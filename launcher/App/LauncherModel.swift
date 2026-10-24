@@ -4,6 +4,8 @@ import AppKit
 import Combine
 import Foundation
 
+enum LauncherPage: Hashable { case general, advanced, achievements }
+
 /// The launcher window's state and actions.
 @MainActor
 final class LauncherModel: ObservableObject {
@@ -15,6 +17,7 @@ final class LauncherModel: ObservableObject {
     private var updaterChanges: AnyCancellable?
 
     @Published var settings = GameSettings()
+    @Published var page = LauncherPage.general
     @Published var config = LaunchConfig()
     @Published private(set) var dataDir: URL
     @Published private(set) var gameProblem: String?
@@ -39,6 +42,7 @@ final class LauncherModel: ObservableObject {
     var confURL: URL { layout.launchConfURL(env: env) }
     var settingsURL: URL { URL(fileURLWithPath: env["BB_CONFIG"] ?? dataDir.appendingPathComponent("bbport.ini").path) }
     var logURL: URL { Logs.folder(home: URL(fileURLWithPath: NSHomeDirectory())).appendingPathComponent("game.log") }
+    var trophyURL: URL { URL(fileURLWithPath: env["BB_USER_DIR"] ?? dataDir.appendingPathComponent("user").path).appendingPathComponent("trophies.log") }
     var saveDir: URL { config.saveDir ?? SaveFolder.defaultURL(dataDir: dataDir) }
     var outputChoices: [PixelSize] {
         Resolution.outputs.contains(settings.output) ? Resolution.outputs : Resolution.outputs + [settings.output]

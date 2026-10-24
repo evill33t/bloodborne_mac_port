@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include "../gpu/bbgpu_trophy.h"
 
 #ifdef __cplusplus
 #define BBGPU_ALIGNAS(n) alignas(n)
@@ -34,7 +35,7 @@
 #define BBGPU_GUEST_MAX UINT64_C(0xfc00000000)
 
 #define BBGPU_SHARED_MAGIC 0x31424742u /* "BGB1" */
-#define BBGPU_SHARED_VERSION 4u /* 3: command buffer copy arena; 4: game fault counters */
+#define BBGPU_SHARED_VERSION 5u /* 5: runtime achievements and live notification mask */
 #define BBGPU_CONTROL_SIZE (UINT64_C(4) << 20) /* control block and rings */
 /* Command buffer copies (game side, at submit; the host parses these): the game may rewrite its
  * command buffers once the submit returns, before the host has parsed them. */
@@ -210,6 +211,9 @@ typedef struct {
     /* ... and over the last game frame: all guest threads' CPU time, the busiest thread's. */
     uint64_t game_frame_cpu_ns, game_busiest_ns;
     char game_busiest_name[32];
+    /* Game writes; GPU host reads. No player data is written by the renderer. */
+    BBGPU_ALIGNAS(BBGPU_CACHE_LINE) BbGpuTrophies trophies;
+    char trophy_archive[1200]; /* immutable launch configuration, empty without artwork */
 } BbGpuShared;
 
 #define BBGPU_SUBMIT_RING_OFFSET (UINT64_C(64) << 10)

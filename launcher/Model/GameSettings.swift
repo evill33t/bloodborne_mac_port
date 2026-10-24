@@ -118,6 +118,7 @@ struct GameSettings: Equatable {
     var sharpen = true
     var sharpness = 0.3
     var showFPS = false
+    var achievementBanners = true
     var metalHUD = false
     var effects = Dictionary(uniqueKeysWithValues: GameSettings.effects.map { ($0.key, $0.defaultOn) })
     var frameCap = FrameCap.fps60
@@ -153,6 +154,7 @@ struct GameSettings: Equatable {
         if let v = flag("sharpen") { sharpen = v }
         if let v = ini["sharpness"], let s = Double(v), (0...2).contains(s) { sharpness = s }
         if let v = flag("show_fps") { showFPS = v }
+        if let v = flag("achievement_banners") { achievementBanners = v }
         if let v = flag("metal_hud") { metalHUD = v }
         for effect in Self.effects {
             if let v = flag(effect.key) { effects[effect.key] = v }
@@ -187,6 +189,7 @@ struct GameSettings: Equatable {
         ini["sharpen"] = sharpen ? "1" : "0"
         ini["sharpness"] = String(format: "%.2f", sharpness)
         ini["show_fps"] = showFPS ? "1" : "0"
+        ini["achievement_banners"] = achievementBanners ? "1" : "0"
         ini["metal_hud"] = metalHUD ? "1" : "0"
         for effect in Self.effects {
             ini[effect.key] = (effects[effect.key] ?? effect.defaultOn) ? "1" : "0"
