@@ -26,7 +26,7 @@ bool OwnedKey(const std::string& key) {
     static constexpr const char* owned[] = {
         "upscaler", "preset", "sharpen", "sharpness", "jitter", "reactive", "object_motion",
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps",
-        "frame_pacing",
+        "frame_pacing", "framegen",
         "model_lod", "output_res",
         "live_resolution", "shader_compile", "renderer"};
     for (const char* k : owned) {
@@ -79,6 +79,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.show_fps = i != 0;
     } else if (key == "frame_pacing") {
         v.frame_pacing = i != 0;
+    } else if (key == "framegen") {
+        v.framegen = value == "1";
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
     } else if (key == "live_resolution") {
@@ -118,6 +120,8 @@ std::array<int, 2> OutputSize() {
 
 void Load() {
     auto& v = Get();
+    v.framegen = false; // an absent key keeps this experimental feature opt-in
+    v.framegen_forced = false;
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -148,6 +152,7 @@ void Load() {
         {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
         {"BB_SHADER_COMPILE", "shader_compile"},
+        {"BB_METAL_FRAMEGEN", "framegen"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -179,6 +184,8 @@ void Load() {
     v.startup_preset = v.preset;
     v.startup_upscaler = v.upscaler;
     v.startup_object_motion = v.object_motion;
+    v.startup_framegen = v.framegen;
+    v.framegen_forced = std::getenv("BB_METAL_FRAMEGEN") != nullptr;
     for (int e = 0; e < EffectCount; ++e) {
         v.startup_effects[e] = v.effects[e];
     }
@@ -256,6 +263,11 @@ bool ResolutionNeedsRestart() {
          (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
 }
 
+bool FrameGenerationNeedsRestart() {
+    const auto& v = Get();
+    return v.framegen != v.startup_framegen;
+}
+
 void Save() {
     const auto& v = Get();
     std::vector<std::string> kept;
@@ -286,12 +298,13 @@ void Save() {
                  "# bbport settings (in-game menu: " BBPORT_MENU_KEYS " / L3+R3)\n"
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\n",
+                 "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\nframegen=%d\n",
                  UpscalerName(saved_upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
-                 v.debug_view.load(), int(v.show_fps.load()), int(v.frame_pacing.load()));
+                 v.debug_view.load(), int(v.show_fps.load()), int(v.frame_pacing.load()),
+                 int(v.framegen.load()));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
