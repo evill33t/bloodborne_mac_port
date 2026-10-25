@@ -50,6 +50,26 @@ Each item: what was done for now, what the refinement is, and where it lives.
   visibility culling reading stale results (`BB_READBACKS` Relaxed). Unknown whether 0.4.0 does it.
   Repro: long scripted walk from `save-backups/dense-20261017` with before/after snapshots.
 
+- **Metal-native: "Submit inside a render pass" assertion ended a co-op session (2026-10-17,
+  online-shadnet; made survivable).** The first phantom to load in on The Hunter's Dream pool
+  hit `Encoder::Finish`'s `ASSERT_MSG(!in_pass)` (bbgpu-host exited with status 23). The
+  scheduler ends its pass before every submission (`SubmitExecution` → `EndRendering`), so the
+  encoder's `in_pass` and the scheduler's `is_rendering` had come apart; the two direct
+  `BeginRenderPass` users in vk_runtime.cpp (layer resolves, clears) are balanced, so the path is
+  not found yet (no backtrace from the host process). Now `Finish` closes the render encoder,
+  commits, and keeps the pass: the next draw reopens it with load actions, as after compute or
+  blit work inside a pass; a `Submit inside a render pass` warning (first 8) marks it in the log.
+  *2026-10-18 (PR #11 review):* most likely a symptom of the recording-chunk race below:
+  `Finish` is reached only from `SubmitExecution`, after `EndRendering` and `SyncRecording`,
+  so `in_pass` can be true there only if another thread recorded a `BeginRenderPass` at the
+  same time, and the relayed fault's download calls `scheduler.Finish()` from stage A, the
+  thread that raced. The warning now carries the reporting thread's stack (which thread
+  submitted); since the pass stays open until the scheduler's next pass end, a still-open pass
+  at `Encoder::BeginRenderPass` (the stop would have moved there: `blit_helper.cpp`'s fullscreen
+  draw, the layer resolves and clears in vk_runtime.cpp) ends first with the same warning, and
+  an `EndRenderPass` without a pass warns and returns. The workaround stays as a safety net; a
+  raced chunk may also carry reordered records, so a log with any of these warnings is a bug
+  report, not a clean run. *Open:* only if the warning shows up again with the race fixed.
 - **Metal-native (M4 → M5): render pipelines declare a depth/stencil format the pass does not
   bind.** Fixed 2026-10-16 (M5 Task 3): `BoundDepthAttachment` (vk_depth_attachment.h) is the one
   rule for the pass's depth attachment and the pipeline key's formats; `MTL_DEBUG_LAYER=1` title +
@@ -408,6 +428,45 @@ Each item: what was done for now, what the refinement is, and where it lives.
   chunk users ("two threads use the recording chunk at once", with both callers and a
   backtrace). Not reproduced in 6 reloads. *Next:* read that report from the next crash, add
   the missing drain there.
+  *2026-10-17 (co-op on The Hunter's Dream, two phantoms in the world, ~40 min in):* the report
+  fired once and the game froze (no frame presented after it; the user closed the window):
+  `bb:DrawRec` from `BufferCache::ObtainBuffer+0xcbc` (SmallGuestCopy → Record) while another
+  thread had entered from `Vulkan::Runtime::CopyBuffer` (its Record). Paths checked and found
+  draining first: the DMA copies (`Rasterizer::CopyBuffer`), queued commands
+  (`Liverpool::ProcessCommands`), the fault relay (`bbgpu_host_fault` → `ReadMemory(assume_locks
+  = false)` → `SendCommand<true>`), `OnWriteFault` / `InvalidateMemory`; stage B advances
+  `consumed` only after a packet's handler returns, so `Drain` does not return early. The
+  remaining `Runtime::CopyBuffer` users are `BufferCache::ReadMemory`'s download (runs on A after
+  a drain, or inline on B/A with `assume_locks`) and `ObtainBuffer`'s upload (line ~489). Still
+  open which thread it was; the log has no thread name for the other side (worth adding to
+  `ReportChunkRace`: the other thread's name, captured with its caller). Workaround for long
+  co-op sessions: `BB_DRAW_PIPE=0` (no stage B, so no chunk race; ~18% slower draw recording).
+  *2026-10-17, later (code review of every thread that can record):* **found and fixed.** The
+  other thread was the GPU command thread itself, through `Liverpool::ProcessCommands`: it
+  drained stage B only `if (num_commands)` *before* the `while (num_commands)` loop, so a
+  command queued between those two reads ran without a drain. The queue is fed by the fault
+  relay thread (`bbgpu_host_fault` → `ReadMemory(assume_locks=false)` → `SendCommand<true>`)
+  and by non-EOP flips; `ProcessCommands` runs before every PM4 packet, the game faults ~1000
+  times a second, so the two-instruction window is hit in a long session. The relayed read
+  fault's download (`ReadMemory` → `DownloadMemory` → `Runtime::CopyBuffer` → `Record`,
+  the reported caller) then raced stage B's draw. The same hole explains the 2026-10-14
+  crash: that download's `scheduler.Finish()` kicks the recorder (`SyncRecording` →
+  `KickRecording`, `record_chunk` momentarily null) while stage B kicked from `RunWriteData`.
+  Fix: `ProcessCommands` drains after a command was taken, before it runs (the fast path, no
+  command, is unchanged: one atomic load); `Rasterizer::WaitDeferredSignals` drains too (its
+  kick touches the chunk; every caller drained already). Every other recording thread was
+  checked: stage B's own faults run inline (it owns the chunk), the fault relay, the host ring
+  thread (`UnmapMemory`, `InvalidateMemory`), the copy threads, the recorder, the priority-ops
+  thread, the present/swap threads, the draw-preparation workers and the pipeline builders
+  never record or go through `SendCommand`; the EOP flip's `PrepareFrame` runs on the
+  signalling thread (B via `RunInOrder`, else A drained); the opt-in texture bind helper binds
+  without refreshing images. `ReportChunkRace` now names both threads and, on macOS, prints
+  the other thread's stack at report time (the thread is suspended, its frame chain walked),
+  so a future report needs no guessing (a same-thread re-entry reports the caller it is inside,
+  not its own). Tests pass; an offline run with `BB_GPU_LOG=debug` showed no report. The drain
+  fix is in `metal-native` for 0.5.0 (32e7f2f); the report and the render-pass workaround above
+  follow in 0.5.1 (PR #11). The co-op reproduction (long session, phantoms) is the user's to
+  confirm; `BB_DRAW_PIPE=0` stays a fallback until then.
   *Same day, test runs:* the load-time corrupted command buffer (cloth-thread entry above) also
   killed the host twice in ~14 test loads: `SignalFence: Unreachable code!` (pm4_cmds.h:492)
   after "Gnm check: bad packet", and a SIGSEGV in `Shader::StageSpecialization` building a
@@ -469,8 +528,25 @@ Each item: what was done for now, what the refinement is, and where it lives.
   `address + size` checks in `src/runtime_memory.c` can wrap on garbage sizes (check before
   adding); `tools/bbrecomp/proto/check4.c` (static-recompilation branch) exits 0 on mismatches.
   Fix independently; do not copy Paleblood's GPL-3 sources.
+- **Cloth (dresses, coats) corrupts at 120 FPS (2026-10-25, owner, every release back to 0.5.0).**
+  The skirt of a dress turns into flat, posterised dark patches; taking the dress off and on fixes
+  it until the character walks. Seen at the 120 cap (Uncap FPS++, variable timing); looks like
+  cloth simulation that assumes 30/60 FPS steps. PR #77 (adaptive timing) scales cloth constraint
+  stiffness by frame time (about min(1, 60*dt)^2), which may be the missing piece; a smaller fix
+  could cap the cloth step or run cloth at fixed 60. Test at 60 vs 120 on the same save first.
+- **Red/purple face at 16:10 (2026-10-25, owner).** Seen with the 1920x1200 native patch, in a test
+  build without 0.5.5's GCN legacy/clamped float translations (that build looked worse overall);
+  the face is normal with the 16:10 patch off. Not yet checked on 0.5.7 itself. Suspects: a
+  screen-size target or skin (subsurface) pass still sized for 16:9 with the native-size patch, or
+  NaN/Inf values (the red-flash class) on the skin shader.
 
 ## 2. Performance
+
+- **16–18 GB Macs on macOS 27 run at 5–17 FPS (2026-10-25, top priority, the 0.5.x hotfix).**
+  Not GPU-bound: the GPU idles ~60% of each frame (FINDINGS "the slow Macs are 16–18 GB Macs on
+  macOS 27"). Needs a slow Mac to test: the kernel log for `required > max`, raising
+  `iogpu.wired_limit_mb`, then BB_GC_BUDGET_MB / BB_ARENA_GIB / BB_ARENA_LAZY / BB_FRAMES_AHEAD with
+  the benchmark. Likely fix if wiring: size the arena and its residency by RAM, or a growing arena.
 
 - **Tessellated draws split their render pass (2026-10-21).** City at 1440p MetalFX: 67 render
   pass splits per frame, all from `Runs::DrawTessellated` (`BB_ENCODER_STATS=1`): each run of
@@ -740,6 +816,9 @@ Each item: what was done for now, what the refinement is, and where it lives.
   them. A correct one must leave texture-watched pages to the renderer.
 
 ## 3. Mac GUI
+
+- **Launcher: the Controls section pushes Locations off the bottom of the window** (0.5.7, the
+  window is sized for a 13" Air). Move the bindings list to Advanced or make Controls one row.
 
 - **16:10 menus keep 16:9 artwork (#75, 2026-10-25).** Kyo's 16:10 patches fix HUD, lock-on and HP
   bar positions, but full-screen menus stay 16:9 with grey bars at the sides. The "16x10 and 4x3

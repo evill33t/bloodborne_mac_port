@@ -92,3 +92,31 @@ preferences, and the offscreen overlay (plain and Metal validation) passed. The 
 achievement browser remains usable during gameplay; its banner preference follows the other
 launch settings and is disabled until the session ends. These checks did not launch the game.
 A subsequent documentation-only merge (`af0fae2`) retains upstream's 0.5.7 release notes.
+
+## Launcher and runtime refresh, 25 October 2026
+
+Merged upstream `master` (`a07284d`), retaining its compact Keyboard and Mouse popover,
+larger launcher window, extra launch.conf variables, runtime ABI checks and renderer
+coordination fixes. Achievements remain a launcher page, usable during gameplay, alongside
+the updated controls. Both the achievement tests and upstream's benchmark/environment
+tests remain in the launcher suite.
+
+The trophy browser now resolves `BB_USER_DIR` from the same effective environment used
+to start the game, including launch.conf assignments. Explicit environment values retain
+precedence; an empty value uses the default user folder, matching `run.sh`. Four model
+checks cover default, configured, overridden and empty folder values.
+
+Both GPU architectures, the full runtime, both native host variants and launcher rebuild
+successfully with LTO disabled. Trophy persistence and both snapshot slices, generated
+catalog and eight tracker tests, launcher model, settings persistence, runtime/pad/launch
+fixtures, seven semaphore tests, six content/module tests, twelve TLS-slot tests and eight
+linker tests pass. Cross-architecture rings, draw-pipe ordering/backpressure and Metal
+encoder/overlay tests (plain and validation layer) also pass.
+
+The existing loader suite has seven passing and seven failing tests, matching the failure
+set reproduced with untouched upstream loader and runtime-service sources using the same
+libraries. Those tests expect unsupported imports to exit 20; the runtime returns zero
+and later reports that the fixture entry returned. Upstream already documents this in
+[TLS_SLOT_CONTRACT.md](TLS_SLOT_CONTRACT.md#validation). No loader-policy change is included.
+These are focused build/fixture checks; gameplay, real-archive artwork, accessibility and
+the packaged app were not retested. The full Ninja-based build/test command was not run.

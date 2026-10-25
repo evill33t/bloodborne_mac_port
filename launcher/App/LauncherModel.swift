@@ -56,7 +56,7 @@ final class LauncherModel: ObservableObject {
 
     var confURL: URL { layout.launchConfURL(env: env) }
     var settingsURL: URL { URL(fileURLWithPath: env["BB_CONFIG"] ?? dataDir.appendingPathComponent("bbport.ini").path) }
-    var trophyURL: URL { URL(fileURLWithPath: env["BB_USER_DIR"] ?? dataDir.appendingPathComponent("user").path).appendingPathComponent("trophies.log") }
+    var trophyURL: URL { AchievementHistory.logURL(dataDir: dataDir, env: config.environment(adding: env)) }
     var logsFolder: URL { Logs.folder(home: URL(fileURLWithPath: NSHomeDirectory())) }
     /// This launch's session log, else the newest one (game.log links to it).
     var logURL: URL { sessionLog ?? logsFolder.appendingPathComponent(SessionLog.latestName).resolvingSymlinksInPath() }
@@ -239,7 +239,8 @@ final class LauncherModel: ObservableObject {
             save()
         }
         guard backUpSavesIfNeeded() else { onExit?(-1); return }
-        let plan = layout.launchPlan(gameDir: game, saveDir: config.saveDir, dataDir: dataDir, env: env)
+        let plan = layout.launchPlan(gameDir: game, saveDir: config.saveDir, dataDir: dataDir,
+                                     env: config.environment(adding: env))
         do {
             let log = try SessionLogWriter(folder: logsFolder, appVersion: appVersion)
             log.note("Bloodborne for Mac \(appVersion) on \(SystemInfo.current(appVersion: appVersion).line); "
@@ -286,8 +287,9 @@ final class LauncherModel: ObservableObject {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        let job = BenchmarkRunner.Job(layout: layout, gameDir: game, dataDir: dataDir, env: env,
-                                      assets: layout.benchmarkAssets(env: env))
+        let job = BenchmarkRunner.Job(layout: layout, gameDir: game, dataDir: dataDir,
+                                      env: config.environment(adding: env),
+                                      assets: layout.benchmarkAssets(env: env), extra: config.extraEnvironment)
         do {
             try benchmark.start(job, home: URL(fileURLWithPath: NSHomeDirectory()), started: { [weak self] in
                 self?.running = true
