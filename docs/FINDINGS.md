@@ -1506,6 +1506,24 @@ VMA, Zydis, xbyak, FSR 4's tools and the `renderer` setting left the build and t
   MoltenVK, VMA, Zydis and xbyak (symlink overlay) succeeds.
 
 
+2026-10-20 — opt-in audio dropout diagnostics (split from PR #26). BB_AUDIO_STATS=1
+adds converted-PCM peak/RMS, non-finite samples and SDL output failure counts to the
+existing per-port five-second reports. Measure minimum queued bytes/starvation before
+silence refill, rather than after submission. BB_AUDIO_TRACE=1 reserves a separate
+100-error budget for unexpected AJM results; expected partial-input/output-full results
+can exhaust the original trace budget before a later real failure appears. Samples,
+gain, clipping and scheduling are unchanged; diagnostics stay disabled by default.
+
+An earlier combined M2 Max 64 GB playtest lost music/effects, with menu effects still
+working. The next session with existing trace flags did not reproduce it; the user
+reported correct audio. Initial output had about 938 buffers/5s (937 expected), a
+6.7 ms maximum gap and a non-empty queue. This is instrumentation, not an audio fix.
+If reproduced, retain Audio stats/Audio trace lines and whether it followed travel/death
+or ordinary play. No reproducible dropout or causal claim is asserted in this split.
+
+Split validation: build_macos.sh completes for the x86 guest/library and both arm64
+host variants. The extraction changes only runtime_audio.c, runtime_ajm.c and this note;
+no playback algorithm, renderer default or launcher setting is changed.
 2026-10-20 — launcher validation fixes (split from PR #26): the duplicate-launch
 guard now recognizes bbgpu-host-macos27 as well as bbgpu-host/bb-probe. Game-folder
 validation passes Python -B in both checkout and packaged layouts; importing prepare.py
@@ -1793,3 +1811,159 @@ value conversion instead of the bits. Second part: Metal's fast math (the defaul
 these ops) back into plain ones; NaN and Inf are now tested on the bit pattern, and the clamp
 output modifier turns NaN into 0 as GCN does. Shader cache meta version 11 (rebuilt once).
 City at 1080p still holds 60 FPS; all 214 pipelines of the test cache build in Metal.
+
+## PRs #39, #58, #59 merged onto 0.5.5, M4 Max (2026-10-24)
+
+Each PR merged onto master f5b7073 in a worktree; test saves only, upscaler off, uncapped
+(`BB_FPS=uncap BB_FPS_LIMIT=0 BB_VBLANK_HZ=480`). At 1440p every build, master included, sits at
+the presenter's 120 FPS ceiling in both scenes, so GPU time and 4K runs separate them.
+
+| Build | 4K Dream FPS | 4K city FPS | GPU ms/frame 1440p Dream / city | Recording µs/draw (city) | 300 s walking soak: frames > 1.5× median / worst |
+|---|---|---|---|---|---|
+| master | 77.7 | 73.8 | 7.97 / 8.33 | 4.5 | 119 / 52 ms |
+| #39 held draws | 80.5 (+4%) | 82.8 (+12%) | 7.64 / 7.50 | 4.5 | 150 / 156 ms (one run) |
+| #58 pass merge + no-op skip | 78.3 (+1%) | 75.6 (+2%) | 7.87 / 8.08 | 4.6 | — |
+| #59 smoothness | — | — | 8.14 / 8.27 | 3.6 | 78 / 44 ms |
+
+- #39: the biggest GPU win, survived the soak without a hang, but its one walking soak had worse
+  pacing than master's (p99 27 vs 14.6 ms). Repeat the soak before merging.
+- #58: small gains; the pass-variant map is keyed by a bare 64-bit hash (no key compare) — ask
+  for a full key compare before merging the pass merge; the profiler fix and no-op skip are fine.
+- #59: recording CPU −20% and fewer walking hitches, as claimed, but 2 of 4 standing city runs
+  were slower (99 and 113 FPS; master never below 117). Suspect the default user-interactive QoS on
+  spin loops; try with the QoS commit reverted. `BB_DIRECT_READBACK=verify`: 15 read-backs
+  checked, 0 mismatches — far too few to prove it (standing and walking cause few read-backs).
+- Scripts: scratchpad `prbench.sh`/`prbench2.sh` (driver over the usual run.sh harness).
+
+## macOS 27.0.1 on the M4 Max: first check (2026-10-24, evening)
+
+master eb10466 (0.5.5 + launcher merges), `bbgpu-host-macos27`, same conditions as the PR table
+above (test saves, upscaler off, uncapped, `BB_PRESENT_MODE=Immediate`), windowed 2992x1680,
+mean of the last six `Frame stats` windows, standing after the load, no compiles:
+
+| Scene | 4K FPS macOS 26.6 (master f5b7073) | 4K FPS macOS 27.0.1 | GPU ms/frame |
+|---|---|---|---|
+| Hunter's Dream (`loadcrash-20261014-134937`) | 77.7 | 74.4 (−4%) | 13.43 |
+| Central Yharnam lamp (`cages-20261016`) | 73.8 | 71.0 (−4%) | 14.08 |
+
+1080p sits at the 120 FPS presenter ceiling on both. Both GPU-bound (GPU ~100% busy). The user
+was using the Mac (Safari, Discord) during the 27 runs, the 26.6 runs had an idle Mac, so −4% is
+an upper bound; no sign of the 4x drop reported on an M3 Pro 18 GB (#69). Harness: scratchpad
+`bench.sh` (restores a snapshot, Continue twice through `BB_PAD_FILE`, `BB_FRAME_STATS=1`,
+kills the game if Frame stats stop for 20 s).
+
+## Benchmark: first runs, route repeatability, PR #39 (2026-10-24 night)
+
+Built-in benchmark (branch `benchmark`, `docs/DESIGN_BENCHMARK.md`), M4 Max, macOS 27.0.1, test
+data, `--benchmark` runs alternating builds, no compiles in any run.
+
+- **Repeatable route:** the same streaming hitches (100-150 MB of uploads in one frame) land at
+  6.9 s, 44.3 s and 63.5 s of the route in nearly every run, both builds. "Other" hitches (frame
+  44-50 ms with game ~16 ms and GPU ~8 ms: the present side) recur too; worth a "present" cause.
+- **Every frame** of the city walk uploads ~14 MB and takes ~46 GPU-tracked faults (median), so
+  the hitch classifier judges streaming against the run's medians.
+- **Standing uncapped at 1080p:** ~124 FPS, game-CPU-limited (game frame ~7.9 ms, GPU ~6.8 ms);
+  a 27-39 ms GPU frame every 5 s (the known long command buffer, 2026-10-18).
+- **PR #39** (held draws in tessellation runs) on master, 3 runs vs master 2:
+
+| | master | #39 |
+|---|---|---|
+| Standing FPS | 123.4 / 124.8 | 125.2 / 124.8 / 125.3 |
+| Standing GPU ms/frame | 6.90 / 6.76 | 6.23 / 6.16 / 6.11 (−9%) |
+| Route GPU ms/frame | 9.12 / 9.18 | 8.93 / 9.11 / 8.51 |
+| Route frames > 33 ms | 3 / 4 | 7 / 5 / 5 |
+| Route ms lost to hitches per minute | 34 / 39 | 74 / 53 / 46 |
+| Route 0.1% low FPS | 28.4 / 28.5 | 25.3 / 26.7 / 28.7 |
+
+  GPU time −9%, but more hitches on the route in every run (extra single frames of 35-60 ms GPU),
+  as in the 300 s soak. Repeat before merging (posted on #39).
+
+## 2026-10-25: 16:10 native resolutions (#75)
+
+Kyo's 16:10 patches (1280x800, 1920x1200, 2560x1600) go through the same path as the ultrawide
+presets (`ultrawide_writes`: scene/UI size, camera aspect, the texture pool above 1080p).
+M4 Max, benchmark save in Central Yharnam, upscaler off: both 1920x1200 and 2560x1600 render the
+whole scene at that size ("observed scene depth"), the HUD and item boxes sit correctly, 60 FPS
+at the cap. 2560x1600 gets the under-24 GB memory warning like the 1440p ultrawides.
+
+## 2026-10-25: benchmark route repeatability (replay clock)
+
+The traversal replay stepped by the GPU host's presented frames, which lag the game by a varying
+frame or two. Draw counts per 10 s block (% from a reference run): the first ~50 s always matched,
+later blocks differed by 25-57% in most runs (two or three repeating paths). The game reads the pad
+once per frame (7815 reads = 7815 frames shown), so the replay now counts pad reads. Three runs
+with the new clock (M4 Max, test data): 0-5% in every block. The route file's wall-clock times
+still make the character bump walls/items near spots where the recording hitched (the same way
+every run); re-recording with frame numbers is planned (DESIGN_BENCHMARK "Next").
+
+## PR #20 on an M3 Pro, against 0.5.1 (2026-10-19)
+
+MacBook Pro M3 Pro (11 CPU / 14 GPU cores), 18 GB, macOS 15.7.5. A copy of a player's save at
+the lamp in Iosefka's Clinic: camera still, 1594-1595 draws per frame in every window of every
+configuration, no compiles while measuring; native 1080p, upscaler off, all effects, 60 cap (not
+reached). Each configuration with its own warmed shader cache, 60 s measured after a 20 s
+settle, process CPU from OS CPU-time deltas. Stock = the 0.5.1 release's GPU library; the game
+process carries the load lock (2cb8681) in every configuration. "All" = the PR on 0.5.1 with
+`BB_SPIRV_PRECISE=invariant` and the PR's arena sizing (dropped since; 0.5.2 sizes the arena).
+Stock and all ran twice (31.4/31.3 and 38.1/37.9 FPS), the others once (±0.6%).
+
+| | 0.5.1 | all | change |
+|---|---|---|---|
+| FPS | 31.3 | **38.0** | **+21.2%** |
+| GPU busy, ms per frame | 31.9 | 26.3 | -17.5% |
+| CPU per frame, both processes | 102.7 ms | 80.8 ms | -21.3% |
+| GPU command thread per draw | 17.7 us | 5.2 us | -71% |
+
+Each one switched off alone (all others on):
+
+| Change | FPS without | gain | also |
+|---|---|---|---|
+| Copy-shader copies deferred to the pass end (27a21db) | 33.7 | **+12.8%** | GPU 29.7 → 26.3 ms |
+| Invariant positions (`BB_SPIRV_PRECISE=invariant`; opt-in then, the default since 0.5.4) | 33.9 | **+12.0%** | GPU 29.5 → 26.3 ms |
+| Draw-pipe sleeping wait (44300ab) | 38.6 | -1.5% | CPU 95.7 → 80.8 ms per frame, GPU process 58.8 → 44.5 |
+| Arena sized from guest memory (dropped) | 37.7 | +0.6% (noise) | GPU memory -2.4 GiB |
+
+Invariant positions on this Mac: no flicker, z-fighting or missing geometry seen in the clinic
+or Hunter's Dream screenshots; the player, who has played with it on since 2026-10-17, reported
+no artifacts (one check, 2026-10-17). Deferred copies: 0 conflicts in both scenes, ~170 copies deferred per frame in the
+clinic; screenshots 0.7 s apart switching it on and off differ less (1.88 mean per channel)
+than same-setting screenshots 1.4 s apart (3.10).
+
+## 2026-10-25: FPS++ patches wrote RET into the game's condition wait
+
+30/60/90/Uncap FPS++ write `C3 90 90 90 90` at 0x02483EC1, the timed-wait `call` inside the
+game's condition wait (0x02483E80: push rbp/r15/r14/rbx/rax; untimed waits, edx = -1, take another
+call). A RET there returns to the saved rax: any timed wait would crash (one caller would jump to
+0). Never seen, so timed waits are evidently not reached in normal play. patches.py now drops that
+write from every patch file (UNSAFE_WRITES), leaving the game's own wait. M4 Max, test data: 60 FPS
+benchmark walk 59.9 FPS, 8 frames > 33 ms (as before), same route; 120 cap with Uncap FPS++ 60 s,
+119.4 FPS, no crash. Enemy Control is now refused alongside an FPS patch (overlapping bytes at
+0x1972a7d). Source: an assessment comparing the port with Paleblood, verified by disassembly.
+
+2026-10-20 — launcher Stop (split from PR #26): retain this launcher's Process;
+Play becomes Stop/Stopping and settings are disabled while playing. Intentional Stop/Quit
+does not produce a crash sheet. For sessions started through the launcher window, keep
+it available behind the game with both launcher and game Dock icons. Direct launch
+("Show launcher every time" off, without the Option override) keeps the window hidden
+and the launcher an accessory app, so only the game has a Dock icon. Reopen explicitly
+reveals the launcher and leaves direct mode. Quit waits for its child to finish. This
+touches the same gameEnded/showWindow lifecycle as update PR #23; rebase after #23 merges.
+
+PR #31 review follow-up: onStarted now preserves the direct path's orderOut/accessory
+behaviour instead of unconditionally showing a launcher window. Startup selection,
+Option override and the existing direct-path exit/error handling are unchanged.
+
+An additional stop test exposed SDL's SIGTERM handler in the windowless game: it only
+queues an SDL quit event, which the guest does not consume. run.sh now exports
+SDL_NO_SIGNAL_HANDLERS=1. The native host keeps its own termination handling. Without a
+mod view, run.sh execs bb-probe; with one, its existing trap forwards SIGTERM, waits for
+the child, then removes only its private merged view. tests/test_launcher_stop.py drives
+the production GameRunner.start and Process.terminate against run.sh with a real x86 SDL
+probe, both directly and with an actual mods.py merged view, using synthetic assets only.
+Preparation is stubbed; this is process-lifetime coverage, not a full gameplay test.
+The previous combined build also passed game Stop/restart/Quit with copied saves, and the
+SDL signal fix passed a restored-game stop with both guest and renderer confirmed gone.
+
+Split validation: both production-Process termination tests pass on macOS with x86 SDL,
+including removal of the merged view and unchanged synthetic source/mod files. Launcher
+build/model tests pass. No private save data is used by these regression tests.

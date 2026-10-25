@@ -3,8 +3,8 @@
 # Builds Bloodborne.app in the repository folder: double-click (or keep in the Dock) to play
 # without a Terminal window. The app is the launcher window (launcher/) for this checkout: it
 # shares launch.conf with Bloodborne.command, runs run.sh (which rebuilds what changed) and writes
-# the game's log to ~/Library/Logs/Bloodborne/game.log (the previous session's in
-# game.previous.log). If the game stops with an error, the launcher shows it with Show Log.
+# the game's logs to ~/Library/Logs/Bloodborne (one dated .log and .jsonl per session; game.log links
+# to the newest). If the game stops with an error, the launcher shows a crash report and the log.
 #
 # The game window runs from inside the bundle (a link to out/bbgpu-host), so the Dock shows
 # "Bloodborne". The icon is made from your game's sce_sys/icon0.png, so the app is built
@@ -18,6 +18,11 @@ app=$repo/Bloodborne.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
+# Version for the About panel and the update check (Updates in launcher/): 0.5.2-5-g0b50589 from
+# a checkout is offered the next numbered release.
+version=$(git describe --tags --match 'mac-v*' --dirty 2>/dev/null | sed 's/^mac-v//' || true)
+version=${version:-dev}
+commit=$(git rev-parse --short HEAD 2>/dev/null || true)
 repo_xml=$(printf '%s' "$repo" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -30,7 +35,10 @@ cat > "$app/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key><string>Bloodborne</string>
     <key>CFBundleIconFile</key><string>Bloodborne</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.4</string>
+    <key>CFBundleShortVersionString</key><string>${version%%-*}</string>
+    <key>CFBundleVersion</key><string>$version</string>
+    <key>BBCommit</key><string>$commit</string>
+    <key>NSHumanReadableCopyright</key><string>bloodborne_mac_port contributors. GPL-2.0-or-later.</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.role-playing-games</string>
     <key>NSHighResolutionCapable</key><true/>

@@ -28,7 +28,8 @@ bool OwnedKey(const std::string& key) {
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps",
         "frame_pacing", "framegen",
         "model_lod", "output_res",
-        "live_resolution", "shader_compile", "renderer"};
+        "live_resolution", "shader_compile", "renderer",
+        "mouse_look", "mouse_sensitivity", "mouse_invert_y"};
     for (const char* k : owned) {
         if (key == k) {
             return true;
@@ -81,6 +82,12 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.frame_pacing = i != 0;
     } else if (key == "framegen") {
         v.framegen = value == "1";
+    } else if (key == "mouse_look") {
+        v.mouse_look = i != 0;
+    } else if (key == "mouse_sensitivity") {
+        v.mouse_sensitivity = Clamp(f, 0.1f, 5.0f);
+    } else if (key == "mouse_invert_y") {
+        v.mouse_invert_y = i != 0;
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
     } else if (key == "live_resolution") {
@@ -165,7 +172,8 @@ void Load() {
     v.ultrawide_width = v.ultrawide_height = 0;
     if (const char* wide = std::getenv("BB_ULTRAWIDE_RES"); wide && wide[0]) {
         constexpr std::array<int, 2> sizes[] = {
-            {2560, 720}, {3840, 1080}, {5120, 1440}, {2560, 1080}, {3440, 1440}};
+            {2560, 720}, {3840, 1080}, {5120, 1440}, {2560, 1080}, {3440, 1440},
+            {1280, 800}, {1920, 1200}, {2560, 1600}};
         for (const auto& size : sizes) {
             if (wide == std::to_string(size[0]) + "x" + std::to_string(size[1])) {
                 v.ultrawide_width = size[0];
@@ -299,13 +307,16 @@ void Save() {
                  "# bbport settings (in-game menu: " BBPORT_MENU_KEYS " / L3+R3)\n"
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\nframegen=%d\n",
+                 "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\nframegen=%d\nmouse_look=%d\n"
+                 "mouse_sensitivity=%.2f\nmouse_invert_y=%d\n",
                  UpscalerName(saved_upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
                  v.debug_view.load(), int(v.show_fps.load()), int(v.frame_pacing.load()),
-                 int(v.framegen_forced ? v.saved_framegen : v.framegen.load()));
+                 int(v.framegen_forced ? v.saved_framegen : v.framegen.load()),
+                 int(v.mouse_look.load()), v.mouse_sensitivity.load(),
+                 int(v.mouse_invert_y.load()));
     // Read by patches.py at start.
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));

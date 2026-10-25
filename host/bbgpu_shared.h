@@ -34,7 +34,7 @@
 #define BBGPU_GUEST_MAX UINT64_C(0xfc00000000)
 
 #define BBGPU_SHARED_MAGIC 0x31424742u /* "BGB1" */
-#define BBGPU_SHARED_VERSION 4u /* 3: command buffer copy arena; 4: game fault counters */
+#define BBGPU_SHARED_VERSION 6u /* 3: command buffer copy arena; 4: game fault counters; 5: benchmark; 6: mouse look */
 #define BBGPU_CONTROL_SIZE (UINT64_C(4) << 20) /* control block and rings */
 /* Command buffer copies (game side, at submit; the host parses these): the game may rewrite its
  * command buffers once the submit returns, before the host has parsed them. */
@@ -210,6 +210,17 @@ typedef struct {
     /* ... and over the last game frame: all guest threads' CPU time, the busiest thread's. */
     uint64_t game_frame_cpu_ns, game_busiest_ns;
     char game_busiest_name[32];
+    /* Benchmark (BB_BENCHMARK, docs/DESIGN_BENCHMARK.md): the host's draws in its last presented
+     * frame (gameplay detection); the game's phase (0 waiting, 1 measuring, 2 done, 3 failed;
+     * bench_error says why). */
+    uint32_t bench_frame_draws, bench_phase;
+    char bench_error[96];
+    /* Mouse look (host window -> the game's pad emulation, runtime_pad.c): the mouse's speed in
+     * points per second over the last ~33 ms, scaled by the sensitivity and the Y inversion
+     * already; buttons as SDL_BUTTON masks; mouse_captured while the window holds the cursor.
+     * Appended last: a host that predates them leaves them zero (no mouse look). */
+    BBGPU_ALIGNAS(BBGPU_CACHE_LINE) int32_t mouse_vx, mouse_vy;
+    uint32_t mouse_buttons, mouse_captured;
 } BbGpuShared;
 
 #define BBGPU_SUBMIT_RING_OFFSET (UINT64_C(64) << 10)

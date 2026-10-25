@@ -40,12 +40,14 @@ int main() {
     unsetenv("BB_METAL_FRAMEGEN");
     FILE* f = std::fopen(path, "w");
     assert(f);
-    std::fprintf(f, "# a comment\nupscaler=fsr3\nfps_cap=40\nfullscreen=1\nrenderer=metal\npreset=2\n");
+    std::fprintf(f, "# a comment\nupscaler=fsr3\nfps_cap=40\nfullscreen=1\nrenderer=metal\npreset=2\n"
+                    "mouse_look=1\nmouse_sensitivity=2.50\nmouse_invert_y=1\n");
     std::fclose(f);
     Load();
     assert(!Get().framegen && !Get().startup_framegen && !Get().framegen_forced);
     assert(!FrameGenerationNeedsRestart());
     assert(Get().upscaler == UpscalerFsr3 && Get().preset == 2);
+    assert(Get().mouse_look && Get().mouse_sensitivity == 2.5f && Get().mouse_invert_y);
     Get().preset = 3;
     Save();
     std::string text = Read(path);
@@ -57,6 +59,8 @@ int main() {
     text = Read(path);
     assert(Count(text, "fps_cap=40") == 1 && Count(text, "fullscreen=1") == 1);
     assert(Count(text, "preset=3") == 1);
+    assert(Count(text, "mouse_look=1") == 1 && Count(text, "mouse_sensitivity=2.50") == 1 &&
+           Count(text, "mouse_invert_y=1") == 1);
     setenv("BB_ULTRAWIDE_RES", "3840x1080", 1);
     f = std::fopen(path, "w");
     assert(f);

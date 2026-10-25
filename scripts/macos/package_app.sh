@@ -19,6 +19,8 @@
 #   Resources/port/               run.sh, scripts/*.py, patches/
 #   Resources/python/             standalone CPython (arm64) for the scripts
 #   Resources/licenses/           GPL text and third-party notices
+#   Resources/benchmark/          the benchmark's save and route (benchmark/ in the repository)
+#                                 (docs/DESIGN_BENCHMARK.md; not in git)
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
 repo=$PWD
@@ -84,6 +86,12 @@ install -m755 run.sh "$contents/Resources/port/"
 install -m644 scripts/*.py "$contents/Resources/port/scripts/"
 install -m644 scripts/launch_settings.sh "$contents/Resources/port/scripts/"
 cp -R patches "$contents/Resources/port/patches"
+if [[ -f benchmark/route.pad && -d benchmark/savedata ]]; then
+    mkdir -p "$contents/Resources/benchmark"
+    cp -R benchmark/route.pad benchmark/savedata "$contents/Resources/benchmark/"
+else
+    echo "No benchmark/ folder: the app's Benchmark button will be unavailable."
+fi
 
 # Python.
 cache=$repo/deps/cache
@@ -165,6 +173,8 @@ cat > "$contents/Info.plist" <<EOF
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${version%%-*}</string>
     <key>CFBundleVersion</key><string>$version</string>
+    <key>BBCommit</key><string>$commit</string>
+    <key>NSHumanReadableCopyright</key><string>bloodborne_mac_port contributors. GPL-2.0-or-later.</string>
     <key>LSMinimumSystemVersion</key><string>15.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.role-playing-games</string>
     <key>LSArchitecturePriority</key><array><string>arm64</string></array>

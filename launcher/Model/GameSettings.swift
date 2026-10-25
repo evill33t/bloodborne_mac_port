@@ -119,6 +119,9 @@ struct GameSettings: Equatable {
     var sharpness = 0.3
     var showFPS = false
     var metalHUD = false
+    /// bbport.ini mouse_look (PR #20): the mouse turns the camera after a click in the window,
+    /// and the arrow keys are the d-pad.
+    var mouseLook = false
     var effects = Dictionary(uniqueKeysWithValues: GameSettings.effects.map { ($0.key, $0.defaultOn) })
     var frameCap = FrameCap.fps60
     var gameTiming = GameTiming.fixed
@@ -136,6 +139,9 @@ struct GameSettings: Equatable {
     /// bbport.ini texture_compression, read by run.sh at start (scripts/launch_settings.sh:
     /// 0 = BB_LAZY_TEXTURE_USAGE=0).
     var textureCompression = true
+    /// bbport.ini cheats= (the Mods & Cheats window; scripts/patches.py applies them at launch).
+    /// Names the launcher does not list stay as read.
+    var cheats: [String] = []
 
     init() {}
 
@@ -154,6 +160,7 @@ struct GameSettings: Equatable {
         if let v = ini["sharpness"], let s = Double(v), (0...2).contains(s) { sharpness = s }
         if let v = flag("show_fps") { showFPS = v }
         if let v = flag("metal_hud") { metalHUD = v }
+        if let v = flag("mouse_look") { mouseLook = v }
         for effect in Self.effects {
             if let v = flag(effect.key) { effects[effect.key] = v }
         }
@@ -174,6 +181,7 @@ struct GameSettings: Equatable {
         if let v = flag("object_motion") { objectMotion = v }
         if let v = ini["live_resolution"], let l = LiveResolution(rawValue: v) { liveResolution = l }
         if let v = flag("texture_compression") { textureCompression = v }
+        cheats = Cheats.parse(ini["cheats"])
     }
 
     /// Writes the launcher's settings into `ini`; every other line stays (a `renderer` key from
@@ -188,6 +196,7 @@ struct GameSettings: Equatable {
         ini["sharpness"] = String(format: "%.2f", sharpness)
         ini["show_fps"] = showFPS ? "1" : "0"
         ini["metal_hud"] = metalHUD ? "1" : "0"
+        ini["mouse_look"] = mouseLook ? "1" : "0"
         for effect in Self.effects {
             ini[effect.key] = (effects[effect.key] ?? effect.defaultOn) ? "1" : "0"
         }
@@ -204,6 +213,7 @@ struct GameSettings: Equatable {
         ini["object_motion"] = objectMotion ? "1" : "0"
         ini["live_resolution"] = ultrawide ? "0" : liveResolution.rawValue
         ini["texture_compression"] = textureCompression ? "1" : "0"
+        ini["cheats"] = Cheats.format(cheats)
     }
 
     /// The scene size the game renders.
