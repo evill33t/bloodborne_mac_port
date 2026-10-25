@@ -19,6 +19,8 @@
 #   Resources/port/               run.sh, scripts/*.py, patches/
 #   Resources/python/             standalone CPython (arm64) for the scripts
 #   Resources/licenses/           GPL text and third-party notices
+#   Resources/benchmark/          the benchmark's save and route (benchmark/ in the repository)
+#                                 (docs/DESIGN_BENCHMARK.md; not in git)
 set -euo pipefail
 cd -- "$(dirname -- "$0")/../.."
 repo=$PWD
@@ -84,6 +86,12 @@ install -m755 run.sh "$contents/Resources/port/"
 install -m644 scripts/*.py "$contents/Resources/port/scripts/"
 install -m644 scripts/launch_settings.sh "$contents/Resources/port/scripts/"
 cp -R patches "$contents/Resources/port/patches"
+if [[ -f benchmark/route.pad && -d benchmark/savedata ]]; then
+    mkdir -p "$contents/Resources/benchmark"
+    cp -R benchmark/route.pad benchmark/savedata "$contents/Resources/benchmark/"
+else
+    echo "No benchmark/ folder: the app's Benchmark button will be unavailable."
+fi
 
 # Python.
 cache=$repo/deps/cache

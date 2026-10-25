@@ -93,6 +93,7 @@ if [[ ${1:-} == --test ]]; then
     arch -arm64 out/trophy-bridge-test
     arch -x86_64 out/trophy-bridge-test
     python3 -m unittest discover -s tests -p test_trophies.py
+    python3 tests/test_launcher_stop.py
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_host.c "${libraries[@]}" -Wl,-rpath,"$PREFIX/lib" -o out/pad-test
     out/pad-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test

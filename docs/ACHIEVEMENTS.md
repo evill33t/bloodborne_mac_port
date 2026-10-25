@@ -39,7 +39,7 @@ mutex. Guest trophy calls do not invoke AppKit or ImGui. The GPU library receive
 and a session-only notification mask. The Rosetta game process publishes them into
 `BbGpuShared` with atomic payload access and a sequence counter. The renderer makes at most three attempts
 to read a complete snapshot, keeping its last one when the writer is busy. macOS uses this
-split-process architecture exclusively. Shared-control version 5 rejects mismatched
+split-process architecture exclusively. Shared-control version 7 rejects mismatched
 game/host binaries; rebuild/package both. No frame-generation or renderer changes are required.
 
 ## Original sources and adaptation
@@ -82,3 +82,12 @@ builds, trophy runtime fixture, both shared-memory fixture slices, eight Python 
 launcher build/model tests, settings persistence and offscreen Metal checks.
 These are synthetic/build checks. Real gameplay unlocks, fullscreen/controller hardware,
 VoiceOver and a packaged-app end-to-end session still require live verification.
+
+After merging upstream `master` (`4dbbb0b`), shared-control version 7 retains the benchmark
+and mouse-input fields and appends achievements. Both GPU-library architectures, the game,
+both GPU-host variants and the launcher rebuilt successfully. Trophy runtime and snapshot
+fixtures, shared rings, launcher model and Stop lifecycle tests, tracker/catalog checks,
+runtime/semaphore/pad tests, launch settings, settings persistence with both banner and mouse
+preferences, and the offscreen overlay (plain and Metal validation) passed. The launcher
+achievement browser remains usable during gameplay; its banner preference follows the other
+launch settings and is disabled until the session ends. These checks did not launch the game.

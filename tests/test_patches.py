@@ -185,5 +185,52 @@ class ExternalPatchTests(unittest.TestCase):
         self.assertEqual(external_patches(XML.parent), [])
 
 
+
+class SafetyTests(unittest.TestCase):
+    def test_fps_patches_never_write_ret_into_the_condition_wait(self):
+        from patches import UNSAFE_WRITES
+        start, length, _ = UNSAFE_WRITES[0]
+        for name in ('30 FPS++', '60 FPS++', '90 FPS++', 'Uncap FPS++'):
+            with self.subTest(name=name):
+                writes = compile_patches(XML, [name], '01.09', SEGMENTS)
+                self.assertTrue(writes)
+                self.assertFalse([w for w in writes if w[0] < start + length and w[0] + len(w[1]) > start])
+
+    def test_external_patch_over_the_condition_wait_is_skipped(self):
+        bad = EXTERNAL.replace('Address="0x00401000" Value="9090"', 'Address="0x02483EC1" Value="C390909090"')
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / 'bad.xml').write_text(bad)
+            found = external_patches(Path(directory))
+            writes = compile_external([f for f in found if f[0] == 'bad.xml/On'], SEGMENTS)
+            self.assertEqual(writes, [])
+
+    def test_enemy_control_is_refused_with_a_frame_rate_patch(self):
+        with self.assertRaisesRegex(ValueError, 'frame rate patch'):
+            validate_patch_requirements(['60 FPS++', 'Enemy Control'], Path('.'))
+        validate_patch_requirements(['Enemy Control'], Path('.'))
+
+
+class CheatTests(unittest.TestCase):
+    def test_cheats_setting_selects_known_patches(self):
+        from patches import CHEATS, cheat_patches
+        names = cheat_patches({'cheats': 'Player No Dead (Read note);Unknown;Increased camera distance'})
+        self.assertEqual(names, ['Player No Dead (Read note)', 'Increased camera distance'])
+        self.assertEqual(cheat_patches({}), [])
+        self.assertNotIn('Enemy Control', CHEATS)
+
+    def test_exclusive_cheats_are_refused_together(self):
+        from patches import cheat_patches
+        with self.assertRaises(ValueError):
+            cheat_patches({'cheats': 'No Rally Decay;Disable Rally (HP Regain)'})
+
+    def test_every_cheat_exists_and_has_a_group(self):
+        from patches import CHEATS, list_json
+        import json
+        listed = json.loads(list_json(XML, '01.09', None, None))
+        self.assertEqual([c['name'] for c in listed['cheats']], list(CHEATS))
+        self.assertTrue(all(c['group'] and c['label'] for c in listed['cheats']))
+        self.assertEqual(listed['external'], [])
+
+
 if __name__ == '__main__':
     unittest.main()
