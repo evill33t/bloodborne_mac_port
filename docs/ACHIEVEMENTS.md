@@ -91,3 +91,4 @@ runtime/semaphore/pad tests, launch settings, settings persistence with both ban
 preferences, and the offscreen overlay (plain and Metal validation) passed. The launcher
 achievement browser remains usable during gameplay; its banner preference follows the other
 launch settings and is disabled until the session ends. These checks did not launch the game.
+A subsequent documentation-only merge (`af0fae2`) retains upstream's 0.5.7 release notes.
