@@ -3,6 +3,7 @@
 #include "common/elf_info.h"
 #include "common/path_util.h"
 #include "core/libraries/libs.h"
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -41,6 +42,17 @@ extern "C" __attribute__((visibility("default"))) int bbseamless_init(const BbSe
         !supplied->net.thread_join || !supplied->thread_attach || !supplied->memory_protection)
         return -1;
     host = *supplied;
+    // Only this optional client module chooses our hosted server. Explicit overrides survive.
+    const auto default_environment = [](const char* name, const char* value) {
+        const char* current = std::getenv(name);
+        if (!current || !*current) setenv(name, value, 1);
+    };
+    default_environment("BB_SHADNET_SERVER", BBSEAMLESS_DEFAULT_LINK);
+    default_environment("BB_SHADNET_WEBAPI", BBSEAMLESS_DEFAULT_WEBAPI);
+    const char* selected_server = std::getenv("BB_SHADNET_SERVER");
+    if (selected_server && (!std::strcmp(selected_server, BBSEAMLESS_DEFAULT_LINK) ||
+                            !std::strcmp(selected_server, BBSEAMLESS_DEFAULT_HOST)))
+        default_environment("BB_SHADNET_SERVER_KEY", BBSEAMLESS_DEFAULT_SERVER_KEY);
     bbnet_configure(host.net.app0, host.net.serial, host.net.title, host.net.app_ver);
     bbnet_register();
     return 0;

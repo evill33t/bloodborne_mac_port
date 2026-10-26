@@ -41,11 +41,36 @@ The reference defaults to `127.0.0.1:31314` for the co-op link and
 co-op service. The project documents player-hosted servers and TCP 31313, 31315, 20443 plus
 UDP 31314. A remote Mac client must use the actual host address, not its own loopback.
 
-The owner requested that the next step be our own backend on SSH host `opc`, under `/docker`
-with `docker-compose.yaml`. No SSH connection, server changes, Docker deployment or firewall
-changes have been performed in this checkpoint. Inspect the host and existing compose setup
-before preparing that deployment. Pin the server revision and then resume the client against
-that protocol; retain its authentication and build/asset compatibility checks.
+Our seamless client defaults to `bloodborne.phobos.services:31314`, with its Web API at
+`http://bloodborne.phobos.services:31315` and game services at
+`http://bloodborne.phobos.services:20443`, requested by the owner on 2026-10-26. The optional
+module applies its network defaults only when no explicit environment override is present.
+These defaults do not enable the unfinished module or change the existing THD backend.
+Hosted mode keeps TCP 31313 on loopback; public clients need UDP 31314 and TCP 31315/20443.
+The default host's public link key is pinned in `gpu/bbseamless/client.h`, read from the
+deployed server over authenticated SSH. Explicit server-key overrides survive, and a custom
+server does not inherit our host's key.
+
+The backend is now deployed on SSH host `opc`, using the existing `/docker/docker-compose.yml`
+(the active file uses `.yml`, not `.yaml`) and service `bloodborne-server`. It is built natively
+for ARM64 from the pinned reference revision above. Operational files and the runbook are under
+`/docker/bloodborne-server`; persistent state is under `/docker/data/bloodborne-server`.
+
+Validation on 2026-10-26: eight focused upstream checks passed; an isolated 20-second bbload
+simulation linked three players, started their team and relayed 2,768 packets without refusals
+or measured loss. The live service is healthy, advertises `bloodborne.phobos.services`, returns
+HTTP 200 for game discovery and WebAPI status, and refuses unlinked HTTP mutations with 403.
+External checks through that hostname passed on TCP 20443/31315 and UDP 31314; the UDP cookie's
+public key matches the key read over SSH. A controlled restart preserved the server identity;
+an initial consistent data snapshot and the original Compose file were backed up under
+`/docker/backups`. All 49 existing containers retained their IDs and start times.
+
+Hosted mode, account/HTTP admission and build/protocol checks remain enabled. The reference is
+a development build (release `dev`, co-op frame protocol 9, link version 4). The separate Mac
+client integration still needs completing; no live game or Windows/Mac co-op is established by
+the server checks. Resume the client against this pinned server protocol, retaining its
+authentication and build/asset checks. The host firewalld rules and Oracle ingress allow only
+the three public game ports; TCP 31313 remains bound to loopback and stats are disabled.
 
 ## Validation and remaining work
 
