@@ -24,8 +24,10 @@
 #   upnp=0                   no UPnP port mapping (BB_UPNP=0; on by default)
 #   p2p_port=3658            the UDP port for co-op traffic (BB_P2P_PORT; 3658, the PS4's, by
 #                            default; 0 = any free port; a busy port falls back to a free one)
-#   online_pool=huntersdream bells and summons through The Hunter's Dream (BB_NET_BACKEND=thd), the
-#                            default; online_pool=shadnet picks a shadNet server instead (also the
+#   online_pool=seamless     hosted seamless co-op; the default for new configurations
+#   seamless_server=host:port  defaults to bloodborne.phobos.services:31314
+#   online_pool=huntersdream bells and summons through The Hunter's Dream (BB_NET_BACKEND=thd);
+#                            online_pool=shadnet picks a shadNet server instead (also the
 #                            choice when no pool is named but only a shadNet account is) ...
 #   thd_online_id=name       ... with the Discord-linked account (BB_THD_ONLINE_ID) ...
 #   thd_token=secret         ... and its token (BB_THD_TOKEN; `scripts/online.py signin` writes both),
@@ -66,7 +68,7 @@ bb_launch_settings() { # ini file
         elif [[ -n $thd_id ]]; then pool=huntersdream
         else pool=seamless; fi
     fi
-    if [[ $pool == seamless ]]; then
+    if [[ ${BB_NET_BACKEND:-$pool} == seamless ]]; then
         server=$seamless_server; webapi=''; npid=''; password=''; thd_id=''; thd_token=''
     fi
     # The password and the token are looked up and exported only for online play (online=1, or

@@ -79,6 +79,7 @@ check_online $'online=1\nshadnet_server=example.org:31313\nshadnet_npid=hunter\n
 check_online $'online=0\nshadnet_npid=hunter\n' "- - hunter -"
 check_online $'fps_cap=60\n' "- - - -"
 check_online $'online=1\nshadnet_npid=hunter\n' "0 - other -" BB_ONLINE=0 BB_SHADNET_NPID=other
+check_online $'online=1\nonline_pool=shadnet\nshadnet_server=old.example:31313\nshadnet_npid=hunter\nshadnet_password=old\n' "1 - - -" BB_NET_BACKEND=seamless
 # The co-op UDP port (p2p_port -> BB_P2P_PORT): digits only, the environment wins.
 check_p2p() { # ini text, expected BB_P2P_PORT (- = unset), extra environment...
     printf '%s' "$1" > "$ini"
