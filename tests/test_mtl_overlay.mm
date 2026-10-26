@@ -437,7 +437,7 @@ int main() {
         for (int i = 0; i < 4; ++i) Present(t, true);
         // The Frame generation row, below the upscaler card, at this drawable size.
         Snapshot(t, "display-framegen-controls.png");
-        constexpr float fx = 1300.0f, fy = 584.0f;
+        constexpr float fx = 1300.0f, fy = 548.0f;
         Click(t, fx, fy);
         Expect(s.framegen && BbSettings::FrameGenerationNeedsRestart() && !s.startup_framegen,
                "framegen toggle requests a restart without changing the running mode");
