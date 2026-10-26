@@ -18,7 +18,7 @@ final class LauncherModel: ObservableObject {
     private var screenChanges: AnyCancellable?
     private var gameProcess: Process?
     private let frameGenerationDeviceSupported = FrameGenerationSupport.deviceSupported
-    @Published private(set) var displayRefreshRates = FrameGenerationSupport.displayRefreshRates
+    @Published private(set) var frameGenerationDisplay = FrameGenerationSupport.launchDisplay
 
     @Published var settings = GameSettings()
     @Published var config = LaunchConfig()
@@ -53,7 +53,7 @@ final class LauncherModel: ObservableObject {
         updaterChanges = updater.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         benchmarkChanges = benchmark.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }
         screenChanges = NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
-            .sink { [weak self] _ in self?.displayRefreshRates = FrameGenerationSupport.displayRefreshRates }
+            .sink { [weak self] _ in self?.frameGenerationDisplay = FrameGenerationSupport.launchDisplay }
     }
 
     var confURL: URL { layout.launchConfURL(env: env) }
@@ -81,7 +81,7 @@ final class LauncherModel: ObservableObject {
             return "BB_METAL_FRAMEGEN overrides this choice. Remove it to use the launcher setting."
         }
         return settings.frameGenerationUnavailableReason(deviceSupported: frameGenerationDeviceSupported,
-                                                          displayRefreshRates: displayRefreshRates)
+                                                          display: frameGenerationDisplay)
     }
     var canPlay: Bool { !running && !checkingGame && config.gameDir != nil && gameProblem == nil }
     /// Straight into the game (no window): the toggle is off and a game folder is known.

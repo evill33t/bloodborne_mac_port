@@ -17,16 +17,19 @@ enum FrameGenerationSupport {
         return false
     }
 
-    static var displayRefreshRates: [Double] {
-        NSScreen.screens.map { screen in
-            if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
-               let mode = CGDisplayCopyDisplayMode(number.uint32Value),
-               mode.refreshRate.isFinite, mode.refreshRate > 0 {
-                // SDL's current display mode reports an integer refresh rate too.
-                return mode.refreshRate.rounded()
-            }
-            // Variable-refresh displays can report zero through CoreGraphics.
-            return Double(screen.maximumFramesPerSecond)
-        }
+    static var launchDisplay: FrameGenerationDisplay? {
+        // SDL_WINDOWPOS_CENTERED starts the game on the primary display. A suitable secondary
+        // screen must not hide an incompatible mode on the screen where the game will open.
+        guard let screen = NSScreen.screens.first,
+              let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
+        let shortest = screen.minimumRefreshInterval
+        let longest = screen.maximumRefreshInterval
+        let validInterval = shortest.isFinite && shortest > 0
+        let variable = validInterval && longest.isFinite && longest > shortest
+        let modeRate = CGDisplayCopyDisplayMode(number.uint32Value)?.refreshRate ?? 0
+        let rate = variable ? 1 / shortest
+            : (modeRate.isFinite && modeRate > 0 ? modeRate : (validInterval ? 1 / shortest : 0))
+        return FrameGenerationDisplay(refreshRate: rate, minimumRefreshRate: variable ? 1 / longest : 0,
+                                      requiresFullscreen: CGDisplayIsBuiltin(number.uint32Value) == 0)
     }
 }
