@@ -15,9 +15,9 @@ process.
 > This project is not affiliated with or endorsed by Sony Interactive Entertainment,
 > FromSoftware, or AMD.
 
-## Status (2026-10-25)
+## Status (2026-10-26)
 
-**Current version: [mac-v0.5.6](https://github.com/Wooloomooloo2/bloodborne_mac_port/releases/tag/mac-v0.5.6)** (download the app, or build it as below).
+**Current version: [mac-v0.5.9](https://github.com/Wooloomooloo2/bloodborne_mac_port/releases/tag/mac-v0.5.9)** (download the app, or build it as below).
 
 **Work in progress, playable.** On an Apple M4 Max the game boots, character creation works,
 saves load, and the game runs at a **locked 60 FPS** at 1080p and 1440p native, and now at
@@ -30,7 +30,70 @@ highest resolution each Mac allows; 90 and 120 FPS caps are there for ProMotion 
 
 **Releases:** 0.5.x is the stable line. **0.6** will be **MetalFX frame generation** (#64, from
 @evill33t): it comes out as pre-releases first and only becomes the default once it's well tested.
-Fixes for 16 GB Macs come as 0.5.x updates. Online play (#9) is still in progress.
+The opening-movie freeze and crash are fixed in 0.5.8, and the slowdowns on 16-18 GB Macs (#69)
+in 0.5.9. Online play (#9) is still in progress.
+
+### New in 0.5.9: 16-18 GB Macs run at full speed
+
+- **16-18 GB Macs no longer slow down to 10-20 FPS** (#69, #83). The cause was memory, not the
+  GPU: the port kept 6.5 GB of GPU memory pinned (it can never be swapped out), and on a 16 or 18
+  GB Mac that left too little for the game and macOS, so the Mac swapped and the frame rate
+  collapsed. On Macs with 24 GB or less, the game's memory is now mapped to the GPU only where the
+  game actually uses it (3.5 GB pinned instead of 6.5 GB). This is
+  [@MojahedAbushawish](https://github.com/MojahedAbushawish)'s work in #85 and #86.
+  - On a Mac limited to behave like an 18 GB Mac: 15-17 FPS before, 58-60 after (1080p, 60 cap).
+  - Players: an M4 MacBook Air 16 GB went from 11-16 FPS to 57-60 (#83), and the M3 Pro 18 GB
+    from #69 plays smoothly.
+  - Macs with more memory keep the previous layout, unchanged. `BB_ARENA_LAYOUT=legacy` in
+    `launch.conf` brings it back on a smaller Mac, if ever needed.
+- If you added `BB_ARENA_GIB` or `BB_GC_BUDGET_MB` to `launch.conf` while testing, remove them.
+- Thank you to @lifeos-creator, @danielsirbubusiness and @khhan0703 for testing the test build on
+  their Macs.
+
+### New in 0.5.8: the opening-movie freeze and crash fixed
+
+- **New games no longer freeze or crash in the opening movie** (#46, #50, #51, #24, #84). Both
+  showed up on slower or busier Macs, which is why they were hard to reproduce on a fast one.
+  - **The freeze** ("no new frame for 30 seconds"): when a movie ended and the game closed the movie
+    player at the same moment, the stop request could miss a decoder thread that was waiting for a
+    free frame buffer, and the game waited for it forever.
+  - **The crash** (signal 11 at guest offset 0x26c01c3): during the movie, the game's main thread
+    drew into the render thread's GPU context from a path the port didn't lock. It now runs under
+    the same lock as the others.
+  - On a Mac slowed down on purpose, 5 of 5 new games froze or crashed before the fix; 4 of 4
+    reached character creation after it. Normal play and the benchmark are unchanged (60 FPS).
+- **A hang report:** if the game ever stops responding, the log now lists where every game thread
+  is waiting, so freeze reports can be read from `game.log` alone.
+- **Co-op stability** (from [@noelmiller](https://github.com/noelmiller), #11): two renderer stops
+  seen in co-op (a render-pass submit and a recording-chunk race) are now survivable.
+- **Safety fixes in the PS4 runtime** (from [@evill33t](https://github.com/evill33t), #80, #81,
+  #82): semaphore handles kept at full width, system-module IDs checked in full before lookup, and
+  guest thread-local storage checked before the runtime is entered.
+
+### New in 0.5.7: mouse look, a Stop button, keyboard fixes
+
+- **Mouse look** (from [@MojahedAbushawish](https://github.com/MojahedAbushawish), #20). Turn on
+  **Mouse camera** in the launcher (General → **Controls**) or in the in-game menu (⌘,).
+  - Click once in the game window to turn the camera with the mouse; ⌘ gives the cursor back.
+  - Left click R1, right click L2, middle click R3 (lock on), side buttons R2 and L1.
+  - While Mouse camera is on, the **arrow keys are the d-pad**: they scroll menus, and in game they
+    switch weapons, tools and quick items.
+  - The launcher's **Controls** section lists every keyboard and mouse binding.
+- **A Stop button** (from [@DiAvisoo](https://github.com/DiAvisoo), #31). While a game started with
+  **Play** runs, the launcher stays behind it with a **Stop** button; quitting the launcher stops
+  the game too. Exit Game in the game's own menu is still the safe way out, because it finishes
+  saving.
+- **The keyboard works with a controller connected.** Before, a connected controller switched the
+  keyboard off, so Enter or Space could not press Play Offline.
+- **⌘ shortcuts no longer reach the game:** ⌘Q drank a Blood Vial. ⌘W no longer quits the game
+  (from #20).
+- **A safety fix in the frame rate patches.** The community 30/60/90/Uncap FPS++ patches wrote a
+  return instruction into the middle of the game's condition wait. Any timed wait reaching it
+  would have crashed; it never showed in play, but now the game's own code runs there. Found by an
+  assessment comparing the port with [Paleblood](https://github.com/Yharnam-Hunters/Paleblood),
+  verified and fixed independently.
+- **Enemy Control** (patch files only) is refused together with a frame rate patch, because the two
+  change the same code.
 
 ### New in 0.5.6: mod manager and cheats, benchmark, 16:10, better crash reports
 
@@ -332,7 +395,7 @@ the log.
   bound saves 1–2 ms of GPU time per frame (6.6–7.5 → 5.6 ms). Keeping those draws inside the pass is next
   (Mojahed's #39 starts on it).
 - **0.6:** MetalFX frame generation (#64), as pre-releases first. Online co-op (#9) after that.
-- Keyboard and mouse controls (mouse look, from #20).
+- Rebindable keys (an `input.ini`, from #21's ideas) and the keyboard/mouse list in the launcher made editable.
 - Confirm the missing-geometry fix on more Macs; the frame-time judder.
 - Signing and notarisation of the downloadable app (today it must be released from quarantine).
 
@@ -635,7 +698,8 @@ saves and settings as the Finder launcher.
   FSR 3.1 or off), shader compile mode. Some changes need a restart. The launcher shows the
   same settings before the game starts.
 - **Full screen:** ⌃⌘F or the green window button.
-- **Input:** game controllers (through SDL) and the keyboard.
+- **Input:** game controllers (through SDL), the keyboard, and the mouse for the camera (turn on
+  **Mouse camera**). The launcher's **Controls** section lists the bindings.
 - **First launch and new areas** compile shaders, so the first minutes stutter a little; later
   sessions load them from the cache at start. The first launch after a rebuild takes ~20 s to
   open the window.
@@ -667,6 +731,10 @@ This port stands entirely on the work of others:
 - **Mrsuss60** — [bloodborne_pc_windows_port](https://github.com/Mrsuss60/bloodborne_pc_windows_port),
   the Windows port this repository was forked from, including its stability, audio, memory
   and frame-pacing fixes (documented in that repository's `CHANGES.md`).
+- **Paleblood contributors** — system-module argument validation evidence from
+  [Paleblood, branch `codex/runtime-sysmodule-wire`](https://github.com/evill33t/Paleblood/tree/codex/runtime-sysmodule-wire),
+  commit `f9c5e5556db987d9fb4fa60b837d8a54817a0718`; provenance and limits in
+  [`docs/SYSMODULE_WIRE.md`](docs/SYSMODULE_WIRE.md).
 - **[shadPS4](https://github.com/shadps4-emu/shadPS4)** project — the Vulkan video core and
   shader recompiler (`gpu/shadps4/`, GPL-2.0-or-later).
 - **FireBurn** — [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan), the native Vulkan
@@ -699,12 +767,14 @@ Thank you to everyone who sent pull requests:
   - Buffer arena sizing for Macs with less memory (#13).
   - The HUD item icon above 1080p (#17).
   - Online play (#9, in progress).
+  - Survivable co-op renderer stops (#11).
 - **[Mojahed Abushawish](https://github.com/MojahedAbushawish)**
   - Lossless texture compression (#33).
   - The upscaler haze fix (#48).
   - Invariant vertex positions, copies held to the end of a render pass, and the loading-screen fix
     (from #20).
   - Mouse look (#20).
+  - Guest memory mapped in runs for 16-18 GB Macs (#85, #86).
   - Benchmarks on an M3 Pro.
 - **[DiAvisoo](https://github.com/DiAvisoo)**
   - Native ultrawide (#30).
@@ -716,8 +786,18 @@ Thank you to everyone who sent pull requests:
   - The About panel and update check (#23).
   - Dated session logs and crash reports (#40).
 - **[soulripper13](https://github.com/soulripper13)**: the game's icon in the Dock (#66).
+- **[evill33t](https://github.com/evill33t)**: PS4 runtime safety fixes (#80, #81, #82) and MetalFX
+  frame generation (#64, in progress).
 
-Thanks also to everyone who reports issues and tests builds on their Macs.
+Thanks also to everyone who reports issues and tests builds on their Macs. Reports, logs and
+measurements that shaped recent releases came from @noelmiller, @MojahedAbushawish, @DiAvisoo,
+@satperm, @IlyaDylko (keyboard sprint #61, long-session FPS #55), @wgorecodes (stuck game #71,
+preferred display #60), @Frosty2804 (16:10, #75), @lifeos-creator (M3 Pro, #53/#69, tested 0.5.9), @Sah-D (#47),
+@ulhaas, @Ohaq2108 and @rozenstein94 (the opening-movie freeze, #46), @khhan0703 (the opening-movie crash, #84, tested 0.5.9), @Didjus (#18),
+@PensionPlanning (#19), @muharremsedona6034gm-hub (#22), @Walltor (#25), @AmberUpraity,
+@VanDung-dev, @douglasrlee, @jefer9011 and @mariuszparowa666 (GPU stalls, fixed in 0.5.4.2),
+@zhouhaoyaomei-ship-it, @SimonKabb and @juliotwo (the memmove crash, fixed in 0.5.5), @ELLDev
+(#74), @danielsirbubusiness (#83, tested 0.5.9), @g3rro333333333, @rwv7p56n9s-cmyk, @LICHTYYYVVV and @vtsilva77.
 
 Each third-party component keeps its own license file in its directory.
 

@@ -160,6 +160,7 @@ static void *hang_watchdog(void *arg) {
             char why[160];
             snprintf(why, sizeof why, "the game stopped responding (no new frame for %u seconds, %" PRIu64
                      " frames before; BB_HANG_SECONDS)", limit, flips);
+            runtime_thread_dump_all(); /* where each guest thread is stuck (#46) */
             crash_exit(why, GPU_PROCESS_EXIT_HANG);
         }
     }
@@ -732,12 +733,26 @@ int main(int argc, char **argv) {
     uint64_t size = read64(f), entry = read64(f), ns = read64(f), nr = read64(f);
     import_count = read64(f);
     uint64_t capabilities = memcmp(magic, "BBPROBE1", 8) ? read64(f) : 0;
-    if (capabilities & ~UINT64_C(1)) fail("unknown runtime capabilities");
-    runtime_start(strict_imports ? 0 : capabilities);
+    if (capabilities & ~UINT64_C(3)) fail("unknown runtime capabilities");
     if (!size || size > 512*1024*1024 || entry >= size || !ns || ns > 64 || nr > 1000000 || import_count > 100000)
         fail("boot file limits exceeded");
     int multi=!memcmp(magic,"BBPROBE5",8);
     int linked=!memcmp(magic,"BBPROBE3",8) || !memcmp(magic,"BBPROBE4",8) || multi;
+    /* Bit 1 adds one GS-displacement word before the existing linked metadata.
+     * Older images cannot prove which slot was selected on macOS. Refuse them
+     * before any initializer/entry executes, even with --strict-imports. run.sh
+     * always regenerates linked images, invalidating stale prepared files. */
+    if ((capabilities & 2) && !linked) fail("TLS slot metadata requires a linked image");
+#ifdef __APPLE__
+    if (linked && !(capabilities & 2)) fail("boot image lacks TLS slot metadata; prepare the game again");
+#endif
+    if (linked && (capabilities & 2)) {
+        uint64_t displacement=read64(f);
+        if (displacement>=512*8 || displacement%8) fail("invalid boot TLS displacement");
+        if (displacement!=runtime_thread_gs_displacement())
+            fail("boot TLS slot does not match this runtime; prepare the game again");
+    }
+    runtime_start(strict_imports ? 0 : capabilities & 1);
     int native_libc=linked && !strict_imports && (capabilities&1);
     uint64_t main_tls[4]={0};
     uint64_t nb=0,procparam=0;

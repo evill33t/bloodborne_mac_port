@@ -13,6 +13,7 @@
 #include "bbport_metalfx.h"
 #include "ffx_metal/ffx_metal.h"
 #include "bbport_settings.h"
+#include "bbport_shader_fingerprint.h"
 #include "core/memory.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -1217,6 +1218,21 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             runs->Draw(e, DrawPipelines(*pipeline), draw_state, resources, draw_args);
         },
         IsTessellated(*pipeline));
+    if (auto frame = upscaler->FrameForDisplay(); frame &&
+        BbShader::Fingerprint(AmdGpu::GetParams(regs.ps_program).code) == 0x86a2e9eb1700b3c1ull &&
+        BbShader::Fingerprint(AmdGpu::GetParams(regs.vs_program).code) == 0xd4cbe93c97d2197aull &&
+        !is_indexed && (num_indices == 3 || num_indices == 4) && num_instances == 1 &&
+        !state.depth.texture && !regs.blend_control[0].enable &&
+        draw_state.scissor_x == 0 && draw_state.scissor_y == 0 &&
+        draw_state.scissor_width >= state.width && draw_state.scissor_height >= state.height &&
+        std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
+        scheduler.EndRendering();
+        scheduler.Record([generator = upscaler->FrameGenerator(), frame,
+                          display = state.colors[0].texture, resources](Metal::Encoder& e) {
+            generator->CaptureDisplay(e, frame, display, resources.bound);
+        });
+        scheduler.GetDynamicState().Invalidate();
+    }
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
@@ -1304,8 +1320,17 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         ResolveIndexBuffer();
     }
 
+    // bbport: without a GPU count Metal reads the records at a 32-bit indirectBufferOffset
+    // (copied when they end past 4 GiB of the arena); with one, the clamp kernel reads them at
+    // any offset and draws from its own scratch buffer (Encoder::DrawIndirectCount).
     const auto [buffer, base] =
-        buffer_cache.ObtainBuffer(indirect.args, stride * max_count, false);
+        count_address == 0
+            ? buffer_cache.ObtainDrawArgumentBuffer(indirect.args, stride * max_count)
+            : buffer_cache.ObtainBuffer(indirect.args, stride * max_count, false, false, true,
+                                        BbArenaRuns::Caller::Indirect);
+    if (count_address != 0 && base + u64(stride) * max_count > (u64{1} << 32)) {
+        BbStats::indirect_counted_high.fetch_add(1, std::memory_order_relaxed);
+    }
     NoteRead(buffer, base, stride * max_count);
     if (FrameCapture::Tracing()) {
         FrameCapture::Trace(fmt::format("A {:#x} {}", indirect.args, stride * max_count));
@@ -1314,7 +1339,8 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const VideoCore::Buffer* count_buffer;
     u64 count_offset;
     if (count_address != 0) {
-        std::tie(count_buffer, count_offset) = buffer_cache.ObtainBuffer(count_address, 4, false);
+        std::tie(count_buffer, count_offset) = buffer_cache.ObtainBuffer(
+            count_address, 4, false, false, true, BbArenaRuns::Caller::Indirect);
         NoteRead(count_buffer, count_offset, 4);
     }
 
@@ -1465,7 +1491,8 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
         return;
     }
 
-    const auto [buffer, base] = buffer_cache.ObtainBuffer(address + offset, size, false);
+    // bbport: dispatchThreadgroupsWithIndirectBuffer's offset is 32-bit too (copied past 4 GiB).
+    const auto [buffer, base] = buffer_cache.ObtainDrawArgumentBuffer(address + offset, size);
     NoteRead(buffer, base, size, Metal::ReadStage::Late);
 
     scheduler.EndRendering();
@@ -1630,6 +1657,23 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     if (IsComputeImageCopy(pipeline) || IsComputeMetaClear(pipeline) ||
         IsComputeImageClear(pipeline)) {
         return false;
+    }
+    // bbport: a stage that reaches memory by address needs the page table and the fault buffer,
+    // which exist only with BB_DIRECT_MEMORY_ACCESS=1. Shaders compiled without it never do, and
+    // a cache entry compiled with it is rejected at load (LoadShaderMeta): this is a backstop.
+    // Skipped, not bound to the zero stand-in (both descriptors would be written).
+    if (!buffer_cache.GetBdaPageTableBuffer()) {
+        for (const auto* stage : pipeline->GetStages()) {
+            if (stage && stage->uses_dma) {
+                static std::atomic<bool> reported{false};
+                if (!reported.exchange(true)) {
+                    LOG_ERROR(Render, "Shader {:#x} reaches memory by address without "
+                                      "BB_DIRECT_MEMORY_ACCESS: its draws and dispatches are skipped",
+                              stage->pgm_hash);
+                }
+                return false;
+            }
+        }
     }
 
     bound.clear();
@@ -2224,8 +2268,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                                ? Metal::ReadStage::Late
                                                : Metal::ReadStage::Vertex;
                 NoteRead(bda_buffer, 0, bda_buffer->SizeBytes(), stage_of_read);
-                for (const auto& arena : buffer_cache.GetArenas()) {
-                    NoteRead(&arena, 0, arena.SizeBytes(), stage_of_read);
+                for (const auto& chunk : buffer_cache.GetChunks()) {
+                    NoteRead(chunk.buffer, 0, chunk.buffer->SizeBytes(), stage_of_read);
                 }
                 element = {.buffer = bda_buffer->Ref(), .size = bda_buffer->SizeBytes()};
             } else if (desc.buffer_type == Shader::BufferType::FaultBuffer) {
@@ -3176,6 +3220,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
+        if (num_bytes == 0) {
+            return; // bbport: nothing to fill; no empty blit
+        }
         if (!buffer_cache.IsRegionGpuModified(address, num_bytes)) {
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
@@ -3186,13 +3233,20 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
         if (is_gds) {
             return {buffer_cache.GetGdsBuffer(), address};
         }
-        return buffer_cache.ObtainBuffer(address, num_bytes, true);
+        return buffer_cache.ObtainBuffer(address, num_bytes, true, false, true,
+                                         BbArenaRuns::Caller::Fill);
     }();
+    if (num_bytes == 0) {
+        return; // GDS: nothing to fill
+    }
     runtime.FillBuffer(*buffer, offset, num_bytes, value);
 }
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
+    if (num_bytes == 0) {
+        return; // bbport: nothing to copy; no empty blit
+    }
     if (!dst_gds && !buffer_cache.IsRegionGpuModified(dst, num_bytes)) {
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
@@ -3207,13 +3261,15 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
         if (src_gds) {
             return {gds_buffer, src};
         }
-        return buffer_cache.ObtainBuffer(src, num_bytes, false, true);
+        return buffer_cache.ObtainBuffer(src, num_bytes, false, true, true,
+                                         BbArenaRuns::Caller::Copy);
     }();
     const auto [dst_buffer, dst_offset] = [&] -> std::pair<const VideoCore::Buffer*, u64> {
         if (dst_gds) {
             return {gds_buffer, dst};
         }
-        return buffer_cache.ObtainBuffer(dst, num_bytes, true, true);
+        return buffer_cache.ObtainBuffer(dst, num_bytes, true, true, true,
+                                         BbArenaRuns::Caller::Copy);
     }();
     const VideoCore::BufferCopy copy = {
         .src_offset = src_offset,

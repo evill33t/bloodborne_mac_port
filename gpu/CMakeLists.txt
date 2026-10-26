@@ -177,10 +177,11 @@ if (APPLE)
         runtime_disabled_optimizations runtime_errno runtime_fault_recover
         runtime_file_translate runtime_game_cpu_since_last runtime_memory_clamp
         runtime_memory_gpu_protect runtime_memory_read_backing runtime_memory_region
-        runtime_memory_set_gpu_hooks runtime_memory_write_backing
+        runtime_memory_set_gpu_hooks runtime_memory_vma_info runtime_memory_write_backing
         runtime_process_time_counter runtime_process_time_us runtime_restart
         runtime_thread_attach_host runtime_thread_clear_blocked runtime_thread_cpu_ns
-        runtime_thread_set_blocked runtime_tsc_frequency runtime_sampler_flip)
+        runtime_thread_set_blocked runtime_tsc_frequency runtime_sampler_flip
+        runtime_context_lock_other)
     foreach(symbol IN LISTS BB_HOST_RUNTIME_SYMBOLS)
         target_link_options(bbgpu PRIVATE -Wl,-U,_${symbol})
     endforeach()
@@ -413,6 +414,16 @@ target_compile_options(frame-rates-test PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 
 
 # Opt-in synthetic regression: no game files or runtime diagnostics required.
+# bbport: the guest memory buffers' lookup (header-only; also run with -fsanitize=thread).
+add_executable(chunk-table-test EXCLUDE_FROM_ALL ../tests/test_chunk_table.cpp)
+target_include_directories(chunk-table-test PRIVATE shadps4)
+target_compile_options(chunk-table-test PRIVATE -UNDEBUG)
+# bbport: BB_ARENA_LAYOUT=runs with real Metal (guest memory buffers per GPU run).
+add_executable(arena-layout-test EXCLUDE_FROM_ALL ../tests/test_arena_layout.cpp)
+target_include_directories(arena-layout-test PRIVATE shim shadps4 third_party/gcn/include)
+target_compile_options(arena-layout-test PRIVATE -UNDEBUG)
+target_link_libraries(arena-layout-test PRIVATE bbgpu "-framework Metal" "-framework Foundation")
+target_link_options(arena-layout-test PRIVATE -Wl,-export_dynamic)
 add_executable(index-offset-test EXCLUDE_FROM_ALL
     ../tests/test_index_offset.cpp ../tests/test_index_triangle.mm)
 set_source_files_properties(../tests/test_index_triangle.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
