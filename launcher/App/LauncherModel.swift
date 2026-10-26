@@ -410,7 +410,8 @@ final class LauncherModel: ObservableObject {
         var items = ["output \(settings.output.iniValue)", "upscaler \(settings.upscaler.rawValue)"]
         if settings.upscaler.usesPreset { items.append("quality \(Resolution.presetNames[settings.preset])") }
         items.append("frame generation \(settings.frameGeneration ? "on" : "off")")
-        items += ["cap \(settings.frameCap.rawValue) FPS", "\(settings.frameCap.hasFixedSteps ? settings.gameTiming.rawValue : "variable") timing", settings.fullscreen ? "full screen" : "windowed"]
+        let timing = settings.gameTiming == .fixed && !settings.frameCap.hasFixedSteps ? "variable" : settings.gameTiming.rawValue
+        items += ["cap \(settings.frameCap.rawValue) FPS", "\(timing) timing", settings.fullscreen ? "full screen" : "windowed"]
         return items
     }
 

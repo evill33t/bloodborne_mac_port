@@ -121,6 +121,8 @@ lic=$contents/Resources/licenses
 cp LICENSE "$lic/LICENSE-bloodborne-mac-port.txt"
 cp LICENSES/GPL-3.0-or-later.txt "$lic/LICENSE-native-menu.txt"
 cp docs/NATIVE_MAC_SETTINGS.md "$lic/native-menu-provenance.txt"
+cp src/fps/LICENSE "$lic/LICENSE-adaptive-fps-GPL-3.0.txt"
+cp src/fps/PROVENANCE.md "$lic/adaptive-fps-provenance.md"
 cp "$stdlib/LICENSE.txt" "$lic/LICENSE-Python.txt"
 for pair in SDL:LICENSE.txt Vulkan-Headers:LICENSE.md SPIRV-Cross:LICENSE FFmpeg:COPYING.LGPLv2.1 \
             FFmpeg:LICENSE.md fmt:LICENSE magic_enum:LICENSE miniz:LICENSE robin-map:LICENSE \
@@ -162,6 +164,9 @@ Bloodborne macOS port $version (commit $commit)
 Source code: https://github.com/Wooloomooloo2/bloodborne_mac_port/tree/$commit
 Existing port sources are GPL-2.0-or-later (LICENSE-bloodborne-mac-port.txt). The native menu
 adapters and combined runtime retain GPL-3.0-or-later (LICENSE-native-menu.txt).
+The original port is GPL-2.0-or-later (LICENSE-bloodborne-mac-port.txt). The compiled game
+runtime includes GPL-3.0-or-later adaptive timing (LICENSE-adaptive-fps-GPL-3.0.txt,
+adaptive-fps-provenance.md), so the combined runtime is distributed under GPL-3.0-or-later.
 The other files are the licences of bundled libraries. No game files are included.
 EOF
 
