@@ -151,6 +151,8 @@ do {
             display: FrameGenerationDisplay(refreshRate: rate, minimumRefreshRate: minimum, requiresFullscreen: external))
     }
     check(settings.frameGeneration, "read the in-game menu's frame generation choice")
+    settings.upscaler = .metalfx_spatial
+    check(reason(120) != nil, "spatial scaling cannot enable temporal frame generation")
     for upscaler in [Upscaler.metalfx, .fsr3, .taa] {
         settings.upscaler = upscaler
         check(reason(120) == nil, "temporal upscaler \(upscaler) allows 60 -> 120 frame generation")

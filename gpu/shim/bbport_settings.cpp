@@ -93,7 +93,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "fps_cap") {
         if (i == 30 || i == 40 || i == 60 || i == 90 || i == 120) v.fps_cap = i;
     } else if (key == "game_timing") {
-        v.game_timing = value == "variable" ? 1 : 0;
+        v.game_timing = value == "adaptive" ? 2 : value == "variable" ? 1 : 0;
     } else if (key == "fullscreen") {
         v.fullscreen = i != 0;
     } else if (key == "metal_hud") {
@@ -366,7 +366,7 @@ void Save() {
                  compile_modes[std::clamp(v.shader_compile.load(), 0, 2)]);
     std::fprintf(file, "fps_cap=%d\ngame_timing=%s\nfullscreen=%d\nmetal_hud=%d\n"
                        "texture_compression=%d\n",
-                 v.fps_cap.load(), v.game_timing ? "variable" : "fixed",
+                 v.fps_cap.load(), v.game_timing == 2 ? "adaptive" : v.game_timing ? "variable" : "fixed",
                  int(v.fullscreen.load()), int(v.metal_hud.load()),
                  int(v.texture_compression.load()));
     for (const std::string& line : kept) {

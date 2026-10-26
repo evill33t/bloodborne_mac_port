@@ -118,7 +118,7 @@ struct Values {
     /// Launcher options, read from the same ini and changed by native Mac Settings. The
     /// launcher consumes them on the next start; no running renderer state is changed here.
     std::atomic<int> fps_cap{60};
-    std::atomic<int> game_timing{0}; ///< 0 fixed, 1 variable
+    std::atomic<int> game_timing{0}; ///< 0 fixed, 1 variable, 2 adaptive
     std::atomic<bool> fullscreen{false};
     std::atomic<bool> metal_hud{false};
     std::atomic<bool> texture_compression{true};

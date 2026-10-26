@@ -249,7 +249,9 @@ struct GameSettings: Equatable {
     func frameGenerationUnavailableReason(deviceSupported: Bool, display: FrameGenerationDisplay?) -> String? {
         guard deviceSupported else { return "Requires macOS 26 or later and a Mac supporting MetalFX frame generation." }
         guard !ultrawide else { return "Unavailable with native ultrawide or 16:10 output: upscaling is off." }
-        guard upscaler != .off else { return "Select MetalFX, FSR 3.1 or TAA to use frame generation." }
+        guard upscaler != .off && upscaler != .metalfx_spatial else {
+            return "Select MetalFX, FSR 3.1 or TAA to use frame generation."
+        }
         guard let display, display.refreshRate.isFinite, display.refreshRate > 0 else {
             return "The display refresh rate could not be determined."
         }

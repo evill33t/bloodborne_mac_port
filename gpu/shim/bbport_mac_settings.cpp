@@ -133,13 +133,16 @@ bool Set(uint32_t field, int32_t value) {
         if (value != 30 && value != 40 && value != 60 && value != 90 && value != 120) return false;
         s.fps_cap = value;
         break;
+    case BBMAC_GAME_TIMING:
+        if (value < 0 || value > 2) return false;
+        s.game_timing = value;
+        break;
     case BBMAC_SHARPEN:
     case BBMAC_JITTER:
     case BBMAC_OBJECT_MOTION:
     case BBMAC_REACTIVE:
     case BBMAC_SHOW_FPS:
     case BBMAC_FRAME_PACING:
-    case BBMAC_GAME_TIMING:
     case BBMAC_FULLSCREEN:
     case BBMAC_METAL_HUD:
     case BBMAC_TEXTURE_COMPRESSION:
@@ -152,7 +155,6 @@ bool Set(uint32_t field, int32_t value) {
         case BBMAC_REACTIVE: s.reactive = value != 0; break;
         case BBMAC_SHOW_FPS: s.show_fps = value != 0; break;
         case BBMAC_FRAME_PACING: s.frame_pacing = value != 0; break;
-        case BBMAC_GAME_TIMING: s.game_timing = value; break;
         case BBMAC_FULLSCREEN: s.fullscreen = value != 0; break;
         case BBMAC_METAL_HUD: s.metal_hud = value != 0; break;
         case BBMAC_TEXTURE_COMPRESSION: s.texture_compression = value != 0; break;

@@ -385,7 +385,8 @@ int main() {
         }
         // The MetalFX segment of the Display tab at this size (drawable pixels; window id 0
         // means density 1).
-        constexpr float mx = 1862.0f, my = 354.0f;
+        Snapshot(t, "display-provider-controls.png");
+        constexpr float mx = 1662.0f, my = 354.0f;
         SDL_Event mouse{};
         mouse.type = SDL_EVENT_MOUSE_MOTION;
         mouse.motion.x = mx;
@@ -428,7 +429,8 @@ int main() {
         Expect(BbOverlay::CapturesInput(), "L3+R3 opens the settings menu");
         for (int i = 0; i < 4; ++i) Present(t, true);
         // The Frame generation row, below the upscaler card, at this drawable size.
-        constexpr float fx = 1300.0f, fy = 548.0f;
+        Snapshot(t, "display-framegen-controls.png");
+        constexpr float fx = 1300.0f, fy = 584.0f;
         Click(t, fx, fy);
         Expect(s.framegen && BbSettings::FrameGenerationNeedsRestart() && !s.startup_framegen,
                "framegen toggle requests a restart without changing the running mode");

@@ -725,15 +725,16 @@ void DisplayTab(BbSettings::Values& s) {
     EndCard();
 
     BeginCard("Frame generation", int(BbSettings::FrameGenerationNeedsRestart()));
-    const bool framegen_available = s.framegen_supported && upscaler_on && BbFrameGen::DisplaySupported();
+    const bool temporal = upscaler_on && upscaler != BbSettings::UpscalerSpatial;
+    const bool framegen_available = s.framegen_supported && temporal && BbFrameGen::DisplaySupported();
     ImGui::BeginDisabled(!framegen_available || s.framegen_forced);
     Toggle("MetalFX 2x (experimental)", s.framegen);
     ImGui::EndDisabled();
     HintBelow("Adds an intermediate image between real frames. Requires an active temporal "
               "upscaler; the FPS cap still controls real frames. Adds GPU work and latency.");
-    if (!upscaler_on) {
+    if (!temporal) {
         Note("Choose MetalFX, FSR 3.1, or TAA above. Native 16:10 and ultrawide output "
-             "disable temporal upscaling and cannot provide frame generation inputs.");
+             "and MetalFX Spatial cannot provide frame generation inputs.");
     } else if (!s.framegen_supported) {
         Note("Unavailable in this session. Requires macOS 26 or newer, a supported GPU, "
              "and the temporal renderer.");

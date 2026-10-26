@@ -21,7 +21,7 @@ enum BbMacSetting {
 // Reads return -1 for an invalid field (and SHOW_LAUNCHER when unavailable).
 // Writes reject invalid/read-only values; in split mode they are asynchronous and the next
 // host snapshot reflects them. Floats are hundredths (sharpness 30 = 0.30); enums use BbSettings.
-// Frame cap is FPS; timing 0 fixed/1 variable; launch-only edits need restart.
+// Frame cap is FPS; timing 0 fixed/1 variable/2 adaptive; launch-only edits need restart.
 // PROVIDER_MASK uses (1 << BbSettings::Upscaler); NATIVE_ULTRAWIDE is read-only.
 #ifdef __cplusplus
 extern "C" {

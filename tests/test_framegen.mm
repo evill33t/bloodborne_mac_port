@@ -97,6 +97,8 @@ void Policy() {
     Expect(BbFrameGen::Active(), "moving back to a suitable display resumes generation");
     settings.upscaler = BbSettings::UpscalerOff;
     Expect(!BbFrameGen::Active(), "native output without a temporal upscaler cannot activate generation");
+    settings.upscaler = BbSettings::UpscalerSpatial;
+    Expect(!BbFrameGen::Active(), "spatial scaling has no temporal motion input for generation");
     settings.upscaler = BbSettings::UpscalerMetalFx;
     settings.startup_framegen = false;
     const auto previous = Description();

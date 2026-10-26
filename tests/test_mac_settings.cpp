@@ -91,11 +91,11 @@ int main() {
     assert(Count(Read(launch), "BB_SHOW_LAUNCHER=1") == 1);
     assert(Read(launch).find("BB_GAME='/some path/game'\nFUTURE_OPTION=keep\n") != std::string::npos);
 
-    // Keep the user's unsupported provider and every unowned launcher / future framegen key.
+    // Keep the user's unsupported provider and every unowned launcher key and the shared framegen preference.
     Write(config, "upscaler=fsr411\npreset=0\nfps_cap=40\ngame_timing=variable\nfullscreen=1\n"
                   "metal_hud=1\ntexture_compression=0\nfsr4_invert_jitter=1\n"
                   "mouse_look=1\nmouse_sensitivity=2.25\nmouse_invert_y=1\n"
-                  "future_launcher=leave me alone\nframegen=fsr3\nframegen_multiplier=3\n");
+                  "future_launcher=leave me alone\nframegen=1\nframegen_multiplier=3\n");
     BbSettings::Load();
     assert(BbSettings::Get().mouse_look && BbSettings::Get().mouse_sensitivity == 2.25f &&
            BbSettings::Get().mouse_invert_y);
@@ -112,7 +112,7 @@ int main() {
     auto text = Read(config);
     assert(Count(text, "upscaler=fsr411") == 1 && Count(text, "sharpness=0.57") == 1);
     for (const char* line : {"fsr4_invert_jitter=1", "future_launcher=leave me alone",
-                             "framegen=fsr3", "framegen_multiplier=3"}) {
+                             "framegen=1", "framegen_multiplier=3"}) {
         assert(Count(text, line) == 1);
     }
     BbSettings::ConfigureUpscalerSupport(true, true);
@@ -156,7 +156,7 @@ int main() {
         {BBMAC_RESTART, 1}, {BBMAC_UPSCALER, -1}, {BBMAC_OUTPUT, BbSettings::OutputCount},
         {BBMAC_PRESET, BbSettings::PresetCount}, {BBMAC_SHOW_FPS, 2}, {BBMAC_EFFECT_FIRST, -1},
         {BBMAC_SHARPNESS, 201}, {BBMAC_REACTIVE_SCALE, 1601}, {BBMAC_REACTIVE_THRESHOLD, -1},
-        {BBMAC_REACTIVE_MAX, 101}, {BBMAC_FRAME_CAP, 45}, {BBMAC_GAME_TIMING, -1},
+        {BBMAC_REACTIVE_MAX, 101}, {BBMAC_FRAME_CAP, 45}, {BBMAC_GAME_TIMING, -1}, {BBMAC_GAME_TIMING, 3},
         {BBMAC_MODEL_LOD, -3}, {BBMAC_LIVE_RESOLUTION, 2},
         {BBMAC_SHADER_COMPILE, BbSettings::ShaderCompileCount},
     };
@@ -183,7 +183,7 @@ int main() {
     assert(Count(text, "texture_compression=0") == 1);
     assert(Count(text, "mouse_look=1") == 1 && Count(text, "mouse_sensitivity=2.25") == 1);
     assert(Count(text, "mouse_invert_y=1") == 1);
-    assert(Count(text, "future_launcher=leave me alone") == 1 && Count(text, "framegen=fsr3") == 1);
+    assert(Count(text, "future_launcher=leave me alone") == 1 && Count(text, "framegen=1") == 1);
     BbSettings::Load();
     BbSettings::ConfigureUpscalerSupport(true, true);
     assert(Get(BBMAC_SHARPNESS) == 87 && Get(BBMAC_SHOW_FPS) == 1);
@@ -192,6 +192,15 @@ int main() {
     assert(Get(BBMAC_TEXTURE_COMPRESSION) == 0 && Get(BBMAC_RESTART_NEEDED) == 0);
     assert(BbSettings::Get().mouse_look && BbSettings::Get().mouse_sensitivity == 2.25f &&
            BbSettings::Get().mouse_invert_y);
+
+    // Adaptive from the launcher survives unrelated overlay/native saves and reloads.
+    assert(Set(BBMAC_GAME_TIMING, 2) && Get(BBMAC_RESTART_NEEDED) == 1);
+    assert(Set(BBMAC_SHARPNESS, 75));
+    assert(Count(Read(config), "game_timing=adaptive") == 1);
+    BbSettings::Load();
+    assert(Get(BBMAC_GAME_TIMING) == 2 && Get(BBMAC_RESTART_NEEDED) == 0);
+    assert(Set(BBMAC_GAME_TIMING, 0) && Get(BBMAC_RESTART_NEEDED) == 1);
+    assert(Set(BBMAC_GAME_TIMING, 2) && Get(BBMAC_RESTART_NEEDED) == 0);
 
     // Wide patches own scene targets; generic provider / size edits must leave them alone.
     setenv("BB_ULTRAWIDE_RES", "3840x1080", 1);

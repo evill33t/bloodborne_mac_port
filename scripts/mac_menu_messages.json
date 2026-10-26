@@ -163,8 +163,8 @@
     "help": "30, 40, 60, 90 or 120 real frames per second. Restart required."
   },
   "126128": {
-    "text": "Variable game timing",
-    "help": "Off: fixed at 30/60/90. On: variable timing. 40/120 always variable. Restart required."
+    "text": "Game timing",
+    "help": "Fixed at 30/60/90, Variable, or Adaptive (experimental). Fixed uses variable timing at 40/120. Restart required."
   },
   "126129": {
     "text": "Fullscreen",
@@ -211,6 +211,9 @@
   },
   "126305": {
     "text": "MetalFX"
+  },
+  "126306": {
+    "text": "MetalFX Spatial"
   },
   "126310": {
     "text": "Native AA"
@@ -283,5 +286,14 @@
   },
   "126364": {
     "text": "120 FPS"
+  },
+  "126370": {
+    "text": "Fixed"
+  },
+  "126371": {
+    "text": "Variable"
+  },
+  "126372": {
+    "text": "Adaptive (experimental)"
   }
 }

@@ -64,13 +64,14 @@ static void function(unsigned char *out,unsigned vtable,void *fn) {
 }
 
 typedef struct { int value; unsigned message; } Choice;
-static const Choice upscalers[]={{0,126300},{1,126301},{2,126302},{3,126303},{4,126304},{5,126305}};
+static const Choice upscalers[]={{0,126300},{1,126301},{2,126302},{3,126303},{4,126304},{5,126305},{6,126306}};
 static const Choice presets[]={{0,126310},{1,126311},{2,126312},{3,126313},{4,126314}};
 static const Choice outputs[]={{0,126320},{1,126321},{2,126322},{3,126323},{4,126324}};
 static const Choice compilers[]={{0,126330},{1,126331},{2,126332}};
 static const Choice debug_views[]={{0,126340},{1,126341},{2,126342}};
 static const Choice live_modes[]={{-1,126350},{0,126351},{1,126352}};
 static const Choice caps[]={{30,126360},{40,126361},{60,126362},{90,126363},{120,126364}};
+static const Choice timing_modes[]={{0,126370},{1,126371},{2,126372}};
 enum { TOGGLE,SLIDER,LIST,CONFIRM,RESTART };
 typedef struct { unsigned field,kind; int min,max,unit; const Choice *choices; unsigned count; } Row;
 #define T(f) {f,TOGGLE,0,1,1,NULL,0}
@@ -85,7 +86,7 @@ static const Row pages[PAGE_COUNT][ROWS]={
     {T(BBMAC_EFFECT_FIRST+6),T(BBMAC_EFFECT_FIRST+7),T(BBMAC_EFFECT_FIRST+8),T(BBMAC_EFFECT_FIRST+9),C(BBMAC_DEBUG_VIEW,debug_views)},
     {C(BBMAC_LIVE_RESOLUTION,live_modes)},
     {T(BBMAC_FULLSCREEN),T(BBMAC_METAL_HUD),T(BBMAC_TEXTURE_COMPRESSION),C(BBMAC_FRAME_CAP,caps)},
-    {T(BBMAC_GAME_TIMING),T(BBMAC_SHOW_LAUNCHER),{BBMAC_COUNT,CONFIRM,0,1,1,NULL,0},{BBMAC_RESTART,RESTART,0,1,1,NULL,0}}
+    {C(BBMAC_GAME_TIMING,timing_modes),T(BBMAC_SHOW_LAUNCHER),{BBMAC_COUNT,CONFIRM,0,1,1,NULL,0},{BBMAC_RESTART,RESTART,0,1,1,NULL,0}}
 };
 static const unsigned page_counts[]={5,5,1,5,5,5,1,4,4};
 typedef struct { uint8_t byte; int32_t list,last; int readonly; } Value;
