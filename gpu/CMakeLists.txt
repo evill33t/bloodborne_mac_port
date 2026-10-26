@@ -467,3 +467,7 @@ if (APPLE)
         "-framework Metal" "-framework MetalFX" "-framework Foundation")
     set_source_files_properties(../tests/test_metalfx.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
+
+add_executable(native-motion-test EXCLUDE_FROM_ALL ../tests/test_native_motion.cpp)
+target_include_directories(native-motion-test PRIVATE shim)
+target_compile_options(native-motion-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
