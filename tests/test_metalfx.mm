@@ -146,6 +146,7 @@ struct Case {
     u32 color, depth, motion, output;
     bool hdr;
     u32 iw, ih; ///< the colour/depth texture size (>= the 64x36 input: BB_RENDER_RES targets)
+    bool spatial = false;
 };
 
 void RunCase(Device& device, const Case& c) {
@@ -160,6 +161,7 @@ void RunCase(Device& device, const Case& c) {
         .out_width = ow,
         .out_height = oh,
         .hdr = c.hdr,
+        .spatial = c.spatial,
     };
     Object scaler = BbMetalFx::CreateScaler(device, config);
     if (!scaler) {
@@ -198,10 +200,11 @@ void RunCase(Device& device, const Case& c) {
         // Our own commands before and after the scaler's, in one command buffer: a copy that
         // leaves a blit encoder open, MetalFX, then the readback copy.
         encoder.CopyTexture(motion.Get(), 0, 0, {}, motion.Get(), 0, 0, {}, {1, 1, 1});
+        const auto encode = c.spatial ? BbMetalFx::EncodeSpatial : BbMetalFx::Encode;
         {
             auto recorded = [owned = Object::Retain(scaler.Get()), &encoder, color = color.Get(),
-                             depth = depth.Get(), motion = motion.Get(), output = output.Get()] {
-                BbMetalFx::Encode(encoder, owned.Get(),
+                             depth = depth.Get(), motion = motion.Get(), output = output.Get(), encode] {
+                encode(encoder, owned.Get(),
                                   {.color = color,
                                    .depth = depth,
                                    .motion = motion,
@@ -275,6 +278,14 @@ int main() {
              MTLPixelFormatDepth32Float_Stencil8, MTLPixelFormatRG16Float,
              MTLPixelFormatRGBA16Float, false, 72, 40},
         };
+        if (BbMetalFx::SpatialSupported(device)) {
+            RunCase(device, {"Spatial HDR", MTLPixelFormatRGBA16Float,
+                MTLPixelFormatDepth32Float_Stencil8, MTLPixelFormatRG16Float,
+                MTLPixelFormatRGBA16Float, true, 64, 36, true});
+            RunCase(device, {"Spatial tonemapped padded input", MTLPixelFormatRGBA8Unorm,
+                MTLPixelFormatDepth32Float_Stencil8, MTLPixelFormatRG16Float,
+                MTLPixelFormatRGBA16Float, false, 64, 40, true});
+        }
         for (const Case& c : cases) {
             RunCase(device, c);
         }
