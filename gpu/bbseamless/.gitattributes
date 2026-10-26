@@ -1,0 +1,6 @@
+# Preserve the pinned import bytes (including original line endings) and source hashes.
+include/** -text
+vendor/** -text
+bbcoop/** -text
+bbcoop.h -text
+network_glue.cpp -text

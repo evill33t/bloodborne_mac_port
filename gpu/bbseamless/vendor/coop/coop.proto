@@ -1,0 +1,1003 @@
+// SPDX-FileCopyrightText: Copyright 2026 shadNet Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+// Our messages between the games and shadNet (docs/SERVER_COOP_PLAN.md, "The protocol"): one file
+// for both sides. They travel on the server link (kind Coop) in its reliable stream
+// (coop/coop_stream.h), in order and exactly once; the game's own packets keep their raw frames.
+//
+// Phase 3: the party's world lives on the server. Every member proposes what it sees (its standing
+// kills, ...), shadNet orders it into the party's world log (coop/world_log.h, WorldLogHost),
+// stores it, and sends every member the entries and, when it asks, a snapshot.
+syntax = "proto3";
+
+package bbcoop;
+
+option optimize_for = LITE_RUNTIME;
+
+// Raised when a message's meaning changes; a game and the server on different ones are refused.
+enum Protocol {
+    PROTOCOL_NONE = 0;
+    // 2: phase 4's enemy owners; 3: phase 5's teams; 4: phase 6's team sessions; 5: a team's
+    // worlds (the leader picks one); 6: the server's worlds, apart from its teams; 7: a world's
+    // name, birth and hunters, and the pick before a team; 8: team duels
+    PROTOCOL_CURRENT = 8;
+}
+
+// game -> server: the first message of the stream, and again whenever the stream starts over (the
+// game or the server restarted).
+message Hello {
+    uint32 protocol = 1;
+    string party = 2;  // SHADPS4_BLOODBORNE_PARTY, "<name>:<secret>"
+    string member = 3; // the member's board name (its online id in hex)
+    uint32 run = 4;    // the game's run: a restart is a new run
+    bool host = 5;     // it hosts the session: its world's state is the party's (shown, map state)
+    // It runs phase 4's enemy owners (every port game does): on an area another member
+    // owns, its new kills and its HP reports do not count.
+    bool enemy_owner = 6;
+}
+
+// server -> game: the answer to a hello.
+message Welcome {
+    bool accepted = 1;
+    string text = 2;  // why not
+    uint64 epoch = 3; // the party's log now
+    uint64 last = 4;
+    bool trades = 5; // it keeps trades (coop/trade.h): the game may offer
+}
+
+// game -> server: a session event of this member (Lifecycle in bloodborne_party.h). A wipe starts
+// the party's log over (once for the party); the session's host joining, leaving or becoming
+// another character starts it over too (a new session); another member's own events only take its
+// share out.
+message Lifecycle {
+    enum Event {
+        NONE = 0;
+        WIPE = 1;
+        JOIN = 2;
+        LEAVE = 3;
+        NEW_CHARACTER = 4;
+    }
+    Event event = 1;
+    bool host = 2; // the member hosts the session
+    // WIPE: the map the member died on (its wipe's). With another member standing elsewhere only
+    // that map starts over (WorldLogHost::ResetMap), unless someone stands on it.
+    uint32 map = 3;
+}
+
+message MapKills {
+    uint32 map = 1;
+    repeated uint32 handles = 2;
+}
+
+// game -> server: the member's standing kills, whole (WorldLogProposal).
+message KillProposal {
+    uint64 epoch = 1; // the log the member follows, 0 before it heard one
+    uint32 run = 2;
+    uint32 number = 3; // counts up within the run: a late one is dropped
+    repeated MapKills kills = 4;
+}
+
+// game -> server, from the session's host: its characters on its map (CharacterShown bits), whole,
+// when they change (WorldLogHost::Show).
+message ShownReport {
+    uint32 map = 1;
+    repeated ShownCharacter characters = 2;
+}
+
+// game -> server: the member's shared flag events (FlagsToShare: a lamp lit, a fog entered), each
+// numbered within its run and sent until taken (WorldLogFlagProposal).
+message FlagEvent {
+    uint32 number = 1;
+    sint32 flag = 2;
+    bool on = 3;
+}
+message FlagProposal {
+    uint64 epoch = 1;
+    uint32 run = 2;
+    repeated FlagEvent events = 3;
+}
+
+// game -> server, from the session's host: its map's state (MapFlagCount flags from MapFlagBase,
+// MSB first) when it changes, and its return point (GlobalState +0x1528).
+message MapStateReport {
+    uint32 map = 1;
+    bytes bits = 2;
+}
+message ReturnPointReport {
+    sint32 point = 1;
+    uint32 map = 2;
+}
+
+// game -> server: the member's HP report, whole (WorldLogHpProposal: its damage per enemy this
+// visit, or the host's HP in one world).
+message HpProposal {
+    uint64 epoch = 1;
+    uint32 run = 2;
+    uint32 number = 3;
+    uint32 map = 4;
+    uint64 source = 5;
+    repeated HpEnemy enemies = 6;
+}
+
+// Phase 3c: what the HTTP boards (/bloodborne/party/*) carried. A member sends its own part
+// (when it changes, and again now and then: the server forgets a part not heard of for a few
+// seconds) and the server sends every member of the party the whole board when it changes.
+
+// game -> server: the map the member is on (0 while loading).
+message MemberMap {
+    uint32 map = 1;
+}
+// Phase 4: who runs each occupied map's enemies (server -> game): the session's host while it is
+// on the map, else the member there first (its committed map, see MemberMap), handed on when it
+// leaves, loads or goes silent; the epoch counts up with every change. Sent to the party on a
+// change and to a member with every answer to its map.
+message EnemyOwner {
+    uint32 map = 1;
+    string member = 2;
+    uint64 epoch = 3;
+}
+message EnemyOwners {
+    repeated EnemyOwner owners = 1;
+}
+message MapBoard {
+    message Entry {
+        string member = 1;
+        uint32 map = 2;
+    }
+    repeated Entry members = 1;
+}
+
+message Position {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+}
+
+// game -> server: the lamp the member rests at (0: not resting) and where.
+message Rest {
+    sint32 lamp = 1;
+    Position at = 2;
+}
+message RestBoard {
+    message Entry {
+        string member = 1;
+        sint32 lamp = 2;
+        Position at = 3;
+    }
+    repeated Entry rests = 1;
+}
+
+// game -> server: the trophies the member unlocked in the party; the board is the party's union.
+message Trophies {
+    repeated int32 ids = 1;
+}
+
+// Kill echoes shared across maps: a member's kill rewards made with no other member on its map
+// (game -> server), each sent on to the party's other members once (server -> game).
+message EchoKill {
+    sint32 echoes = 1;
+    uint32 map = 2;
+}
+message Echoes {
+    repeated EchoKill kills = 1;
+}
+
+// Party death: the member's vitals (game -> server), and the party's with the wipes the server
+// declared (server -> game; a map's party is wiped when nobody there stands any more).
+message ReviveHit {
+    string target = 1;
+    uint32 down = 2;
+    uint32 damage = 3;
+}
+message Vitals {
+    uint32 map = 1;
+    uint32 vital = 2; // Vital: 0 off, 1 up, 2 down, 3 dead, 4 spectating its teammates
+    sint32 hp = 3;
+    sint32 max = 4;
+    uint32 down = 5;
+    uint32 landed = 6;
+    uint32 needed = 7;
+    Position at = 8;
+    repeated ReviveHit hits = 9;
+    // Kaniel 2026-10-17: this member's cutscene (CutsceneVote): 0 none, 1 playing, 2 it voted to
+    // skip. The server keeps it with the rest.
+    uint32 cutscene = 10;
+    // Kaniel 2026-10-18: this member's Blood Vials and Quicksilver Bullets, shown beside its name
+    // in the others' party lists.
+    uint32 vials = 11;
+    uint32 bullets = 12;
+    // Kaniel 2026-10-20: was a member's bloodstain, shown to the others (v1.0.2 only); each player
+    // sees only its own now.
+    reserved 13;
+    // Invasions (docs/INVASIONS.md): the character's level (the matcher's level band; 0: not
+    // said, no band) and whether a boss fight runs in its world (event flag 4000 or the boss
+    // runner): no invader comes then, and one there goes home.
+    uint32 level = 14;
+    bool boss = 15;
+    // A real death that followed an invader's hit (the victim's game says so).
+    bool killed_by_invader = 16;
+    // Kaniel 2026-10-25: the lamps this member used this run (it counts up with each): a
+    // spectating teammate wakes once another's goes up.
+    uint32 lamp_uses = 17;
+    // Kaniel 2026-10-25: the bosses (handles) this member's game runs now, so that every game picks
+    // the same runner for a fight (BossRunnerPick). The server keeps it with the rest.
+    repeated uint32 bosses = 18;
+}
+message VitalsBoard {
+    message Member {
+        string member = 1;
+        Vitals vitals = 2; // without its hits
+        uint32 revive_damage = 3;
+        // Invasions: the invader's line (its body stays shown); never in the panel, wipes,
+        // downs or revives.
+        bool hostile = 4;
+    }
+    message Wipe {
+        uint32 id = 1;
+        uint32 map = 2;
+        repeated string members = 3;
+    }
+    repeated Member members = 1;
+    repeated Wipe wipes = 2;
+}
+
+// A member's portrait (bloodborne_portrait.h), RGB888, or none (no pixels); the server keeps each
+// member's last one for the members that come later.
+message Portrait {
+    string member = 1; // server -> game: whose
+    uint32 id = 2;
+    bytes pixels = 3;
+}
+
+// Trading (coop/trade.h): a member offers another member goods (and may ask for some back); the
+// server holds what was offered until the other member answers, then hands each side its part, or
+// the offer back to the giver (declined, expired, withdrawn, refused). The giver's game takes what
+// it offers out of its inventory before it sends the offer; the other's takes what it gives back
+// before it accepts. Every hand-over is a grant, kept on the server (and on disk) until the
+// member's game says it added it.
+message TradeItem {
+    uint32 kind = 1;  // TradeItemKind: 1 Blood Echoes, 2 goods, 3 an item of its own
+    uint32 id = 2;    // goods: the EquipParamGoods id; an item: category | id; echoes: 0
+    uint32 count = 3;
+    string name = 4;  // the item's name in the giver's game (the words of the boxes)
+    bytes data = 5;   // an item of its own: what makes it itself (its upgrades, its gems)
+}
+
+// game -> server: an offer to another member, its items already taken out.
+message TradeOffer {
+    uint32 number = 1; // counts up within the game's run
+    string to = 2;     // the other member's board name
+    string from_name = 3; // the giver's character name, shown to the other
+    repeated TradeItem give = 4;
+    repeated TradeItem want = 5;
+    string to_name = 6; // the other member's character name, for the giver's notices
+}
+
+// server -> the giver: what became of its offer.
+message TradeStatus {
+    uint32 number = 1;
+    uint64 id = 2;
+    uint32 state = 3; // TradeState
+    string text = 4;  // why it was refused
+}
+
+// server -> the other member: an offer to answer before `expires_in_ms`.
+message TradeAsk {
+    uint64 id = 1;
+    string from = 2;
+    string from_name = 3;
+    repeated TradeItem give = 4;
+    repeated TradeItem want = 5;
+    uint32 expires_in_ms = 6;
+}
+
+// game -> server: the other member's answer; with an accept, what it took out of its inventory
+// (what was asked of it), given back if the offer is gone by then.
+message TradeAnswer {
+    uint64 id = 1;
+    bool accept = 2;
+    repeated TradeItem taken = 3;
+}
+
+// game -> server, from the giver: the offer withdrawn while unanswered.
+message TradeCancel {
+    uint64 id = 1;
+}
+
+// server -> the other member: the offer is no longer open (its question goes away).
+message TradeClosed {
+    uint64 id = 1;
+}
+
+// server -> game: items to add, and game -> server (TradeGranted) once they are added.
+message TradeGrant {
+    uint64 id = 1; // the grant's own id
+    uint64 trade = 2;
+    string from = 3;
+    string from_name = 4;
+    repeated TradeItem items = 5;
+    uint32 reason = 6; // TradeGrantReason: 0 received, 1 returned
+}
+message TradeGranted {
+    uint64 id = 1;
+}
+
+// One world log entry (WorldLogEntry; kind is WorldLogKind).
+message Entry {
+    uint64 seq = 1;
+    uint32 map = 2;
+    uint32 kind = 3;
+    uint32 subject = 4;
+    uint32 value = 5;
+}
+
+// server -> game: entries in seq order, or a heartbeat (none) with the last seq.
+message Entries {
+    uint64 epoch = 1;
+    uint64 last = 2;
+    repeated Entry entries = 3;
+}
+
+// game -> server: what the member has; the answer is a Snapshot.
+message SnapshotRequest {
+    uint64 epoch = 1;
+    uint64 seq = 2;
+}
+
+message ShownCharacter {
+    uint32 handle = 1;
+    uint32 bits = 2; // ShownBits
+}
+
+// Phase 8 (one HP path): a game's own hit on an enemy, sent the moment the game applies it, with
+// the HP it left; the server sends it on at once to the others (`member` set). The others' copies
+// take it at once (an owner applies the hit itself, from the game's own 0x15); the owner's HP (the
+// log) then corrects them.
+message EnemyHit {
+    uint32 map = 1;
+    uint32 handle = 2;
+    sint32 hp = 3;     // after the hit
+    sint32 max = 4;
+    string member = 5; // server -> game: whose
+}
+
+message HpEnemy {
+    uint32 handle = 1;
+    sint32 value = 2;
+    sint32 max = 3;
+}
+
+message HpReport {
+    uint64 source = 1;
+    uint32 map = 2;
+    repeated HpEnemy enemies = 3;
+}
+
+// server -> game: the party's world at `last`, every part of it at once.
+message Snapshot {
+    uint64 epoch = 1;
+    uint64 last = 2;
+    repeated MapKills kills = 3;
+    uint32 shown_map = 4;
+    repeated ShownCharacter shown = 5;
+    uint32 map_state_map = 6;
+    bytes map_state_bits = 7;
+    sint32 return_point = 8;
+    uint32 return_point_map = 9;
+    repeated HpReport hp = 10;
+    repeated Entry recent_flags = 11;
+    bool after_wipe = 12;
+}
+
+message Envelope {
+    oneof body {
+        Hello hello = 1;
+        Welcome welcome = 2;
+        Lifecycle lifecycle = 3;
+        KillProposal kills = 4;
+        Entries entries = 5;
+        SnapshotRequest snapshot_request = 6;
+        Snapshot snapshot = 7;
+        ShownReport shown = 8;
+        FlagProposal flags = 9;
+        MapStateReport map_state = 10;
+        ReturnPointReport return_point = 11;
+        HpProposal hp = 12;
+        MemberMap map = 13;
+        MapBoard map_board = 14;
+        Rest rest = 15;
+        RestBoard rest_board = 16;
+        Trophies trophies = 17;
+        Echoes echoes = 18;
+        Vitals vitals = 19;
+        VitalsBoard vitals_board = 20;
+        Portrait portrait = 21;
+        EnemyOwners enemy_owners = 22;
+        LobbyHello lobby_hello = 23;
+        TeamRequest team_request = 24;
+        LobbyState lobby_state = 25;
+        TeamStart team_start = 26;
+        TradeOffer trade_offer = 27;
+        TradeStatus trade_status = 28;
+        TradeAsk trade_ask = 29;
+        TradeAnswer trade_answer = 30;
+        TradeCancel trade_cancel = 31;
+        TradeClosed trade_closed = 32;
+        TradeGrant trade_grant = 33;
+        TradeGranted trade_granted = 34;
+        TeamWorld team_world = 35;
+        TeamSession team_session = 36;
+        LoadProgress load_progress = 37;
+        // 38 was EnemiesLetGo (phase 6's far-guest runners, gone in phase 8).
+        EnemyHit enemy_hit = 39;
+        ResumeAt resume_at = 40;
+        Ping ping = 41;
+        AltarRecord altar_record = 42;
+        InvadeRequest invade_request = 43;
+        InvasionNotice invasion_notice = 44;
+        InvasionStart invasion_start = 45;
+        InvaderJoined invader_joined = 46;
+        InvasionEnd invasion_end = 47;
+        TeamTravel team_travel = 48;
+        DuelRequest duel_request = 49;
+        DuelState duel_state = 50;
+    }
+}
+
+// Invasions (docs/INVASIONS.md): a solo player invades a team's world as a hostile phantom. The
+// server matches it to a started team world that allows invaders, tells both sides, joins it after
+// a notice, keeps it out of the world log and ends the invasion itself. A game that does not know
+// these messages never gets one: only a player that asked, and teams whose leader allowed
+// invaders, hear of an invasion.
+
+// game -> server, from a player in no team: find me a world to invade (`cancel`: stop looking, or
+// leave the invasion). The answer is an InvasionNotice once matched, or an InvasionEnd.
+message InvadeRequest {
+    uint32 level = 1; // the invader's character level (0: unknown, no level band)
+    bool cancel = 2;
+}
+
+// server -> the target team's games and the invader: an invader approaches (the team's notice
+// with its countdown); it joins in `in_ms`.
+message InvasionNotice {
+    uint64 id = 1;
+    uint32 in_ms = 2;
+    string invader = 3; // the invader's board name
+    string target = 4;  // the member it hunts (the session's host)
+}
+
+// server -> the invader: join the target's session now. `session` is the target host's
+// TeamSession with the invader's kind and sign (InvasionKind / InvasionSign in shadnet.cfg).
+message InvasionStart {
+    uint64 id = 1;
+    TeamSession session = 2;
+    string target = 3; // the member it hunts
+    uint32 map = 4;    // the target's map as the server last heard it
+    Position at = 5;   // where the target last stood (its last vitals), to travel to first
+    EnemyOwners owners = 6; // the team's enemy owners (sent again as they change while it lasts)
+}
+
+// server -> the target team's games: the invader joined the session: leave it out of the party
+// panel, vitals, revives and enemy owners; its kill is a real death.
+message InvaderJoined {
+    uint64 id = 1;
+    string member = 2; // the invader's board name
+    string target = 3;
+    string name = 4;   // the invader's name as players see it (its lobby name)
+}
+
+// server -> everyone in it: the invasion is over (or, to an invader still looking, refused).
+message InvasionEnd {
+    enum Reason {
+        NONE = 0;
+        INVADER_DIED = 1;   // the team wins
+        TARGET_KILLED = 2;  // the invader wins
+        PARTY_WIPED = 3;    // the invader wins
+        BOSS = 4;           // a boss fight started in the world
+        TIMEOUT = 5;        // InvasionMaxMs ran out
+        INVADER_LEFT = 6;   // its link is lost, its game restarted, or it cancelled
+        HOST_LEFT = 7;      // the target's session closed or its host's link is lost
+        INVADERS_OFF = 8;   // the leader turned invasions off
+        NOT_FOUND = 9;      // no world found in time
+        REFUSED = 10;       // invasions are off on this server, or the player is in a team
+    }
+    uint64 id = 1;
+    Reason reason = 2;
+    string invader = 3;
+    string text = 4;
+}
+
+// Kaniel 2026-10-25: team duels (coop/duel.h). A member proposes a duel from the team screen; the
+// members on its map are asked, and those who accept fight until one side stands. The server keeps
+// the duel (who is in, their sides, who is out, the score) and every game follows its DuelState: a
+// duelist's defeat puts it out (no party death), the end gives everyone back what the duel took.
+// The hits themselves are the game's own: a foe's body on the invaders' team takes them, and the
+// struck duelist's game applies them as any hit.
+
+// game -> server.
+message DuelRequest {
+    enum Action {
+        ACTION_NONE = 0;
+        PROPOSE = 1;  // a new duel to the members on `map`
+        ACCEPT = 2;   // duel `duel`'s question answered
+        DECLINE = 3;
+        CANCEL = 4;   // a duelist ends duel `duel` for everyone
+        DEFEATED = 5; // this duelist's lethal hit in duel `duel`: out
+    }
+    Action action = 1;
+    uint32 duel = 2;
+    uint32 map = 3;
+}
+
+message Duelist {
+    string member = 1;
+    uint32 side = 2;   // free for all: each its own (1, 2, ...); teams later share one
+    uint32 answer = 3; // 0 not yet, 1 accepted, 2 declined
+    bool out = 4;      // defeated in this duel
+    uint32 wins = 5;   // duels won while the server ran
+}
+
+// server -> every member of the party, on every change (and after a hello).
+message DuelState {
+    enum Stage {
+        STAGE_NONE = 0;
+        ASKING = 1;    // waiting for the answers (DuelAskMs)
+        COUNTDOWN = 2; // accepted: the fight starts in left_ms
+        FIGHTING = 3;
+        OVER = 4;
+    }
+    enum End {
+        END_NONE = 0;
+        WON = 1;       // one side stands (`winner`)
+        CANCELLED = 2; // a duelist cancelled (`ended_by`)
+        LEFT = 3;      // a duelist's game went (`ended_by`)
+        MAP = 4;       // a duelist left the duel's map (`ended_by`)
+        DECLINED = 5;  // fewer than two accepted
+        NO_ANSWER = 6; // the question timed out with fewer than two in
+    }
+    uint32 duel = 1; // counts up per party; 0 none yet
+    Stage stage = 2;
+    string proposer = 3;
+    uint32 map = 4;
+    repeated Duelist duelists = 5;
+    string winner = 6;
+    End end = 7;
+    string ended_by = 8;
+    uint32 left_ms = 9;
+    string refused = 10; // only to a member whose request was refused: why
+}
+
+// Team altars (Kaniel's playtest 2026-10-24, emulator bloodborne_altar.h): game -> server ->
+// the party's other games, as it is: a ritual's or a join's record of ritual altar `altar` (0-6),
+// whole (its 6000 event flags, 750 bytes, the first flag a byte's top bit), which every other
+// game's altar takes exactly. Sent flag by flag, as diffs, the records merged and named no
+// dungeon.
+message AltarRecord {
+    uint32 altar = 1;
+    bytes bits = 2;
+    string member = 3; // server -> game: whose
+}
+
+// Kaniel 2026-10-24: a team ping. A member marks a spot (where its camera aims, the enemy it is
+// locked on, or a spot on the world map; game -> server); the server sends it on at once to the
+// team's other members (`member` set; server -> game). Each game shows it 20 s, one per member
+// (a new one replaces it). Nothing is kept.
+message Ping {
+    uint32 map = 1;    // the packed map the spot is on
+    Position at = 2;   // the game's metres on that map
+    uint32 enemy = 3;  // the enemy it follows (its handle), 0 none
+    uint32 seq = 4;    // counts up within the sender's run
+    bool from_map = 5; // placed on the world map
+    string member = 6; // server -> game: whose
+}
+
+// Kaniel 2026-10-25 (the travel together host rule): a member's lamp or headstone trip for the
+// whole party. The asker's game says ASK (with the vote: the others answer within 20 s, one No
+// stops it) and then GO or STOPPED; the server sends each on at once to the party's other members
+// (`member` set; server -> game). Nothing is kept.
+message TeamTravel {
+    enum Step {
+        NONE = 0;
+        ASK = 1;     // the asker's vote: go to `point`?
+        ANSWER = 2;  // a member's answer to trip `id` (`yes`)
+        GO = 3;      // everyone travels to `point` now
+        STOPPED = 4; // trip `id` is off (`member` said No)
+    }
+    Step step = 1;
+    uint32 id = 2;     // the asker's trip, counted in its run
+    sint32 point = 3;  // the warp point: a lamp's, or the Hunter's Dream
+    bool yes = 4;
+    string member = 5; // server -> game: whose; the asker's for ANSWER's `asker`
+    string asker = 6;  // ANSWER: the member whose trip it answers
+}
+
+// Phase 7, server -> game (after its hello): where this member last stood in the team's world
+// (its last vitals), for a guest's next run to come back there instead of at its save's lamp.
+message ResumeAt {
+    uint32 map = 1;
+    Position at = 2;
+}
+
+// Phase 5: the team lobby (docs/SERVER_COOP_PLAN.md, "The team lobby"). A game signs in to the
+// lobby when its link comes up, before any party: the teams are the server's, kept on its disk,
+// and a team's party key (TeamStart.party) is what the game's party hello carries from then on.
+
+// game -> server: the player, at the title or playing; sent again when that changes.
+message LobbyHello {
+    uint32 protocol = 1;
+    string member = 2; // its board name (the online id in hex)
+    string name = 3;   // the online id, as players see it
+    bool playing = 4;  // in a world (a save loaded), not at the title
+}
+
+// game -> server: what the player did in the lobby. The answer is the LobbyState (with a notice
+// when the server refused it).
+message TeamRequest {
+    enum Action {
+        NONE = 0;
+        CREATE = 1;  // a new team, the player its leader
+        INVITE = 2;  // `member` to the player's team
+        ACCEPT = 3;  // the invite to `team`
+        DECLINE = 4; // the invite to `team`
+        LEAVE = 5;   // the player's team
+        REMOVE = 6;  // `member` from the team (the leader only)
+        READY = 7;   // with the character in `slot` (`character`: its name)
+        UNREADY = 8;
+        START = 9; // the leader: every ready member's game loads its save
+        // Kaniel 2026-10-16: the leader picks the world the next Start plays: `world`, one of
+        // the server's worlds, or empty for a new one. A player in no team picks the world of
+        // the team it makes next.
+        WORLD = 10;
+        // Kaniel 2026-10-17: the leader forgets one of the server's worlds (`world`): off the
+        // list, its folder kept aside on the server.
+        FORGET_WORLD = 11;
+        // A friend the lobby does not list (hosted: it lists 32 players). The player joins the
+        // team whose code it typed (`code`, coop/team_code.h): the leader handed the code out, so
+        // it stands for the leader's invite and the typing for the accept.
+        JOIN_CODE = 12;
+        NEW_CODE = 13;    // the leader: a fresh code for its team, the old one no longer joins
+        INVITE_NAME = 14; // invite the one signed-in player named `name` (as the lobby shows it)
+        // Invasions (docs/INVASIONS.md): the leader allows invaders into the team's world
+        // (`allow`), or turns them off (ending a running invasion).
+        INVADERS = 15;
+        // Kaniel 2026-10-25 (host rules): the leader's rules for its team (`rules`), from its
+        // launcher. A player in no team sets them for the team it makes next.
+        RULES = 16;
+        // Kaniel 2026-10-25: the player's own rot (`rot`, the Rot rule), kept by the server while
+        // its team lives, so a restarted game gets it back.
+        ROT = 17;
+        // Kaniel 2026-10-25: the leader picks how its team's deaths play out (`death_mode`,
+        // Team.death_mode), at any time.
+        DEATH_MODE = 18;
+    }
+    Action action = 1;
+    string member = 2;
+    string team = 3;
+    uint32 slot = 4;
+    string character = 5;
+    string world = 6;
+    string code = 7;
+    string name = 8;
+    bool allow = 9; // INVADERS
+    TeamRules rules = 10;
+    repeated uint32 rot = 11; // RotKind values, the oldest first
+    uint32 death_mode = 12; // DEATH_MODE
+}
+
+// Kaniel 2026-10-25: the host rules, the leader's choice for its whole team, all off by default.
+message TeamRules {
+    // A real death (not a down a teammate revives) adds a rot penalty, up to MaxRot.
+    bool rot = 1;
+    // A lamp or headstone trip asks "Travel with the team?" and takes everyone along.
+    bool travel_together = 2;
+    // With travel_together: the team votes on a trip, one No stops it.
+    bool travel_vote = 3;
+    // Enemies grow from the vanilla game (alone) to the harder defaults (a full team) with the
+    // hunters on their map, over the player's own enemy setting.
+    bool enemy_scaling = 4;
+}
+
+// The Rot rule's penalties (one each per death, picked at random).
+enum RotKind {
+    ROT_NONE = 0;
+    ROT_MAX_HP = 1;        // -10% max HP
+    ROT_MAX_STAMINA = 2;   // -10% max stamina
+    ROT_STAMINA_USE = 3;   // +10% stamina use
+    ROT_RALLY = 4;         // -15% rally
+    ROT_DISCOVERY = 5;     // -10 Item Discovery
+}
+
+message LobbyPlayer {
+    enum State {
+        OFFLINE = 0;
+        TITLE = 1;
+        PLAYING = 2;
+    }
+    string member = 1;
+    string name = 2;
+    State state = 3;
+    string team = 4; // the team it is in, if any
+}
+
+message TeamMember {
+    string member = 1;
+    string name = 2;
+    LobbyPlayer.State state = 3;
+    bool ready = 4;
+    uint32 slot = 5;
+    string character = 6;
+    // Phase 7: the player slot the server gives this guest (the sign it joins sessions with:
+    // 7, 6, 5), kept while others come and go; 0 for the leader, who hosts.
+    uint32 sign = 7;
+    // Kaniel 2026-10-25: its rot (RotKind values, the oldest first), as its game last said.
+    repeated uint32 rot = 8;
+}
+
+// Kaniel 2026-10-17: one of the server's worlds. Worlds are the server's, not a team's: any team
+// may play any of them (the server runs at home), each kept apart under its party key
+// "world:<id>".
+message TeamWorldInfo {
+    string id = 1;
+    string character = 2; // its host's character, as its host's reports last said
+    int64 played_ms = 3;  // the last Start that played it (the server's clock, ms since 1970)
+    uint32 flags_on = 4;  // its world flags on, as its host last reported
+    uint32 lamps = 5;     // its lamps lit, as its host last reported (how far it is)
+    // Kaniel 2026-10-17 (the world list, as the game's Load Game): its name (empty: "<host
+    // character>'s world"), when it was made (ms since 1970; for a world from before, the earliest
+    // time known of it), the characters that played in it, and (server -> game, never stored) the
+    // team that plays it now.
+    string name = 6;
+    int64 created_ms = 7;
+    repeated string characters = 8;
+    string played_by = 9;
+    // Hosted (docs/HOSTED_SERVER.md): the players (board names) whose world it is: those of the
+    // teams that played it. Only they see it in their lists; never sent to the games.
+    repeated string members = 10;
+}
+
+message Team {
+    string id = 1;
+    string leader = 2; // hosts the team's sessions
+    repeated TeamMember members = 3;
+    bool started = 4; // the leader pressed Start and a member still plays
+    reserved 5;
+    // Kaniel 2026-10-16: the world the next Start plays (TeamWorldInfo.id; empty: a new one), and
+    // its party key ("world:<id>"; empty for a new one): a game in another party is not in it.
+    string world = 6;
+    string party = 7;
+    // The code that joins the team (TeamRequest.JOIN_CODE); sent to its leader only.
+    string code = 8;
+    // Invasions (docs/INVASIONS.md): the leader allows invaders (off by default).
+    bool allow_invaders = 9;
+    TeamRules rules = 10; // Kaniel 2026-10-25: the leader's host rules
+    // Kaniel 2026-10-25: how a member's lethal hit plays out while a teammate stands on its map,
+    // one for the whole team (the leader's pick): 0 it goes down until struck back up (party
+    // death), 1 it spectates its teammates until one uses a lamp or the area's boss dies.
+    uint32 death_mode = 11;
+}
+
+message TeamInvite {
+    string team = 1;
+    string from = 2;
+    string from_name = 3;
+}
+
+// server -> game: the player's lobby, whole, whenever anything in it changes.
+message LobbyState {
+    Team team = 1; // none: not in a team
+    repeated TeamInvite invites = 2;
+    repeated LobbyPlayer players = 3; // everyone else signed in to the lobby
+    string notice = 4;                // why the player's last request was refused
+    // Kaniel 2026-10-17: every world on the server, the last played first.
+    repeated TeamWorldInfo worlds = 5;
+    // Kaniel 2026-10-17: the world a player not in a team picked (its team takes it when it makes
+    // one; empty: a new one).
+    string world = 6;
+}
+
+// server -> game: load your save and play the team's world. To every ready member at Start, and
+// to a member that readies while the team plays.
+message TeamStart {
+    string team = 1;
+    string party = 2; // the party key for the party hello ("world:<world>")
+    string host = 3;  // the member that hosts the sessions (the leader)
+    uint32 slot = 4;  // the save slot the member readied with
+    string world = 5; // the team's world it plays (TeamWorldInfo.id)
+}
+
+// shadNet's world store (server/src/bloodborne_world_store.h): a party's world as it keeps it on
+// disk, and the journal of what changed it since.
+message StoredMember {
+    string name = 1;
+    uint32 run = 2;
+    uint32 number = 3;
+    repeated MapKills kills = 4;
+    repeated uint32 voided = 5; // WorldLogHost::Member::voided
+}
+
+message StoredStanding {
+    uint32 handle = 1;
+    uint32 map = 2;
+    repeated string by = 3;
+}
+
+message StoredSender {
+    string name = 1;
+    uint32 run = 2;
+    uint32 number = 3;
+    uint64 source = 4;
+}
+
+message StoredFlagSeen {
+    sint32 flag = 1;
+    bool on = 2;
+    int64 at_ms = 3;
+}
+
+message StoredHost {
+    uint64 epoch = 1;
+    uint64 last = 2;
+    repeated StoredMember members = 3;
+    repeated StoredStanding standing = 4;
+    uint32 shown_map = 5;
+    repeated ShownCharacter shown = 6;
+    repeated StoredSender flag_senders = 7;
+    repeated StoredFlagSeen flag_events = 8;
+    uint32 map_state_map = 9;
+    bytes map_state_bits = 10;
+    repeated StoredSender hp_senders = 11;
+    repeated HpReport hp = 12;
+    repeated Entry recent_flags = 13;
+    bool started_after_wipe = 14;
+    sint32 return_point = 15;
+    uint32 return_point_map = 16;
+}
+
+message StoredWorld {
+    uint32 version = 1;
+    uint32 world = 2; // the world's id: the upper half of its log epochs
+    uint32 logs = 3;  // logs started
+    int64 last_wipe_ms = 4;
+    uint64 journal_from = 5; // the first journal record not in it
+    StoredHost host = 6;
+}
+
+// Phase 5b: a team's world (docs/SERVER_COOP_PLAN.md, "Team worlds"): the world's event flags
+// that are on (FlagOwner Host and Shared: the world's, not a character's), as the team's host's
+// game has them. The host sends it whole when it changed (game -> server); the server keeps it
+// (team_world.pb in the team's world folder) and sends it to every member after its hello and when
+// it changes (server -> game): a member's game sets its world to it as its save loads, the
+// character's own world kept aside until it plays alone again.
+message TeamWorld {
+    bool exists = 1;              // server -> game: false, the team has no world yet (its host's
+                                  // save makes it)
+    repeated sint32 on = 2;       // sorted
+    repeated uint32 blocks = 3;   // the flag blocks it covers (a flag in another block is left as
+                                  // it is)
+    uint64 version = 4;           // counts up with each report taken
+    string character = 5;         // game -> server: the host's character's name, if known
+}
+
+// Kaniel 2026-10-17: the server's list of worlds on disk (worlds.pb, beside the worlds): each
+// world's line and its folder (a hash of its party key; a world from before the list keeps the
+// folder its team's key made). Teams are not kept: they live while their members play.
+message KeptWorld {
+    TeamWorldInfo info = 1;
+    string folder = 2;
+}
+message StoredWorlds {
+    uint32 version = 1;
+    repeated KeptWorld worlds = 2; // the last played first
+}
+// What the list is made from once: the teams file of the builds that kept teams (teams.pb, only
+// read: a team's id and a world's id give the world's folder).
+message OldTeam {
+    string id = 1;
+    repeated TeamWorldInfo worlds = 5;
+}
+message OldStoredTeams {
+    repeated OldTeam teams = 2;
+}
+
+// One change to a party's world, as the journal keeps it (replayed on top of StoredWorld).
+message JournalRecord {
+    uint64 number = 1;
+    int64 at_ms = 2;
+    oneof change {
+        Start start = 3;
+        Propose propose = 4;
+        Drop drop = 5;
+        ShownReport shown = 6;
+        Flags flags = 7;
+        MapStateReport map_state = 8;
+        ReturnPointReport return_point = 9;
+        Hp hp = 10;
+        ResetMap reset_map = 11;
+    }
+    message ResetMap {
+        uint32 map = 1;
+    }
+    message Start {
+        uint64 epoch = 1;
+        bool after_wipe = 2;
+        uint32 logs = 3;
+    }
+    message Propose {
+        string member = 1;
+        KillProposal kills = 2;
+    }
+    message Drop {
+        string member = 1;
+    }
+    message Flags {
+        string member = 1;
+        FlagProposal flags = 2;
+    }
+    message Hp {
+        string member = 1;
+        HpProposal hp = 2;
+    }
+}
+
+// A party's trades as shadNet keeps them on disk (trades.pb, written whole on every change).
+message StoredTrade {
+    uint64 id = 1;
+    string from = 2;
+    string from_name = 3;
+    string to = 4;
+    uint32 number = 5;
+    repeated TradeItem give = 6;
+    repeated TradeItem want = 7;
+    int64 expires_ms = 8; // on the server's clock: an open trade read back gets a fresh time
+    string to_name = 9;
+}
+message StoredGrant {
+    string member = 1; // whose
+    TradeGrant grant = 2;
+}
+message StoredTrades {
+    uint64 next_id = 1;
+    repeated StoredTrade open = 2;
+    repeated StoredGrant grants = 3;
+}
+
+// Phase 6: the team join without signs or a bell (docs/native-netcode/session.md, "Team join").
+// The team's host opens its game session itself once it stands in its world and sends what a
+// summon would send its guest (game -> server); the server keeps the latest and sends it to every
+// other member after its hello and when it changes (server -> game), and each guest's game joins
+// that session when it stands alone in its world. An empty `join`: the host's session closed.
+message TeamSession {
+    bytes join = 1;      // the session's join data, the game's own ("NXRV"...), empty: closed
+    uint32 kind = 2;     // for GameMan +0x16F0 (0xFFFFFFFF: a co-operator's summon)
+    uint32 sign = 3;     // for GameMan +0x16F4 (the sign's type, 7)
+    uint64 session = 4;  // the host's count of the sessions it opened
+    string host = 5;     // server -> game: the host's member name
+}
+
+// Kaniel 2026-10-14: a team loading screen as in League of Legends. Each member's game says where
+// its load is (game -> server) when it changes; the server sends it to the team's other members
+// after their hello and as it changes (server -> game, `member` set). Every game holds its screen
+// until all members are in the team's session, so the hunt opens for everyone at once.
+message LoadProgress {
+    enum Stage {
+        WAITING = 0;  // not loading (at the title, or playing alone)
+        LOADING = 1;  // the save's load, since `started_ms` ago on its own clock (for the bar)
+        JOINING = 2;  // in its world, joining the host's session
+        READY = 3;    // in the team's session (the host: its session open)
+    }
+    Stage stage = 1;
+    uint32 percent = 2; // 0..100, the game's own estimate
+    string member = 3;  // server -> game: whose
+}
+
+
+// docs/SCALING.md: what a shard of a region gives a signed-in player it sends to another shard
+// (the link's Redirect). The game echoes it, opaque, in its hellos there (server_link.h); only
+// the shards read it, under the region's key (HMAC-SHA256 after these bytes, src/region.h).
+message RegionTicket {
+    string online_id = 1;
+    bytes secret_sha256 = 2;              // the player's secret, as the first shard checked it
+    string shard = 3;                     // the shard it is for
+    int64 expires_ms = 4;                 // wall clock
+    repeated TeamRequest requests = 5;    // to run there at the player's lobby hello
+}
