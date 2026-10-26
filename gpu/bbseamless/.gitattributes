@@ -1,5 +1,5 @@
 # Preserve the pinned import bytes (including original line endings) and source hashes.
-include/** -text
+include/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 vendor/** -text
 bbcoop/** -text
 bbcoop.h -text
