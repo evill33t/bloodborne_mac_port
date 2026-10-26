@@ -969,6 +969,16 @@ int runtime_memory_vma_info(uintptr_t address, int *prot, int *type, uintptr_t *
     read_unlock();
     return ok;
 }
+int runtime_memory_protection(uintptr_t address, uintptr_t *start, uintptr_t *end, uint32_t *prot) {
+    read_lock();
+    const size_t i=vma_index(address);
+    const int ok=i<vma_count && vmas[i].start<=address && vmas[i].kind!=KIND_RESERVED;
+    if (ok) {
+        *start=vmas[i].start; *end=vmas[i].end; *prot=(uint32_t)vmas[i].prot;
+    }
+    read_unlock();
+    return ok;
+}
 /* Region around address: [start,end) mapped or a gap; 0 past the last mapping. */
 int runtime_memory_region(uintptr_t address, uintptr_t *start, uintptr_t *end, int *mapped) {
     const CachedRegion *c=(runtime_disabled_optimizations & 1) ? NULL : cached_region(address);

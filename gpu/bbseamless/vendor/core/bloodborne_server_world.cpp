@@ -418,16 +418,20 @@ void SendLobby(s64 now_ms) {
         hello.mutable_lobby_hello()->set_name(lobby_name);
         hello.mutable_lobby_hello()->set_playing(lobby_playing);
         stream->Send(EncodeEnvelope(hello), now_ms);
-        // Kaniel 2026-10-25: this launcher's host rules, the team's if this player leads it.
-        const HostRules& own = OwnHostRules();
-        bbcoop::Envelope rules;
-        rules.mutable_team_request()->set_action(bbcoop::TeamRequest::RULES);
-        bbcoop::TeamRules& r = *rules.mutable_team_request()->mutable_rules();
-        r.set_rot(own.rot);
-        r.set_travel_together(own.travel_together);
-        r.set_travel_vote(own.travel_vote);
-        r.set_enemy_scaling(own.enemy_scaling);
-        stream->Send(EncodeEnvelope(rules), now_ms);
+        // A reconnect or character-name update must not let a member overwrite its host's rules.
+        const auto& state = team_gate.Lobby();
+        if (!state || !state->has_team() || state->team().leader() == lobby_member) {
+            // Kaniel 2026-10-25: this launcher's host rules, the team's if this player leads it.
+            const HostRules& own = OwnHostRules();
+            bbcoop::Envelope rules;
+            rules.mutable_team_request()->set_action(bbcoop::TeamRequest::RULES);
+            bbcoop::TeamRules& r = *rules.mutable_team_request()->mutable_rules();
+            r.set_rot(own.rot);
+            r.set_travel_together(own.travel_together);
+            r.set_travel_vote(own.travel_vote);
+            r.set_enemy_scaling(own.enemy_scaling);
+            stream->Send(EncodeEnvelope(rules), now_ms);
+        }
     }
     for (const bbcoop::Envelope& envelope : lobby_outbox) {
         stream->Send(EncodeEnvelope(envelope), now_ms);

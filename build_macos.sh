@@ -45,8 +45,17 @@ cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_PREFIX_PATH="$PREFIX;$boost" -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew \
     -DBoost_INCLUDE_DIR="$boost/include" \
     -DBB_PGO=off -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" \
-    -DBB_NET="${BB_NET:-ON}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
+    -DBB_NET="${BB_NET:-ON}" -DBB_SEAMLESS="${BB_SEAMLESS:-ON}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
 echo "GPU library: LTO ${BB_LTO:-ON}"
+if [[ ${BB_SEAMLESS:-ON} == ON ]]; then
+    if ! ninja -C out/gpu bbseamless > out/seamless-build.log 2>&1; then
+        tail -35 out/seamless-build.log >&2
+        echo 'Seamless client build failed (out/seamless-build.log).' >&2; exit 1
+    fi
+    echo "Seamless client: $PWD/out/gpu/libbbseamless.dylib"
+else
+    rm -f out/gpu/libbbseamless.dylib
+fi
 # A failed GPU build must stop here: an older libbbgpu.dylib would otherwise be used silently.
 if ! ninja -C out/gpu bbgpu > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
@@ -119,6 +128,17 @@ if [[ ${1:-} == --test ]]; then
     # Online imports go to the online module when it is there (skips without it).
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_online.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -framework CoreFoundation -o out/online-test
     out/online-test
+    "$CC" "${cflags[@]}" -I. -Isrc tests/test_coop_trophy.c src/runtime_coop_trophy.c -o out/coop-trophy-test
+    out/coop-trophy-test
+    PYTHONPYCACHEPREFIX="$ROOT/out/pycache" python3 tests/test_seamless_launch.py
+    /usr/bin/clang++ -std=c++23 "${ARCH[@]}" -Igpu/bbseamless/include -Igpu/bbseamless \
+        tests/test_seamless_mac.cpp gpu/bbseamless/mac_epoll.cpp -o out/seamless-mac-test
+    out/seamless-mac-test
+    if [[ -f out/gpu/libbbseamless.dylib ]]; then
+        /usr/bin/clang++ -std=c++20 "${ARCH[@]}" -I. tests/test_seamless_module.cpp -o out/seamless-module-test
+        out/seamless-module-test "$ROOT/out/gpu/libbbseamless.dylib" default
+        out/seamless-module-test "$ROOT/out/gpu/libbbseamless.dylib" custom
+    fi
     # The online module's P2P frames match shadPS4 v0.20.0's codec (skips without the module).
     if [[ -f out/gpu/libbbnet.dylib ]]; then
         ninja -C out/gpu bbnet-codec-test bbnet-session-test > out/gpu-net-test-build.log 2>&1 || { tail -40 out/gpu-net-test-build.log >&2; exit 1; }

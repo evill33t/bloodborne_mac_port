@@ -1048,7 +1048,8 @@ void InstallSharedLoot(u64 base, u64 image_size) {
         coop_features.On("menu client");
     }
     if (channel_table_installed) {
-        coop_features.Skipped("map item sync", "the channel table drops map item packets");
+        // The channel table already prevents a host pickup from clearing the guest's items.
+        coop_features.On("map item sync");
     } else if (MapItemPacketHeaderOffset + MapItemPacketHeader.size() > image_size ||
                !InstallCoopHook(reinterpret_cast<void*>(base + MapItemPacketHeaderOffset),
                                 MapItemPacketHeader, 0, IgnorePartyMapItemSync)) {

@@ -20,6 +20,7 @@
 #include <atomic>
 #include <bit>
 #include <charconv>
+#include "common/float_chars.h"
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -385,7 +386,7 @@ struct AutoplayStep {
         const std::string_view text = Arg(index);
         double value = fallback;
         if (!text.empty()) {
-            std::from_chars(text.data(), text.data() + text.size(), value);
+            BbSeamless::FloatChars(text.data(), text.data() + text.size(), value);
         }
         return value;
     }
@@ -1831,7 +1832,7 @@ bool AutoplayExpectCompass(const AutoplayStep& step) {
               : view.why;
     const double bearing = step.Number(0, 0.0), metres = step.Number(1, 0.0);
     // Kaniel 2026-10-17: a last word "down" or "dead" wants the marker in that state.
-    const std::string_view last = step.command.args.empty() ? "" : step.command.args.back();
+    const std::string_view last = step.command.args.empty() ? std::string_view{} : std::string_view{step.command.args.back()};
     const bool wants_state = last == "down" || last == "dead";
     const int state = static_cast<int>(last == "down" ? Vital::Down : Vital::Dead);
     const auto number = [&](size_t index, double fallback) {

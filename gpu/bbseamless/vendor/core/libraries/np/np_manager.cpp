@@ -1215,7 +1215,7 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
             QueueNpStateEvent(user_id, state);
         },
         nullptr);
-    Libraries::Np::NpHandler::GetInstance().Initialize();
+    // Mac client: login begins in bbnet_start, after the image and build fingerprint are verified.
 
     LIB_FUNCTION("GpLQDNKICac", "libSceNpManager", 1, "libSceNpManager", sceNpCreateRequest);
     LIB_FUNCTION("eiqMCt9UshI", "libSceNpManager", 1, "libSceNpManager", sceNpCreateAsyncRequest);

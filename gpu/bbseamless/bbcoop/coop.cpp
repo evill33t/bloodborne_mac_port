@@ -10,6 +10,8 @@
 #include <cstring>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <openssl/sha.h>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -73,6 +75,22 @@ extern "C" void bbcoop_note_segment(uint64_t address, uint64_t size, unsigned fl
 namespace {
 std::string game_folder; // app0, as bbcoop_install got it
 } // namespace
+
+namespace Core::Bloodborne {
+bool NativeVerified109EbootFile() {
+    // A known dump can keep the base game's SFO while carrying the verified EU 1.09
+    // executable. This exact-file fallback complements game_check.py's loaded-image
+    // hash; unknown files still need 1.09 metadata and every core site must match.
+    std::ifstream file(std::filesystem::path{game_folder}/"eboot.bin",std::ios::binary);
+    if (!file) return false;
+    SHA256_CTX context;SHA256_Init(&context);
+    std::array<char,65536> bytes;
+    while(file) {file.read(bytes.data(),bytes.size());SHA256_Update(&context,bytes.data(),file.gcount());}
+    std::array<unsigned char,SHA256_DIGEST_LENGTH> digest;SHA256_Final(digest.data(),&context);
+    std::string hex;for(auto value:digest) hex+=fmt::format("{:02x}",value);
+    return hex=="d65f0b4f01d59166aed16f8604196d8b7dd805abbf0758b356e8f1354c9429f9";
+}
+}
 
 extern "C" int bbcoop_game_file(const char* relative, char* out, size_t size) {
     if (game_folder.empty()) {
@@ -207,6 +225,7 @@ extern "C" int bbcoop_party_panel(bbcoop_panel* panel) {
     for (std::size_t index = 0; index < count; ++index) {
         const auto& member = party.members[index];
         auto& out = panel->members[index];
+        std::snprintf(out.board,sizeof(out.board),"%s",member.member.c_str());
         // Phase 11: the character's name when the server knows it, else "" (the overlay says
         // Hunter); never the online id.
         std::snprintf(out.name, sizeof(out.name), "%s", member.shown.c_str());

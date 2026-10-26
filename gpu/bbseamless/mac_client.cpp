@@ -3,6 +3,7 @@
 #include "common/elf_info.h"
 #include "common/path_util.h"
 #include "core/libraries/libs.h"
+#include "core/libraries/np/np_handler.h"
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -14,10 +15,12 @@ namespace {
 BbSeamlessHost host{};
 std::map<std::string, uintptr_t> imports;
 std::map<Common::FS::PathType, std::filesystem::path> paths;
+std::once_flag paths_once;
 }
 
 extern "C" void bbnet_configure(const char*, const char*, const char*, const char*);
 extern "C" void bbnet_register();
+void BbSeamlessUiInit(const BbSeamlessHost& supplied);
 
 namespace Core::Loader {
 void SymbolsResolver::AddSymbol(const char* nid, const char* library, const char* module,
@@ -39,7 +42,8 @@ extern "C" __attribute__((visibility("default"))) uintptr_t bbnet_resolve(const 
 extern "C" __attribute__((visibility("default"))) int bbseamless_init(const BbSeamlessHost* supplied) {
     if (!supplied || supplied->abi != BBSEAMLESS_ABI_VERSION ||
         supplied->net.abi != BBNET_ABI_VERSION || !supplied->net.thread_spawn ||
-        !supplied->net.thread_join || !supplied->thread_attach || !supplied->memory_protection)
+        !supplied->net.thread_join || !supplied->thread_attach || !supplied->memory_protection ||
+        !supplied->publish_ui || !supplied->next_command || !supplied->take_portrait)
         return -1;
     host = *supplied;
     // Only this optional client module chooses our hosted server. Explicit overrides survive.
@@ -48,13 +52,17 @@ extern "C" __attribute__((visibility("default"))) int bbseamless_init(const BbSe
         if (!current || !*current) setenv(name, value, 1);
     };
     default_environment("BB_SHADNET_SERVER", BBSEAMLESS_DEFAULT_LINK);
-    default_environment("BB_SHADNET_WEBAPI", BBSEAMLESS_DEFAULT_WEBAPI);
+    std::string endpoint=std::getenv("BB_SHADNET_SERVER");
+    if(endpoint.find(':')==std::string::npos) {endpoint+=":31314";setenv("BB_SHADNET_SERVER",endpoint.c_str(),1);}
+    const std::string webapi="http://"+endpoint.substr(0,endpoint.rfind(':'))+":31315";
+    default_environment("BB_SHADNET_WEBAPI",webapi.c_str());
     const char* selected_server = std::getenv("BB_SHADNET_SERVER");
     if (selected_server && (!std::strcmp(selected_server, BBSEAMLESS_DEFAULT_LINK) ||
                             !std::strcmp(selected_server, BBSEAMLESS_DEFAULT_HOST)))
         default_environment("BB_SHADNET_SERVER_KEY", BBSEAMLESS_DEFAULT_SERVER_KEY);
     bbnet_configure(host.net.app0, host.net.serial, host.net.title, host.net.app_ver);
     bbnet_register();
+    BbSeamlessUiInit(host);
     return 0;
 }
 extern "C" int32_t runtime_thread_spawn(void** out, void* __attribute__((sysv_abi)) (*entry)(void*),
@@ -75,8 +83,8 @@ extern "C" int32_t runtime_trophy_unlock_from_party(int32_t trophy) {
 
 namespace Common::FS {
 const std::filesystem::path& GetUserPath(PathType type) {
-    if (paths.empty()) {
-        const char* user = std::getenv("BB_USER_DIR");
+    std::call_once(paths_once, [] {
+        const char* user = host.user_dir && *host.user_dir ? host.user_dir : std::getenv("BB_USER_DIR");
         const std::filesystem::path root{user && *user ? user : "user"};
         for (int value = 0; value <= static_cast<int>(PathType::CustomModulesDir); ++value)
             paths[static_cast<PathType>(value)] = root;
@@ -88,7 +96,7 @@ const std::filesystem::path& GetUserPath(PathType type) {
             std::error_code error;
             std::filesystem::create_directories(path, error);
         }
-    }
+    });
     return paths.at(type);
 }
 std::string GetUserPathString(PathType type) { return GetUserPath(type).string(); }
@@ -97,4 +105,8 @@ std::string PathToUTF8String(const std::filesystem::path& path) { return path.st
 
 namespace Libraries::Kernel {
 int* __Error() { static thread_local int error; return &error; }
+}
+
+extern "C" __attribute__((visibility("default"))) void bbnet_start() {
+    Libraries::Np::NpHandler::GetInstance().Initialize();
 }

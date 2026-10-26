@@ -22,6 +22,9 @@
 #include "common/logging/log.h"
 #include "core/cpu_patches.h"
 #include "core/guest_hook.h"
+#ifdef __APPLE__
+#include "mac_memory.h"
+#endif
 
 namespace Core {
 namespace {
@@ -61,6 +64,10 @@ bool OverlapsHook(const HookModule& module, const u8* begin, const u8* end) {
 #ifndef _WIN32
 // The protection of the mapping holding `address`, from /proc/self/maps.
 int PageProtection(uintptr_t address) {
+#ifdef __APPLE__
+    uintptr_t first,last;uint32_t protection;
+    return BbSeamless::HostRegion(address,first,last,protection)?static_cast<int>(protection):-1;
+#else
     std::ifstream maps{"/proc/self/maps"};
     for (std::string line; std::getline(maps, line);) {
         uintptr_t start{}, end{};
@@ -74,6 +81,7 @@ int PageProtection(uintptr_t address) {
         }
     }
     return -1;
+#endif
 }
 #endif
 

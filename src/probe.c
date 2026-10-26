@@ -717,7 +717,7 @@ int main(int argc, char **argv) {
         sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
         sfo_value(sfo,"APP_VER",version,sizeof(version),NULL);
-        runtime_net_configure(app0,serial,title,version);
+        runtime_net_configure(app0,serial,title,version,user_dir?user_dir:"user");
     }
     bbgpu_register_kernel();
     page_size = (size_t)sysconf(_SC_PAGESIZE);
@@ -937,6 +937,12 @@ int main(int argc, char **argv) {
     runtime_net_set_image(image, size); /* the online module reads the game's code before the patches change it */
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     runtime_install_context_lock(image, size);
+    if (runtime_coop_enabled()) {
+        for (uint64_t i=0;i<ns;++i)
+            runtime_coop_note_segment((uintptr_t)image+segments[i].address,segments[i].size,(unsigned)segments[i].flags);
+        if (runtime_coop_install(image,module_count?modules[0].base:size))
+            fail("seamless co-op hooks could not be installed for this game image; see co-op log");
+    }
     protect(thunks, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;

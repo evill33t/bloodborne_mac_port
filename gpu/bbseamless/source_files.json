@@ -3,6 +3,18 @@
   "commit": "8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1",
   "files": [
     {
+      "path": "../../scripts/seamless/party_boss_events.py",
+      "source": "tools/re/party_boss_events.py",
+      "sha256": "7e7ed43665455b4aef8df50f7c7d7e3602727b9b8de4a8e99936b8356f84e6fe",
+      "adapted_sha256": "92b4c1a7abcc9e210914bb696563792791eb56d483e49aea379e9c08aacfb83b"
+    },
+    {
+      "path": "bbcoop.h",
+      "source": "bbport/gpu/bbcoop.h",
+      "sha256": "97fb1a8395784df89dc7a117fcf36793a106063a88325549299113035f8c09fb",
+      "adapted_sha256": "e1de1ba70c44ab2007010e5698231f7c4fea190ccbbaa6622f5dbcbb08382de9"
+    },
+    {
       "path": "bbcoop/bbcoop_internal.h",
       "source": "bbport/gpu/bbcoop/bbcoop_internal.h",
       "sha256": "06a8e167ac4965aba24cddb8ffc05029ce768f23ebf93307f4b687eb2fd91dc1"
@@ -10,7 +22,8 @@
     {
       "path": "bbcoop/coop.cpp",
       "source": "bbport/gpu/bbcoop/coop.cpp",
-      "sha256": "c7d1347e63a19aca82d9b0b809a1ef4074255a545d69adf718998ab2d788fc5e"
+      "sha256": "c7d1347e63a19aca82d9b0b809a1ef4074255a545d69adf718998ab2d788fc5e",
+      "adapted_sha256": "eac04a293ed1ed171efbed0a3197f412fd2101a9ee1df514ee7f2c20d5d28928"
     },
     {
       "path": "bbcoop/duel.cpp",
@@ -20,12 +33,14 @@
     {
       "path": "bbcoop/guest_hooks.cpp",
       "source": "bbport/gpu/bbcoop/guest_hooks.cpp",
-      "sha256": "60dea3ac906fc7469ccfff81de3ab3d609374cb8bad4b963c3aeccde92602973"
+      "sha256": "60dea3ac906fc7469ccfff81de3ab3d609374cb8bad4b963c3aeccde92602973",
+      "adapted_sha256": "c2647af6090e41f967a36641e959d12e481c23294a6e07995ff056e56f28c4b6"
     },
     {
       "path": "bbcoop/memory.cpp",
       "source": "bbport/gpu/bbcoop/memory.cpp",
-      "sha256": "e4908e4dff18df5270f04e373ca04f8ee2cff8fdc5876e9a21ec81b58cb24a5e"
+      "sha256": "e4908e4dff18df5270f04e373ca04f8ee2cff8fdc5876e9a21ec81b58cb24a5e",
+      "adapted_sha256": "070dc6f8cc8ab5545c891689a1f966d407eb5ef11d765c757bfc8638701de502"
     },
     {
       "path": "bbcoop/revision.cmake",
@@ -38,14 +53,10 @@
       "sha256": "60dd1d7d8838ee503f8a4b63037766dc46dbfa42a1cf2806065e3298b59e184c"
     },
     {
-      "path": "bbcoop.h",
-      "source": "bbport/gpu/bbcoop.h",
-      "sha256": "97fb1a8395784df89dc7a117fcf36793a106063a88325549299113035f8c09fb"
-    },
-    {
       "path": "include/common/assert.cpp",
       "source": "bbport/gpu/shim/common/assert.cpp",
-      "sha256": "df0010543fc23c51afcc41574b85d2188d46e5e96c17dac8916185a4acb5593e"
+      "sha256": "df0010543fc23c51afcc41574b85d2188d46e5e96c17dac8916185a4acb5593e",
+      "adapted_sha256": "afbfa53ee758ecb1d84068055839fcfe22581611f1c90fbd559ad8f1a81bf6b7"
     },
     {
       "path": "include/common/debug.h",
@@ -85,7 +96,8 @@
     {
       "path": "include/core/emulator_settings.h",
       "source": "bbport/gpu/shim/core/emulator_settings.h",
-      "sha256": "694fda06b98034b1a3ad0aba61dfb37b5c399e97d037358a810f5294d33b1ad2"
+      "sha256": "694fda06b98034b1a3ad0aba61dfb37b5c399e97d037358a810f5294d33b1ad2",
+      "adapted_sha256": "61f8271f4ecf2134dadd34539717a910ce6cf31d7feafd8441e6b50b1923dfca"
     },
     {
       "path": "include/core/file_sys/fs.h",
@@ -113,14 +125,14 @@
       "sha256": "b8ec6064350c494e10937e7388539b69be34700229ad0d991f968237f29408ec"
     },
     {
-      "path": "include/core/libraries/kernel/threads/pthread.h",
-      "source": "bbport/gpu/shim/core/libraries/kernel/threads/pthread.h",
-      "sha256": "515cd0c1bf72e8826a1591c1d436f407b8c73ae9cec8737bb5f91647eec0a1fc"
-    },
-    {
       "path": "include/core/libraries/kernel/threads.h",
       "source": "bbport/gpu/shim/core/libraries/kernel/threads.h",
       "sha256": "72d6ae79df87a7491d11319084fa27852d389a0c2b83f522cebcd99cf7bd1487"
+    },
+    {
+      "path": "include/core/libraries/kernel/threads/pthread.h",
+      "source": "bbport/gpu/shim/core/libraries/kernel/threads/pthread.h",
+      "sha256": "515cd0c1bf72e8826a1591c1d436f407b8c73ae9cec8737bb5f91647eec0a1fc"
     },
     {
       "path": "include/core/libraries/libs.h",
@@ -180,7 +192,35 @@
     {
       "path": "network_glue.cpp",
       "source": "bbport/gpu/bbnet/bbnet_glue.cpp",
-      "sha256": "807df775c746925b02872cf62b735cfa21155787c71232f99b6128b242c84db3"
+      "sha256": "807df775c746925b02872cf62b735cfa21155787c71232f99b6128b242c84db3",
+      "adapted_sha256": "3082307b1aae1c9ca693660af3cf3d5066cb14925f53bdb5a054b3042b489ee0"
+    },
+    {
+      "path": "text/bbport_game_art.cpp",
+      "source": "bbport/gpu/shim/bbport_game_art.cpp",
+      "sha256": "319300a122a98956be169dfad423b21c127fea3a7dfc9e30e8e89bc0e9d30a24"
+    },
+    {
+      "path": "text/bbport_game_art.h",
+      "source": "bbport/gpu/shim/bbport_game_art.h",
+      "sha256": "29349bb0500c5566919dbca85b68a15fea9183a59531c2ec42e882321409e85f"
+    },
+    {
+      "path": "text/bbport_save_editor.h",
+      "source": "bbport/gpu/shim/bbport_save_editor.h",
+      "sha256": "a16153c712e085060c3b0abf68c999bb3235ca3c3afae31b0b9f3d99e62c3d82"
+    },
+    {
+      "path": "text/bbport_save_editor_items.cpp",
+      "source": "bbport/gpu/shim/bbport_save_editor_items.cpp",
+      "sha256": "890ec7b6949b8678c822abfe5be89139b67e5bccb657d8d1fd32213a6d08ed55"
+    },
+    {
+      "path": "touch.h",
+      "source": "bbport/src/runtime_pad.c",
+      "sha256": "f872f8856ef760ce1607582b872f6f1a75f303b4e21560c7686311c31c6598bb",
+      "note": "Adapted MapHold touch gesture state only; the original hash covers the complete source file.",
+      "adapted_sha256": "5cb3ec97ae371c73f7988a5742a5bd105e240c24ff061b4e6b4f89fe631a85bb"
     },
     {
       "path": "vendor/common/adaptive_mutex.h",
@@ -485,7 +525,8 @@
     {
       "path": "vendor/common/thread.cpp",
       "source": "emulator/src/common/thread.cpp",
-      "sha256": "5d644d9e674b7bc8e954555ef94a75d5b9a4e3a4f0e85e4b6c5f6e95ec8b2f44"
+      "sha256": "5d644d9e674b7bc8e954555ef94a75d5b9a4e3a4f0e85e4b6c5f6e95ec8b2f44",
+      "adapted_sha256": "7fd7dc5cfe534aa9adfcea95c7eec2e8110e76d99c5f1765b943506c9d52a804"
     },
     {
       "path": "vendor/common/thread.h",
@@ -640,7 +681,8 @@
     {
       "path": "vendor/core/bloodborne_autoplay.cpp",
       "source": "emulator/src/core/bloodborne_autoplay.cpp",
-      "sha256": "c498ac6d67886503bdd399b8a68dd90df035872ad73e53d9080a29c296100243"
+      "sha256": "c498ac6d67886503bdd399b8a68dd90df035872ad73e53d9080a29c296100243",
+      "adapted_sha256": "a737efa37f88b9e1f9092c07cb6acaff8647c5003619864cdfc84cf5138148df"
     },
     {
       "path": "vendor/core/bloodborne_boards.cpp",
@@ -760,7 +802,8 @@
     {
       "path": "vendor/core/bloodborne_party.cpp",
       "source": "emulator/src/core/bloodborne_party.cpp",
-      "sha256": "b6709e63c784320478a52063dd36c87525681894e9b793080c475bf05aba4c74"
+      "sha256": "b6709e63c784320478a52063dd36c87525681894e9b793080c475bf05aba4c74",
+      "adapted_sha256": "40cfed816b2cd64fcf1c24ad87a4956c37238bf54b6c56e70183a57b421fdf89"
     },
     {
       "path": "vendor/core/bloodborne_party.h",
@@ -770,22 +813,26 @@
     {
       "path": "vendor/core/bloodborne_party_death.cpp",
       "source": "emulator/src/core/bloodborne_party_death.cpp",
-      "sha256": "41bd83cc8d4361dde63923155f7fd430fed9d888fd7581c184bb69abb02f7bc9"
+      "sha256": "41bd83cc8d4361dde63923155f7fd430fed9d888fd7581c184bb69abb02f7bc9",
+      "adapted_sha256": "802b926c689a6a3542768eeb895ea2254612eda0836c2b6f3a99a10fcabed935"
     },
     {
       "path": "vendor/core/bloodborne_party_rules.cpp",
       "source": "emulator/src/core/bloodborne_party_rules.cpp",
-      "sha256": "5206cc3e0859b8657afd8fed8387b52cbfd3e2c8a6d5fd67b98b9807a155417e"
+      "sha256": "5206cc3e0859b8657afd8fed8387b52cbfd3e2c8a6d5fd67b98b9807a155417e",
+      "adapted_sha256": "6d26b8301aa16693e8864553f4b5cbb76e7aaec6f6ee0fcd0fb432bbad7e2ffc"
     },
     {
       "path": "vendor/core/bloodborne_patch_sites.h",
       "source": "emulator/src/core/bloodborne_patch_sites.h",
-      "sha256": "12ce6a21fd0de5b043f09edc05944879a910ea8845529046a486c45afab9fbf5"
+      "sha256": "12ce6a21fd0de5b043f09edc05944879a910ea8845529046a486c45afab9fbf5",
+      "adapted_sha256": "3abcc117681b9ab995057efa91f647e5558e204e60eecc45b86ffa0207f950b6"
     },
     {
       "path": "vendor/core/bloodborne_patches.cpp",
       "source": "emulator/src/core/bloodborne_patches.cpp",
-      "sha256": "cdf6d27a8f780c049a9612e4efc803e554734b34e56fe86f07b229af051e9474"
+      "sha256": "cdf6d27a8f780c049a9612e4efc803e554734b34e56fe86f07b229af051e9474",
+      "adapted_sha256": "a8545b9d48f175fcf9bdbbaa982511f8438ca1d01c28c47d47700b83627b5bce"
     },
     {
       "path": "vendor/core/bloodborne_pings.cpp",
@@ -850,7 +897,8 @@
     {
       "path": "vendor/core/bloodborne_server_world.cpp",
       "source": "emulator/src/core/bloodborne_server_world.cpp",
-      "sha256": "65f115aca84d42cf82107eb9b4def126e542daf44e3d7f10eaaf9fcfb72da99d"
+      "sha256": "65f115aca84d42cf82107eb9b4def126e542daf44e3d7f10eaaf9fcfb72da99d",
+      "adapted_sha256": "905231c52bfd9ba13af2ff7e950c5853ac6d8dff87812137e5da4130f8978c36"
     },
     {
       "path": "vendor/core/bloodborne_spectate.cpp",
@@ -880,12 +928,14 @@
     {
       "path": "vendor/core/bloodborne_trade.cpp",
       "source": "emulator/src/core/bloodborne_trade.cpp",
-      "sha256": "f11abcfa8cd9184edb616b9eefab7b1c71a39bf14e808f46fb5251cb509b4248"
+      "sha256": "f11abcfa8cd9184edb616b9eefab7b1c71a39bf14e808f46fb5251cb509b4248",
+      "adapted_sha256": "026c3f6fc53ac5ae11faa6c371b7ee5ca821ec2ea1df8abe88f47df6b477aae0"
     },
     {
       "path": "vendor/core/bloodborne_trade.h",
       "source": "emulator/src/core/bloodborne_trade.h",
-      "sha256": "2eb305abb87063dcaf45ffef238f01081d243b77fd4113988d33db8be1cab411"
+      "sha256": "2eb305abb87063dcaf45ffef238f01081d243b77fd4113988d33db8be1cab411",
+      "adapted_sha256": "d399ae0ec677e2741da2352f7e856030049e9c4434979594cd9f05fb552262ae"
     },
     {
       "path": "vendor/core/bloodborne_travel.cpp",
@@ -931,6 +981,21 @@
       "path": "vendor/core/guest_hook.h",
       "source": "emulator/src/core/guest_hook.h",
       "sha256": "d1f5ea954a0d080f7ed0aadbddfea50616d4f3d7358e58db99be018aa47150a3"
+    },
+    {
+      "path": "vendor/core/libraries/error_codes.h",
+      "source": "emulator/src/core/libraries/error_codes.h",
+      "sha256": "30025f71b0cd3f1f23a1cfb8fffb445218f70fe8f84254cc54370b22ee5a9e95"
+    },
+    {
+      "path": "vendor/core/libraries/kernel/orbis_error.h",
+      "source": "emulator/src/core/libraries/kernel/orbis_error.h",
+      "sha256": "726040d59a93275877fb6f032d22336904eb1efdbbc2dadc5b4ba4d03bfe8af1"
+    },
+    {
+      "path": "vendor/core/libraries/kernel/time.h",
+      "source": "emulator/src/core/libraries/kernel/time.h",
+      "sha256": "65726f2787dbb6d3f697e280ace08f4569e7ceab1b109ecbfe9775128e747479"
     },
     {
       "path": "vendor/core/libraries/network/http.cpp",
@@ -995,7 +1060,8 @@
     {
       "path": "vendor/core/libraries/network/net_epoll.h",
       "source": "emulator/src/core/libraries/network/net_epoll.h",
-      "sha256": "26ada715ab26eb5a891fb3104182ad8c203a200351c7818aac8ba4053505ac6e"
+      "sha256": "26ada715ab26eb5a891fb3104182ad8c203a200351c7818aac8ba4053505ac6e",
+      "adapted_sha256": "3f7361ab6886cf1697ea1588e059dfa1cf31e4d6679aeaa10972048cb93ab9d6"
     },
     {
       "path": "vendor/core/libraries/network/net_error.h",
@@ -1060,7 +1126,8 @@
     {
       "path": "vendor/core/libraries/network/p2p_sockets.cpp",
       "source": "emulator/src/core/libraries/network/p2p_sockets.cpp",
-      "sha256": "d2c1c52b157831d49252163b63c6c5892a96faa4b0a7d3749883d5b62781c80d"
+      "sha256": "d2c1c52b157831d49252163b63c6c5892a96faa4b0a7d3749883d5b62781c80d",
+      "adapted_sha256": "ac4ac378e789515f62c8399af0a6cc30e7cc4d23071650263802dca2469872ae"
     },
     {
       "path": "vendor/core/libraries/network/posix_sockets.cpp",
@@ -1085,7 +1152,8 @@
     {
       "path": "vendor/core/libraries/network/sockets.h",
       "source": "emulator/src/core/libraries/network/sockets.h",
-      "sha256": "4498498dbb138bc05e95dc9fa98fab45b03fdcc36b67cc91c603ad228134aeac"
+      "sha256": "4498498dbb138bc05e95dc9fa98fab45b03fdcc36b67cc91c603ad228134aeac",
+      "adapted_sha256": "23f9b322ba33b1ad275f09241afe1195ef14c0c6f3c7803c8812967953fb56a7"
     },
     {
       "path": "vendor/core/libraries/network/ssl.cpp",
@@ -1190,7 +1258,8 @@
     {
       "path": "vendor/core/libraries/np/np_manager.cpp",
       "source": "emulator/src/core/libraries/np/np_manager.cpp",
-      "sha256": "aefb455a6b19e486459862760688c64745614affd60a3788662b526968aa40c3"
+      "sha256": "aefb455a6b19e486459862760688c64745614affd60a3788662b526968aa40c3",
+      "adapted_sha256": "12229517ddd91a6b9f7d3c116af85324eb2184a28fe74156655b9dd78bf84b99"
     },
     {
       "path": "vendor/core/libraries/np/np_manager.h",
@@ -1482,5 +1551,6 @@
       "source": "server/src/shadnet.proto",
       "sha256": "a6a1879daf244c6a0578d64b9ef96d40b8a9c8054d751e7bd840f79f8e7502fc"
     }
-  ]
+  ],
+  "path_base": "gpu/bbseamless; ../../ paths refer to repository scripts"
 }

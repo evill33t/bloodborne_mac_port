@@ -37,7 +37,7 @@
 # Values already in the environment win. Bash 3.2 (macOS /bin/bash) compatible.
 bb_launch_settings() { # ini file
     local line cap='' full='' hud='' compress='' online='' server='' webapi='' npid='' password='' community='' upnp='' p2p=''
-    local pool='' thd_id='' thd_token='' timing=''
+    local pool='' thd_id='' thd_token='' timing='' seamless_server=''
     # BB_FPS chosen here for the previous launch is chosen again after an in-game restart.
     if [[ ${BB_FPS_AUTO:-} == 1 ]]; then unset BB_FPS BB_FPS_AUTO; fi
     [[ -f $1 ]] || return 0
@@ -47,6 +47,7 @@ bb_launch_settings() { # ini file
         if [[ $line =~ ^fullscreen=([01])$ ]]; then full=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^metal_hud=([01])$ ]]; then hud=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^online=([01])$ ]]; then online=${BASH_REMATCH[1]}; fi
+        if [[ $line =~ ^seamless_server=(.+)$ ]]; then seamless_server=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^shadnet_server=(.+)$ ]]; then server=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^shadnet_webapi=(.+)$ ]]; then webapi=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^shadnet_npid=(.+)$ ]]; then npid=${BASH_REMATCH[1]}; fi
@@ -54,12 +55,20 @@ bb_launch_settings() { # ini file
         if [[ $line =~ ^community_server=(.+)$ ]]; then community=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^upnp=([01])$ ]]; then upnp=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^p2p_port=([0-9]{1,5})$ ]]; then p2p=${BASH_REMATCH[1]}; fi
-        if [[ $line =~ ^online_pool=(shadnet|huntersdream)$ ]]; then pool=${BASH_REMATCH[1]}; fi
+        if [[ $line =~ ^online_pool=(seamless|shadnet|huntersdream)$ ]]; then pool=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^thd_online_id=(.+)$ ]]; then thd_id=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^thd_token=(.+)$ ]]; then thd_token=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^texture_compression=([01])$ ]]; then compress=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^game_timing=(fixed|variable)$ ]]; then timing=${BASH_REMATCH[1]}; fi
     done < "$1"
+    if [[ -z $pool ]]; then
+        if [[ -n $npid && -z $thd_id ]]; then pool=shadnet
+        elif [[ -n $thd_id ]]; then pool=huntersdream
+        else pool=seamless; fi
+    fi
+    if [[ $pool == seamless ]]; then
+        server=$seamless_server; webapi=''; npid=''; password=''; thd_id=''; thd_token=''
+    fi
     # The password and the token are looked up and exported only for online play (online=1, or
     # BB_ONLINE=1 from the environment, which wins): offline, no secret enters the environment.
     if [[ ${BB_ONLINE:-$online} != 1 ]]; then password='' thd_token=''; fi
@@ -104,6 +113,7 @@ bb_launch_settings() { # ini file
         if [[ -n $npid && -z $thd_id ]]; then pool=shadnet; else pool=huntersdream; fi
     fi
     if [[ $pool == huntersdream && -z ${BB_NET_BACKEND:-} ]]; then export BB_NET_BACKEND=thd; fi
+    if [[ $pool == seamless && -z ${BB_NET_BACKEND:-} ]]; then export BB_NET_BACKEND=seamless; fi
     if [[ -n $thd_id && -z ${BB_THD_ONLINE_ID:-} ]]; then export BB_THD_ONLINE_ID=$thd_id; fi
     if [[ -n $thd_token && -z ${BB_THD_TOKEN:-} ]]; then export BB_THD_TOKEN=$thd_token; fi
     if [[ $compress == 0 && -z ${BB_LAZY_TEXTURE_USAGE:-} ]]; then export BB_LAZY_TEXTURE_USAGE=0; fi

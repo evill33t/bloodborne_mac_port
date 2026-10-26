@@ -54,6 +54,7 @@ enum { BBCOOP_VITAL_OFF, BBCOOP_VITAL_UP, BBCOOP_VITAL_DOWN, BBCOOP_VITAL_DEAD,
 enum { BBCOOP_PANEL_MEMBERS = 4 };
 typedef struct bbcoop_panel_member {
     char name[20]; /* "" when unknown */
+    char board[40]; /* native split overlay's portrait key */
     int vital;     /* BBCOOP_VITAL_* */
     int here;
     int32_t hp, hp_max;

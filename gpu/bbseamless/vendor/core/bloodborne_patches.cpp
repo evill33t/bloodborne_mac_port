@@ -69,6 +69,7 @@
 #include "core/memory.h"
 
 namespace Core::Bloodborne {
+bool NativeVerified109EbootFile();
 namespace Coop {
 
 bool negative_area_patch_installed{};
@@ -1799,14 +1800,17 @@ bool SeamlessCoreInstalled() {
 
 // Whether this game is the one the seamless patches are for: Bloodborne CUSA03173 at 01.09.
 bool IsSeamlessCoopGame() {
-    if (MemoryPatcher::g_game_serial != "CUSA03173") {
+    // Native port: regional 1.09 executables must still pass CoopSitesMatch in full.
+    constexpr std::array<std::string_view,9> titles{"CUSA03173", "CUSA00207", "CUSA00208",
+        "CUSA00900", "CUSA03179", "CUSA01363", "CUSA03023", "CUSA00299", "CUSA03014"};
+    if (std::ranges::find(titles, MemoryPatcher::g_game_serial) == titles.end()) {
         return false;
     }
     const auto* param_sfo = Common::Singleton<PSF>::Instance();
     const std::string_view app_version = param_sfo->GetString("APP_VER").value_or("Unknown");
-    if (app_version != "01.09") {
+    if (app_version != "01.09" && !NativeVerified109EbootFile()) {
         LOG_ERROR(Debug,
-                  "Bloodborne seamless patches require CUSA03173 01.09; loaded version is {}",
+                  "Bloodborne seamless patches require the verified 01.09 executable; loaded version is {}",
                   app_version);
         return false;
     }
@@ -2012,5 +2016,7 @@ void InstallSeamlessCoopPatches() {
              CoopPatchesOf("seamless core").size(), core_hooks.size());
     LogCoopFeatures();
 }
+
+bool NativeSeamlessReady() { return SeamlessCoreInstalled(); }
 
 } // namespace Core::Bloodborne

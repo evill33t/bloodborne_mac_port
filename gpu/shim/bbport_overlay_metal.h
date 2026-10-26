@@ -24,5 +24,7 @@ bool Init(Metal::Device& device, u32 pixel_format);
 /// (ImGui::NewFrame .. ImGui::Render), then the draw data in a render encoder of its own. Font
 /// atlas uploads happen in there (the backend has RendererHasTextures).
 void Frame(void* command_buffer, void* target, const std::function<void()>& build);
+// A cached co-op portrait, kept alive through completion of the frame that draws it.
+void* PortraitTexture(unsigned slot, u32 version, const u8* rgba, u32 side);
 
 } // namespace BbOverlay::MetalBackend

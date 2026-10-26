@@ -108,9 +108,9 @@ check_pool() { # ini text, expected "BACKEND ID TOKENLEN" (- = unset), extra env
 }
 check_pool $'online=1\nonline_pool=huntersdream\nthd_online_id=hunter\nthd_token=abcdef\n' "thd hunter 6"
 check_pool $'online_pool=shadnet\nthd_online_id=hunter\n' "- hunter 0"
-check_pool $'online_pool=other\n' "thd - 0"                             # unknown value: the default pool
+check_pool $'online_pool=other\n' "seamless - 0"                        # unknown value: the default pool
 check_pool $'online_pool=huntersdream\n' "shadnet - 0" BB_NET_BACKEND=shadnet
-check_pool $'online=1\n' "thd - 0"                                      # no pool named: The Hunter's Dream
+check_pool $'online=1\n' "seamless - 0"                                 # no pool named: Seamless Co-op
 check_pool $'online=1\nthd_online_id=hunter\n' "thd hunter 0"
 check_pool $'online=1\nshadnet_npid=hunter\n' "- - 0"                   # only a shadNet account: shadNet
 check_pool $'online=1\nshadnet_npid=hunter\nthd_online_id=hunter\n' "thd hunter 0"

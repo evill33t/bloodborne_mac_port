@@ -4,6 +4,11 @@
 #include "../src/runtime_pad.c"
 
 static int capture;
+void runtime_coop_frame(uint32_t *buttons,uint8_t sticks[4],uint8_t *l2,uint8_t *r2,int32_t *side) {
+    (void)buttons;(void)sticks;(void)l2;(void)r2;(void)side;
+}
+int runtime_coop_camera_mouse(float dx,float dy) { (void)dx;(void)dy;return 0; }
+
 int bbgpu_overlay_captures_input(void) { return capture; }
 int bbgpu_mouse_look_enabled(void) { return 0; }
 const bool *bbgpu_split_keyboard(void) { return NULL; }

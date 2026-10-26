@@ -6,6 +6,7 @@
 #include <bit>
 #include <cctype>
 #include <charconv>
+#include "common/float_chars.h"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1553,7 +1554,7 @@ std::optional<ResumePoint> ParseResumePoint(std::string_view text) {
             return std::nullopt;
         }
         ++cursor;
-        const auto [next, error] = std::from_chars(cursor, end, coordinate);
+        const auto [next, error] = BbSeamless::FloatChars(cursor, end, coordinate);
         if (error != std::errc{}) {
             return std::nullopt;
         }
@@ -3048,7 +3049,7 @@ std::optional<HarderEnemies> ParseHarderEnemies(std::string_view setting) {
             part.remove_suffix(1);
         }
         float rate = 0.0f;
-        const auto [end, error] = std::from_chars(part.data(), part.data() + part.size(), rate);
+        const auto [end, error] = BbSeamless::FloatChars(part.data(), part.data() + part.size(), rate);
         if (count == rates.size() || part.empty() || error != std::errc{} ||
             end != part.data() + part.size() || !(rate >= 1.0f && rate <= 10.0f)) {
             return std::nullopt;
@@ -4421,7 +4422,7 @@ std::string FormatCoordinate(float value) {
 
 std::optional<float> ParseCoordinate(std::string_view text) {
     float value = 0.0f;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    const auto [end, error] = BbSeamless::FloatChars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || end != text.data() + text.size()) {
         return std::nullopt;
     }
@@ -4819,7 +4820,7 @@ std::optional<double> AutoplayChapterBudget(const AutoplayCommand& command) {
     }
     const std::string& text = command.args[1];
     double seconds = 0.0;
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), seconds);
+    const auto [end, error] = BbSeamless::FloatChars(text.data(), text.data() + text.size(), seconds);
     if (error != std::errc{} || end != text.data() + text.size() || seconds <= 0.0) {
         return std::nullopt;
     }

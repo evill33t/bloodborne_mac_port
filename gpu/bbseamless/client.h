@@ -2,10 +2,11 @@
 #ifndef BBSEAMLESS_CLIENT_H
 #define BBSEAMLESS_CLIENT_H
 #include "../bbnet/bbnet.h"
+#include "ui.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define BBSEAMLESS_ABI_VERSION 1
+#define BBSEAMLESS_ABI_VERSION 3
 #define BBSEAMLESS_DEFAULT_HOST "bloodborne.phobos.services"
 #define BBSEAMLESS_DEFAULT_LINK BBSEAMLESS_DEFAULT_HOST ":31314"
 #define BBSEAMLESS_DEFAULT_WEBAPI "http://" BBSEAMLESS_DEFAULT_HOST ":31315"
@@ -18,7 +19,12 @@ typedef struct BbSeamlessHost {
     void (*thread_attach)(const char *name);
     int (*memory_protection)(uintptr_t address, uintptr_t *start, uintptr_t *end, uint32_t *prot);
     int32_t (*trophy_unlock)(int32_t trophy);
+    void (*publish_ui)(const BbCoopUi *view);
+    int (*next_command)(BbCoopCommand *command);
+    int (*take_portrait)(uint8_t *rgba, uint32_t capacity);
+    const char *user_dir;
 } BbSeamlessHost;
+typedef void (*BbSeamlessFrameFn)(uint32_t*,uint8_t[4],uint8_t*,uint8_t*,int32_t*);
 typedef int (*BbSeamlessInitFn)(const BbSeamlessHost *host);
 int bbseamless_init(const BbSeamlessHost *host);
 #ifdef __cplusplus

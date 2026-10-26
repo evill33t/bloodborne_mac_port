@@ -17,6 +17,9 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef __APPLE__
+#include <fcntl.h>
+#endif
 #ifdef __linux__
 #include <sys/eventfd.h>
 #endif
@@ -224,7 +227,7 @@ public:
     }
 
     bool Start() {
-#if !defined(__linux__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(_WIN32) && !defined(__APPLE__)
         LOG_ERROR(Lib_Net, "P2P transport is currently supported on Linux and Windows");
         return false;
 #else
@@ -304,7 +307,7 @@ public:
     }
 
     void Stop() {
-#if defined(__linux__) || defined(_WIN32)
+#if defined(__linux__) || defined(_WIN32) || defined(__APPLE__)
         std::lock_guard lock(start_mutex);
         if (!running.exchange(false, std::memory_order_acq_rel)) {
             return;
@@ -384,7 +387,7 @@ public:
 
     int SendFrame(u16 source_vport_nbo, u16 dest_vport_nbo, const void* data, u32 len,
                   u32 dest_addr_nbo, u16 dest_port_nbo) {
-#if !defined(__linux__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(_WIN32) && !defined(__APPLE__)
         return -1;
 #else
         if (!Start() || !IsValidSocket(host_socket) || (data == nullptr && len != 0) ||
@@ -423,7 +426,7 @@ public:
 
     // Sends a datagram as it is, after the test ping's delay when there is one.
     bool Transmit(const sockaddr_in& dest, std::vector<u8> datagram) {
-#if !defined(__linux__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(_WIN32) && !defined(__APPLE__)
         return false;
 #else
         if (LinkCut()) {
@@ -703,7 +706,7 @@ private:
     }
 
     void ReceiveMain() {
-#if defined(__linux__) || defined(_WIN32)
+#if defined(__linux__) || defined(_WIN32) || defined(__APPLE__)
         std::vector<u8> buffer(65536);
         while (running.load(std::memory_order_acquire)) {
             LinkHousekeeping();
@@ -1146,7 +1149,7 @@ private:
 
     // The test ping (SHADPS4_P2P_DELAY_MS): packets wait their turn here, sent by DelayMain.
     void DelayMain() {
-#if defined(__linux__) || defined(_WIN32)
+#if defined(__linux__) || defined(_WIN32) || defined(__APPLE__)
         std::unique_lock lock(delay_mutex);
         while (running.load(std::memory_order_acquire)) {
             if (delayed.empty()) {
@@ -1256,6 +1259,16 @@ P2PSocket::P2PSocket(int domain, int type, int protocol) : Socket(domain, type, 
         LOG_ERROR(Lib_Net, "P2P readiness socket pair failed error={}", LastSocketError());
         valid = false;
     }
+#elif defined(__APPLE__)
+    int pair[2];
+    // A datagram socket pair reports writable as well as readable readiness, like eventfd.
+    if (::socketpair(AF_UNIX,SOCK_DGRAM,0,pair) != 0) { valid=false; return; }
+    for (int fd : pair) {
+        if (::fcntl(fd,F_SETFL,O_NONBLOCK)<0 || ::fcntl(fd,F_SETFD,FD_CLOEXEC)<0) {
+            ::close(pair[0]);::close(pair[1]);valid=false;return;
+        }
+    }
+    readiness_fd=pair[0];readiness_signal_fd=pair[1];
 #elif defined(__linux__)
     readiness_fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (readiness_fd < 0) {
@@ -1290,7 +1303,10 @@ int P2PSocket::Close() {
 #ifdef _WIN32
     CloseSocket(readiness_signal_fd);
     CloseSocket(readiness_fd);
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
+#ifdef __APPLE__
+    if (readiness_signal_fd>=0) { ::close(readiness_signal_fd);readiness_signal_fd=-1; }
+#endif
     if (readiness_fd >= 0) {
         ::close(readiness_fd);
         readiness_fd = -1;
@@ -1601,7 +1617,7 @@ int P2PSocket::ReceivePacket(void* buf, u32 len, int flags, OrbisNetSockaddr* fr
             char signal = 0;
             (void)::recv(readiness_fd, &signal, sizeof(signal), 0);
         }
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
         if (receive_queue.empty() && readiness_fd >= 0) {
             u64 event_count = 0;
             (void)::read(readiness_fd, &event_count, sizeof(event_count));
@@ -1706,6 +1722,10 @@ void P2PSocket::EnqueuePacket(P2PDatagram packet) {
         if (::send(readiness_signal_fd, &signal, sizeof(signal), 0) < 0) {
             LOG_WARNING(Lib_Net, "P2P readiness signal failed error={}", LastSocketError());
         }
+    }
+#elif defined(__APPLE__)
+    if (was_empty && readiness_signal_fd>=0) {
+        const u64 one=1;(void)::write(readiness_signal_fd,&one,sizeof(one));
     }
 #elif defined(__linux__)
     if (was_empty && readiness_fd >= 0) {

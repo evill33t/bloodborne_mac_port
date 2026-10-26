@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <thread>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -67,6 +68,21 @@ int32_t runtime_thread_join_spawned(void* thread, void** result);
 // ---- Kernel ---------------------------------------------------------------------------------
 
 namespace Libraries::Kernel {
+
+s32 PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(s32* version) {
+    if (!version) return ORBIS_KERNEL_ERROR_EFAULT;
+    *version = 0x02000071; // the supported Bloodborne 1.09 executable
+    return 0;
+}
+u64 PS4_SYSV_ABI sceKernelGetProcessTime() {
+    static const auto start = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - start).count();
+}
+s32 PS4_SYSV_ABI sceKernelUsleep(u32 microseconds) {
+    std::this_thread::sleep_for(std::chrono::microseconds(microseconds));
+    return 0;
+}
 
 struct BbNetMutex {
     std::recursive_mutex mutex;

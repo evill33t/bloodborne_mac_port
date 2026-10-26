@@ -163,7 +163,7 @@ struct P2PSocket : public Socket {
         if (readiness_fd != INVALID_SOCKET) {
             return readiness_fd;
         }
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
         if (readiness_fd >= 0) {
             return readiness_fd;
         }
@@ -193,9 +193,12 @@ private:
     // wepoll requires a Winsock handle. A private loopback pair carries readiness bytes only.
     net_socket readiness_fd{INVALID_SOCKET};
     net_socket readiness_signal_fd{INVALID_SOCKET};
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
     // eventfd carries readiness only; network data stays on the shared UDP transport.
     int readiness_fd{-1};
+#ifdef __APPLE__
+    int readiness_signal_fd{-1};
+#endif
 #endif
 };
 

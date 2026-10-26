@@ -174,9 +174,7 @@ bool AccurateSleep(const std::chrono::nanoseconds duration, std::chrono::nanosec
 
 // Sets the debugger-visible name of the current thread.
 void SetCurrentThreadName(const char* name) {
-    if (Libraries::Kernel::g_curthread) {
-        Libraries::Kernel::g_curthread->name = name;
-    }
+    // The port owns its guest thread metadata; pthread carries the host name.
     SetThreadDescription(GetCurrentThread(), UTF8ToUTF16W(name).data());
 }
 
@@ -189,9 +187,7 @@ void SetThreadName(void* thread, const char* name) {
 // MinGW with the POSIX threading model does not support pthread_setname_np
 #if !defined(_WIN32) || defined(_MSC_VER)
 void SetCurrentThreadName(const char* name) {
-    if (Libraries::Kernel::g_curthread) {
-        Libraries::Kernel::g_curthread->name = name;
-    }
+    // The port owns its guest thread metadata; pthread carries the host name.
 #ifdef __APPLE__
     pthread_setname_np(name);
 #elif defined(__Bitrig__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
@@ -218,9 +214,7 @@ void SetThreadName(void* thread, const char* name) {
 
 #if defined(_WIN32)
 void SetCurrentThreadName(const char* name) {
-    if (Libraries::Kernel::g_curthread) {
-        Libraries::Kernel::g_curthread->name = name;
-    }
+    // The port owns its guest thread metadata; pthread carries the host name.
     // Do Nothing on MinGW
 }
 
@@ -251,9 +245,7 @@ void AccurateTimer::End() {
 
 std::string GetCurrentThreadName() {
     using namespace Libraries::Kernel;
-    if (g_curthread && !g_curthread->name.empty()) {
-        return g_curthread->name;
-    }
+    // Thread names come from pthread in the native port.
 #ifdef _WIN32
     PWSTR name;
     GetThreadDescription(GetCurrentThread(), &name);

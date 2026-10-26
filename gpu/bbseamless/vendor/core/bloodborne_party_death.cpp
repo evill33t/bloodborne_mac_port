@@ -2538,6 +2538,15 @@ void InstallPartyNameplates(u64 base, u64 image_size) {
 #ifdef BLOODBORNE_PARTY_HUD
     const char* setting = std::getenv("BB_PARTY_HUD");
     if (setting != nullptr && std::string_view{setting} == "0") {
+        // The Metal overlay replaces the patched list, but map/compass/pings still need
+        // the game's HUD visibility. Observe this site without creating any native tags.
+        const auto observe = +[](u64, const GuestRegisterSnapshot*) {
+            game_hud_ticked_ms.store(SteadyMilliseconds(), std::memory_order_relaxed);
+        };
+        if (HudTicksTagsDoneOffset + HudTicksTagsDone.size() <= image_size) {
+            InstallCoopHook(reinterpret_cast<void*>(base + HudTicksTagsDoneOffset),
+                HudTicksTagsDone, 0, observe);
+        }
         return;
     }
     if (HudTagUpdateExitOffset + HudTagUpdateExit.size() > image_size ||

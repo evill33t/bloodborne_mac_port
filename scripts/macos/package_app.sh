@@ -70,7 +70,14 @@ if [[ -f out/gpu/libbbnet.dylib ]]; then
     set_rpath "$contents/Frameworks/libbbnet.dylib" @loader_path
     online_module=1
 else
-    echo 'No libbbnet.dylib: packaging an offline-only app.'
+    echo 'No legacy libbbnet.dylib.'
+fi
+seamless_module=0
+if [[ -f out/gpu/libbbseamless.dylib ]]; then
+    lipo out/gpu/libbbseamless.dylib -verify_arch x86_64
+    install -m755 out/gpu/libbbseamless.dylib "$contents/Frameworks/"
+    set_rpath "$contents/Frameworks/libbbseamless.dylib" @loader_path
+    seamless_module=1
 fi
 for lib in libSDL3.0 libavformat.61 libavcodec.61 libswscale.8 libswresample.5 libavutil.59; do
     universal "$lib.dylib" "deps/x86_64/lib/$lib.dylib" "deps/arm64/lib/$lib.dylib"
@@ -98,6 +105,8 @@ install -m755 run.sh "$contents/Resources/port/"
 printf '%s\n' "$version" > "$contents/Resources/port/bbport-version"
 install -m644 scripts/*.py "$contents/Resources/port/scripts/"
 install -m644 scripts/launch_settings.sh "$contents/Resources/port/scripts/"
+mkdir -p "$contents/Resources/port/scripts/seamless"
+install -m644 scripts/seamless/*.py "$contents/Resources/port/scripts/seamless/"
 cp -R patches "$contents/Resources/port/patches"
 if [[ -f benchmark/route.pad && -d benchmark/savedata ]]; then
     mkdir -p "$contents/Resources/benchmark"
@@ -166,13 +175,21 @@ FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 EOF
-if (( online_module )); then
+if (( online_module || seamless_module )); then
     cp LICENSES/GPL-3.0-or-later.txt "$lic/LICENSE-online-backend.txt"
     cp docs/ONLINE_PROVENANCE.md "$lic/online-provenance.txt"
     cp gpu/third_party/httplib/LICENSE "$lic/LICENSE-cpp-httplib.txt"
     for pair in protobuf:LICENSE openssl:LICENSE.txt miniupnp:miniupnpc/LICENSE json:LICENSE.MIT; do
         cp "deps/src/${pair%%:*}/${pair#*:}" "$lic/LICENSE-online-${pair%%:*}.txt"
     done
+fi
+if (( seamless_module )); then
+    cp gpu/bbseamless/PROVENANCE.md "$lic/seamless-provenance.txt"
+    cp gpu/bbseamless/source_files.json "$lic/seamless-source-files.json"
+    cp deps/src/Zydis/LICENSE "$lic/LICENSE-Zydis.txt"
+    cp deps/src/Zydis/dependencies/zycore/LICENSE "$lic/LICENSE-Zycore.txt"
+    cp deps/src/xbyak/COPYRIGHT "$lic/LICENSE-Xbyak.txt"
+    cp gpu/bbseamless/vendor/coop/monocypher/LICENCE.md "$lic/LICENSE-Monocypher.md"
 fi
 commit=$(git rev-parse --short HEAD)
 cat > "$lic/README.txt" <<EOF
@@ -181,6 +198,7 @@ Source code: https://github.com/Wooloomooloo2/bloodborne_mac_port/tree/$commit
 Existing port sources are GPL-2.0-or-later (LICENSE-bloodborne-mac-port.txt).
 Online module bundled: $online_module (1 = yes). When present, it includes GPL-3.0-or-later
 code; see online-provenance.txt and LICENSE-online-backend.txt.
+Seamless client bundled: $seamless_module (1 = yes); see seamless-provenance.txt and seamless-source-files.json.
 The other files are the notices for bundled libraries. No game files are included.
 EOF
 

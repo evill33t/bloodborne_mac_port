@@ -39,6 +39,10 @@ export BB_GPU_USER_DIR=${BB_GPU_USER_DIR:-${BB_USER_DIR:-$data/user}}
 mkdir -p "$BB_GPU_USER_DIR"
 if [[ -z ${PYTHON:-} ]]; then PYTHON=$(command -v python3 || true); fi
 if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1; fi
+# Seamless preparation re-execs with private credentials and a per-server save namespace.
+if [[ ${BB_ONLINE:-0} == 1 && ${BB_NET_BACKEND:-seamless} == seamless && ${BB_SEAMLESS_PREPARED:-0} != 1 ]]; then
+    exec "$PYTHON" scripts/seamless.py launch --data "$data" -- "$@"
+fi
 # BB_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
 game=${BB_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set BB_GAME_DIR)." >&2; exit 1; fi
@@ -48,10 +52,17 @@ original_game=$game
 game=$("$PYTHON" scripts/mods.py "$game" --out "$out" \
     --mods-dir "${BB_MODS_DIR:-$data/mods}" --config "${BB_MODS_CONFIG:-$data/mods.json}" \
     --enabled "${BB_MODS_ENABLED:-1}")
-# A private merged view lasts for this launch, including restarts. Cleanup only our own view.
-if [[ $game != "$(realpath "$original_game")" ]]; then
+# Private views only contain links and generated copies; remove both layers on exit.
+private_views=()
+if [[ $game != "$(realpath "$original_game")" ]]; then private_views+=("$game"); fi
+if [[ ${BB_ONLINE:-0} == 1 && ${BB_NET_BACKEND:-} == seamless ]]; then
+    game=$("$PYTHON" scripts/seamless.py view --game "$game" --out "$out")
+    private_views+=("$game")
+fi
+if ((${#private_views[@]})); then
     mod_game=$game
-    trap '"$PYTHON" -c '\''import shutil,sys; shutil.rmtree(sys.argv[1])'\'' "$mod_game"' EXIT
+    cleanup_views() { "$PYTHON" -c 'import shutil,sys; [shutil.rmtree(p) for p in sys.argv[1:]]' "${private_views[@]}"; }
+    trap cleanup_views EXIT
 fi
 "$PYTHON" scripts/prepare.py "$game" --out "$out"
 "$PYTHON" scripts/link_libc.py "$game" --out "$out"
@@ -143,8 +154,10 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     fi
     # The community server (BB_COMMUNITY_SERVER, community_server=): https only, plain http only
     # for a server on this Mac. Another address stops the launch here, with the reason.
-    community=$("$PYTHON" scripts/online.py community) || exit 1
-    if [[ ${BB_NET_BACKEND:-} == thd ]]; then
+    if [[ ${BB_NET_BACKEND:-} == seamless ]]; then
+        [[ -r ${BB_NET_MODULE:-out/gpu/libbbseamless.dylib} || -n ${BB_PREBUILT:-} ]] || { echo 'Co-op client module missing; rebuild with BB_SEAMLESS=ON.' >&2; exit 1; }
+    elif [[ ${BB_NET_BACKEND:-} == thd ]]; then
+        community=$("$PYTHON" scripts/online.py community) || exit 1
         SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py thd-overrides --user "${BB_USER_DIR:-$data/user}") || true
         export SHADPS4_HTTP_HOST_OVERRIDES_JSON
         export BB_THD_SERVER=${BB_THD_SERVER:-$community:18671} BB_THD_AUTH=${BB_THD_AUTH:-$community}
@@ -175,6 +188,7 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
         fi
     fi
 fi
+export BB_PATCHES_FILE="$out/patches.bin"
 probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then
     "$probe" "${probe_args[@]}" &

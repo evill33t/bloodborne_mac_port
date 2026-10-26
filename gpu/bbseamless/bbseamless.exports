@@ -79,3 +79,8 @@ _bbcoop_trophy_unlocked
 _bbcoop_window_closing
 _bbnet_resolve
 _bbseamless_init
+
+_bbseamless_install
+_bbseamless_frame
+
+_bbnet_start

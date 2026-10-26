@@ -1,5 +1,7 @@
 /* Exercise actual guest file operations on a linked overlay and writable saves. */
 #include "../src/runtime_file.c"
+
+void runtime_coop_file_opened(const char *path) { (void)path; }
 #include <assert.h>
 static int32_t guest_errno;
 int32_t *runtime_errno(void) { return &guest_errno; }

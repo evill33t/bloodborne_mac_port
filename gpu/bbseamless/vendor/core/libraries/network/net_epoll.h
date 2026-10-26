@@ -54,6 +54,9 @@ struct Epoll {
 #ifdef _WIN32
         epoll_close(epoll_fd);
         epoll_fd = nullptr;
+#elif defined(__APPLE__)
+        epoll_close(epoll_fd);
+        epoll_fd = -1;
 #else
         close(epoll_fd);
         epoll_fd = -1;

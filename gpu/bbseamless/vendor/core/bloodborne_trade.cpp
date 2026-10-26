@@ -326,6 +326,30 @@ std::vector<HeldGoods> HeldItemGoods() {
     return held;
 }
 
+// Native port: enumerate existing entries for the trade picker, on the game thread.
+std::vector<InventoryRow> HeldTradeInventory() {
+    std::vector<InventoryRow> rows;
+    const u64 data = PlayerGameData();
+    if (data < 0x10000) return rows;
+    const u32 echoes = TradeHeld({BloodborneCoop::TradeItemKind::Echoes, 0, 1});
+    if (echoes) rows.push_back({1, 0, echoes, 0});
+    for (const u64 entry : InventoryEntries(data)) {
+        const u32 id = ReadValue<u32>(entry, 4);
+        const s32 count = ReadValue<s32>(entry, 8);
+        if (count <= 0) continue;
+        const bool goods = (id & 0xF0000000) == GoodsCategory;
+        const u32 kind = goods ? 2 : 3;
+        // Empty weapon slots (Bare Fists) are not inventory objects to offer.
+        if (!goods && (id == 0 || GaitemOf(ReadValue<u32>(entry, 0)) == 0)) continue;
+        const u32 item = goods ? id & ~GoodsCategory : id;
+        const BloodborneCoop::TradeItem checked{static_cast<BloodborneCoop::TradeItemKind>(kind), item, 1};
+        if (BloodborneCoop::TradeItemsProblem(std::span{&checked, 1}, false)) continue;
+        rows.push_back({kind, item, static_cast<u32>(count), ReadValue<u32>(entry, 0)});
+        if (rows.size() == 512) break;
+    }
+    return rows;
+}
+
 std::vector<u32> HeldWeaponIds() {
     std::vector<u32> held;
     const u64 data = PlayerGameData();

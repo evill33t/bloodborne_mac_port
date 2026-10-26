@@ -31,7 +31,8 @@ highest resolution each Mac allows; 90 and 120 FPS caps are there for ProMotion 
 **Releases:** 0.5.x is the stable line. **0.6** will be **MetalFX frame generation** (#64, from
 @evill33t): it comes out as pre-releases first and only becomes the default once it's well tested.
 The opening-movie freeze and crash are fixed in 0.5.8, and the slowdowns on 16-18 GB Macs (#69)
-in 0.5.9. Online play (#9) is still in progress.
+in 0.5.9. This branch adds [Seamless Co-op](docs/SEAMLESS_COOP_CLIENT.md), with
+`bloodborne.phobos.services` as its default server and two-client Mac gameplay validation.
 
 ### New in 0.5.9: 16-18 GB Macs run at full speed
 
@@ -338,11 +339,12 @@ scrolling, even on a 13" MacBook Air):
   and **skip intro videos** (straight to the title screen, no Sony and FromSoftware logos).
 - **Locations:** the game folder (checked before Play is enabled) and the save folder (it
   offers to copy your saves to a new folder; the originals stay where they were).
-- **Online** (second tab): play online on or off; the co-op pool, either **The Hunter's Dream**
-  with **Sign in with Discord** (the window shows the page and the code, then who you are
-  signed in as, with **Sign Out**) or a **shadNet server** with its address, account name and
-  password; UPnP port mapping and the co-op UDP port. Passwords and tokens go to your login
-  keychain, never into a file or the log. Setup guide: [docs/ONLINE.md](docs/ONLINE.md).
+- **Online** (second tab): play online on or off; **Seamless Co-op** (the default for new
+  configurations) uses `bloodborne.phobos.services`, automatic registration and separate
+  co-op saves. **The Hunter's Dream** remains available with **Sign in with Discord** (the
+  window shows the page and code, then who you are signed in as, with **Sign Out**) or a **shadNet server** with its address, account name and
+  password; UPnP port mapping and the co-op UDP port. Legacy passwords and tokens use the login
+  keychain; the automatic Seamless identity uses an owner-only file. Setup guide: [docs/ONLINE.md](docs/ONLINE.md).
 - **Show launcher every time:** untick it to start the game directly next time; hold **⌥
   (Option)** while opening the app to get the window back.
 
@@ -688,11 +690,18 @@ password), Backspace deletes, Enter confirms, Esc cancels and leaves the field a
 field gets exactly what was typed; the game's own length limit applies (the log line
 `ImeDialog opened (..., up to N chars)` shows it).
 
-### Online play (shadNet)
+### Online play
 
-Step-by-step setup, both pools and a troubleshooting table: [docs/ONLINE.md](docs/ONLINE.md).
-The Hunter's Dream is the default co-op pool (bbhost and Windows-port players, works through
-any router); shadNet is the alternative described below.
+Choose **Seamless Co-op** in the launcher's Online tab for the integrated
+[bloodborne-server client](docs/SEAMLESS_COOP_CLIENT.md), using
+`bloodborne.phobos.services` by default. Turn **Play online** on; registration is automatic.
+Use **F6** for teams and trading, **F8** for map/travel, **G** for pings and **F7** for free
+camera. Offline saves are preserved in a separate namespace. The branch includes the
+reference's game hooks and native Mac controls/HUD; see the linked guide for tested behavior
+and the remaining campaign, DLC and cross-platform validation limits.
+
+Step-by-step setup and troubleshooting for the retained THD and shadNet pools:
+[docs/ONLINE.md](docs/ONLINE.md). The following section describes those legacy pools.
 
 Messages, bloodstains and ghosts come from the community game server (The Hunter's Dream);
 bells and summons go through a shadNet server (`srv.shadps4.net:31313` by default) with a
@@ -716,7 +725,7 @@ or with the same settings as environment variables in `launch.conf` (`BB_ONLINE=
 `BB_SHADNET_NPID`, `BB_SHADNET_PASSWORD`). Optional: `shadnet_server=host:port`,
 `shadnet_webapi=http://host:31315`, `community_server=https://...`, `upnp=0` (no UPnP port
 mapping), `p2p_port=3658` (the UDP port co-op traffic uses; the PS4's 3658 by default, `0` for
-any free port), `online_pool=shadnet` or `huntersdream` (The Hunter's Dream by default; see below). An account is needed to sign in: without one the module loads but no shadNet user
+any free port), `online_pool=shadnet` or `huntersdream`. An account is needed to sign in: without one the module loads but no shadNet user
 connects, and the game stays offline. `run.sh` writes `user/host_overrides.json` for each launch (the game's server
 `ss4.scej-network.jp` → the community server; summon signs → the shadNet WebAPI when it has the
 Bloodborne summon service), and the log starts with `Online: module ...` when the module is in
@@ -746,8 +755,8 @@ python3 scripts/online.py signin --ini ~/Library/Application\ Support/Bloodborne
 ```
 
 which writes `online_pool=huntersdream`, `thd_online_id=` and `thd_token=` (keep the token to
-yourself) and leaves the rest of the file alone. The Hunter's Dream is the default pool: a file
-that names no pool uses it, unless it holds only a shadNet account; `online_pool=shadnet` picks
+yourself) and leaves the rest of the file alone. A THD account without an explicit pool keeps
+using The Hunter's Dream; `online_pool=shadnet` picks
 the shadNet pool. The log then starts with `Co-op: The Hunter's Dream as ...`.
 That backend is Supermedo's port of droogie's bbhost (`gpu/bbnet/thd`, GPL-3.0-or-later).
 The server tells clients apart by their name and version and asks each port for its own:

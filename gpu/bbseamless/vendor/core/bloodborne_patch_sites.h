@@ -308,6 +308,14 @@ inline constexpr auto CoopSites = std::to_array<CoopSite>({
     {"position receive entry", "enemy owner", CoopSiteKind::Hook, 0x018EEBB0, "45 8B 6C 24 FC"},
     // The game's hand-out of enemies (see HandOutSeconds): a guest's receive of 0x17.
     {"hand-out received", "enemy owner", CoopSiteKind::Hook, 0x018ED083, "49 89 D8 89 C3 85 DB"},
+    // Native port: include the cutscene observers in the same preflight as the team gate.
+    {"cutscene Init", "team lobby", CoopSiteKind::Hook, 0x01CFA050, "55 48 89 E5 41 57 41 56"},
+    {"cutscene Prolog", "team lobby", CoopSiteKind::Hook, 0x01CFA310, "55 48 89 E5 41 57 41 56"},
+    {"cutscene Load", "team lobby", CoopSiteKind::Hook, 0x01CFA4C0, "55 48 89 E5 41 57 41 56"},
+    {"cutscene Play", "team lobby", CoopSiteKind::Hook, 0x01CFA670, "55 48 89 E5 41 57 41 56"},
+    {"cutscene End", "team lobby", CoopSiteKind::Hook, 0x01CFB060, "55 48 89 E5 41 57 41 56"},
+    {"cutscene Epilog", "team lobby", CoopSiteKind::Hook, 0x01CFB350, "55 48 89 E5 41 57 41 56"},
+    {"cutscene EpilogWait", "team lobby", CoopSiteKind::Hook, 0x01CFB5F0, "55 48 89 E5 41 56 53"},
     // Phase 5: the title's save load held for the team, and the title menu seen again.
     {"title load state", "team lobby", CoopSiteKind::Hook, 0x0195B480, "55 48 89 E5 41 57"},
     {"title menu state", "team lobby", CoopSiteKind::Hook, 0x0195AE80, "55 48 89 E5 41 57"},

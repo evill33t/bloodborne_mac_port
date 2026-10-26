@@ -9,15 +9,21 @@
 #include "video_core/renderer_metal/mtl_device.h"
 
 #include <cstdio>
+#include <array>
 
 namespace BbOverlay::MetalBackend {
 
 namespace {
 MTLPixelFormat expected_format = MTLPixelFormatInvalid;
+id<MTLDevice> overlay_device;
+std::array<id<MTLTexture>,4> portraits;
+std::array<u32,4> portrait_versions{};
+NSMutableArray<id<MTLTexture>>* frame_portraits;
 }
 
 bool Init(Metal::Device& device, u32 pixel_format) {
     expected_format = MTLPixelFormat(pixel_format);
+    overlay_device=(__bridge id<MTLDevice>)device.NativeDevice();
     return ImGui_ImplMetal_Init((__bridge id<MTLDevice>)device.NativeDevice());
 }
 
@@ -39,6 +45,7 @@ void Frame(void* command_buffer, void* target, const std::function<void()>& buil
     pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
     pass.colorAttachments[0].storeAction = MTLStoreActionStore;
     ImGui_ImplMetal_NewFrame(pass);
+    frame_portraits=[NSMutableArray array];
     build();
     ImDrawData* draw_data = ImGui::GetDrawData();
     if (!draw_data || draw_data->CmdLists.Size == 0) {
@@ -48,6 +55,25 @@ void Frame(void* command_buffer, void* target, const std::function<void()>& buil
     encoder.label = @"Overlay";
     ImGui_ImplMetal_RenderDrawData(draw_data, cmdbuf, encoder);
     [encoder endEncoding];
+    if(frame_portraits.count) {
+        NSArray* keepalive=[frame_portraits copy];
+        [cmdbuf addCompletedHandler:^(id<MTLCommandBuffer>) { [keepalive count]; }];
+    }
+}
+
+void* PortraitTexture(unsigned slot,u32 version,const u8* rgba,u32 side) {
+    if(slot>=portraits.size() || !version || !rgba || side!=128 || !overlay_device) return nullptr;
+    if(!portraits[slot] || portrait_versions[slot]!=version) {
+        MTLTextureDescriptor* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+            width:side height:side mipmapped:NO];
+        desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead;
+        id<MTLTexture> texture=[overlay_device newTextureWithDescriptor:desc];
+        if(!texture) return nullptr;
+        [texture replaceRegion:MTLRegionMake2D(0,0,side,side) mipmapLevel:0 withBytes:rgba bytesPerRow:side*4];
+        portraits[slot]=texture;portrait_versions[slot]=version;
+    }
+    [frame_portraits addObject:portraits[slot]];
+    return (__bridge void*)portraits[slot];
 }
 
 } // namespace BbOverlay::MetalBackend

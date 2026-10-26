@@ -54,6 +54,10 @@ else()
     set(BB_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 message(STATUS "bbgpu target architecture: ${BB_TARGET_ARCH}")
+option(BB_SEAMLESS "Build the x86-64 seamless co-op client module" ON)
+if(APPLE AND BB_TARGET_ARCH STREQUAL "x86_64" AND BB_SEAMLESS)
+    add_subdirectory(bbseamless)
+endif()
 
 # Vulkan-Hpp's types only (the Metal renderer keeps shadPS4's Vulkan-named classes): headers, no
 # loader. Elsewhere the reference Linux path links the loader.

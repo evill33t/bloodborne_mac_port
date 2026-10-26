@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <set>
+#include <atomic>
+#include <chrono>
+#include "bbport_coop_ui.h"
 #include <string_view>
 #include <xxhash.h>
 
@@ -60,6 +63,33 @@ TextureCache::TextureCache(Metal::Device& device_, Vulkan::Scheduler& scheduler_
 }
 
 TextureCache::~TextureCache() = default;
+
+void TextureCache::CaptureCoopPortrait(Image& image) {
+    if (!BbCoopOverlay::WantsPortrait() || image.info.size.width!=BB_COOP_MODEL_WIDTH ||
+        image.info.size.height!=BB_COOP_MODEL_HEIGHT ||
+        False(image.flags & ImageFlagBits::GpuModified)) return;
+    const auto format=image.info.pixel_format;
+    if(format!=vk::Format::eR8G8B8A8Srgb && format!=vk::Format::eB8G8R8A8Srgb) return;
+    static std::atomic<int64_t> captured_at{};
+    const auto now=std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    auto previous=captured_at.load();
+    if(now-previous<500 || !captured_at.compare_exchange_strong(previous,now)) return;
+    const auto download=runtime.GetStagingPool().Request(BB_COOP_MODEL_BYTES,MemoryType::HostCached,16,true);
+    const vk::BufferImageCopy copy{
+        .bufferOffset=download.offset,
+        .imageSubresource={.aspectMask=vk::ImageAspectFlagBits::eColor,.mipLevel=0,
+                           .baseArrayLayer=0,.layerCount=1},
+        .imageOffset={0,0,0},.imageExtent={BB_COOP_MODEL_WIDTH,BB_COOP_MODEL_HEIGHT,1}};
+    runtime.DownloadImage(&image,download.buffer,std::span{&copy,1});
+    scheduler.DeferPriorityOperation([this,download,bgra=format==vk::Format::eB8G8R8A8Srgb] {
+        // Metal staging storage is coherent; the deferred operation runs after GPU completion.
+        std::vector<u8> rgba(download.mapped,download.mapped+BB_COOP_MODEL_BYTES);
+        if(bgra) for(size_t i=0;i<rgba.size();i+=4) std::swap(rgba[i],rgba[i+2]);
+        BbCoopOverlay::PublishModel(rgba.data(),rgba.size());
+        runtime.GetStagingPool().FreeDeferred(download);
+    });
+}
 
 void TextureCache::ProcessDownloadImages() {
     std::unique_lock lk{download_images_mutex};
@@ -705,6 +735,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
     if (refresh) {
         UpdateImage(image_id);
     }
+    if(desc.type!=BindingType::Storage) CaptureCoopPortrait(image);
     if (memo && !BbToggle::Disabled(BbToggle::TextureViewMemo)) {
         if (memo->image_id == image_id && memo->backing == image.backing && memo->view_id) {
             return slot_image_views[memo->view_id];
@@ -730,6 +761,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
     }
     image.usage.render_target = 1u;
     UpdateImage(image_id);
+    CaptureCoopPortrait(image);
 
     // Register meta data for this color buffer
     if (desc.info.meta_info.cmask_addr) {

@@ -18,6 +18,9 @@
 #endif
 #include "bbcoop/bbcoop_internal.h"
 #include "core/memory.h"
+#ifdef __APPLE__
+#include "mac_memory.h"
+#endif
 
 extern "C" int runtime_memory_protection(uintptr_t address, uintptr_t* start, uintptr_t* end,
                                          uint32_t* prot);
@@ -86,6 +89,11 @@ bool HostRegion(uintptr_t address, Region& found) {
 // /proc/self/maps, read again when an address is not in it or it is older than a moment: the
 // co-op code asks about stack words in bursts (a call chain), one region after another.
 bool HostRegion(uintptr_t address, Region& found) {
+#ifdef __APPLE__
+    uintptr_t first,last;uint32_t protection;
+    if (!BbSeamless::HostRegion(address,first,last,protection)) return false;
+    found={first,last,protection};return protection!=0;
+#else
     using Clock = std::chrono::steady_clock;
     static std::mutex mutex;
     static std::vector<Region> regions;
@@ -111,6 +119,7 @@ bool HostRegion(uintptr_t address, Region& found) {
         }
     }
     return FindIn(regions, address, found) && found.prot != 0;
+#endif
 }
 #endif
 

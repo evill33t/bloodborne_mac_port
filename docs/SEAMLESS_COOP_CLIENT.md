@@ -1,89 +1,126 @@
-# Seamless co-op client checkpoint
+# Seamless co-op on macOS
 
-Paused at the owner's request on 2026-10-26. Branch: `codex/seamless-coop-client`.
+This branch integrates the online client from
+[lKaniel/bloodborne-server](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1),
+pinned at `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`. The default server is
+`bloodborne.phobos.services`. This repository builds the client; the backend runs separately.
 
-The intended scope is every online client feature from
-[lKaniel/bloodborne-server](https://github.com/lKaniel/bloodborne-server), connecting to a
-separately hosted backend. No backend executable, deployment, game asset or save is included.
+## Start playing
 
-## Current state
+Build dependencies with `bash scripts/macos/bootstrap_deps.sh`, then run
+`bash build_macos.sh`. Both online modules are included by default. Choose **Seamless Co-op**
+in the launcher's **Online** tab and enable **Play online**. Select Continue or Load Game to choose your character; its team
+screen opens before entering the world. A new configuration selects
+Seamless; existing explicit THD/shadNet choices and accounts retain their pool. Offline play
+remains the default until online play is enabled.
 
-- Started from upstream `master` at `c5fb32273ebbf40207e90344bb695c344f622de2`.
-- Merged the published online foundation from PR #78 at
-  `f83caab12b6faa07ff34f8e1f3434c77baeacc59`, retaining its ancestry and authorship.
-- Imported the reference client's networking, game hooks and shared wire/value code from
-  `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1` into `gpu/bbseamless/`.
-- Added an initial standalone CMake target and host callback adapter. They are a prototype:
-  **the new module does not build yet and is not connected to the runtime, launcher,
-  packaging or Metal overlay.** The regular build does not include this target.
-- Existing online behavior remains the PR #78 implementation. The imported seamless features
-  are not available in the game on this branch yet.
+For a command-line launch, set the following in `bbport.ini`:
 
-## Intended feature coverage
+```ini
+online=1
+online_pool=seamless
+seamless_server=bloodborne.phobos.services:31314
+seamless_host_rules=off
+seamless_harder_enemies=off
+```
 
-The reference includes team creation/invites/readiness and joining a running team, shared
-world/event/enemy state, independent travel, party HUD and portraits, compass/map/pings,
-down/revive/wipe or spectating, item/weapon/echo trading, shared chalices, retained bloodstains,
-optional harder/scaled enemies and host rules (rot and group travel/voting). Its client code
-also includes invasion/duel support. These are targets for integration, not validated features
-of this Mac branch.
+Registration is automatic. A persistent account belongs to each server and is stored in an
+owner-only file under `seamless/identities/` in the data folder. Keep this file when moving or
+backing up the client; deleting it creates a different account. Credentials are not printed.
+Co-op saves live under `user-seamless/<server-hash>/` and are seeded once from a copy of the
+existing `user/savedata`. Offline saves are preserved. An explicit `BB_USER_DIR` selects that
+folder instead. Game assets remain unchanged: checked event copies and links form a temporary
+private game view, removed on exit. Generated event caches include input and output hashes.
 
-The client must run in the x86-64 game process, using the existing native arm64 Metal GPU
-host. Port the necessary snapshots/actions across that process boundary; do not replace the
-renderer or load x86-64 game hooks into the GPU host. Keep offline play and the existing THD
-backend selectable. Use an isolated co-op save directory and generated overlays from the
-player's files. Refuse incompatible executable/hook/patch combinations before mutation.
+Co-op uses the reference's fixed 60 FPS game timing. The renderer still runs in the native
+arm64 Metal host; game hooks and networking run in the x86-64 Rosetta game process.
 
-## Server configuration and next step
+## Controls and features
 
-The reference defaults to `127.0.0.1:31314` for the co-op link and
-`http://127.0.0.1:31315` for the Web API. These are local-machine defaults, not a hosted public
-co-op service. The project documents player-hosted servers and TCP 31313, 31315, 20443 plus
-UDP 31314. A remote Mac client must use the actual host address, not its own loopback.
+| Control | Action |
+| --- | --- |
+| F6, or Co-op Team in the settings overlay | Team creation, invites by name/code, online hunters, readiness, world selection, join/leave and death mode |
+| F8, or hold the controller touchpad | World map, lamps, saved exploration, cleared areas, teammates and own bloodstain; travel to lit lamps |
+| G, or double-tap the touchpad | Ping where the camera aims; right-click the map to ping a location |
+| A single touchpad tap | The game's original gesture menu, after the double-tap interval |
+| F7, or L3 + Square | Free camera; use again to return |
+| Team menu > Trade items | Offer carried goods, equipment or Blood Echoes; confirm the offer, then the recipient accepts or declines |
+| Attack a downed teammate | Build revive progress; holding Circle while downed gives up |
+| Options during a cutscene | Vote to skip |
 
-Our seamless client defaults to `bloodborne.phobos.services:31314`, with its Web API at
-`http://bloodborne.phobos.services:31315` and game services at
-`http://bloodborne.phobos.services:20443`, requested by the owner on 2026-10-26. The optional
-module applies its network defaults only when no explicit environment override is present.
-These defaults do not enable the unfinished module or change the existing THD backend.
-Hosted mode keeps TCP 31313 on loopback; public clients need UDP 31314 and TCP 31315/20443.
-The default host's public link key is pinned in `gpu/bbseamless/client.h`, read from the
-deployed server over authenticated SSH. Explicit server-key overrides survive, and a custom
-server does not inherit our host's key.
+The client retains the pinned reference's shared world/events/enemy ownership and HP,
+independent travel and session restoration, team HUD/portraits/compass/pings, down/revive/wipe
+and spectating, rot, trading (including equipment payloads), chalice sharing, bloodstain
+retention, boss/event adaptations, shared trophies, optional enemy scaling/harder enemies,
+team duels, and invasion requests. Incoming trophies are recorded in the co-op save folder's
+`trophies.log`, using the port's existing `id timestamp` format, without echoing them back.
+The map uses a coordinate chart and exploration shading; it does not bundle a terrain atlas.
 
-The backend is now deployed on SSH host `opc`, using the existing `/docker/docker-compose.yml`
-(the active file uses `.yml`, not `.yaml`) and service `bloodborne-server`. It is built natively
-for ARM64 from the pinned reference revision above. Operational files and the runbook are under
-`/docker/bloodborne-server`; persistent state is under `/docker/data/bloodborne-server`.
+The team leader's launcher settings choose rot, group travel, travel voting and enemy scaling.
+The harder-enemy field accepts `off` or three multipliers from 1 to 10 (HP, damage, poise).
+Trade offers reserve the sender's items until answered; stale offers and unavailable inventory
+are checked again on the game thread. World deletion requires an explicit confirmation.
 
-Validation on 2026-10-26: eight focused upstream checks passed; an isolated 20-second bbload
-simulation linked three players, started their team and relayed 2,768 packets without refusals
-or measured loss. The live service is healthy, advertises `bloodborne.phobos.services`, returns
-HTTP 200 for game discovery and WebAPI status, and refuses unlinked HTTP mutations with 403.
-External checks through that hostname passed on TCP 20443/31315 and UDP 31314; the UDP cookie's
-public key matches the key read over SSH. A controlled restart preserved the server identity;
-an initial consistent data snapshot and the original Compose file were backed up under
-`/docker/backups`. All 49 existing containers retained their IDs and start times.
+## Server and compatibility
 
-Hosted mode, account/HTTP admission and build/protocol checks remain enabled. The reference is
-a development build (release `dev`, co-op frame protocol 9, link version 4). The separate Mac
-client integration still needs completing; no live game or Windows/Mac co-op is established by
-the server checks. Resume the client against this pinned server protocol, retaining its
-authentication and build/asset checks. The host firewalld rules and Oracle ingress allow only
-the three public game ports; TCP 31313 remains bound to loopback and stats are disabled.
+| Service | Default endpoint |
+| --- | --- |
+| Authenticated encrypted co-op link | UDP `bloodborne.phobos.services:31314` |
+| Web API | HTTP `bloodborne.phobos.services:31315` |
+| Game discovery, messages, ghosts and bloodstains | HTTP `bloodborne.phobos.services:20443` |
 
-## Validation and remaining work
+Clients use an ephemeral outbound UDP socket; they do not require a router port forward.
+Hosted mode tunnels the internal RPC service over the authenticated UDP link; TCP 31313 stays
+on the server's loopback interface. The default host's link public key is pinned:
+`1562e07491a27d6c7aea2ed37364b8839a4a924886afae1ff6eae5c483ea3424`.
+HTTP endpoints retain the upstream linked-client admission rules. They use the upstream HTTP
+protocol; only the co-op link is encrypted. Existing THD HTTPS verification remains enabled.
 
-Standalone CMake configuration succeeded with the existing x86-64 dependencies, a temporary
-Zydis 4.1.1 source checkout and a temporary Xbyak checkout. Compilation failed on incomplete
-header dependencies (`orbis_error.h`, `error_codes.h`, `bbport_settings.h`) and the Linux
-`sys/epoll.h` interface. No successful client library, runtime build, sign-in, game launch or
-multiplayer test is claimed. Local build log: `out/seamless-build.log`.
+`seamless_server` or `BB_SHADNET_SERVER` overrides the link endpoint.
+`BB_SHADNET_WEBAPI` and `BB_SEAMLESS_SERVICES` override its HTTP endpoints.
+`BB_SHADNET_SERVER_KEY` can explicitly pin another server. A custom host never inherits our
+host's key. `host_overrides.custom.json` in the chosen save folder takes precedence over the
+generated HTTP routes. Advanced explicit credentials require both `BB_SHADNET_NPID` and
+`BB_SHADNET_PASSWORD`.
 
-On resumption: complete the dependency closure and reproducible pinned bootstrap; adapt
-readiness/epoll and Mach memory/protection queries; finish module ABI/loading, checked hook
-admission and guest callback lifetimes; port event/HUD generation and isolated saves; wire
-team/HUD/map/trade/host-rule actions into the Mac UI and packaging; run focused transport and
-hook tests, then authenticated gameplay and a real multi-client session against our server.
-Matching the protobuf schema alone does not establish Windows/Mac compatibility: the reference
-also checks build and asset identities.
+The server runs the pinned development protocol: release `dev`, frame protocol 9, link version
+4, with hosted admission, proof-of-work registration and build checks enabled. Invasions are
+disabled by the upstream server default on this deployment. The client exposes the requests
+and allow-invaders switch; enabling that server feature and testing an actual invasion remains
+separate work. No Windows/Mac interoperability claim follows from the Mac/Mac test.
+
+Hook admission checks the supported 1.09 title IDs and original instruction signatures before
+mutation. The known 1.09 executable with stale 1.00 SFO metadata is accepted only by its exact
+container SHA-256. Unknown images, conflicting hook bytes, missing libraries or ABI mismatch
+stop launch with an error. Module identity is derived from its source contents. The cross-
+process UI uses versioned fixed-width snapshots and bounded command/model queues; no guest
+pointers or x86 callbacks cross into the arm64 renderer.
+
+## Validation on 2026-10-26
+
+Two real Mac game processes joined the same persistent server world and rendered one another.
+The test used isolated copies of a fresh base-game save, the player's original game assets,
+and the native Metal renderer. Metal validation was enabled for the extended runs.
+
+- Both clients authenticated automatically; all 62 checked co-op feature groups were enabled.
+- A 10 Blood Echo trade changed the sender from 300 to 290 and recipient from 300 to 310.
+  The visible trade UI also sent a separate offer; declining returned its reserved echoes.
+- Actual Metal portrait readback crossed to the game process, was sent to the server, and
+  arrived at the other client. Map, lamps, compass and pings displayed live team state.
+- A lethal fall put the guest down. The host's attacks completed revival, and the guest
+  recovered at half HP. Both clients asserted the down-to-up transition.
+- A team duel reached the countdown and fighting state; cancellation restored the saved state.
+
+Local evidence lives under `out/ingame-seamless-2026-10-26/` (excluded from Git). Scripts and
+logs distinguish successful assertions from failed fixture attempts; forced death is not a
+revive test, and `cut-link` takes seconds. Original seed hashes were checked after each run.
+Final reconnect/travel results are recorded in `docs/SEAMLESS_COOP_VALIDATION.md`.
+
+`build_macos.sh --test` includes the launch identity/save/route checks, actual dylib ABI and
+fail-closed image checks, Mac socket readiness/Mach protections/touch gestures, shared trophy
+persistence, existing online imports/codec/session tests, runtime pad tests, launcher model
+checks and process-ring tests. See [source provenance](../gpu/bbseamless/PROVENANCE.md).
+
+This is bounded gameplay validation, not a complete campaign or DLC/chalice/boss/invasion
+playthrough. Those source paths are integrated, but their complete in-game behavior and a
+mixed Windows/Mac session remain unverified.

@@ -294,7 +294,7 @@ final class FakeSecrets: SecretStore {
 do {
     let defaults = OnlineSettings(ini: IniFile())
     check(defaults == OnlineSettings(), "empty ini = defaults")
-    check(!defaults.online && defaults.pool == .huntersdream && defaults.upnp && defaults.p2pPort == 3658, "default online settings")
+    check(!defaults.online && defaults.pool == .seamless && defaults.upnp && defaults.p2pPort == 3658, "default online settings")
     check(defaults.shadnetServer == "" && defaults.shadnetNpid == "" && defaults.shadnetPassword == .none, "default shadNet: nothing")
     check(defaults.thdOnlineId == "" && defaults.thdToken == .none && !defaults.hasSecretInFile, "default Hunter's Dream: nothing")
 
@@ -304,7 +304,7 @@ do {
     check(!read.upnp && read.p2pPort == 0 && read.hasSecretInFile, "read upnp, port, a token in the file")
     // The shell's rules: flags are exactly 0 or 1; a bad port or pool is ignored.
     let odd = OnlineSettings(ini: IniFile(text: "online=yes\nupnp=2\np2p_port=70000\nonline_pool=psn\nshadnet_password=\n"))
-    check(!odd.online && odd.upnp && odd.p2pPort == 3658 && odd.pool == .huntersdream && odd.shadnetPassword == .none, "invalid values -> defaults")
+    check(!odd.online && odd.upnp && odd.p2pPort == 3658 && odd.pool == .seamless && odd.shadnetPassword == .none, "invalid values -> defaults")
     check(OnlineSettings.port(from: "3658") == 3658 && OnlineSettings.port(from: "0") == 0 && OnlineSettings.port(from: "65535") == 65535, "ports")
     check(OnlineSettings.port(from: "65536") == nil && OnlineSettings.port(from: "") == nil && OnlineSettings.port(from: "12a") == nil, "bad ports")
     check(OnlineSettings.port(from: "-1") == nil && OnlineSettings.port(from: "123456") == nil && OnlineSettings.port(from: "٣") == nil, "digits only, five at most")
@@ -312,7 +312,7 @@ do {
     // only a shadNet account.
     check(OnlineSettings(ini: IniFile(text: "online=1\nshadnet_npid=hunter\n")).pool == .shadnet, "only a shadNet account: shadNet")
     check(OnlineSettings(ini: IniFile(text: "shadnet_npid=hunter\nthd_online_id=dreamer\n")).pool == .huntersdream, "both accounts: The Hunter's Dream")
-    check(OnlineSettings(ini: IniFile(text: "online=1\n")).pool == .huntersdream, "no account: The Hunter's Dream")
+    check(OnlineSettings(ini: IniFile(text: "online=1\n")).pool == .seamless, "no account: The Hunter's Dream")
 
     // Round trip: every key written as the shell reads it; other keys and the order kept.
     var file = IniFile(text: "# header\nupscaler=metalfx\ncommunity_server=https://example.org\nshadnet_webapi=http://example.org:31315\n")

@@ -43,6 +43,8 @@ std::vector<HeldGoods> HeldKeyGoods();
 // Kaniel 2026-10-25 (duels): the goods the player holds that are not key items (consumables,
 // materials), with their counts (the game's thread).
 std::vector<HeldGoods> HeldItemGoods();
+struct InventoryRow { u32 kind, id, count, handle; };
+std::vector<InventoryRow> HeldTradeInventory();
 // The weapon ids (with their upgrade level) in the player's inventory, not the storage.
 std::vector<u32> HeldWeaponIds();
 // The player's gestures (PlayerGameData +0x5B8, see DecodeGestureSlot), learned or not; none when
