@@ -13,6 +13,7 @@
 #include "fps/patch_guard.h"
 #include "gpu/bbgpu.h"
 #include "gpu_process.h"
+#include "runtime_patch_guard.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang.
 #endif
@@ -571,6 +572,10 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
     if (patch_check==2) fail("patch set overlaps installed adaptive FPS timing");
     if (patch_check) fail("bad patch entry or file extent");
     unsigned char data[4096];
+    const char *conflict=NULL;
+    int checked=runtime_validate_patch_set(f,count,&conflict);
+    if (checked==2) { fprintf(stderr,"Patch conflict: %s\n",conflict); fail("patch set changes required runtime code"); }
+    if (checked) fail("bad patch entry or file extent");
     for (uint64_t i=0;i<count;++i) {
         uint64_t offset=read64(f), length=read64(f);
         if (!length || length>sizeof(data) || !mapped(segments,ns,offset,length) || fread(data,1,length,f)!=length)

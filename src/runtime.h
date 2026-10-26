@@ -112,6 +112,8 @@ void runtime_install_context_lock(unsigned char *image, uint64_t image_size);
 int runtime_install_mac_settings(unsigned char *image, uint64_t image_size);
 int runtime_install_exit_menu(unsigned char *image, uint64_t image_size);
 void runtime_mac_settings_pad(uint32_t *buttons);
+/* Reject patches that change active hook prologues or the retained timed wait. */
+const char *runtime_patch_conflict(uint64_t offset, const unsigned char *data, size_t size);
 void runtime_context_lock_stats(void);
 /* The hook name while another thread holds the context lock, else NULL (diagnostics). */
 const char *runtime_context_lock_other(void);
