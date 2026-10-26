@@ -60,8 +60,19 @@ HTTP routes/key pin/overrides, the real dylib's ABI and NID imports, rejected ho
 remaining unchanged, kqueue readiness/EOF/failed modifications, Mach permissions, touchpad
 hold/double-tap behavior, shared trophy persistence/deduplication, runtime pad handling,
 legacy online codec/session behavior, launcher settings and shared process rings.
-Full command and packaging results are retained in `out/mac-tests-final.log` and
+The canonical `build_macos.sh --test` completed with exit status 0. The final Python launch
+suite has five passing cases, including custom save-folder isolation. The shell settings suite
+also verifies legacy-credential isolation when Seamless is explicitly selected. Results are
+retained in `out/mac-tests-final.log`, `out/seamless-launch-final.log` and
 `out/seamless-package.log`.
+
+The signed self-contained app (code revision `89293cb`, 155 MB; ZIP 55 MB) passed dependency
+checks, a real dylib ABI/image-guard probe and deep strict signature verification. A further
+in-game run used its bundled Python, scripts, runtime and Metal host: automatic authentication,
+62/62 hooks, world entry, map and Team menu all worked. The launcher's custom save selection
+was copied to the per-server namespace and its original files remained unchanged. The app's
+signature still verified after gameplay. Evidence: `out/ingame-seamless-2026-10-26/package/`.
+All test processes were stopped; no app was installed over the user's build.
 
 ## Coverage limits
 
