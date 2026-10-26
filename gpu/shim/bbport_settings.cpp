@@ -25,7 +25,7 @@ const char* Path() {
 bool OwnedKey(const std::string& key) {
     static constexpr const char* owned[] = {
         "upscaler", "preset", "sharpen", "sharpness", "jitter", "reactive", "object_motion",
-        "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps",
+        "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps", "achievement_banners",
         "frame_pacing", "framegen",
         "model_lod", "output_res",
         "live_resolution", "shader_compile", "renderer",
@@ -76,6 +76,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.reactive_max = Clamp(f, 0.0f, 1.0f);
     } else if (key == "debug_view") {
         v.debug_view = std::clamp(i, 0, DebugViewCount - 1);
+    } else if (key == "achievement_banners") {
+        v.achievement_banners = i != 0;
     } else if (key == "show_fps") {
         v.show_fps = i != 0;
     } else if (key == "frame_pacing") {
@@ -307,7 +309,7 @@ void Save() {
                  "# bbport settings (in-game menu: " BBPORT_MENU_KEYS " / L3+R3)\n"
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
-                 "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\nframegen=%d\nmouse_look=%d\n"
+                 "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\nframegen=%d\nachievement_banners=%d\nmouse_look=%d\n"
                  "mouse_sensitivity=%.2f\nmouse_invert_y=%d\n",
                  UpscalerName(saved_upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
@@ -315,6 +317,7 @@ void Save() {
                  v.reactive_scale.load(), v.reactive_threshold.load(), v.reactive_max.load(),
                  v.debug_view.load(), int(v.show_fps.load()), int(v.frame_pacing.load()),
                  int(v.framegen_forced ? v.saved_framegen : v.framegen.load()),
+                 int(v.achievement_banners.load()),
                  int(v.mouse_look.load()), v.mouse_sensitivity.load(),
                  int(v.mouse_invert_y.load()));
     // Read by patches.py at start.

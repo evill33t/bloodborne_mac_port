@@ -8,8 +8,7 @@ struct LauncherView: View {
 
     @ObservedObject var model: LauncherModel
 
-    private enum Page: Hashable { case general, advanced }
-    @State private var page = Page.general
+    private typealias Page = LauncherPage
     @State private var showingControls = false
 
     var body: some View {
@@ -19,22 +18,24 @@ struct LauncherView: View {
             // Not a TabView: on macOS 26.0.1 switching back to a tab re-inserts its cached view
             // graph and SwiftUI's accessibility nodes loop on a dependency cycle, printing it
             // forever with the window frozen (#47, sampled by the reporter).
-            Picker("", selection: $page) {
+            Picker("", selection: $model.page) {
                 Text("General").tag(Page.general)
                 Text("Advanced").tag(Page.advanced)
+                Text("Achievements").tag(Page.achievements)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .fixedSize()
             .padding(.top, 10)
             Group {
-                switch page {
+                switch model.page {
                 case .general: general
                 case .advanced: advanced
+                case .achievements: AchievementsView(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .disabled(model.running)
+            .disabled(model.running && model.page != .achievements)
             Divider()
             HStack(spacing: 12) {
                 Button("Mods & Cheats…") { ModsWindow.show(launcher: model) }
