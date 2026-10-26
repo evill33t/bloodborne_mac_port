@@ -40,6 +40,20 @@ class SeamlessLaunch(unittest.TestCase):
             self.assertEqual(env['BB_USER_DIR'],str(data/'explicit'))
             self.assertEqual(env['SHADPS4_BLOODBORNE_HOST_RULES'],'travel,vote,scale')
             with self.assertRaises(ValueError): s.launch_environment({'BB_SHADNET_NPID':'half'},data)
+    def test_launcher_custom_save_folder_is_copied_then_isolated(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);selected=root/'chosen saves';selected.mkdir();(selected/'slot').write_bytes(b'original')
+            data=root/'data'
+            env=s.launch_environment({'BB_SAVE_DIR':str(selected)},data)
+            actual=Path(env['BB_SAVE_DIR'])
+            self.assertEqual(actual,Path(env['BB_USER_DIR'])/'savedata')
+            self.assertNotEqual(actual,selected)
+            self.assertEqual((actual/'slot').read_bytes(),b'original')
+            (actual/'slot').write_bytes(b'co-op')
+            self.assertEqual((selected/'slot').read_bytes(),b'original')
+            again=s.launch_environment({'BB_SAVE_DIR':str(selected)},data)
+            self.assertEqual(Path(again['BB_SAVE_DIR']),actual)
+            self.assertEqual((actual/'slot').read_bytes(),b'co-op')
     def test_bad_address_and_unsafe_identity_fail(self):
         for address in ('https://x.example','name:0','name:65536','user@host:31314','host:123/path'):
             with self.assertRaises(ValueError): s.server(address)

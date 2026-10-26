@@ -28,8 +28,10 @@ Registration is automatic. A persistent account belongs to each server and is st
 owner-only file under `seamless/identities/` in the data folder. Keep this file when moving or
 backing up the client; deleting it creates a different account. Credentials are not printed.
 Co-op saves live under `user-seamless/<server-hash>/` and are seeded once from a copy of the
-existing `user/savedata`. Offline saves are preserved. An explicit `BB_USER_DIR` selects that
-folder instead. Game assets remain unchanged: checked event copies and links form a temporary
+existing `user/savedata`, or the launcher's custom save folder when selected. Offline saves
+are preserved. An explicit `BB_USER_DIR` selects that folder instead. `BB_SAVE_DIR` is used as
+the seed and then routed to the chosen co-op folder's `savedata`. Game assets remain unchanged:
+checked event copies and links form a temporary
 private game view, removed on exit. Generated event caches include input and output hashes.
 
 Co-op uses the reference's fixed 60 FPS game timing. The renderer still runs in the native

@@ -73,6 +73,7 @@ def launch_environment(environ, data):
     host, port = server(env.get('BB_SHADNET_SERVER'))
     endpoint = f'{host}:{port}'
     namespace = hashlib.sha256(endpoint.encode()).hexdigest()[:20]
+    seed = Path(env.get('BB_SAVE_DIR') or data / 'user' / 'savedata').expanduser().resolve()
     settings = ini_values(Path(env.get('BB_CONFIG', data / 'bbport.ini')))
     if bool(env.get('BB_SHADNET_NPID')) != bool(env.get('BB_SHADNET_PASSWORD')):
         raise ValueError('Set both BB_SHADNET_NPID and BB_SHADNET_PASSWORD, or leave both unset for a persistent automatic identity.')
@@ -85,14 +86,20 @@ def launch_environment(environ, data):
             user.parent.mkdir(parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix='.seed-', dir=user.parent))
             try:
-                if (data / 'user' / 'savedata').is_dir():
-                    shutil.copytree(data / 'user' / 'savedata', staging / 'savedata')
+                if seed.is_dir():
+                    shutil.copytree(seed, staging / 'savedata')
                 staging.rename(user)
             finally:
                 if staging.exists(): shutil.rmtree(staging)
         env['BB_USER_DIR'] = str(user.resolve())
     user = Path(env['BB_USER_DIR']).resolve()
     user.mkdir(parents=True, exist_ok=True)
+    # The launcher's BB_SAVE_DIR overrides the runtime's --user/savedata. Treat it as
+    # a seed too, then route actual writes to this server's selected co-op folder.
+    savedata = user / 'savedata'
+    if not savedata.exists() and seed.is_dir() and seed != savedata:
+        shutil.copytree(seed, savedata)
+    env['BB_SAVE_DIR'] = str(savedata)
     services = env.get('BB_SEAMLESS_SERVICES', f'http://{host}:20443').rstrip('/')
     webapi = env.get('BB_SHADNET_WEBAPI', f'http://{host}:31315').rstrip('/')
     for address in (services, webapi):
