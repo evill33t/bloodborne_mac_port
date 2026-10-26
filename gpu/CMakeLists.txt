@@ -458,10 +458,6 @@ if (BB_NET AND NOT BB_ARM64)
     endif()
 endif()
 
-add_executable(native-motion-test EXCLUDE_FROM_ALL ../tests/test_native_motion.cpp)
-target_include_directories(native-motion-test PRIVATE shim)
-target_compile_options(native-motion-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-
 if (APPLE)
     add_executable(metalfx-test EXCLUDE_FROM_ALL ../tests/test_metalfx.mm shim/bbport_metalfx.mm
         shim/common/logging/log.cpp shim/common/assert.cpp)
