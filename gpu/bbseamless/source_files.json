@@ -767,7 +767,8 @@
     {
       "path": "vendor/core/bloodborne_invasion.h",
       "source": "emulator/src/core/bloodborne_invasion.h",
-      "sha256": "0de2dd5f043238119988763d0add764fc00c875d8ca0f7c82781d762f84d55a1"
+      "sha256": "0de2dd5f043238119988763d0add764fc00c875d8ca0f7c82781d762f84d55a1",
+      "adapted_sha256": "301ccefcace609e086467154d68de9a0b27f411b2eaf19c574086eec495a3205"
     },
     {
       "path": "vendor/core/bloodborne_join.cpp",

@@ -226,6 +226,29 @@ void Portrait(const BbCoopUi& s,const char* board) {
         return;
     }
 }
+void InvasionStatus(const bbcoop_invasion& invasion) {
+    const bool visitor=invasion.role==BBCOOP_INVASION_INVADER;
+    switch(invasion.phase) {
+    case BBCOOP_INVASION_SEARCHING:
+        ImGui::TextUnformatted("Searching for a hunt to invade...");break;
+    case BBCOOP_INVASION_APPROACHING:
+        ImGui::Text(visitor?"Invading a hunt in %d seconds":"An adversary arrives in %d seconds",invasion.seconds);break;
+    case BBCOOP_INVASION_ACTIVE:
+        ImGui::TextUnformatted(visitor?"You are invading a hunt":"An adversary is in your world");break;
+    case BBCOOP_INVASION_RETURNING:
+        ImGui::TextUnformatted("Returning to your world...");break;
+    case BBCOOP_INVASION_ENDED:
+        switch(invasion.reason) {
+        case BBCOOP_INVASION_INVADER_DIED:ImGui::TextUnformatted("Invader defeated");break;
+        case BBCOOP_INVASION_TARGET_KILLED:ImGui::TextUnformatted("The host was defeated");break;
+        case BBCOOP_INVASION_PARTY_WIPED:ImGui::TextUnformatted("The hunt was defeated");break;
+        case BBCOOP_INVASION_NOT_FOUND:ImGui::TextUnformatted("No hunt found for an invasion");break;
+        case BBCOOP_INVASION_REFUSED:ImGui::TextUnformatted("The server refused the invasion request");break;
+        default:ImGui::TextUnformatted("The invasion ended");break;
+        }break;
+    default:break;
+    }
+}
 void Hud(const BbCoopUi& s) {
     const auto& io=ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(20,std::max(280.f,io.DisplaySize.y*.32f)),ImGuiCond_Always);ImGui::SetNextWindowBgAlpha(.65f);
@@ -238,7 +261,7 @@ void Hud(const BbCoopUi& s) {
         if(s.camera_on) ImGui::TextUnformatted("Free camera (F7 to return)");
         if(s.skip_want) ImGui::Text("Skip cutscene: %d / %d votes (Options)",s.skip_want,s.skip_watching);
         if(*s.notice) ImGui::TextWrapped("%s",s.notice);
-        if(s.has_invasion) {ImGui::Text("Invasion: %s (phase %d)",Hunter(s.invasion.name),s.invasion.phase);}
+        if(s.has_invasion) InvasionStatus(s.invasion);
         if(s.duel.countdown_shown) ImGui::Text("Duel: %s %d",s.duel.countdown_fight?"Fight!":"Starts in",s.duel.countdown_number);
     } ImGui::End();
     auto* draw=ImGui::GetForegroundDrawList();

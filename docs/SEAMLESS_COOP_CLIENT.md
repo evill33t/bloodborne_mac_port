@@ -86,10 +86,18 @@ generated HTTP routes. Advanced explicit credentials require both `BB_SHADNET_NP
 `BB_SHADNET_PASSWORD`.
 
 The server runs the pinned development protocol: release `dev`, frame protocol 9, link version
-4, with hosted admission, proof-of-work registration and build checks enabled. Invasions are
-disabled by the upstream server default on this deployment. The client exposes the requests
-and allow-invaders switch; enabling that server feature and testing an actual invasion remains
-separate work. No Windows/Mac interoperability claim follows from the Mac/Mac test.
+4, with hosted admission, proof-of-work registration and build checks enabled. Invasions were
+enabled on our server on 2026-10-27. A leader opts in using **F6 > Allow invasions**; a player
+outside a team uses **F6 > Search for an invasion**, then **Leave invasion** to return.
+The server retains its level/area/slot restrictions and cooldowns; no extra firewall ports are
+needed. Turning a hunt's allowance off also ends a visit.
+
+The Mac client enables the reference's hostile compatibility fallback because the server's
+placeholder native kind/sign otherwise produced a friendly cooperator. Two actual Mac clients
+verified matching, notice, entry, native PvP damage, host cancellation and return to the
+invader's own lamp with world flags restored. Retail red tint/native kind/sign, rewards and
+mixed Windows/Mac invasions remain unverified. See the dated invasion follow-up in the
+[validation record](SEAMLESS_COOP_VALIDATION.md).
 
 Hook admission checks the supported 1.09 title IDs and original instruction signatures before
 mutation. The known 1.09 executable with stale 1.00 SFO metadata is accepted only by its exact
@@ -123,6 +131,5 @@ fail-closed image checks, Mac socket readiness/Mach protections/touch gestures, 
 persistence, existing online imports/codec/session tests, runtime pad tests, launcher model
 checks and process-ring tests. See [source provenance](../gpu/bbseamless/PROVENANCE.md).
 
-This is bounded gameplay validation, not a complete campaign or DLC/chalice/boss/invasion
-playthrough. Those source paths are integrated, but their complete in-game behavior and a
+This is bounded gameplay validation, not a complete campaign or DLC/chalice/boss playthrough. Those source paths are integrated, but their complete in-game behavior and a
 mixed Windows/Mac session remain unverified.

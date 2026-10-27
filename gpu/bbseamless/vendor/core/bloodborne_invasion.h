@@ -30,7 +30,9 @@ namespace Core::Bloodborne {
 // joins as a co-operator (TeamSessionKind and the server's slot byte), turns itself into the
 // invader's character type (SetChrType), and every team member's game writes the invaders' team
 // (DownedTeams::Hostile) onto its body for the whole visit (GAME_SIDE_PLAN.md section 3).
-constexpr bool invasion_fallback_switch = false;
+// The pinned server's placeholder native values join as a friendly cooperator on Mac.
+// Use the reference's explicit hostile body/type path for this port.
+constexpr bool invasion_fallback_switch = true;
 // The character type the fallback gives the invader (ChrIns +0x78; 1 is a white phantom). A guess
 // until phase 0: the game's black phantom.
 constexpr s32 InvaderCharacterType = 2;

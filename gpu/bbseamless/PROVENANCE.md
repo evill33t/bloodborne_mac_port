@@ -41,3 +41,9 @@ Shared `vendor/coop/monocypher` retains its own notices. No game executable, gam
 saves, backend executable or server configuration is included.
 
 See [client setup and validation](../../docs/SEAMLESS_COOP_CLIENT.md).
+
+The Mac client enables the reference's existing `invasion_fallback_switch`: the pinned
+server's placeholder kind/sign joined as a friendly cooperator in the 2026-10-27 game test.
+The fallback sets the invader's local character type and keeps its remote body on the hostile
+team. The live retest verified native PvP damage and return-home/world restoration; it does
+not establish the still-unknown retail invasion kind/sign or mixed-client compatibility.

@@ -83,5 +83,37 @@ not all individually exercised in-game. Their reference implementations and clie
 are integrated; trophy persistence also has a focused native test. Legacy retail messages,
 ghosts and bloodstains use the configured backend endpoints, but each was not separately
 placed/replayed in this run. The map is a coordinate/exploration view rather than the
-reference's terrain atlas. Invasions remain disabled by the deployed upstream server default;
-client requests alone do not establish working invasion gameplay.
+reference's terrain atlas. Invasions were enabled and tested in the follow-up below; their
+retail red tint/native kind/sign, rewards/covenants and mixed Windows/Mac behavior remain
+unverified.
+
+
+## Invasion follow-up - 2026-10-27
+
+Enabled `Invasions=true` persistently on the existing `bloodborne-server` Compose service.
+Only that container was restarted, with no players connected. It is healthy, retains the
+same link identity, and all 49 unrelated containers kept their IDs and start times. The
+original configuration is backed up under
+`/docker/backups/bloodborne-invasions-20261027T111142Z/` on `opc`. Teams still default to
+refusing invaders. No admission/build/HTTP rules, cooldowns or firewall ports were loosened.
+
+The initial real-game test matched, showed the ten-second notice, joined a two-member game
+session and returned home, but the upstream placeholder native kind/sign left the invader
+friendly. Enabled the reference's existing hostile fallback for the Mac client, then repeated
+in a fresh isolated team world with the same two test accounts:
+
+- The invader had local character type 2 and team 21; its body on the host was also team 21.
+- A real R1 attack, without writing the target's HP, reduced the host from 594 to 579 HP.
+  Both the attacker's peer HP and the host's own HP confirmed the same change. Godmode was off
+  on the host for this check; the nearby enemy was disabled to isolate PvP damage.
+- The host turned **Allow invasions** off. Both games received `INVADERS_OFF` and the invader
+  returned to its own lamp 2412959. Its saved world flags were restored (161 changed back),
+  and its temporary invasion-home marker was removed.
+- The invader stayed out of the team/party HUD. No failed test steps or Metal validation
+  assertions occurred in the successful fallback run. Original seed save hashes were unchanged.
+
+Evidence: `out/ingame-invasions-2026-10-27/validation.json`, per-role `hostile-fallback/`
+logs/scripts/results, `shots/hostile-arrived.png`, `shots/pvp-damage.png` and `shots/home.png`.
+The earlier friendly native-kind attempt is retained in `native-kind/`. Both clients were
+stopped after the checks. The HUD now describes searching, arrival, active invasion and return
+in ordinary text, without internal player IDs or numeric protocol phases.
