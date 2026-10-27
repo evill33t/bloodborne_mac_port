@@ -2,7 +2,7 @@
 /* Fixed-width copies only. The arm64 renderer never calls into the x86 game module. */
 #pragma once
 #include "bbcoop.h"
-#define BB_COOP_UI_VERSION 3u
+#define BB_COOP_UI_VERSION 4u
 #define BB_COOP_INVENTORY_MAX 512
 #define BB_COOP_MODEL_WIDTH 560u
 #define BB_COOP_MODEL_HEIGHT 768u
@@ -12,7 +12,7 @@ enum BbCoopAction {
     BB_COOP_MAP_MENU, BB_COOP_TRAVEL, BB_COOP_PING, BB_COOP_MAP_PING,
     BB_COOP_TRADE_OFFER, BB_COOP_TRADE_ANSWER, BB_COOP_TRAVEL_ANSWER,
     BB_COOP_DUEL_PROPOSE, BB_COOP_DUEL_CANCEL, BB_COOP_DUEL_ANSWER,
-    BB_COOP_INVASION, BB_COOP_ALLOW_INVADERS, BB_COOP_CAMERA, BB_COOP_PINGS, BB_COOP_MAP_AREA,
+    BB_COOP_INVASION, BB_COOP_ALLOW_INVADERS, BB_COOP_CAMERA, BB_COOP_PINGS, BB_COOP_MAP_AREA, BB_COOP_PREFERENCES,
 };
 typedef struct BbCoopCommand {
     uint32_t version, action;
@@ -38,7 +38,12 @@ typedef struct BbCoopUi {
     uint32_t explored_map;
     int32_t explored_count;
     int16_t explored[8192 * 2];
+    uint32_t explored_other_map;
+    int32_t explored_other_count;
+    int16_t explored_other[8192 * 2];
     char lamp_names[BBCOOP_MAP_LAMPS][64];
+    int32_t label_count;
+    struct { int32_t id; char name[96]; } labels[256];
     int32_t area_count;
     struct { uint32_t map; char name[64]; } areas[48];
     bbcoop_pings pings;

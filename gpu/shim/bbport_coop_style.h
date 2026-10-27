@@ -5,9 +5,15 @@
 #include "bbport_party_icons.h"
 #include "gpu/bbseamless/ui.h"
 #include <imgui.h>
+#include <initializer_list>
 namespace BbCoopStyle {
 // Called under the overlay lock before NewFrame: fonts must never be added during a frame.
 void Prepare();
+bool ArtworkReady();
+const char* Text(const char* english);
+struct Hint {const char* pad;const char* keys;const char* text;};
+void Guide(std::initializer_list<Hint> hints);
+void Input(bool controller);
 struct Scope { Scope();~Scope(); };
 float Scale();
 ImU32 Ink(float alpha=1);

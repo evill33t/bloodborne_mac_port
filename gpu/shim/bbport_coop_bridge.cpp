@@ -22,7 +22,7 @@ void Receive(const BbGpuRecord* record) {
     if (record->bytes != sizeof(CommandRecord)) return;
     auto command = reinterpret_cast<const CommandRecord*>(record)->command;
     if (command.version != BB_COOP_UI_VERSION || command.action < BB_COOP_LOBBY ||
-        command.action > BB_COOP_MAP_AREA) return;
+        command.action > BB_COOP_PREFERENCES) return;
     command.text[sizeof(command.text)-1] = 0;
     std::scoped_lock lock{command_mutex};
     if (commands.size() < 64) commands.push_back(command);

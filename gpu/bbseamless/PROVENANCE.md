@@ -72,3 +72,20 @@ server's placeholder kind/sign joined as a friendly cooperator in the 2026-10-27
 The fallback sets the invader's local character type and keeps its remote body on the hostile
 team. The live retest verified native PvP damage and return-home/world restoration; it does
 not establish the still-unknown retail invasion kind/sign or mixed-client compatibility.
+
+The parity follow-up also retains Kaniel's `bbport_menu_texts.inc` and
+`bbport_key_guide.h`. `bbport_coop_russian.inc` extracts the Russian `Ui::T` text from the
+pinned `bbport_overlay.cpp`; `bbport_map_atlas.h` retains its `Map::WorldOf` and
+`Map::AtlasOffset` placements. `bbport_language.h` adapts the language lookup from
+`bbport_settings.cpp`, including game-language IDs, with macOS font fallbacks. Original and
+adapted hashes are recorded in `source_files.json`. `bbport_coop_texts.inc` supplements the
+reference table with labels specific to the Mac interface; it is a local adaptation.
+
+The controller map navigation, crosshair, lamp snapping, place labels, compass layouts,
+ping arrows, prerendered views and world browser adapt Kaniel's `Map`, `Compass`, `Pings`,
+`Team` and `Ui::Keys` namespaces. Native Metal resource retention and the presentation fixture
+continue Mark Hall's original overlay/test architecture. The launcher preparation helper
+adapts Kaniel's visible Windows Map card using the same read-only map parsers and generated
+cache as the game. The retained collision reader credits **MikeTat1988 / Hunter's Atlas**
+([original project](https://github.com/MikeTat1988/HuntersAtlas)); no game-owned art, fonts,
+geometry or textures are added to the distribution.

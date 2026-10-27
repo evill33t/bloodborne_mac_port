@@ -29,13 +29,14 @@ int main() {
     };
     assert(!BbMapCharts::Get(0));
     const auto first=get(0x18010000);
-    get(0x15000000); // evicts the first resident area
-    assert(first->rgba==chart.rgba); // consumers can still hold the evicted result safely
-    get(0x18010000); // reloads its disk cache
+    get(0x15000000); // both areas remain in the atlas under the LRU budget
+    assert(BbMapCharts::Atlas().size()==2);
+    assert(first->rgba==chart.rgba); // consumers retain immutable results safely
+    get(0x18010000); // full-detail cache remains available
     BbMapCharts::Get(0x19000000); // missing MSB: terminal fallback, no busy retry loop
     for(int i=0;i<1000 && BbMapCharts::Status(0x19000000).find("unavailable")==std::string::npos;++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     assert(BbMapCharts::Status(0x19000000).find("unavailable")!=std::string::npos);
     fs::remove_all(root);
-    std::puts("map-worker: cache, eviction, unavailable-area fallback and shutdown passed");
+    std::puts("map-worker: cache, atlas retention, unavailable-area fallback and shutdown passed");
 }

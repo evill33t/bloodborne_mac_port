@@ -24,6 +24,10 @@ final class LauncherModel: ObservableObject {
     private var updaterChanges: AnyCancellable?
     private var benchmarkChanges: AnyCancellable?
     private var gameProcess: Process?
+    private var mapProcess: Process?
+    @Published private(set) var preparingMaps=false
+    @Published private(set) var mapProgress: String?
+    @Published private(set) var mapFraction=0.0
 
     @Published var settings = GameSettings()
     @Published var config = LaunchConfig()
@@ -90,7 +94,7 @@ final class LauncherModel: ObservableObject {
         Upscaler.launcherChoices.contains(settings.upscaler) ? Upscaler.launcherChoices
             : Upscaler.launcherChoices + [settings.upscaler]
     }
-    var canPlay: Bool { !running && !checkingGame && config.gameDir != nil && gameProblem == nil }
+    var canPlay: Bool { !running && !preparingMaps && !checkingGame && config.gameDir != nil && gameProblem == nil }
     /// Straight into the game (no window): the toggle is off and a game folder is known.
     var canSkipWindow: Bool {
         !config.showLauncher && config.gameDir.map {
@@ -179,8 +183,48 @@ final class LauncherModel: ObservableObject {
         (try? HuntersDream.communityAddress(communitySetting)) ?? communitySetting ?? HuntersDream.defaultCommunityServer
     }
 
-    /// Links a Discord account: the window shows the page and the code until the service
-    /// reports the approval; the token then goes to the keychain and the account into bbport.ini.
+    // Kaniel's visible launcher preparation card, using the native read-only cache worker.
+    func prepareMaps() {
+        guard !running, !preparingMaps, let game=config.gameDir else {return}
+        let executable=layout.mapPrepareExecutable
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {mapProgress="Map preparation is unavailable in this build.";return}
+        save();let process=Process();let pipe=Pipe();mapProcess=process
+        process.executableURL=executable
+        let cache=env["BB_GPU_USER_DIR"] ?? env["BB_USER_DIR"] ?? dataDir.appendingPathComponent("user").path
+        process.arguments=["--game",game.path,"--cache",cache,"--view",settings.mapView==3 ? "1" : "0"]
+        process.standardOutput=pipe;process.standardError=pipe
+        mapOutputPending="";mapProgress="Preparing maps from your game files…";mapFraction=0;preparingMaps=true
+        pipe.fileHandleForReading.readabilityHandler={ [weak self] handle in
+            let bytes=handle.availableData
+            if bytes.isEmpty {handle.readabilityHandler=nil;return}
+            let text=String(decoding: bytes,as: UTF8.self)
+            Task { @MainActor [weak self] in
+                guard let self else {return}
+                self.mapOutput(text)
+            }
+        }
+        process.terminationHandler={ [weak self] result in
+            Task { @MainActor [weak self] in
+                guard let self else {return}
+                self.preparingMaps=false;self.mapProcess=nil
+                self.mapProgress=result.terminationStatus==0 ? "Maps ready" : "Map preparation stopped. Prepared areas remain cached."
+            }
+        }
+        do {try process.run()} catch {preparingMaps=false;mapProcess=nil;mapProgress=error.localizedDescription}
+    }
+    private var mapOutputPending=""
+    private func mapOutput(_ text: String) {
+        mapOutputPending+=text
+        while let end=mapOutputPending.firstIndex(of: "\n") {
+            let line=String(mapOutputPending[..<end]);mapOutputPending.removeSubrange(...end)
+            guard let data=line.data(using: .utf8),let info=(try? JSONSerialization.jsonObject(with: data)) as? [String:Any],let done=info["prepared"] as? Int,let total=info["total"] as? Int,total>0 else {continue}
+            mapFraction=Double(done)/Double(total)
+            mapProgress="\(done) / \(total) maps prepared"
+        }
+    }
+    func cancelMapPreparation() {mapProcess?.terminate()}
+
+    /// Links a Discord account; tokens go to the keychain and the account to bbport.ini.
     func startSignIn() {
         signInTask?.cancel()
         onlineProblem = nil

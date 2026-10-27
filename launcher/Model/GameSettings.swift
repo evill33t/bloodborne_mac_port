@@ -92,6 +92,8 @@ struct Effect: Identifiable {
 /// The launcher's view of bbport.ini (the file the in-game menu writes too). Keys it does not
 /// know stay in the IniFile; values it does not offer (an unlisted output, FSR 4) are kept as read.
 struct GameSettings: Equatable {
+    var mapView=1
+    var mapFog=true
     /// gpu/shim/bbport_settings.h Effects (without the debug ones), same defaults.
     static let effects = [
         Effect(key: "effect_dof", label: "Depth of field", defaultOn: true),
@@ -148,6 +150,8 @@ struct GameSettings: Equatable {
     init(ini: IniFile) {
         // Booleans as the game reads them (atoi(value) != 0).
         func flag(_ key: String) -> Bool? { ini[key].map { (Int($0) ?? 0) != 0 } }
+        if let v=ini["map_view"].flatMap(Int.init), (0...3).contains(v) {mapView=v}
+        if let v=flag("map_fog") {mapFog=v}
         if let v = ini["output_res"], let size = PixelSize(iniValue: v) { output = size }
         if let v = ini["ultrawide_res"], let size = PixelSize(iniValue: v), Resolution.ultrawideOutputs.contains(size) {
             ultrawide = true
@@ -187,6 +191,8 @@ struct GameSettings: Equatable {
     /// Writes the launcher's settings into `ini`; every other line stays (a `renderer` key from
     /// 0.5.2 or earlier too: the game drops it the next time its menu saves).
     func apply(to ini: inout IniFile) {
+        ini["map_view"]=String(mapView)
+        ini["map_fog"]=mapFog ? "1" : "0"
         ini["output_res"] = (ultrawide ? Resolution.defaultOutput : output).iniValue
         ini["ultrawide_res"] = ultrawide ? wideOutput.iniValue : nil
         ini["standard_output_res"] = output.iniValue

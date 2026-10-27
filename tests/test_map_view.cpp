@@ -5,6 +5,14 @@
 #include <cassert>
 #include <cstdio>
 int main() {
+    for(float yaw:{0.f,.7f,1.6f,2.8f}) for(float pitch:{.35f,.9f,1.57f}) {
+        BbMapView::Camera camera{500,10,300,1,yaw,pitch};
+        camera.zoom=BbMapView::FitZoom(camera,-900,-800,1900,1400,1100,700,-300,900);
+        for(float x:{-900.f,1900.f}) for(float z:{-800.f,1400.f}) for(float y:{-300.f,900.f}) {
+            auto at=camera.Project(x,y,z);assert(std::abs(at[0])<=550 && std::abs(at[1])<=350);
+        }
+    }
+
     // Pings invert marker placement at the player's floor, including negative coordinates,
     // tilted views, rotation and panning. Height affects only the tilted view.
     for(float yaw:{-2.f,0.f,1.57f}) for(float pitch:{.35f,.9f,1.5707963268f}) {

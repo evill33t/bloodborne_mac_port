@@ -44,16 +44,23 @@ int main() {
     Load();
     assert(Get().upscaler == UpscalerFsr3 && Get().preset == 2);
     Get().preset = 3;
-    Get().map_view = 2;
+    Get().map_view = 3;Get().compass=false;Get().compass_position=2;
+    Get().bloodstains=false;Get().team_pings=false;Get().ping_key=3;Get().free_camera=true;
+    Get().menu_language_auto=false;Get().menu_language=MenuLanguage::De;
     Save();
     std::string text = Read(path);
     assert(Count(text, "fps_cap=40") == 1 && Count(text, "fullscreen=1") == 1);
     assert(Count(text, "renderer=") == 0); // the removed renderer setting is dropped
     assert(Count(text, "preset=3") == 1 && Count(text, "preset=2") == 0);
-    assert(Count(text, "map_view=2") == 1);
+    assert(Count(text, "map_view=3") == 1);
     Get().map_view = 0;
     Load();
-    assert(Get().map_view == 2);
+    assert(Get().map_view == 3 && !Get().compass && Get().compass_position==2);
+    assert(!Get().bloodstains && !Get().team_pings && Get().ping_key==3 && Get().free_camera);
+    assert(Get().menu_language==MenuLanguage::De && !Get().menu_language_auto);
+    assert(std::string(BbLanguage::Text(MenuLanguage::De,"Begin the hunt"))!="Begin the hunt");
+    assert(std::string(BbLanguage::Text(MenuLanguage::Russian,"Begin the hunt"))!="Begin the hunt");
+    assert(std::string(BbLanguage::GameFolder(MenuLanguage::De))=="deude");
     assert(Count(text, "upscaler=fsr3") == 1 && Count(text, "# a comment") == 0);
     Save(); // again: still once each
     text = Read(path);

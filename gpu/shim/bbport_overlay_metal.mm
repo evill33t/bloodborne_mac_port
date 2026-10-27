@@ -4,6 +4,7 @@
 #import <Metal/Metal.h>
 
 #include "bbport_overlay_metal.h"
+#include <map>
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 #include "video_core/renderer_metal/mtl_device.h"
@@ -18,18 +19,25 @@ namespace {
 MTLPixelFormat expected_format = MTLPixelFormatInvalid;
 id<MTLDevice> overlay_device;
 std::array<id<MTLTexture>,4> portraits;
-std::array<id<MTLTexture>,8> artwork;
+std::array<id<MTLTexture>,64> artwork;
 std::array<u32,4> portrait_versions{};
 NSMutableArray<id>* frame_portraits;
 id<MTLCommandBuffer> frame_buffer;
 id<MTLTexture> map_texture;
-u64 map_version=0;
+std::map<unsigned,std::pair<u64,id<MTLTexture>>> map_textures;
 id<MTLRenderPipelineState> map_pipeline;
 id<MTLDepthStencilState> map_depth_state;
 id<MTLBuffer> map_positions,map_colors,map_indices;
 id<MTLTexture> map_color,map_depth,map_tops;
 u32 mesh_map=0;
 std::shared_ptr<const BbMapArt::AreaMesh> current_mesh;
+struct MeshResources {
+    id<MTLBuffer> positions,colors,indices;
+    id<MTLTexture> tops;
+    std::weak_ptr<const BbMapArt::AreaMesh> source;
+    const BbMapArt::Chart* chart=nullptr;
+};
+std::map<u32,MeshResources> map_meshes;
 }
 
 bool Init(Metal::Device& device, u32 pixel_format) {
@@ -106,28 +114,30 @@ void* ArtworkTexture(unsigned slot,const u8* rgba,u32 width,u32 height) {
     [frame_portraits addObject:artwork[slot]];return (__bridge void*)artwork[slot];
 }
 
-void* MapTexture(u64 version,const BbMapArt::Chart& chart,const u8* rgba) {
+void* MapTexture(u64 version,const BbMapArt::Chart& chart,const u8* rgba,unsigned slot) {
     if(!overlay_device || !rgba || chart.width<=0 || chart.height<=0) return nullptr;
-    if(!map_texture || map_version!=version) {
+    auto& [map_version,cached_texture]=map_textures[slot];
+    if(!cached_texture || map_version!=version) {
         auto* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
             width:chart.width height:chart.height mipmapped:NO];
         desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead;
         id<MTLTexture> texture=[overlay_device newTextureWithDescriptor:desc];
         if(!texture) return nullptr;
         [texture replaceRegion:MTLRegionMake2D(0,0,chart.width,chart.height) mipmapLevel:0 withBytes:rgba bytesPerRow:chart.width*4];
-        map_texture=texture;map_version=version;
+        cached_texture=texture;map_version=version;
     }
+    map_texture=cached_texture;
     [frame_portraits addObject:map_texture];return (__bridge void*)map_texture;
 }
 
 void ClearMap3d() {
     // In-flight frames hold their own strong references until command-buffer completion.
     map_positions=nil;map_colors=nil;map_indices=nil;map_tops=nil;map_color=nil;map_depth=nil;
-    mesh_map=0;current_mesh.reset();
+    mesh_map=0;current_mesh.reset();map_meshes.clear();
 }
 
 void* Map3d(u32 map,const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
-            const BbMapArt::Chart& chart,const MapCamera& camera) {
+            const BbMapArt::Chart& chart,const MapCamera& camera,bool append) {
     if(!overlay_device || !frame_buffer || !map_texture || !mesh || mesh->indices.empty()) return nullptr;
     if(!map_pipeline) {
         // MSL port of lKaniel's map_3d.vert/.frag: orthographic orbit, depth, textured top faces.
@@ -178,7 +188,8 @@ void* Map3d(u32 map,const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
         depth.depthCompareFunction=MTLCompareFunctionLessEqual;depth.depthWriteEnabled=YES;
         map_depth_state=[overlay_device newDepthStencilStateWithDescriptor:depth];
     }
-    if(mesh_map!=map || current_mesh!=mesh) {
+    auto& buffers=map_meshes[map];
+    if(buffers.source.lock()!=mesh || buffers.chart!=&chart) {
         map_positions=[overlay_device newBufferWithBytes:mesh->positions.data() length:mesh->positions.size()*4 options:MTLResourceStorageModeShared];
         map_colors=[overlay_device newBufferWithBytes:mesh->colors.data() length:mesh->colors.size()*4 options:MTLResourceStorageModeShared];
         map_indices=[overlay_device newBufferWithBytes:mesh->indices.data() length:mesh->indices.size()*4 options:MTLResourceStorageModeShared];
@@ -189,7 +200,10 @@ void* Map3d(u32 map,const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
         map_tops=[overlay_device newTextureWithDescriptor:desc];
         const int16_t missing=BbMapArt::Chart::NoHeight;
         [map_tops replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:0 withBytes:s.roof.empty()?&missing:s.roof.data() bytesPerRow:w*2];
-        mesh_map=map;current_mesh=mesh;
+        buffers.positions=map_positions;buffers.colors=map_colors;buffers.indices=map_indices;buffers.tops=map_tops;
+        buffers.source=mesh;buffers.chart=&chart;
+    } else {
+        map_positions=buffers.positions;map_colors=buffers.colors;map_indices=buffers.indices;map_tops=buffers.tops;
     }
     const auto width=NSUInteger(std::clamp(camera.width,1.f,4096.f)),height=NSUInteger(std::clamp(camera.height,1.f,4096.f));
     if(!map_color || map_color.width!=width || map_color.height!=height) {
@@ -201,10 +215,10 @@ void* Map3d(u32 map,const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
     }
     if(!map_positions || !map_colors || !map_indices || !map_tops || !map_color || !map_depth) return nullptr;
     MTLRenderPassDescriptor* pass=[MTLRenderPassDescriptor renderPassDescriptor];
-    pass.colorAttachments[0].texture=map_color;pass.colorAttachments[0].loadAction=MTLLoadActionClear;
+    pass.colorAttachments[0].texture=map_color;pass.colorAttachments[0].loadAction=append?MTLLoadActionLoad:MTLLoadActionClear;
     pass.colorAttachments[0].storeAction=MTLStoreActionStore;pass.colorAttachments[0].clearColor=MTLClearColorMake(.07,.09,.11,1);
-    pass.depthAttachment.texture=map_depth;pass.depthAttachment.loadAction=MTLLoadActionClear;
-    pass.depthAttachment.storeAction=MTLStoreActionDontCare;pass.depthAttachment.clearDepth=1;
+    pass.depthAttachment.texture=map_depth;pass.depthAttachment.loadAction=append?MTLLoadActionLoad:MTLLoadActionClear;
+    pass.depthAttachment.storeAction=MTLStoreActionStore;pass.depthAttachment.clearDepth=1;
     auto encoder=[frame_buffer renderCommandEncoderWithDescriptor:pass];encoder.label=@"Multiplayer terrain map";
     [encoder setRenderPipelineState:map_pipeline];[encoder setDepthStencilState:map_depth_state];[encoder setCullMode:MTLCullModeNone];
     const float constants[16]={camera.cx,camera.cy,camera.cz,camera.zoom,std::cos(camera.yaw),std::sin(camera.yaw),std::sin(camera.pitch),std::cos(camera.pitch),

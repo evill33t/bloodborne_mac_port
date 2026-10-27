@@ -448,3 +448,10 @@ if (BB_NET AND NOT BB_ARM64)
         message(STATUS "Online module: off (protobuf, nlohmann_json, OpenSSL, zlib or miniupnpc missing)")
     endif()
 endif()
+
+# Native map preparation uses Kaniel's read-only parsers and the same cache as the game.
+add_executable(bbmap-prepare ../host/map_prepare.cpp shim/bbport_map_charts.cpp
+    shim/bbport_map_art.cpp shim/bbport_map_collision.cpp shim/bbport_game_art.cpp)
+target_include_directories(bbmap-prepare PRIVATE shim)
+target_compile_features(bbmap-prepare PRIVATE cxx_std_20)
+target_link_libraries(bbmap-prepare PRIVATE miniz::miniz)

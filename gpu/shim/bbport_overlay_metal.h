@@ -30,12 +30,12 @@ void* PortraitTexture(unsigned slot, u32 version, const u8* rgba, u32 side);
 // Immutable co-op artwork. Like portraits, retained through GPU completion on unretained buffers.
 void* ArtworkTexture(unsigned slot, const u8* rgba, u32 width, u32 height);
 // Current terrain image; replacements and 3D resources survive command-buffer completion.
-void* MapTexture(u64 version, const BbMapArt::Chart& chart, const u8* rgba);
+void* MapTexture(u64 version, const BbMapArt::Chart& chart, const u8* rgba, unsigned slot = 0);
 struct MapCamera {
     float cx, cy, cz, zoom, yaw, pitch, width, height;
 };
 void* Map3d(u32 map, const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
-            const BbMapArt::Chart& chart, const MapCamera& camera);
+            const BbMapArt::Chart& chart, const MapCamera& camera, bool append = false);
 void ClearMap3d();
 
 } // namespace BbOverlay::MetalBackend

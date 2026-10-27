@@ -87,6 +87,9 @@ were added in the follow-up below. Invasions were enabled and tested in the foll
 retail red tint/native kind/sign, rewards/covenants and mixed Windows/Mac behavior remain
 unverified.
 
+The parity follow-up below adds explicit equipment/gem trading, spectator recovery and
+group-travel refusal coverage; those were limits of the initial run above.
+
 
 ## Invasion follow-up - 2026-10-27
 
@@ -195,3 +198,75 @@ Evidence: `out/ingame-coop-ui-2026-10-27/` (initial `host/guest`, corrected
 `out/coop-ui-full-test.log`. Fixture downed/dead states are presentation checks; the earlier
 real revival/PvP gameplay evidence remains separate. The Mac settings UI retains its existing
 style, and the backend/protocol are unchanged.
+
+## Windows client parity follow-up, 2026-10-27
+
+Reference: **Kaniel / lKaniel**, `lKaniel/bloodborne-server` at
+`8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`, particularly
+[`bbport_overlay.cpp`](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/bbport/gpu/shim/bbport_overlay.cpp),
+[`bbport_settings.cpp`](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/bbport/gpu/shim/bbport_settings.cpp),
+and its menu translation table, key-guide layout and launcher Map card. Native Metal and
+fixture foundations: **Mark Hall**; retained collision-reader lineage: **MikeTat1988 / Hunter's
+Atlas**. See the source manifest and provenance for hashes and individual notices.
+
+The identified client gaps now have native implementations:
+
+| Reference behavior | Mac implementation |
+| --- | --- |
+| Joined map atlas and place labels | Original world grouping/offsets, prepared overview charts, localized place/lamp names, saved exploration updates for other areas |
+| Prerendered and live 3D | Four cached oblique angles; native Metal depth composition of prepared areas, with coarse geometry for other areas |
+| Controller map interaction | Analog pan/rotate/tilt, trigger zoom, crosshair, lamp snapping and confirmation, area/whole-atlas/recenter/floor/3D shortcuts, contextual game button glyphs |
+| Compass and ping presentation | Top/bottom/ring layouts, compass pings, world-edge arrows, terrain-height map pings with height fallback |
+| Display preferences and language | Persistent online preferences, 20 reference language choices/automatic selection, game message/font lookup with fallback |
+| World browser and launcher preparation | World details/busy states/forget confirmation; packaged read-only map helper with visible progress/cancel |
+
+`build_macos.sh --test` passed, including both architecture map tests, settings preservation,
+launcher checks, module guards and native Metal tests. Subsequent focused checks cover the
+rotated-atlas fit correction and LTO artwork/font fix. The presentation fixture covers nine
+states at four sizes, including the four map projections and German/Japanese layouts, under
+Metal API validation with unretained command buffers. It now requires the embedded artwork and
+fallback font to be usable. LTO had reordered end labels: assembly-computed byte counts fix
+both the artwork and font lengths. Both library slices report the actual binary sizes
+(1,855,877 / 92,185 / 759,676 bytes for art/icons/font).
+
+Real gameplay evidence is under `out/ingame-parity-2026-10-27/`. Two Mac game processes on one
+machine connected to **bloodborne.phobos.services**, authenticated and installed **62/62**
+hooks. The host used German menus and the ring compass, while the guest used English and a
+bottom compass. Actual SDL input exercised stick pan, trigger zoom, whole-atlas framing,
+controller glyph selection, live-map rotation and crosshair pings. Peer logs record matching
+map IDs and world coordinates for the delivered pings. The map displayed German place/lamp
+names, prerendered terrain, and multiple areas in the live Metal view. The standalone packaged
+helper also prepared a real Central Yharnam flat/oblique pair; first oblique generation took
+14.5 seconds.
+
+The source-based `final-host`/`final-guest` gameplay scripts additionally verified:
+
+- One offer transferred Oedon Tomb Key, Hunter Axe +5 and Charred Hunter Garb, with source and
+  recipient inventory checks and the weapon's socketed gem/effect retained.
+- A lethal fall in spectator death mode hid the guest's body and moved its camera to the host.
+  Holding Circle woke the guest at its own lamp with 594 HP, without a map reload.
+- The host requested a group trip, the guest voted No, and both remained in Central Yharnam
+  with the two-member session intact.
+
+An earlier `proof-guest` fall run failed while its nearby enemy remained active; its host also
+suffered a real death. That failed run is retained. The successful repeat pauses that enemy's
+AI and lets the positions settle, matching the existing source test approach. No death-core
+change was made to manufacture a pass. This does not certify every instant-death/campaign path.
+Original seed saves and the source eboot hash remained unchanged.
+
+The final signed package repeated authentication, 62/62 hook admission and entry into a
+remote hunt (`PACKAGED_PARITY_PASS`) using its bundled runtime, Metal host, scripts and
+Python. Inspected the German live map and controller glyphs after rotating/tilting and
+fitting the complete atlas; framing includes the prepared geometry's height bounds. The
+world browser's scaled rows and host-rule labels were also checked in the packaged game.
+No Metal/ImGui validation findings occurred. Deep strict signature verification passed
+after gameplay; the original selected saves and game eboot hashes were unchanged. Evidence:
+`package/final-world-browser.png`, `package/final-rotated-atlas.png`,
+`package/final-controller-atlas.png` and the final `validation.json`. All test clients were
+stopped after the checks.
+
+These results establish the listed native client behaviors and the exercised Mac/Mac paths.
+They do not certify Windows/Mac cross-play, complete campaign/boss/DLC/chalice progression,
+every retail message/ghost/bloodstain action, or the upstream/backend's unknown retail invasion
+kind/sign, tint and reward behavior. The Mac-specific renderer/settings/launcher remain native;
+Windows Vulkan/provider-specific renderer features are outside this online-client integration.

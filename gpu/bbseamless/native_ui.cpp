@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "client.h"
 #include "touch.h"
+#include "../shim/bbport_language.h"
 #include "core/bloodborne_re_internal.h"
 #include "core/bloodborne_trade.h"
 #include "text/bbport_game_art.h"
@@ -21,6 +22,7 @@ std::mutex ui_mutex;
 std::deque<BbCoopCommand> trades;
 BbCoopUi view{};
 uint32_t explored_map{};
+BbLanguage::MenuLanguage language=BbLanguage::GameLanguage();
 std::string notice;
 std::chrono::steady_clock::time_point notice_until;
 std::vector<uint8_t> ReadText(const char* relative) {
@@ -31,22 +33,33 @@ std::vector<uint8_t> ReadText(const char* relative) {
     const auto unpacked=BbGameArt::InflateDcx(bytes);
     return unpacked ? *unpacked : std::vector<uint8_t>{};
 }
+std::vector<uint8_t> TextFile(const char* book) {
+    const auto path=std::string("dvdroot_ps4/msg/")+BbLanguage::GameFolder(language)+"/"+book+".msgbnd.dcx";
+    auto bytes=ReadText(path.c_str());
+    if(bytes.empty()) bytes=ReadText((std::string("dvdroot_ps4/msg/engus/")+book+".msgbnd.dcx").c_str());
+    return bytes;
+}
 const std::map<uint32_t,std::string>& Names() {
-    static const auto names=BbSaveEditor::ItemNamesFromGameText(
-        ReadText("dvdroot_ps4/msg/engus/item.msgbnd.dcx"),
-        ReadText("dvdroot_ps4/msg/engus/menu.msgbnd.dcx"));
-    return names;
+    static std::map<int,std::map<uint32_t,std::string>> cache;
+    auto [it,added]=cache.try_emplace(int(language));
+    if(added) it->second=BbSaveEditor::ItemNamesFromGameText(TextFile("item"),TextFile("menu"));
+    return it->second;
 }
-const std::map<uint32_t,std::string>& LampNames() {
-    static const auto names=BbSaveEditor::GameText(ReadText("dvdroot_ps4/msg/engus/menu.msgbnd.dcx"),30);
-    return names;
+const std::map<uint32_t,std::string>& GameNames(int table) {
+    static std::map<std::pair<int,int>,std::map<uint32_t,std::string>> cache;
+    auto [it,added]=cache.try_emplace(std::pair{int(language),table});
+    if(added) it->second=BbSaveEditor::GameText(TextFile(table==30?"menu":"item"),table);
+    return it->second;
 }
-const std::map<uint32_t,std::string>& AreaNames() {
-    static const auto names=BbSaveEditor::GameText(ReadText("dvdroot_ps4/msg/engus/item.msgbnd.dcx"),19);
-    return names;
-}
+const auto& LampNames() {return GameNames(30);}
+const auto& AreaNames() {return GameNames(19);}
 void MapNames() {
-    view.area_count=0;
+    view.area_count=0;view.label_count=0;
+    for(const auto& [id,name]:AreaNames()) {
+        if(view.label_count==256) break;
+        auto& label=view.labels[view.label_count++];label.id=id;
+        std::snprintf(label.name,sizeof(label.name),"%s",name.c_str());
+    }
     const auto area=[&](uint32_t map) {
         if(!map || view.area_count==48) return;
         for(int i=0;i<view.area_count;++i) if(view.areas[i].map==map) return;
@@ -126,16 +139,19 @@ void Command(const BbCoopCommand& c) {
     case BB_COOP_DUEL_ANSWER: bbcoop_duel_answer(static_cast<uint32_t>(c.id),c.value!=0);break;
     case BB_COOP_INVASION: bbcoop_invade(c.value!=0);break;
     case BB_COOP_ALLOW_INVADERS: bbcoop_team_allow_invaders(c.value!=0);break;
-    case BB_COOP_CAMERA: bbcoop_set_free_camera(1);bbcoop_free_camera_toggle();break;
+    case BB_COOP_CAMERA: bbcoop_free_camera_toggle();break;
     case BB_COOP_PINGS: bbcoop_set_team_pings(c.value!=0);break;
     case BB_COOP_MAP_AREA: explored_map=c.map;break;
+    case BB_COOP_PREFERENCES:
+        bbcoop_set_free_camera((c.value&1)!=0);bbcoop_set_team_pings((c.value&2)!=0);
+        language=static_cast<BbLanguage::MenuLanguage>(std::clamp<int>(c.kind,0,BbLanguage::MenuLanguageCount-1));break;
     default: break;
     }
 }
 }
 void BbSeamlessUiInit(const BbSeamlessHost& supplied) {
     host=supplied;
-    bbcoop_set_free_camera(1);
+    bbcoop_set_free_camera(0);
 }
 extern "C" int bbseamless_install(unsigned char* image,uint64_t size,void* code,
                                    uint64_t code_size,const char* app0) {
@@ -195,6 +211,8 @@ extern "C" void bbseamless_frame(uint32_t* buttons,uint8_t sticks[4],uint8_t* l2
         MapNames();
         view.explored_map=explored_map?explored_map:view.map.map;
         view.explored_count=bbcoop_map_explored(view.explored_map,view.explored,8192);
+        static unsigned next_area=0;view.explored_other_map=view.area_count?view.areas[next_area++%view.area_count].map:0;
+        view.explored_other_count=bbcoop_map_explored(view.explored_other_map,view.explored_other,8192);
     }
     view.has_pings=bbcoop_pings_view(&view.pings);
     view.has_load=bbcoop_team_load_view(&view.load);

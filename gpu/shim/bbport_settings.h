@@ -7,6 +7,7 @@
 #pragma once
 
 #include <atomic>
+#include "bbport_language.h"
 #include <array>
 
 /// Keyboard shortcut that opens the in-game menu (log lines and the ini header; ASCII).
@@ -60,7 +61,15 @@ inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
 /// Values::shader_compile.
 enum ShaderCompile { ShaderWait, ShaderSkip, ShaderBalanced, ShaderCompileCount };
 
+using BbLanguage::MenuLanguage;
+inline constexpr int MenuLanguageCount=BbLanguage::MenuLanguageCount;
+inline constexpr const char* PingKeyNames[]={"G","T","V","Z","X","B","H","N","Y","U","O","P","CapsLock"};
+inline constexpr int PingKeyCount=sizeof(PingKeyNames)/sizeof(PingKeyNames[0]);
 struct Values {
+    std::atomic<MenuLanguage> menu_language{MenuLanguage::English};
+    std::atomic<bool> menu_language_auto{true};
+    std::atomic<bool> compass{true}, bloodstains{true}, team_pings{true}, free_camera{false};
+    std::atomic<int> compass_position{0}, ping_key{0};
     std::atomic<int> upscaler{UpscalerOff};
     std::atomic<int> preset{NativeAA};
     std::atomic<bool> sharpen{true};
@@ -88,7 +97,7 @@ struct Values {
     /// Applied at start (patches.py); the menu shows when a restart is needed.
     std::atomic<bool> effects[EffectCount]{};
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
-    std::atomic<int> map_view{1}; ///< 0 coordinates, 1 rendered terrain, 2 live Metal 3D (opt in)
+    std::atomic<int> map_view{1}; ///< 0 coordinates, 1 rendered terrain, 2 live Metal 3D, 3 prerendered 3D
     std::atomic<bool> map_fog{true}; ///< reveal terrain near explored ground and lit lamps
     std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
     /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest

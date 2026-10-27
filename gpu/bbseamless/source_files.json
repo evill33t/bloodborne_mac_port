@@ -1721,6 +1721,34 @@
       "path": "../../tests/test_party_icons.cpp",
       "source": "bbport/tests/test_party_icons.cpp",
       "sha256": "714f3b1b2ae2f2a4b18af295efd536e745b91e81378f6c7245470e7655f502c9"
+    },
+    {
+      "path": "../shim/bbport_menu_texts.inc",
+      "source": "bbport/gpu/shim/bbport_menu_texts.inc",
+      "sha256": "7f1d2660fa6c2fca45208303d0050971fb0e50ddd4a6edbe0cb730433fb0687c"
+    },
+    {
+      "path": "../shim/bbport_key_guide.h",
+      "source": "bbport/gpu/shim/bbport_key_guide.h",
+      "sha256": "016956a4ecf4113ffc03ec293aa9b44db74e102cba61c548b9a7f3492ef8d528"
+    },
+    {
+      "path": "../shim/bbport_coop_russian.inc",
+      "source": "bbport/gpu/shim/bbport_overlay.cpp",
+      "sha256": "ed4b16220dfa888d98e82e3f51323452fca23b8c01f914133248d21d9a6f7df9",
+      "adapted_sha256": "7be6022557a152b062127ba293fd4676e69d250befc71046e0a5bfea0f7e6c27"
+    },
+    {
+      "path": "../shim/bbport_map_atlas.h",
+      "source": "bbport/gpu/shim/bbport_overlay.cpp",
+      "sha256": "ed4b16220dfa888d98e82e3f51323452fca23b8c01f914133248d21d9a6f7df9",
+      "adapted_sha256": "177271d092ca13e1c14a76965dc11de82a21408ba2d2f5c3fdd39919a95d5190"
+    },
+    {
+      "path": "../shim/bbport_language.h",
+      "source": "bbport/gpu/shim/bbport_settings.cpp",
+      "sha256": "b99341f0023200d76c83ef3a033933de4ff472cdd668ed065b39408444b62be6",
+      "adapted_sha256": "e84ca431177800964221be835da656ddc52acc3b7f3209b64ced2aa410ef8f08"
     }
   ],
   "path_base": "gpu/bbseamless; ../../ paths refer to repository scripts"

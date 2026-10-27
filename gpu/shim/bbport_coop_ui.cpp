@@ -3,6 +3,8 @@
 #include "bbport_split.h"
 #include "bbport_map_charts.h"
 #include "bbport_map_view.h"
+#include "bbport_map_atlas.h"
+#include <imgui_internal.h>
 #include "bbport_settings.h"
 #include "bbport_map_fog.h"
 #include "bbport_overlay_metal.h"
@@ -20,12 +22,14 @@
 #include <string>
 namespace BbCoopOverlay {
 namespace {
+const char* T(const char* text) {return BbCoopStyle::Text(text);}
+const char* Popup(const char* title) {static std::map<std::string,std::string> names;auto& text=names[title];text=std::string(T(title))+"###"+title;return text.c_str();}
 constexpr float Pi=3.14159265358979323846f;
 std::mutex snapshot_mutex;
 BbCoopUi latest{};
 std::atomic<bool> enabled{},capture{},visible{},trade_capture{};
 std::atomic<bool> want_portrait{};
-bool trade_open=false;
+bool trade_open=false,map_was_open=false;
 void Send(uint32_t action,int value=0,const char* text="",uint64_t id=0) {
     CommandRecord record{{BBGPU_EV_COOP_COMMAND,sizeof(record)}, {}};
     record.command.version=BB_COOP_UI_VERSION;record.command.action=action;
@@ -70,12 +74,68 @@ void HunterCards(const BbCoopUi& s) {
             const auto next=ImGui::GetCursorScreenPos();
             const float button_width=ImGui::CalcTextSize("Remove").x+ImGui::GetStyle().FramePadding.x*2;
             ImGui::SetCursorScreenPos(ImVec2(end.x-button_width-14*scale,end.y-27*scale));
-            if(ImGui::SmallButton("Remove")) Lobby(BBCOOP_TEAM_REMOVE,member->id);
+            if(ImGui::SmallButton(T("Remove"))) Lobby(BBCOOP_TEAM_REMOVE,member->id);
             ImGui::SetCursorScreenPos(next);ImGui::Dummy(ImVec2(0,0));
         }
         ImGui::PopID();
     }
     ImGui::EndTable();ImGui::Spacing();
+}
+// Host and online display preferences mirror Kaniel's Display and Team screens.
+void Preferences() {
+    if(!ImGui::CollapsingHeader(T("Online display"))) return;
+    auto& v=BbSettings::Get();bool changed=false;
+    auto toggle=[&](const char* name,std::atomic<bool>& setting) {bool on=setting;if(ImGui::Checkbox(T(name),&on)) {setting=on;changed=true;}};
+    toggle("Teammate compass",v.compass);
+    int position=v.compass_position;const char* positions[]={T("Top"),T("Bottom"),T("Around the middle")};
+    if(ImGui::Combo(T("Compass position"),&position,positions,3)) {v.compass_position=position;changed=true;}
+    toggle("Bloodstains on compass and map",v.bloodstains);toggle("Team pings",v.team_pings);
+    int key=v.ping_key;if(ImGui::Combo(T("Ping key"),&key,BbSettings::PingKeyNames,BbSettings::PingKeyCount)) {v.ping_key=key;changed=true;}
+    toggle("Free camera hotkey",v.free_camera);
+    int map_view=v.map_view;const char* maps[]={T("Coordinates"),T("Rendered terrain"),T("Live 3D"),T("Prerendered")};
+    if(ImGui::Combo(T("Map"),&map_view,maps,4)) {v.map_view=map_view;changed=true;}
+    toggle("Map fog of war",v.map_fog);
+    int language=v.menu_language_auto?0:int(v.menu_language.load())+1;
+    const char* language_name=language?BbLanguage::LanguageName(v.menu_language):T("Game language");
+    if(ImGui::BeginCombo(T("Language"),language_name)) {
+        if(ImGui::Selectable(T("Game language"),!language)) {v.menu_language_auto=true;v.menu_language=BbLanguage::GameLanguage();changed=true;}
+        for(int i=0;i<BbLanguage::MenuLanguageCount;++i) if(ImGui::Selectable(BbLanguage::LanguageName(static_cast<BbLanguage::MenuLanguage>(i)),language==i+1)) {v.menu_language_auto=false;v.menu_language=static_cast<BbLanguage::MenuLanguage>(i);changed=true;}
+        ImGui::EndCombo();
+    }
+    if(changed) BbSettings::Save();
+}
+void WorldPicker(const BbCoopUi& s) {
+    const auto& lobby=s.lobby;const auto display=ImGui::GetIO().DisplaySize;const float scale=BbCoopStyle::Scale();
+    ImGui::SetNextWindowSize(ImVec2(std::min(display.x-60*scale,1100.f*scale),std::min(display.y-60*scale,750.f*scale)),ImGuiCond_Appearing);
+    if(!ImGui::BeginPopupModal(Popup("Choose a world"),nullptr,ImGuiWindowFlags_NoCollapse)) return;
+    ImGui::TextWrapped(T("%s"),T("Every hunt in a world shares its progress. Your character keeps its own equipment."));
+    static char selected[40]{};static char forget[40]{};
+    if(ImGui::BeginChild("world list",ImVec2(0,std::max(150.f,ImGui::GetContentRegionAvail().y-100*scale)),ImGuiChildFlags_Borders)) {
+        if(ImGui::Selectable(T("A new world"),lobby.world<0)) {Lobby(BBCOOP_TEAM_WORLD);ImGui::CloseCurrentPopup();}
+        ImGui::TextWrapped(T("%s"),T("Starts from the leader's save; kept on the server from the first hunt."));
+        for(int i=0;i<std::clamp<int>(lobby.world_count,0,BBCOOP_LOBBY_WORLDS);++i) {
+            const auto& world=lobby.worlds[i];ImGui::PushID(world.id);ImGui::Separator();
+            ImGui::BeginDisabled(world.busy);const auto at=ImGui::GetCursorScreenPos();
+            if(ImGui::Selectable("##world",lobby.world==i,ImGuiSelectableFlags_None,ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*4+12*scale))) {std::snprintf(selected,sizeof(selected),"%s",world.id);Lobby(BBCOOP_TEAM_WORLD,world.id);ImGui::CloseCurrentPopup();}
+            const auto next=ImGui::GetCursorScreenPos();ImGui::SetCursorScreenPos(ImVec2(at.x+10*scale,at.y+6*scale));
+            ImGui::TextUnformatted(world.name);
+            ImGui::Text(T("%s%s   %s%s   %d %s"),T("Last played "),world.when,T("Made "),world.created,world.lamps,T("lamps lit"));
+            ImGui::TextWrapped(T("%s"),world.characters);if(world.busy) ImGui::TextUnformatted(T("In use"));
+            ImGui::SetCursorScreenPos(next);ImGui::Dummy(ImVec2(0,0));ImGui::EndDisabled();ImGui::PopID();
+        }
+    } ImGui::EndChild();
+    if(lobby.world>=0 && lobby.world<lobby.world_count && !lobby.worlds[lobby.world].busy) {
+        if(BbCoopStyle::Button("Forget this world")) {std::snprintf(forget,sizeof(forget),"%s",lobby.worlds[lobby.world].id);ImGui::OpenPopup(Popup("Forget world?"));}
+        if(ImGui::BeginPopupModal(Popup("Forget world?"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped(T("%s"),T("Forgotten worlds go off the list; the server keeps their files aside."));
+            if(BbCoopStyle::Button("Forget")) {Lobby(BBCOOP_TEAM_FORGET_WORLD,forget);ImGui::CloseCurrentPopup();}
+            ImGui::SameLine();if(BbCoopStyle::Button("Cancel")) ImGui::CloseCurrentPopup();ImGui::EndPopup();
+        }
+    }
+    if(BbCoopStyle::Button("Back")) ImGui::CloseCurrentPopup();
+    BbCoopStyle::Guide({{"Cross","Enter","Choose"},{"Circle","Esc","Back"}});
+    if(ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
 }
 void Team(const BbCoopUi& s) {
     const auto& lobby=s.lobby;
@@ -84,31 +144,30 @@ void Team(const BbCoopUi& s) {
     ImGui::SetNextWindowPos(ImVec2(display.x*.5f,display.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
     bool open=true;
     if(BbCoopStyle::Begin("Co-op Team",lobby.menu?&open:nullptr)) {
-        ImGui::TextUnformatted(lobby.signed_in?"Connected":"Connecting to the co-op server...");
-        if(*lobby.notice) ImGui::TextWrapped("%s",lobby.notice);
-        if(!lobby.signed_in) ImGui::TextWrapped("Check the server address and connection if this persists. You can return to offline play from the launcher.");
+        ImGui::TextUnformatted(T(lobby.signed_in?"Connected":"Connecting to the co-op server..."));
+        if(*lobby.notice) ImGui::TextWrapped(T("%s"),lobby.notice);
+        if(!lobby.signed_in) ImGui::TextWrapped("%s",T("Check the server address and connection if this persists. You can return to offline play from the launcher."));
         if(lobby.in_team) {
             HunterCards(s);
-            if(*lobby.code) { ImGui::Text("Team code: %s",lobby.code);ImGui::SameLine();if(ImGui::SmallButton("Copy")) ImGui::SetClipboardText(lobby.code); }
-            if(lobby.leader && ImGui::SmallButton("New team code")) Lobby(BBCOOP_TEAM_NEW_CODE);
-            ImGui::SeparatorText("The hunt");
-            const char* world=lobby.world>=0 && lobby.world<lobby.world_count?lobby.worlds[lobby.world].name:"New world";
+            if(*lobby.code) { ImGui::Text("%s: %s",T("Team code"),lobby.code);ImGui::SameLine();if(ImGui::SmallButton(T("Copy"))) ImGui::SetClipboardText(lobby.code); }
+            if(lobby.leader && ImGui::SmallButton(T("New team code"))) Lobby(BBCOOP_TEAM_NEW_CODE);
+            ImGui::SeparatorText(T("The hunt"));
+            const char* world=lobby.world>=0 && lobby.world<lobby.world_count?lobby.worlds[lobby.world].name:T("A new world");
+            ImGui::Text(T("%s: %s"),T("The world"),world);
             ImGui::BeginDisabled(!lobby.leader || lobby.started || lobby.menu);
-            if(ImGui::BeginCombo("World",world)) {
-                if(ImGui::Selectable("New world",lobby.world<0)) Lobby(BBCOOP_TEAM_WORLD);
-                for(int i=0;i<std::clamp<int>(lobby.world_count,0,BBCOOP_LOBBY_WORLDS);++i) {
-                    const auto& row=lobby.worlds[i];ImGui::PushID(i);ImGui::BeginDisabled(row.busy);
-                    if(ImGui::Selectable(row.name,lobby.world==i)) Lobby(BBCOOP_TEAM_WORLD,row.id);
-                    ImGui::EndDisabled();if(ImGui::IsItemHovered()) ImGui::SetTooltip("%s\n%s\n%d lamps\n%s",row.created,row.when,row.lamps,row.characters);ImGui::PopID();
-                } ImGui::EndCombo();
-            }
+            if(BbCoopStyle::Button("Choose a world")) ImGui::OpenPopup(Popup("Choose a world"));
+            WorldPicker(s);
             int death=lobby.death_mode;
-            if(ImGui::Combo("On death",&death,"Down and revive\0Spectate teammates\0")) Lobby(BBCOOP_TEAM_DEATH_MODE,death?"1":"0");
+            const char* death_modes[]={T("Go down (revive)"),T("Spectate teammates")};
+            if(ImGui::Combo(T("On death"),&death,death_modes,2)) Lobby(BBCOOP_TEAM_DEATH_MODE,death?"1":"0");
             ImGui::EndDisabled();ImGui::BeginDisabled(!lobby.leader);
             bool invaders=lobby.allow_invaders!=0;
-            if(ImGui::Checkbox("Allow invasions",&invaders)) Send(BB_COOP_ALLOW_INVADERS,invaders);
+            if(ImGui::Checkbox(T("Allow invasions"),&invaders)) Send(BB_COOP_ALLOW_INVADERS,invaders);
             ImGui::EndDisabled();
-            ImGui::TextWrapped("Host rules: Rot %s, travel together %s, travel vote %s, enemy scaling %s",lobby.rule_rot?"on":"off",lobby.rule_travel?"on":"off",lobby.rule_vote?"on":"off",lobby.rule_scale?"on":"off");
+            std::string rules;
+            auto rule=[&](bool on,const char* text) {if(on) {if(!rules.empty()) rules+=" · ";rules+=T(text);}};
+            rule(lobby.rule_rot,"Rot");rule(lobby.rule_travel,lobby.rule_vote?"Travel together (vote)":"Travel together");rule(lobby.rule_scale,"Enemies scale with the team");
+            ImGui::TextWrapped("%s%s",T("Host rules: "),rules.empty()?T("none"):rules.c_str());
             if(!lobby.menu && lobby.leader && !lobby.started) {
                 if(BbCoopStyle::Button("Start hunt")) Send(BB_COOP_CHOOSE,BBCOOP_TEAM_GO_START);
                 ImGui::SetItemDefaultFocus();
@@ -120,38 +179,43 @@ void Team(const BbCoopUi& s) {
             if(BbCoopStyle::Button("Leave team")) Lobby(BBCOOP_TEAM_LEAVE);
             if(lobby.leader && !lobby.started && lobby.world>=0 && lobby.world<lobby.world_count) {
                 static char forget[40]{};
-                if(BbCoopStyle::Button("Forget selected world...")) { std::snprintf(forget,sizeof(forget),"%s",lobby.worlds[lobby.world].id);ImGui::OpenPopup("Forget world?"); }
-                if(ImGui::BeginPopupModal("Forget world?",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-                    ImGui::TextUnformatted("Remove this world from your saved-world list?");
+                if(BbCoopStyle::Button("Forget selected world...")) { std::snprintf(forget,sizeof(forget),"%s",lobby.worlds[lobby.world].id);ImGui::OpenPopup(Popup("Forget world?")); }
+                if(ImGui::BeginPopupModal(Popup("Forget world?"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::TextUnformatted(T("Remove this world from your saved-world list?"));
                     if(BbCoopStyle::Button("Forget")) { Lobby(BBCOOP_TEAM_FORGET_WORLD,forget);ImGui::CloseCurrentPopup(); }
                     ImGui::SameLine();if(BbCoopStyle::Button("Cancel")) ImGui::CloseCurrentPopup();ImGui::EndPopup();
                 }
             }
         } else {
-            HunterCards(s);ImGui::SeparatorText("Gather your hunters");
+            HunterCards(s);ImGui::SeparatorText(T("Gather your hunters"));
             ImGui::BeginDisabled(!lobby.signed_in);
+            if(lobby.signed_in && !lobby.menu) {if(BbCoopStyle::Button("Choose a world")) ImGui::OpenPopup(Popup("Choose a world"));WorldPicker(s);}
             if(BbCoopStyle::Button("Create team")) Lobby(BBCOOP_TEAM_CREATE);
             ImGui::SetItemDefaultFocus();
             if(!lobby.menu) {ImGui::SameLine();if(BbCoopStyle::Button("Play alone")) Send(BB_COOP_CHOOSE,BBCOOP_TEAM_GO_ALONE);}
-            static char code[32]{};ImGui::InputText("Team code",code,sizeof(code));ImGui::SameLine();if(BbCoopStyle::Button("Join")) Lobby(BBCOOP_TEAM_JOIN_CODE,code);
+            static char code[32]{};ImGui::InputText(T("Team code"),code,sizeof(code));ImGui::SameLine();if(BbCoopStyle::Button("Join")) Lobby(BBCOOP_TEAM_JOIN_CODE,code);
             if(lobby.playing) {
                 const bool invading=s.has_invasion && s.invasion.role==BBCOOP_INVASION_INVADER && s.invasion.phase!=BBCOOP_INVASION_ENDED;
                 if(BbCoopStyle::Button(invading?"Leave invasion":"Search for an invasion")) Send(BB_COOP_INVASION,!invading);
             }
             ImGui::EndDisabled();
         }
-        if(lobby.invite_count || lobby.in_team) ImGui::SeparatorText("Invitations");
+        if(lobby.invite_count || lobby.in_team) ImGui::SeparatorText(T("Invitations"));
         for(int i=0;i<std::clamp<int>(lobby.invite_count,0,BBCOOP_LOBBY_INVITES);++i) {
-            const auto& invite=lobby.invites[i];ImGui::PushID(100+i);ImGui::Separator();ImGui::Text("Invitation from %s",Hunter(invite.name));
-            if(BbCoopStyle::Button("Accept")) Lobby(BBCOOP_TEAM_ACCEPT,invite.id);ImGui::SameLine();if(BbCoopStyle::Button("Decline")) Lobby(BBCOOP_TEAM_DECLINE,invite.id);ImGui::PopID();
+            const auto& invite=lobby.invites[i];ImGui::PushID(100+i);ImGui::Separator();ImGui::Text(T("Invitation from %s"),Hunter(invite.name));
+            if(BbCoopStyle::Button("Accept")) {if(lobby.playing) Send(BB_COOP_JOIN_HUNT,0,invite.id);else Lobby(BBCOOP_TEAM_ACCEPT,invite.id);}ImGui::SameLine();if(BbCoopStyle::Button("Decline")) Lobby(BBCOOP_TEAM_DECLINE,invite.id);ImGui::PopID();
         }
         if(lobby.in_team) {
-            static char name[40]{};ImGui::InputText("Invite by name",name,sizeof(name));ImGui::SameLine();if(BbCoopStyle::Button("Invite")) Lobby(BBCOOP_TEAM_INVITE_NAME,name);
-            if(ImGui::TreeNode("Online hunters")) {
-                for(int i=0;i<std::clamp<int>(lobby.player_count,0,BBCOOP_LOBBY_PLAYERS);++i) {
-                    const auto& p=lobby.players[i];ImGui::PushID(200+i);ImGui::TextUnformatted(Hunter(p.name));ImGui::SameLine();if(ImGui::SmallButton("Invite")) Lobby(BBCOOP_TEAM_INVITE,p.id);ImGui::PopID();
-                } ImGui::TreePop();
-            }
+            static char name[40]{};ImGui::InputText(T("Invite by name"),name,sizeof(name));ImGui::SameLine();if(BbCoopStyle::Button("Invite")) Lobby(BBCOOP_TEAM_INVITE_NAME,name);
+        }
+        if(ImGui::TreeNode(T("Hunters online"))) {
+            for(int i=0;i<std::clamp<int>(lobby.player_count,0,BBCOOP_LOBBY_PLAYERS);++i) {
+                const auto& p=lobby.players[i];ImGui::PushID(200+i);ImGui::TextUnformatted(Hunter(p.name));ImGui::SameLine();
+                ImGui::TextDisabled(T("%s"),T(p.state==BBCOOP_LOBBY_PLAYING?"In the hunt":p.state==BBCOOP_LOBBY_OFFLINE?"Away":"Choosing a character"));ImGui::SameLine();
+                ImGui::BeginDisabled(!lobby.in_team || lobby.member_count>=4);
+                if(ImGui::SmallButton(T("Invite"))) Lobby(BBCOOP_TEAM_INVITE,p.id);
+                ImGui::EndDisabled();ImGui::PopID();
+            } ImGui::TreePop();
         }
         if(lobby.playing) {
             if(BbCoopStyle::Button("Trade items")) trade_open=true;
@@ -159,12 +223,13 @@ void Team(const BbCoopUi& s) {
             if(s.duel.may_propose && BbCoopStyle::Button("Propose team duel")) Send(BB_COOP_DUEL_PROPOSE);
             if(s.duel.may_cancel && BbCoopStyle::Button("End duel")) Send(BB_COOP_DUEL_CANCEL);
         }
-        if(lobby.menu && !lobby.playing) ImGui::TextWrapped("Close this menu and select Continue or Load Game to choose your character. Your team will be ready when that character's team screen opens.");
+        if(lobby.menu && !lobby.playing) ImGui::TextWrapped("%s",T("Close this menu and select Continue or Load Game to choose your character. Your team will be ready when that character's team screen opens."));
         if(lobby.menu) {
             if(BbCoopStyle::Button(lobby.playing?"Return to game":"Return to title")) CloseTeam();
             ImGui::SetItemDefaultFocus();
         }
-        ImGui::TextDisabled("F6 Team   F8 Map   G Ping   F7 Free camera");
+        Preferences();
+        BbCoopStyle::Guide({{"Options","F6","Co-op"},{"TouchLeft","F8","Map"},{"Circle","Esc","Back"}});
     }
     ImGui::End();if(!open) CloseTeam();
 }
@@ -174,14 +239,14 @@ void Trade(const BbCoopUi& s) {
     ImGui::SetNextWindowSize(ImVec2(std::min(700*scale,display.x-40*scale),std::min(600*scale,display.y-50*scale)),ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(display.x*.5f,display.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
     if(BbCoopStyle::Begin("Trade with teammate",&trade_open)) {
-        if(!s.trade_on || !s.partner_count) ImGui::TextWrapped("Trading is available with a standing teammate on your current map.");
+        if(!s.trade_on || !s.partner_count) ImGui::TextWrapped("%s",T("Trading is available with a standing teammate on your current map."));
         static int partner=0,quantity=1;static uint32_t selected_handle=0,selected_kind=0,selected_item=0;
         partner=std::clamp(partner,0,std::max(0,s.partner_count-1));
-        if(ImGui::BeginCombo("Give to",s.partner_count?Hunter(s.partners[partner].name):"No teammate nearby")) {
+        if(ImGui::BeginCombo(T("Give to"),s.partner_count?Hunter(s.partners[partner].name):"No teammate nearby")) {
             for(int i=0;i<std::clamp(s.partner_count,0,4);++i) if(ImGui::Selectable(Hunter(s.partners[i].name),partner==i)) partner=i;
             ImGui::EndCombo();
         }
-        static ImGuiTextFilter filter;filter.Draw("Find item");
+        static ImGuiTextFilter filter;filter.Draw(T("Find item"));
         const BbCoopInventoryItem* selected=nullptr;
         if(ImGui::BeginChild("inventory",ImVec2(0,std::max(100*scale,ImGui::GetContentRegionAvail().y-ImGui::GetFrameHeightWithSpacing()*3)),ImGuiChildFlags_Borders)) {
             for(int i=0;i<std::clamp(s.inventory_count,0,BB_COOP_INVENTORY_MAX);++i) {
@@ -193,7 +258,7 @@ void Trade(const BbCoopUi& s) {
                 ImGui::PopID();
             }
         } ImGui::EndChild();
-        ImGui::InputInt("Quantity",&quantity);
+        ImGui::InputInt(T("Quantity"),&quantity);
         const int maximum=selected?std::min(selected->count,selected->kind==1?999999999u:selected->kind==3?1u:99u):1;
         quantity=std::clamp(quantity,1,std::max(1,maximum));
         static BbCoopCommand pending{};static char confirmation[256]{};
@@ -202,150 +267,265 @@ void Trade(const BbCoopUi& s) {
             pending={};pending.version=BB_COOP_UI_VERSION;pending.action=BB_COOP_TRADE_OFFER;
             pending.kind=selected->kind;pending.item=selected->id;pending.handle=selected->handle;pending.count=quantity;
             std::snprintf(pending.text,sizeof(pending.text),"%s",s.partners[partner].id);
-            std::snprintf(confirmation,sizeof(confirmation),"Give %d %s to %s?",quantity,selected->name,Hunter(s.partners[partner].name));
-            ImGui::OpenPopup("Confirm trade");
+            std::snprintf(confirmation,sizeof(confirmation),"%s: %d %s → %s?",T("Give"),quantity,selected->name,Hunter(s.partners[partner].name));
+            ImGui::OpenPopup(Popup("Confirm trade"));
         } ImGui::EndDisabled();
-        if(ImGui::BeginPopupModal("Confirm trade",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::TextWrapped("%s",confirmation);ImGui::TextUnformatted("The items are reserved until your teammate answers.");
+        if(ImGui::BeginPopupModal(Popup("Confirm trade"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped(T("%s"),confirmation);ImGui::TextUnformatted(T("The items are reserved until your teammate answers."));
             if(BbCoopStyle::Button("Send offer")) {Send(pending);ImGui::CloseCurrentPopup();}
             ImGui::SameLine();if(BbCoopStyle::Button("Cancel")) ImGui::CloseCurrentPopup();ImGui::EndPopup();
         }
     } ImGui::End();
 }
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Native Metal adaptation of Kaniel / lKaniel's Map namespace (bbport_overlay.cpp, 8d5e54f).
+bool Pressed(std::initializer_list<ImGuiKey> keys,bool repeat=false) {
+    for(auto key:keys) if(ImGui::IsKeyPressed(key,repeat)) return true;
+    return false;
+}
 void Map(const BbCoopUi& s) {
-    bool open=true;
-    const float scale=ImGui::GetFontSize()/17;
-    const ImVec2 limit(ImGui::GetIO().DisplaySize.x-40,ImGui::GetIO().DisplaySize.y-60);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(std::min(650*scale,limit.x),std::min(780*scale,limit.y)),limit);
-    ImGui::SetNextWindowSize(ImVec2(std::min(920*scale,limit.x),std::min(820*scale,limit.y)),ImGuiCond_FirstUseEver);
-    if(BbCoopStyle::Begin("World map",&open)) {
-        if(!s.has_map) ImGui::TextUnformatted("Waiting for the game map...");
-        const auto& map=s.map;
-        static uint32_t shown=0;static float zoom=1.0f;
-        if(!shown) shown=map.map;
-        std::map<uint32_t,bool> areas;areas[map.map]=true;
-        for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) areas[map.lamps[i].map]=true;
-        auto area_name=[&](uint32_t map) -> std::string {
-            for(int i=0;i<std::clamp(s.area_count,0,48);++i) if(s.areas[i].map==map) return s.areas[i].name;
-            char text[40];std::snprintf(text,sizeof(text),"Area %08x",map);return text;
-        };
-        const auto title=area_name(shown);
-        if(ImGui::BeginCombo("Area",title.c_str())) { for(auto [area,unused]:areas) { (void)unused;if(ImGui::Selectable(area_name(area).c_str(),shown==area)) shown=area; }ImGui::EndCombo(); }
-        if(s.explored_map!=shown) {
-            BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_AREA;c.map=shown;Send(c);
+    const auto& map=s.map;auto& prefs=BbSettings::Get();auto& io=ImGui::GetIO();
+    const float scale=BbCoopStyle::Scale();bool open=true;
+    static uint32_t shown=0,previous=0,requested=0;
+    static float zoom=3,pan_x=0,pan_z=0,cy=0,yaw=0,pitch=.9f;
+    static bool follow=true;static int floors=0,focused=0,side=1;
+    static int three_d=2;static int travel_ask=0;
+    static std::map<uint32_t,std::vector<int16_t>> explored;
+    if(s.explored_other_map) explored[s.explored_other_map]={s.explored_other,s.explored_other+std::clamp(s.explored_other_count,0,8192)*2};
+    if(s.explored_map) explored[s.explored_map]={s.explored,s.explored+std::clamp(s.explored_count,0,8192)*2};
+    std::vector<uint32_t> areas;
+    for(int i=0;i<std::clamp(s.area_count,0,48);++i) if(s.areas[i].map) areas.push_back(s.areas[i].map);
+    if(areas.empty() && map.map) areas.push_back(map.map);
+    if(!map_was_open) {shown=map.map;previous=0;requested=0;follow=true;map_was_open=true;}
+    auto area_name=[&](uint32_t id)->const char* {
+        for(int i=0;i<std::clamp(s.area_count,0,48);++i) if(s.areas[i].map==id) return s.areas[i].name;
+        return T("Map");
+    };
+    const auto display=io.DisplaySize;
+    ImGui::SetNextWindowPos(ImVec2(20*scale,20*scale),ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(display.x-40*scale,display.y-40*scale),ImGuiCond_Appearing);
+    if(BbCoopStyle::Begin("World map",&open,ImGuiWindowFlags_NoNavInputs)) {
+        const bool keys=!io.WantTextInput && !ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId);
+        if(keys && Pressed({ImGuiKey_GamepadFaceRight,ImGuiKey_GamepadBack,ImGuiKey_M})) open=false;
+        if(keys && !areas.empty() && Pressed({ImGuiKey_GamepadL1,ImGuiKey_GamepadR1,ImGuiKey_Q,ImGuiKey_E,ImGuiKey_PageUp,ImGuiKey_PageDown})) {
+            auto it=std::find(areas.begin(),areas.end(),shown);int n=it==areas.end()?0:int(it-areas.begin());
+            n+=Pressed({ImGuiKey_GamepadR1,ImGuiKey_E,ImGuiKey_PageDown})?1:-1;
+            shown=areas[(n+int(areas.size()))%areas.size()];
         }
-        int view=BbSettings::Get().map_view;
-        if(ImGui::Combo("View",&view,"Coordinates\0Rendered terrain\0Live 3D\0")) {BbSettings::Get().map_view=view;BbSettings::Save();}
-        bool fog=BbSettings::Get().map_fog;
-        if(ImGui::Checkbox("Fog of war",&fog)) {BbSettings::Get().map_fog=fog;BbSettings::Save();}
+        if(ImGui::BeginCombo(T("Area"),area_name(shown))) {
+            for(auto id:areas) if(ImGui::Selectable(area_name(id),id==shown)) shown=id;
+            ImGui::EndCombo();
+        }
+        const char* views[]={T("Coordinates"),T("Rendered terrain"),T("Live 3D"),T("Prerendered")};
+        int view=prefs.map_view;
+        if(ImGui::Combo(T("View"),&view,views,4)) {prefs.map_view=view;BbSettings::Save();}
+        if(keys && Pressed({ImGuiKey_GamepadL3,ImGuiKey_V})) {
+            if(view>=2) {three_d=view;view=1;} else view=three_d;
+            prefs.map_view=view;BbSettings::Save();
+        }
+        bool fog=prefs.map_fog;
+        if(ImGui::Checkbox(T("Fog of war"),&fog)) {prefs.map_fog=fog;BbSettings::Save();}
+        ImGui::SameLine();ImGui::Checkbox(T("Follow player"),&follow);ImGui::SameLine();
+        bool fit=BbCoopStyle::Button("Fit area");ImGui::SameLine();
+        bool fit_all=BbCoopStyle::Button("All areas");
+        const bool asked_before=travel_ask!=0;
+        if(keys && Pressed({ImGuiKey_GamepadFaceUp,ImGuiKey_Tab})) fit_all=true;
+        if(keys && Pressed({ImGuiKey_GamepadR3,ImGuiKey_F})) floors=(floors+1)%3;
+        const char* floor_names[]={T("Automatic"),T("Roofs"),T("Floors")};
+        ImGui::SameLine();ImGui::SetNextItemWidth(170*scale);
+        ImGui::Combo(T("Level"),&floors,floor_names,3);
+        if(view==3) {ImGui::SameLine();if(BbCoopStyle::Button("Turn")) side=side%4+1;}
+        int projected=view==3?side:0;
+        for(auto id:areas) if(view) {BbMapCharts::Prepare(id);if(projected) BbMapCharts::Prepare(id,projected);if(view==2) BbMapCharts::PrepareMesh(id);}
         auto chart=view?BbMapCharts::Get(shown):nullptr;
+        auto side_chart=projected?BbMapCharts::Get(shown,projected):nullptr;
         auto mesh=view==2 && chart?BbMapCharts::GetMesh(shown):nullptr;
-        const bool live=view==2 && chart && mesh;
-        static bool follow=true;static float pan_x=0,pan_z=0,yaw=0,pitch=.9f;
-        static uint32_t previous=0;
-        if(previous!=shown) {pan_x=pan_z=0;previous=shown;follow=true;}
-        ImGui::SliderFloat("Zoom",&zoom,.1f,12.f,"%.1f px/m");
-        ImGui::Checkbox("Follow player",&follow);ImGui::SameLine();
-        const bool fit=BbCoopStyle::Button("Fit area");
-        if(view==2) {ImGui::SliderAngle("Turn",&yaw,-180,180);ImGui::SliderAngle("Tilt",&pitch,20,90);}
-        const ImVec2 start=ImGui::GetCursorScreenPos(),size=ImVec2(std::max(250.f,ImGui::GetContentRegionAvail().x),std::max(100.f,ImGui::GetContentRegionAvail().y-140.f-ImGui::GetTextLineHeightWithSpacing()*7-ImGui::GetFrameHeightWithSpacing()));
-        ImGui::InvisibleButton("map canvas",size,ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight);
-        const bool hovered=ImGui::IsItemHovered();auto* draw=ImGui::GetWindowDrawList();
-        const ImVec2 end(start.x+size.x,start.y+size.y);
-        float cx=shown==map.map?map.x:0,cz=shown==map.map?map.z:0,cy=shown==map.map?map.y:0;
-        if(shown!=map.map) for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) if(map.lamps[i].map==shown) {cx=map.lamps[i].x;cz=map.lamps[i].z;cy=map.lamps[i].y;break;}
-        if(follow) {pan_x=cx;pan_z=cz;}
-        if(fit && chart) {follow=false;pan_x=chart->x0+chart->width/chart->ppm*.5f;pan_z=chart->z1-chart->height/chart->ppm*.5f;zoom=std::min(size.x/(chart->width/chart->ppm),size.y/(chart->height/chart->ppm))*.95f;}
-        BbMapView::Camera camera{pan_x,cy,pan_z,zoom,live?yaw:0,live?pitch:1.5707963268f};
-        if(hovered && ImGui::GetIO().MouseWheel!=0) zoom=std::clamp(zoom*std::pow(1.15f,ImGui::GetIO().MouseWheel),.1f,12.f);
-        if(hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-            const auto& delta=ImGui::GetIO().MouseDelta;auto p=camera.Ground(-delta.x,-delta.y);
-            pan_x=p[0];pan_z=p[1];follow=false;camera.x=pan_x;camera.z=pan_z;
+        bool live=view==2 && chart && mesh;
+        bool oblique=projected && bool(side_chart);
+        auto pictures=view?BbMapCharts::Atlas(oblique?projected:0):decltype(BbMapCharts::Atlas()){};
+        if(oblique) pictures[shown]=side_chart;else if(chart) pictures[shown]=chart;
+        if(previous!=shown) {
+            const auto offset=BbMapView::AtlasOffset(shown);
+            float x=shown==map.map?map.x:0,z=shown==map.map?map.z:0;cy=shown==map.map?map.y:0;
+            if(shown!=map.map) for(int i=0;i<map.lamp_count;++i) if(map.lamps[i].map==shown) {x=map.lamps[i].x;z=map.lamps[i].z;cy=map.lamps[i].y;break;}
+            pan_x=x+offset.dx;pan_z=z+offset.dz;previous=shown;focused=0;follow=true;
         }
-        camera.zoom=zoom;
-        auto at=[&](float x,float z,float y) {auto p=camera.Project(x,y,z);return ImVec2(start.x+size.x*.5f+p[0],start.y+size.y*.5f+p[1]);};
-        draw->PushClipRect(start,end,true);draw->AddRectFilled(start,end,IM_COL32(18,24,28,255));
-        bool cleared=false;
-        for(int i=0;i<std::clamp(map.cleared_count,0,24);++i) cleared|=map.cleared[i]==shown;
-        if(chart) {
-            static uint64_t last=0;static std::vector<uint8_t> pixels;
-            uint64_t stamp=14695981039346656037ull;
-            auto mix=[&](uint64_t n){stamp^=n;stamp*=1099511628211ull;};
-            const bool floor=!live && shown==map.map && BbMapArt::UnderRoof(*chart,map.x,map.y,map.z);
-            mix(reinterpret_cast<uintptr_t>(chart.get()));mix(shown);mix(cleared);mix(fog);
-            mix(uint64_t(int64_t(std::floor(map.x/2))));mix(uint64_t(int64_t(std::floor(map.z/2))));mix(floor?uint64_t(int64_t(std::floor(cy))):UINT64_MAX);
-            if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192)*2;++i) mix(uint16_t(s.explored[i]));
-            for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) mix(map.lamps[i].lit);
-            if(last!=stamp) {
-                pixels=chart->rgba;if(floor) BbMapArt::FloorView(*chart,std::floor(cy),pixels.data());
+        const auto me_offset=BbMapView::AtlasOffset(map.map);
+        if(follow && map.has_me && shown==map.map) {pan_x=map.x+me_offset.dx;pan_z=map.z+me_offset.dz;cy=map.y;}
+        if(keys && Pressed({ImGuiKey_GamepadStart,ImGuiKey_C}) && map.has_me) {shown=map.map;pan_x=map.x+me_offset.dx;pan_z=map.z+me_offset.dz;cy=map.y;follow=true;}
+        if(s.explored_map!=shown && requested!=shown) {requested=shown;BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_AREA;c.map=shown;Send(c);}
+        const float list_width=std::min(290*scale,ImGui::GetContentRegionAvail().x*.28f);
+        const auto start=ImGui::GetCursorScreenPos();
+        const ImVec2 size(std::max(180.f,ImGui::GetContentRegionAvail().x-list_width-20*scale),std::max(100.f,ImGui::GetContentRegionAvail().y-110*scale));
+        ImGui::InvisibleButton("map canvas",size,ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight);
+        const bool hovered=ImGui::IsItemHovered();const ImVec2 end(start.x+size.x,start.y+size.y),middle(start.x+size.x*.5f,start.y+size.y*.5f);
+        auto* draw=ImGui::GetWindowDrawList();
+        if(fit_all && !pictures.empty()) {
+            float x0=FLT_MAX,z0=FLT_MAX,x1=-FLT_MAX,z1=-FLT_MAX;
+            for(const auto& [id,p]:BbMapCharts::Atlas()) {const auto o=BbMapView::AtlasOffset(id);x0=std::min(x0,p->x0+o.dx);x1=std::max(x1,p->x0+p->width/p->ppm+o.dx);z0=std::min(z0,p->z1-p->height/p->ppm+o.dz);z1=std::max(z1,p->z1+o.dz);}
+            float low=cy,high=cy;
+            if(live) {
+                auto scene=BbMapCharts::MeshAtlas();scene[shown]=mesh;
+                low=FLT_MAX;high=-FLT_MAX;
+                for(const auto& [id,m]:scene) {const auto offset=BbMapView::AtlasOffset(id);
+                    for(size_t i=0;i+2<m->positions.size();i+=3) {x0=std::min(x0,m->positions[i]+offset.dx);x1=std::max(x1,m->positions[i]+offset.dx);z0=std::min(z0,m->positions[i+2]+offset.dz);z1=std::max(z1,m->positions[i+2]+offset.dz);low=std::min(low,m->positions[i+1]);high=std::max(high,m->positions[i+1]);}
+                }
+                if(low<=high) cy=(low+high)*.5f;else low=high=cy;
+            }
+            if(x0<x1 && z0<z1) {pan_x=(x0+x1)*.5f;pan_z=(z0+z1)*.5f;zoom=BbMapView::FitZoom({pan_x,cy,pan_z,1,live?yaw:oblique?BbMapArt::ViewOf(projected).yaw:0,live?pitch:oblique?BbMapArt::ViewOf(projected).pitch:Pi*.5f},x0,z0,x1,z1,size.x,size.y,low,high);follow=false;}
+        } else if(fit && chart) {const auto o=BbMapView::AtlasOffset(shown);pan_x=chart->x0+chart->width/chart->ppm*.5f+o.dx;pan_z=chart->z1-chart->height/chart->ppm*.5f+o.dz;zoom=.9f*std::min(size.x/(chart->width/chart->ppm),size.y/(chart->height/chart->ppm));follow=false;}
+        const float dt=std::min(io.DeltaTime,.1f);
+        auto analog=[](ImGuiKey k){return ImGui::GetKeyData(k)->AnalogValue;};
+        if(keys) {
+            float lx=analog(ImGuiKey_GamepadLStickRight)-analog(ImGuiKey_GamepadLStickLeft)+(ImGui::IsKeyDown(ImGuiKey_D)?1:0)-(ImGui::IsKeyDown(ImGuiKey_A)?1:0);
+            float ly=analog(ImGuiKey_GamepadLStickDown)-analog(ImGuiKey_GamepadLStickUp)+(ImGui::IsKeyDown(ImGuiKey_S)?1:0)-(ImGui::IsKeyDown(ImGuiKey_W)?1:0);
+            const float rx=analog(ImGuiKey_GamepadRStickRight)-analog(ImGuiKey_GamepadRStickLeft),ry=analog(ImGuiKey_GamepadRStickDown)-analog(ImGuiKey_GamepadRStickUp);
+            if(live) {yaw+=(rx+(ImGui::IsKeyDown(ImGuiKey_X)?1:0)-(ImGui::IsKeyDown(ImGuiKey_Z)?1:0))*1.8f*dt;pitch=std::clamp(pitch-ry*.9f*dt,.35f,1.5707f);}
+            else zoom*=std::pow(2.f,-ry*dt*1.6f);
+            zoom*=std::pow(2.f,dt*1.5f*((ImGui::IsKeyDown(ImGuiKey_GamepadR2)?1:0)-(ImGui::IsKeyDown(ImGuiKey_GamepadL2)?1:0)+(ImGui::IsKeyDown(ImGuiKey_Equal)?1:0)-(ImGui::IsKeyDown(ImGuiKey_Minus)?1:0)));
+            if(std::abs(lx)+std::abs(ly)>.05f) {BbMapView::Camera moving{pan_x,cy,pan_z,zoom,live?yaw:oblique?BbMapArt::ViewOf(projected).yaw:0,live?pitch:oblique?BbMapArt::ViewOf(projected).pitch:Pi*.5f};auto p=moving.Ground(lx*dt*400,-ly*dt*400);pan_x=p[0];pan_z=p[1];follow=false;}
+        }
+        if(oblique) {yaw=BbMapArt::ViewOf(projected).yaw;pitch=BbMapArt::ViewOf(projected).pitch;}
+        zoom=std::clamp(zoom,.05f,12.f);
+        BbMapView::Camera camera{pan_x,cy,pan_z,zoom,live||oblique?yaw:0,live||oblique?pitch:Pi*.5f};
+        if(hovered && io.MouseWheel) zoom=std::clamp(zoom*std::pow(1.25f,io.MouseWheel),.05f,12.f);
+        if(hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {auto p=camera.Ground(-io.MouseDelta.x,-io.MouseDelta.y);pan_x=p[0];pan_z=p[1];follow=false;}
+        if(live && hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Right,6)) {yaw+=io.MouseDelta.x*.006f;pitch=std::clamp(pitch+io.MouseDelta.y*.004f,.35f,1.5707f);}
+        if(!follow) {
+            const auto flat=BbMapCharts::Atlas();
+            auto under=[&](uint32_t id) {auto it=flat.find(id);if(it==flat.end()) return false;const auto o=BbMapView::AtlasOffset(id);const auto& c=*it->second;auto px=c.PixelOf(pan_x-o.dx,pan_z-o.dz);int x=int(px[0]),y=int(px[1]);return x>=0 && y>=0 && x<c.width && y<c.height && c.rgba[(size_t(y)*c.width+x)*4+3]!=0;};
+            if(!under(shown)) for(const auto& [id,c]:flat) if(under(id)) {shown=previous=id;focused=0;break;}
+        }
+        camera.x=pan_x;camera.z=pan_z;camera.yaw=live||oblique?yaw:0;camera.pitch=live||oblique?pitch:Pi*.5f;camera.zoom=zoom;
+        auto at=[&](uint32_t id,float x,float z,float y) {const auto o=BbMapView::AtlasOffset(id);auto p=camera.Project(x+o.dx,y,z+o.dz);return ImVec2(middle.x+p[0],middle.y+p[1]);};
+        auto floor_at=[&](uint32_t id,float x,float z) {
+            auto c=id==shown?chart:nullptr;
+            if(!c) {const auto atlas=BbMapCharts::Atlas();if(auto it=atlas.find(id);it!=atlas.end()) c=it->second;}
+            if(!c) return cy;
+            auto pixel=c->PixelOf(x,z);int px=int(pixel[0])/BbMapArt::Chart::FloorCell,py=int(pixel[1])/BbMapArt::Chart::FloorCell;
+            if(px<0 || py<0 || px>=c->storeys.width || py>=c->storeys.height) return cy;
+            auto h=BbMapArt::ShownHeight(*c,size_t(py)*c->storeys.width+px,floors==1?NAN:cy);
+            return h==BbMapArt::Chart::NoHeight?cy:h*.1f;
+        };
+        draw->PushClipRect(start,end,true);draw->AddRectFilled(start,end,IM_COL32(18,21,23,255));
+        // Flat charts use the atlas world's coordinates. Oblique charts carry projected (u,w).
+        std::vector<uint32_t> order;for(const auto& [id,p]:pictures) if(id!=shown) order.push_back(id);if(pictures.contains(shown)) order.push_back(shown);
+        static std::map<uint32_t,std::pair<uint64_t,std::vector<uint8_t>>> fogged;
+        for(auto id:order) {
+            const auto& picture=*pictures[id];bool cleared=false;for(int i=0;i<map.cleared_count;++i) cleared|=map.cleared[i]==(id&0xffff0000u);
+            auto& [last,pixels]=fogged[id];uint64_t stamp=uint64_t(reinterpret_cast<uintptr_t>(pictures[id].get()));
+            auto mix=[&](uint64_t n){stamp^=n;stamp*=1099511628211ull;};mix(id);mix(view);mix(fog);mix(cleared);mix(floors);mix(int(cy*2));
+            if(explored.contains(id)) {mix(explored[id].size());for(auto n:explored[id]) mix(uint16_t(n));}
+            if(map.has_me && id==map.map) {mix(int(map.x/4));mix(int(map.z/4));}
+            for(int i=0;i<map.lamp_count;++i) if(map.lamps[i].map==id) mix(map.lamps[i].lit);
+            if(stamp!=last) {
+                pixels=picture.rgba;
+                bool floor=floors==2 || (floors==0 && chart && shown==map.map && BbMapArt::UnderRoof(*chart,map.x,map.y,map.z));
+                if(!oblique && floor) BbMapArt::FloorView(picture,id==map.map && map.has_me?map.y:cy,pixels.data());
                 std::vector<BbMapArt::Vec3> reveal;
-                if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192);++i)
-                    reveal.push_back({(s.explored[2*i]+.5f)*float(BBCOOP_MAP_CELL),(s.explored[2*i+1]+.5f)*float(BBCOOP_MAP_CELL),40});
-                for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {const auto& lamp=map.lamps[i];
-                    if(lamp.map==shown && lamp.lit) reveal.push_back({lamp.x,lamp.z,60});}
-                if(map.has_me && shown==map.map) reveal.push_back({map.x,map.z,40});
-                if(fog && !cleared) BbMapView::Fog(*chart,reveal,pixels);
+                if(explored.contains(id)) for(size_t i=0;i+1<explored[id].size();i+=2) reveal.push_back({(explored[id][i]+.5f)*float(BBCOOP_MAP_CELL),(explored[id][i+1]+.5f)*float(BBCOOP_MAP_CELL),40});
+                for(int i=0;i<map.lamp_count;++i) {const auto& l=map.lamps[i];if(l.map==id && l.lit) reveal.push_back({l.x,l.z,60});}
+                if(map.has_me && id==map.map) reveal.push_back({map.x,map.z,40});
+                if(oblique) for(auto& disc:reveal) {auto p=BbMapArt::ToView(BbMapArt::ViewOf(projected),disc[0],cy,disc[1]);disc[0]=p[0];disc[1]=p[1];}
+                if(fog && !cleared) BbMapView::Fog(picture,reveal,pixels);
                 last=stamp;
             }
-            void* texture=BbOverlay::MetalBackend::MapTexture(stamp,*chart,pixels.data());
-            if(live) texture=BbOverlay::MetalBackend::Map3d(shown,mesh,*chart,{camera.x,camera.y,camera.z,camera.zoom,camera.yaw,camera.pitch,size.x,size.y});
-            const ImTextureRef ref{static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture))};
-            if(texture) {
-                if(live) draw->AddImage(ref,start,end);
-                else draw->AddImage(ref,at(chart->x0,chart->z1,cy),at(chart->x0+chart->width/chart->ppm,chart->z1-chart->height/chart->ppm,cy));
-            }
-        } else {
-            if(cleared) draw->AddRectFilled(start,end,IM_COL32(38,54,48,255));
-            else if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192);++i) {
-                const float x=s.explored[2*i]*BBCOOP_MAP_CELL,z=s.explored[2*i+1]*BBCOOP_MAP_CELL;
-                draw->AddRectFilled(at(x,z+float(BBCOOP_MAP_CELL),cy),at(x+float(BBCOOP_MAP_CELL),z,cy),IM_COL32(45,65,61,255));
-            }
-            for(float x=0;x<size.x;x+=40) draw->AddLine(ImVec2(start.x+x,start.y),ImVec2(start.x+x,end.y),IM_COL32(40,48,52,255));
-            for(float y=0;y<size.y;y+=40) draw->AddLine(ImVec2(start.x,start.y+y),ImVec2(end.x,start.y+y),IM_COL32(40,48,52,255));
+            void* texture=BbOverlay::MetalBackend::MapTexture(stamp,picture,pixels.data(),id|unsigned(projected));
+            ImVec2 a,b;
+            if(oblique) {auto o=BbMapView::AtlasOffset(id);auto shift=BbMapArt::ToView(BbMapArt::ViewOf(projected),o.dx,0,o.dz);auto center=BbMapArt::ToView(BbMapArt::ViewOf(projected),pan_x,cy,pan_z);a={middle.x+(picture.x0+shift[0]-center[0])*zoom,middle.y-(picture.z1+shift[1]-center[1])*zoom};b={a.x+picture.width/picture.ppm*zoom,a.y+picture.height/picture.ppm*zoom};}
+            else {a=at(id,picture.x0,picture.z1,cy);b=at(id,picture.x0+picture.width/picture.ppm,picture.z1-picture.height/picture.ppm,cy);}
+            if(live && id==shown) {const auto o=BbMapView::AtlasOffset(shown);texture=BbOverlay::MetalBackend::Map3d(shown,mesh,*chart,{pan_x-o.dx,cy,pan_z-o.dz,zoom,yaw,pitch,size.x,size.y});a=start;b=end;}
+            if(texture) draw->AddImage(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture))),a,b,ImVec2(0,0),ImVec2(1,1),id==shown?IM_COL32_WHITE:IM_COL32(175,175,175,255));
+            if(zoom<1.2f && pictures.size()>1) BbCoopStyle::Label(draw,ImVec2((a.x+b.x)*.5f,(a.y+b.y)*.5f),20*scale,BbCoopStyle::Ink(.7f),area_name(id),.5f);
+            if(zoom>=1) for(const auto& label:picture.labels) for(int i=0;i<s.label_count;++i) if(s.labels[i].id==label.name_id) {auto pos=at(id,label.x,label.z,floor_at(id,label.x,label.z));pos.y+=22*scale;BbCoopStyle::Label(draw,pos,17*scale,BbCoopStyle::Muted(),s.labels[i].name,.5f,240*scale);break;}
         }
-        for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {const auto& lamp=map.lamps[i];if(lamp.map==shown) draw->AddCircleFilled(at(lamp.x,lamp.z,lamp.y),5,lamp.lit?IM_COL32(255,210,90,255):IM_COL32(100,100,100,255));}
-        for(int i=0;i<std::clamp(map.member_count,0,4);++i) {const auto& m=map.members[i];if(m.map==shown && m.has_at) {auto p=at(m.x,m.z,m.y);BbCoopStyle::Face(draw,s,m.board,m.name,p,28*scale,i,m.vital==BBCOOP_VITAL_UP);draw->AddText(ImVec2(p.x+17*scale,p.y),BbCoopStyle::Ink(),Hunter(m.name));}}
-        if(map.has_me && shown==map.map) draw->AddCircleFilled(at(map.x,map.z,map.y),6,IM_COL32(130,255,150,255));
-        if(map.has_stain && map.stain.map==shown) draw->AddCircleFilled(at(map.stain.x,map.stain.z,map.stain.y),6,IM_COL32(230,60,70,255));
-        for(int i=0;i<std::clamp(s.pings.count,0,4);++i) {const auto& ping=s.pings.pings[i];if(ping.map==shown) draw->AddCircle(at(ping.x,ping.z,ping.y),9,IM_COL32(255,240,130,255),0,2);}
+        if(live) {
+            // Other prepared areas share the depth target and their atlas-world offsets.
+            const auto previews=BbMapCharts::Atlas();
+            for(const auto& [id,other]:BbMapCharts::MeshAtlas()) if(id!=shown && previews.contains(id)) {
+                const auto& p=*previews.at(id);const auto offset=BbMapView::AtlasOffset(id);
+                // This area's latest fog texture was prepared above. Its stable slot retains it.
+                const auto& [version,fogged_pixels]=fogged[id];
+                BbOverlay::MetalBackend::MapTexture(version,p,fogged_pixels.data(),id);
+                BbOverlay::MetalBackend::Map3d(id,other,p,{pan_x-offset.dx,cy,pan_z-offset.dz,zoom,yaw,pitch,size.x,size.y},true);
+            }
+        }
+        if(!chart) for(float x=0;x<size.x;x+=40) draw->AddLine(ImVec2(start.x+x,start.y),ImVec2(start.x+x,end.y),IM_COL32(40,48,52,255));
+        std::vector<int> lamps;for(int i=0;i<map.lamp_count;++i) if(map.lamps[i].map==shown && map.lamps[i].lit) lamps.push_back(i);
+        bool moving=keys && (std::abs(analog(ImGuiKey_GamepadLStickRight)-analog(ImGuiKey_GamepadLStickLeft))+std::abs(analog(ImGuiKey_GamepadLStickDown)-analog(ImGuiKey_GamepadLStickUp))>.05f);
+        if(keys && !lamps.empty() && Pressed({ImGuiKey_GamepadDpadUp,ImGuiKey_GamepadDpadDown,ImGuiKey_UpArrow,ImGuiKey_DownArrow},true)) {
+            focused=std::clamp(focused+(Pressed({ImGuiKey_GamepadDpadDown,ImGuiKey_DownArrow},true)?1:-1),0,int(lamps.size())-1);
+            const auto& l=map.lamps[lamps[focused]];const auto o=BbMapView::AtlasOffset(l.map);pan_x=l.x+o.dx;pan_z=l.z+o.dz;follow=false;
+        }
+        static double mouse_moved=-10;
+        if(hovered && (io.MouseDelta.x || io.MouseDelta.y)) mouse_moved=ImGui::GetTime();
+        const ImVec2 cursor=hovered && ImGui::GetTime()-mouse_moved<2?io.MousePos:middle;
+        int hover_lamp=-1;float best=30*scale*30*scale;
+        for(int i=0;i<map.lamp_count;++i) {
+            const auto& l=map.lamps[i];if(!pictures.contains(l.map) && l.map!=shown) continue;
+            auto p=at(l.map,l.x,l.z,l.y);float d=(p.x-cursor.x)*(p.x-cursor.x)+(p.y-cursor.y)*(p.y-cursor.y);
+            if(l.lit && d<best) {best=d;hover_lamp=i;}
+            draw->AddCircleFilled(p,l.lit?5*scale:3*scale,l.lit?IM_COL32(255,210,90,255):IM_COL32(100,100,100,255));
+        }
+        if(hover_lamp>=0) {
+            const auto& l=map.lamps[hover_lamp];auto p=at(l.map,l.x,l.z,l.y);draw->AddCircle(p,12*scale,BbCoopStyle::Ink(),24,2*scale);
+            BbCoopStyle::Label(draw,ImVec2(p.x,p.y-30*scale),20*scale,BbCoopStyle::Ink(),s.lamp_names[hover_lamp],.5f);
+            if(!moving && !follow && !ImGui::IsMouseDown(ImGuiMouseButton_Left) && cursor.x==middle.x && cursor.y==middle.y) {const auto o=BbMapView::AtlasOffset(l.map);float ease=std::min(1.f,dt*10);pan_x+=(l.x+o.dx-pan_x)*ease;pan_z+=(l.z+o.dz-pan_z)*ease;}
+            if(map.block==BBCOOP_MAP_GO && ((keys && Pressed({ImGuiKey_GamepadFaceDown,ImGuiKey_Enter})) || (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)))) travel_ask=l.warp_point;
+        }
+        for(int i=0;i<map.member_count;++i) {const auto& m=map.members[i];if(m.has_at && (pictures.contains(m.map) || m.map==shown)) {auto p=at(m.map,m.x,m.z,m.y);BbCoopStyle::Face(draw,s,m.board,m.name,p,28*scale,i,m.vital==BBCOOP_VITAL_UP);BbCoopStyle::Label(draw,ImVec2(p.x+17*scale,p.y),16*scale,BbCoopStyle::Ink(),Hunter(m.name));}}
+        if(map.has_me) draw->AddCircleFilled(at(map.map,map.x,map.z,map.y),6*scale,IM_COL32(130,255,150,255));
+        if(prefs.bloodstains && map.has_stain) draw->AddCircleFilled(at(map.stain.map,map.stain.x,map.stain.z,map.stain.y),6*scale,IM_COL32(230,60,70,255));
+        if(prefs.team_pings) for(int i=0;i<s.pings.count;++i) {const auto& p=s.pings.pings[i];draw->AddCircle(at(p.map,p.x,p.z,p.y),9*scale,IM_COL32(255,240,130,255),0,2*scale);}
+        draw->AddLine(ImVec2(middle.x-12*scale,middle.y),ImVec2(middle.x+12*scale,middle.y),BbCoopStyle::Ink(.8f));
+        draw->AddLine(ImVec2(middle.x,middle.y-12*scale),ImVec2(middle.x,middle.y+12*scale),BbCoopStyle::Ink(.8f));
+        const bool right_click=hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right) && io.MouseDragMaxDistanceSqr[1]<36*scale*scale;
+        if(prefs.team_pings && (right_click || (keys && Pressed({ImGuiKey_GamepadFaceLeft})))) {
+            auto pick=camera.Ground((right_click?io.MousePos.x:middle.x)-middle.x,(right_click?io.MousePos.y:middle.y)-middle.y);
+            uint32_t target=shown;for(const auto& [id,p]:BbMapCharts::Atlas()) {const auto o=BbMapView::AtlasOffset(id);auto xy=p->PixelOf(pick[0]-o.dx,pick[1]-o.dz);if(xy[0]>=0 && xy[1]>=0 && xy[0]<p->width && xy[1]<p->height) {target=id;if(id==shown) break;}}
+            const auto o=BbMapView::AtlasOffset(target);BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_PING;c.map=target;c.x=pick[0]-o.dx;c.z=pick[1]-o.dz;c.y=floor_at(target,c.x,c.z);Send(c);
+        }
         draw->PopClipRect();
-        if(hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-            const auto p=ImGui::GetIO().MousePos;auto ground=camera.Ground(p.x-start.x-size.x*.5f,p.y-start.y-size.y*.5f);
-            BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_PING;c.map=shown;c.x=ground[0];c.z=ground[1];c.y=cy;Send(c);
+        // Source-style lamp list and confirmation retain keyboard and controller access.
+        ImGui::SameLine();ImGui::BeginGroup();
+        ImGui::TextWrapped(T("%s"),area_name(shown));
+        if(ImGui::BeginChild("lit lamps",ImVec2(list_width,size.y))) for(int i=0;i<map.lamp_count;++i) {
+            const auto& l=map.lamps[i];if(l.map!=shown) continue;ImGui::PushID(i);
+            ImGui::BeginDisabled(!l.lit || map.block!=BBCOOP_MAP_GO);
+            if(ImGui::Selectable(s.lamp_names[i],hover_lamp==i,ImGuiSelectableFlags_None,ImVec2(0,32*scale))) travel_ask=l.warp_point;
+            ImGui::EndDisabled();ImGui::PopID();
+        } ImGui::EndChild();ImGui::EndGroup();
+        if(view && (!chart || (view==2 && !mesh))) ImGui::TextWrapped(T("%s"),BbMapCharts::Status(shown,chart && view==2).c_str());
+        BbCoopStyle::Guide({{"LeftStick","W A S D","Move"},{"RightStick","Z X","Turn"},{"L2 R2","- =","Zoom"},{"L1 R1","Q E","Area"},{"Triangle","Tab","All areas"},{"Square",nullptr,"Ping"},{"L3","V","3D view"},{"R3","F","Floors"},{"Options","C","Your location"},{"Circle","Esc","Back"}});
+        if(travel_ask) ImGui::OpenPopup(Popup("Travel to lamp?"));
+        if(ImGui::BeginPopupModal(Popup("Travel to lamp?"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            for(int i=0;i<map.lamp_count;++i) if(map.lamps[i].warp_point==travel_ask) ImGui::TextUnformatted(s.lamp_names[i]);
+            if(BbCoopStyle::Button("Travel") || (asked_before && Pressed({ImGuiKey_GamepadFaceDown,ImGuiKey_Enter}))) {Send(BB_COOP_TRAVEL,travel_ask);travel_ask=0;ImGui::CloseCurrentPopup();}
+            ImGui::SameLine();if(BbCoopStyle::Button("Cancel") || (asked_before && Pressed({ImGuiKey_GamepadFaceRight,ImGuiKey_Escape}))) {travel_ask=0;ImGui::CloseCurrentPopup();}
         }
-        if(view && (!chart || (view==2 && !mesh))) ImGui::TextWrapped("%s",BbMapCharts::Status(shown,chart && view==2).c_str());
-        ImGui::TextDisabled("Drag: pan   Scroll: zoom   Right-click: ping at your floor height");
-        ImGui::TextDisabled("Green: you   Medallions: teammates   Gold: lamps   Red: bloodstain");
-        ImGui::TextDisabled(!fog?"Fog of war is off":cleared?"Area cleared":"Unexplored terrain is dimmed; exploration is saved.");
-        if(map.has_stain) ImGui::Text("Bloodstain: %d echoes",map.stain.echoes);
-        if(ImGui::BeginChild("lamps",ImVec2(0,140))) for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {
-            const auto& lamp=map.lamps[i];if(lamp.map!=shown) continue;ImGui::PushID(i);
-            ImGui::Text("%s%s",s.lamp_names[i],lamp.lit?"":" (unlit)");ImGui::SameLine();
-            ImGui::BeginDisabled(!lamp.lit || map.block!=BBCOOP_MAP_GO);if(ImGui::SmallButton("Travel")) Send(BB_COOP_TRAVEL,lamp.warp_point);ImGui::EndDisabled();ImGui::PopID();
-        } ImGui::EndChild();
-        if(map.block!=BBCOOP_MAP_GO) ImGui::TextDisabled("Travel is unavailable while loading, downed, in combat with a boss, or already travelling.");
-        if(BbCoopStyle::Button("Close map")) open=false;
-    } ImGui::End();if(!open) Send(BB_COOP_MAP_MENU,0);
+
+    } ImGui::End();if(!open) {travel_ask=0;Send(BB_COOP_MAP_MENU,0);}
 }
+
 void InvasionStatus(const bbcoop_invasion& invasion) {
     const bool visitor=invasion.role==BBCOOP_INVASION_INVADER;
     switch(invasion.phase) {
     case BBCOOP_INVASION_SEARCHING:
-        ImGui::TextUnformatted("Searching for a hunt to invade...");break;
+        ImGui::TextUnformatted(T("Searching for a hunt to invade..."));break;
     case BBCOOP_INVASION_APPROACHING:
-        ImGui::Text(visitor?"Invading a hunt in %d seconds":"An adversary arrives in %d seconds",invasion.seconds);break;
+        ImGui::Text(T(visitor?"Invading in %d":"An invader approaches: %d"),invasion.seconds);break;
     case BBCOOP_INVASION_ACTIVE:
-        ImGui::TextUnformatted(visitor?"You are invading a hunt":"An adversary is in your world");break;
+        ImGui::Text(T(visitor?"Invading the world of %s":"Invaded by %s"),Hunter(invasion.name));break;
     case BBCOOP_INVASION_RETURNING:
-        ImGui::TextUnformatted("Returning to your world...");break;
+        ImGui::TextUnformatted(T("Returning to your world..."));break;
     case BBCOOP_INVASION_ENDED:
         switch(invasion.reason) {
-        case BBCOOP_INVASION_INVADER_DIED:ImGui::TextUnformatted("Invader defeated");break;
-        case BBCOOP_INVASION_TARGET_KILLED:ImGui::TextUnformatted("The host was defeated");break;
-        case BBCOOP_INVASION_PARTY_WIPED:ImGui::TextUnformatted("The hunt was defeated");break;
-        case BBCOOP_INVASION_NOT_FOUND:ImGui::TextUnformatted("No hunt found for an invasion");break;
-        case BBCOOP_INVASION_REFUSED:ImGui::TextUnformatted("The server refused the invasion request");break;
-        default:ImGui::TextUnformatted("The invasion ended");break;
+        case BBCOOP_INVASION_INVADER_DIED:ImGui::TextUnformatted(T("Invader defeated"));break;
+        case BBCOOP_INVASION_TARGET_KILLED:ImGui::TextUnformatted(T("The host was defeated"));break;
+        case BBCOOP_INVASION_PARTY_WIPED:ImGui::TextUnformatted(T("The hunt was defeated"));break;
+        case BBCOOP_INVASION_NOT_FOUND:ImGui::TextUnformatted(T("No hunt found for an invasion"));break;
+        case BBCOOP_INVASION_REFUSED:ImGui::TextUnformatted(T("The server refused the invasion request"));break;
+        default:ImGui::TextUnformatted(T("The invasion ended"));break;
         }break;
     default:break;
     }
@@ -370,7 +550,7 @@ void Hud(const BbCoopUi& s) {
         BbCoopStyle::Supplies(draw,left+382*scale,y+6*scale,m.vials,m.bullets,scale);
         if(down) {
             const float share=m.needed?std::clamp(float(m.landed)/m.needed,0.f,1.f):0;
-            char text[64];std::snprintf(text,sizeof(text),"Downed  -  revive %d%%",int(share*100));
+            char text[64];std::snprintf(text,sizeof(text),"%s %d%%",T("Down"),int(share*100));
             BbCoopStyle::Label(draw,ImVec2(left+76*scale,y+32*scale),15*scale,IM_COL32(239,148,135,255),text);
             if(share>0) {
                 draw->PathArcTo(ImVec2(left+30*scale,y+29*scale),28*scale,-Pi*.5f,-Pi*.5f+share*2*Pi,48);
@@ -390,7 +570,7 @@ void Hud(const BbCoopUi& s) {
             char text[32];std::snprintf(text,sizeof(text),"%d%%",int(share*100));
             BbCoopStyle::Label(draw,ImVec2(center,y-16*scale),20*scale,BbCoopStyle::Ink(),text,.5f);
         }
-        char title[96];std::snprintf(title,sizeof(title),down?"You are down":"Spectating %s",Hunter(s.panel.watching_name));
+        char title[96];std::snprintf(title,sizeof(title),T(down?"You are down":"Spectating %s"),Hunter(s.panel.watching_name));
         BbCoopStyle::Label(draw,ImVec2(center,y+42*scale),27*scale,BbCoopStyle::Ink(),title,.5f,570*scale);
         BbCoopStyle::Label(draw,ImVec2(center,y+81*scale),17*scale,BbCoopStyle::Muted(),down?"A companion can strike you to revive you":"L1 / R1: next companion",.5f);
         BbCoopStyle::Label(draw,ImVec2(center,y+108*scale),15*scale,BbCoopStyle::Muted(),"Hold Circle / Left Shift to wake at your lamp",.5f);
@@ -401,27 +581,41 @@ void Hud(const BbCoopUi& s) {
         char text[96];std::snprintf(text,sizeof(text),"R1 / R2  -  strike to revive %s",Hunter(member.name));
         BbCoopStyle::Label(draw,ImVec2(center,y),22*scale,BbCoopStyle::Ink(),text,.5f,700*scale);
     }
-    if(s.has_compass) {
-        const float center=stage.x+stage.w*.5f,y=stage.y+35*scale,span=190*scale;
-        draw->AddLine(ImVec2(center-span,y),ImVec2(center+span,y),BbCoopStyle::Muted(.45f),scale);
-        for(int tick=-4;tick<=4;++tick) draw->AddLine(ImVec2(center+tick*span/4,y-3*scale),ImVec2(center+tick*span/4,y+(tick%2?3:6)*scale),BbCoopStyle::Muted(.5f),scale);
-        for(int i=0;i<std::clamp(s.compass.count,0,4);++i) {
-            const auto& m=s.compass.markers[i];const float x=center+std::clamp(m.x,-1.f,1.f)*span,my=y+17*scale+(i%2)*38*scale;
-            BbCoopStyle::Face(draw,s,m.board,m.name,ImVec2(x,my),32*scale,m.member,m.vital==BBCOOP_VITAL_UP);
-            if(m.vital==BBCOOP_VITAL_DOWN) BbCoopStyle::Icon(draw,BbPartyIcons::Icon::Downed,ImVec2(x-14*scale,my-14*scale),28*scale);
-            char text[48];std::snprintf(text,sizeof(text),"%s  %.0fm",Hunter(m.name),m.distance);
-            BbCoopStyle::Label(draw,ImVec2(x,my+19*scale),12*scale,BbCoopStyle::Ink(),text,.5f,135*scale);
-            if(m.pinned) draw->AddTriangleFilled(ImVec2(x,y-9*scale),ImVec2(x+(m.x<0?8:-8)*scale,y-13*scale),ImVec2(x+(m.x<0?8:-8)*scale,y-5*scale),BbCoopStyle::Ink());
+    const auto& prefs=BbSettings::Get();
+    const float compass_x=stage.x+stage.w*.5f,compass_y=prefs.compass_position==1?stage.y+stage.h-95*scale:stage.y+35*scale,span=190*scale;
+    const ImVec2 ring(compass_x,stage.y+stage.h*.5f);const float radius=190*scale;
+    auto compass_at=[&](float x,float bearing) {return prefs.compass_position==2?ImVec2(ring.x+radius*std::sin(bearing),ring.y-radius*std::cos(bearing)):ImVec2(compass_x+std::clamp(x,-1.f,1.f)*span,compass_y);};
+    auto arrow=[&](ImVec2 point,float angle,float r,ImU32 ink) {ImVec2 d(std::cos(angle),std::sin(angle)),side(-d.y,d.x);ImVec2 base(point.x+d.x*r,point.y+d.y*r);draw->AddTriangleFilled(ImVec2(base.x+side.x*5*scale,base.y+side.y*5*scale),ImVec2(base.x+d.x*9*scale,base.y+d.y*9*scale),ImVec2(base.x-side.x*5*scale,base.y-side.y*5*scale),ink);};
+    if(s.has_compass && prefs.compass) {
+        if(prefs.compass_position!=2) {
+            draw->AddLine(ImVec2(compass_x-span,compass_y),ImVec2(compass_x+span,compass_y),BbCoopStyle::Muted(.45f),scale);
+            for(int tick=-4;tick<=4;++tick) draw->AddLine(ImVec2(compass_x+tick*span/4,compass_y-3*scale),ImVec2(compass_x+tick*span/4,compass_y+(tick%2?3:6)*scale),BbCoopStyle::Muted(.5f),scale);
         }
-        if(s.compass.has_stain) draw->AddCircleFilled(ImVec2(center+std::clamp(s.compass.stain.x,-1.f,1.f)*span,y),4*scale,IM_COL32(200,45,38,255));
+        for(int i=0;i<std::clamp(s.compass.count,0,4);++i) {
+            const auto& m=s.compass.markers[i];auto p=compass_at(m.x,m.bearing);if(prefs.compass_position!=2) p.y+=17*scale+(i%2)*38*scale;
+            BbCoopStyle::Face(draw,s,m.board,m.name,p,32*scale,m.member,m.vital==BBCOOP_VITAL_UP);
+            if(m.vital==BBCOOP_VITAL_DOWN) BbCoopStyle::Icon(draw,BbPartyIcons::Icon::Downed,ImVec2(p.x-14*scale,p.y-14*scale),28*scale);
+            char text[64];std::snprintf(text,sizeof(text),"%s  %.0fm",Hunter(m.name),m.distance);BbCoopStyle::Label(draw,ImVec2(p.x,p.y+19*scale),12*scale,BbCoopStyle::Ink(),text,.5f,135*scale);
+            if(m.pinned && prefs.compass_position!=2) arrow(p,m.x<0?Pi:0,18*scale,BbCoopStyle::Ink());
+        }
+        if(prefs.bloodstains && s.compass.has_stain) draw->AddCircleFilled(compass_at(s.compass.stain.x,s.compass.stain.bearing),4*scale,IM_COL32(200,45,38,255));
     }
-    for(int i=0;i<std::clamp(s.pings.count,0,4);++i) {
-        const auto& p=s.pings.pings[i];if(!p.on_screen) continue;
-        ImVec2 point(p.screen_x*io.DisplaySize.x,p.screen_y*io.DisplaySize.y);
-        const float r=8*scale;const ImU32 ink=IM_COL32(218,211,170,240);
-        draw->AddQuad(ImVec2(point.x,point.y-r),ImVec2(point.x+r,point.y),ImVec2(point.x,point.y+r),ImVec2(point.x-r,point.y),ink,1.5f*scale);
-        char text[80];std::snprintf(text,sizeof(text),"%s  %.0fm",Hunter(p.name),p.distance);
-        BbCoopStyle::Label(draw,ImVec2(point.x+12*scale,point.y-8*scale),15*scale,ink,text,0,220*scale);
+    if(prefs.team_pings) for(int i=0;i<std::clamp(s.pings.count,0,4);++i) {
+        const auto& p=s.pings.pings[i];if(!p.here) continue;
+        const auto ink=BbCoopStyle::Ink(std::min(1.f,p.seconds_left/2.f));
+        const float r=8*scale;char text[80];std::snprintf(text,sizeof(text),"%s  %.0fm",Hunter(p.name),p.distance);
+        if(p.on_screen) {
+            ImVec2 point(stage.x+p.screen_x*stage.w,stage.y+p.screen_y*stage.h);
+            if(p.pinned) point.y=std::max(point.y,stage.y+115*scale);
+            draw->AddCircle(point,r,ink,24,2*scale);draw->AddCircleFilled(point,r*.3f,ink);
+            if(p.pinned) arrow(point,p.arrow,r+5*scale,ink);
+            BbCoopStyle::Label(draw,ImVec2(point.x,point.y-r-24*scale),15*scale,ink,text,.5f,220*scale);
+        }
+        if(prefs.compass && s.has_compass) {
+            const auto point=compass_at(p.strip_x,p.bearing);draw->AddCircle(point,r,ink,24,2*scale);
+            BbCoopStyle::Label(draw,ImVec2(point.x,point.y-30*scale),13*scale,ink,text,.5f,200*scale);
+            if(p.strip_pinned && prefs.compass_position!=2) arrow(point,p.strip_x<0?Pi:0,r+4*scale,ink);
+        }
     }
     if(s.duel.countdown_shown) {
         char text[32];std::snprintf(text,sizeof(text),s.duel.countdown_fight?"Fight":"%d",s.duel.countdown_number);
@@ -432,11 +626,11 @@ void Hud(const BbCoopUi& s) {
         ImGui::SetNextWindowPos(ImVec2(left,top+(count*72+18)*scale),ImGuiCond_Always);
         ImGui::SetNextWindowBgAlpha(.25f);ImGui::SetNextWindowSize(ImVec2(400*scale,0));
         if(ImGui::Begin("##hunt notices",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoNav)) {
-            if(!s.lobby.signed_in) ImGui::TextUnformatted("Connecting to the hunt...");
-            if(s.has_rot) ImGui::Text("Rot %d  -  rest at a lamp to clear",s.rot.count);
-            if(s.camera_on) ImGui::TextUnformatted("Free camera  -  F7 to return");
-            if(s.skip_want) ImGui::Text("Skip cutscene: %d / %d votes",s.skip_want,s.skip_watching);
-            if(*s.notice) ImGui::TextWrapped("%s",s.notice);
+            if(!s.lobby.signed_in) ImGui::TextUnformatted(T("Connecting to the hunt..."));
+            if(s.has_rot) ImGui::Text(T("Rot %d/%d"),s.rot.count,BBCOOP_ROT_MAX);
+            if(s.camera_on) ImGui::TextUnformatted(T("Free camera  -  F7 to return"));
+            if(s.skip_want) ImGui::Text(T("Skip cutscene: %d / %d votes"),s.skip_want,s.skip_watching);
+            if(*s.notice) ImGui::TextWrapped(T("%s"),s.notice);
             if(invasion) InvasionStatus(s.invasion);
         } ImGui::End();
     }
@@ -478,11 +672,11 @@ void Questions(const BbCoopUi& s) {
     if(s.trade_id) {
         ImGui::SetNextWindowSize(ImVec2(520*BbCoopStyle::Scale(),0),ImGuiCond_Always);
         if(BbCoopStyle::Begin("Trade offer",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoCollapse)) {
-            ImGui::TextWrapped("%s",s.trade_question);if(BbCoopStyle::Button("Accept")) Send(BB_COOP_TRADE_ANSWER,1,"",s.trade_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline")) Send(BB_COOP_TRADE_ANSWER,0,"",s.trade_id);
+            ImGui::TextWrapped(T("%s"),s.trade_question);if(BbCoopStyle::Button("Accept")) Send(BB_COOP_TRADE_ANSWER,1,"",s.trade_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline")) Send(BB_COOP_TRADE_ANSWER,0,"",s.trade_id);
         } ImGui::End();
     }
-    if(s.duel_id) { if(BbCoopStyle::Begin("Team duel invitation",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text("%s proposes a duel.",Hunter(s.duel_name));if(BbCoopStyle::Button("Accept duel")) Send(BB_COOP_DUEL_ANSWER,1,"",s.duel_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline duel")) Send(BB_COOP_DUEL_ANSWER,0,"",s.duel_id);}ImGui::End(); }
-    if(s.has_travel && (s.travel.question || s.travel.waiting)) {if(BbCoopStyle::Begin("Travel with team",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text("%s%s",s.travel.from,s.travel.waiting?": waiting for the team":": travel together?");if(s.travel.question) {if(BbCoopStyle::Button("Yes")) Send(BB_COOP_TRAVEL_ANSWER,1);ImGui::SameLine();if(BbCoopStyle::Button("No")) Send(BB_COOP_TRAVEL_ANSWER,0);}if(s.travel.seconds_left>0) ImGui::Text("%.0f seconds left",s.travel.seconds_left);}ImGui::End();}
+    if(s.duel_id) { if(BbCoopStyle::Begin("Team duel invitation",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text(T("%s proposes a duel."),Hunter(s.duel_name));if(BbCoopStyle::Button("Accept duel")) Send(BB_COOP_DUEL_ANSWER,1,"",s.duel_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline duel")) Send(BB_COOP_DUEL_ANSWER,0,"",s.duel_id);}ImGui::End(); }
+    if(s.has_travel && (s.travel.question || s.travel.waiting)) {if(BbCoopStyle::Begin("Travel with team",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text(T("%s%s"),s.travel.from,s.travel.waiting?": waiting for the team":": travel together?");if(s.travel.question) {if(BbCoopStyle::Button("Yes")) Send(BB_COOP_TRAVEL_ANSWER,1);ImGui::SameLine();if(BbCoopStyle::Button("No")) Send(BB_COOP_TRAVEL_ANSWER,0);}if(s.travel.seconds_left>0) ImGui::Text(T("%.0f seconds left"),s.travel.seconds_left);}ImGui::End();}
     if(s.has_load) Loading(s);
 }
 }
@@ -511,12 +705,15 @@ bool CapturesInput() {return capture || trade_capture;}
 bool Shortcut(const SDL_Event& e) {
     if(!enabled || e.type!=SDL_EVENT_KEY_DOWN || e.key.repeat) return false;
     std::scoped_lock lock{snapshot_mutex};
+    const int ping_key=BbSettings::Get().ping_key;
+    if(e.key.scancode==SDL_GetScancodeFromName(BbSettings::PingKeyNames[ping_key]) && !CapturesInput() && BbSettings::Get().team_pings) {Send(BB_COOP_PING);return true;}
     switch(e.key.scancode) {
     case SDL_SCANCODE_F6:Send(BB_COOP_TEAM_MENU,!latest.team_screen);return true;
     case SDL_SCANCODE_F8:Send(BB_COOP_MAP_MENU,!latest.map_screen);return true;
-    case SDL_SCANCODE_F7:Send(BB_COOP_CAMERA);return true;
-    case SDL_SCANCODE_G:if(!CapturesInput()) {Send(BB_COOP_PING);return true;}return false;
+    case SDL_SCANCODE_F7:if(BbSettings::Get().free_camera) Send(BB_COOP_CAMERA);return true;
+
     case SDL_SCANCODE_ESCAPE:
+        if(ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId)) return false;
         if(trade_open) {trade_open=false;trade_capture=false;}
         else if(latest.map_screen) Send(BB_COOP_MAP_MENU,0);
         else if(latest.team_screen && latest.lobby.menu) CloseTeam();else return false;
@@ -528,8 +725,13 @@ void Render() {
     static BbCoopUi s{};{std::scoped_lock lock{snapshot_mutex};s=latest;}
     if(!s.enabled || !s.map_screen || BbSettings::Get().map_view!=2) BbOverlay::MetalBackend::ClearMap3d();
     if(!s.enabled) return;
+    auto& settings=BbSettings::Get();
+    static int last_preferences=-1,last_language=-1;
+    const int preferences=int(settings.free_camera)|(int(settings.team_pings)<<1),language=int(settings.menu_language.load());
+    if(preferences!=last_preferences || language!=last_language) {BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_PREFERENCES;c.value=preferences;c.kind=language;Send(c);last_preferences=preferences;last_language=language;}
     BbCoopStyle::Scope theme;
     trade_capture=trade_open;
+    if(!s.map_screen) map_was_open=false;
     Hud(s);if(s.team_screen) Team(s);if(s.map_screen) Map(s);Trade(s);Questions(s);
 }
 }

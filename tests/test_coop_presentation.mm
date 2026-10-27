@@ -4,6 +4,11 @@
 #import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #include "bbport_coop_ui.h"
+#include "bbport_coop_style.h"
+#include "bbport_map_charts.h"
+#include <fstream>
+#include <thread>
+#include <unistd.h>
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
 #include "video_core/renderer_metal/mtl_device.h"
@@ -18,6 +23,22 @@
 #include <vector>
 int main() {
     unsetenv("BB_MENU_OPEN");unsetenv("BB_OVERLAY");
+    char temp[]="/tmp/bb-coop-parity-XXXXXX";assert(mkdtemp(temp));
+    const std::filesystem::path root(temp);std::filesystem::create_directories(root/"dvdroot_ps4/map");
+    const auto cache=root/"map/metal-v1-cbf29ce484222325";std::filesystem::create_directories(cache);
+    BbMapArt::Chart chart;chart.width=chart.height=8;chart.ppm=1;chart.x0=-4;chart.z1=4;chart.rgba.assign(8*8*4,200);
+    for(size_t i=3;i<chart.rgba.size();i+=4) chart.rgba[i]=255;
+    chart.labels.push_back({19,0,0});chart.storeys.width=chart.storeys.height=4;
+    chart.storeys.roof.assign(16,100);chart.storeys.level.assign(48,50);chart.storeys.rgb.assign(48,0xff888888);
+    BbMapArt::AreaMesh mesh;mesh.positions={-4,10,-4,4,10,-4,0,10,4};mesh.colors.assign(3,0xff888888);mesh.indices={0,1,2};
+    auto write=[](const auto& path,const auto& bytes) {std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());};
+    for(auto name:{"m24_01_00_00","m21_00_00_00"}) {write(cache/(std::string(name)+".bbmap"),BbMapArt::Save(chart));write(cache/(std::string(name)+"_v1.bbmap"),BbMapArt::Save(chart));write(cache/(std::string(name)+".bbmesh"),BbMapArt::SaveMesh(mesh));}
+    setenv("BB_MAP_GAME_DIR",temp,1);setenv("BB_GPU_USER_DIR",temp,1);
+    for(auto map:{0x18010000u,0x15000000u}) {
+        for(int n=0;n<1000 && !BbMapCharts::Get(map);++n) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        for(int n=0;n<1000 && !BbMapCharts::Get(map,1);++n) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    for(int n=0;n<1000 && !BbMapCharts::GetMesh(0x18010000u);++n) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     @autoreleasepool {
         Metal::Device device;auto mtl=(__bridge id<MTLDevice>)device.NativeDevice();
         auto queue=[mtl newCommandQueue];BbSettings::Get().show_fps=false;
@@ -42,7 +63,13 @@ int main() {
             auto* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:width height:height mipmapped:NO];
             desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
             auto texture=[mtl newTextureWithDescriptor:desc];
-            for(int mode=0;mode<5;++mode) {
+            for(int mode=0;mode<9;++mode) {
+                s.map_screen=mode>=5;s.has_map=mode>=5;s.map.map=0x18010000;s.map.has_me=1;s.map.y=10;
+                s.area_count=2;s.areas[0].map=0x18010000;s.areas[1].map=0x15000000;
+                std::snprintf(s.areas[0].name,64,"Yharnam");std::snprintf(s.areas[1].name,64,"Hunter's Dream");
+                s.label_count=1;s.labels[0].id=19;std::snprintf(s.labels[0].name,96,"Iosefka's Clinic");
+                BbSettings::Get().map_view=mode>=5?mode-5:1;
+                BbSettings::Get().menu_language=mode==7?BbLanguage::MenuLanguage::De:mode==8?BbLanguage::MenuLanguage::Ja:BbLanguage::MenuLanguage::English;
                 s.team_screen=mode==0;s.has_load=mode==2;s.trade_id=mode==3?42:0;
                 s.panel.member_count=mode==4?1:4;
                 s.panel.members[0].vital=mode==4?BBCOOP_VITAL_DOWN:BBCOOP_VITAL_UP;
@@ -52,7 +79,7 @@ int main() {
                 s.load.count=4;
                 for(int i=0;i<4;++i) {std::snprintf(s.load.rows[i].name,sizeof(s.load.rows[i].name),"%s",names[i]);s.load.rows[i].percent=25*(i+1);s.load.rows[i].stage=i==3?BBCOOP_LOAD_READY:BBCOOP_LOAD_LOADING;}
                 BbCoopOverlay::Dispatch(&record->r);
-                assert(BbCoopOverlay::CapturesInput()==(mode==0 || mode==2 || mode==3));
+                assert(BbCoopOverlay::CapturesInput()==(mode==0 || mode==2 || mode==3 || mode>=5));
                 for(int frame=0;frame<4;++frame) {
                     // Match the renderer's unretained command buffers: artwork must stay alive.
                     auto cmdbuf=[queue commandBufferWithUnretainedReferences];
@@ -61,6 +88,7 @@ int main() {
                     pass.colorAttachments[0].clearColor=MTLClearColorMake(.12,.14,.16,1);
                     [[cmdbuf renderCommandEncoderWithDescriptor:pass] endEncoding];
                     BbOverlay::Render((__bridge void*)cmdbuf,(__bridge void*)texture,width,height);
+                    assert(BbCoopStyle::ArtworkReady());
                     assert(ImGui::GetCurrentContext()->ErrorCountCurrentFrame==0);
                     for(auto* list:ImGui::GetDrawData()->CmdLists) assert(list->_Path.Size==0);
                     [cmdbuf commit];[cmdbuf waitUntilCompleted];assert(cmdbuf.status==MTLCommandBufferStatusCompleted);
@@ -76,6 +104,7 @@ int main() {
                 }
             }
         }
-        std::puts("PASS: co-op presentation, unretained Metal resources, theme isolation, input ownership and four aspect ratios");
+        std::puts("PASS: co-op presentation, unretained Metal resources, theme isolation, input ownership and four aspect ratios, four map projections and localized text");
     }
+    std::filesystem::remove_all(root);
 }

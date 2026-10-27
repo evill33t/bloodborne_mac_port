@@ -180,6 +180,23 @@ struct LauncherView: View {
                     FolderRow(title: "Save folder", path: model.saveDir.path, problem: model.saveProblem,
                               choose: model.chooseSaveFolder, reset: model.resetSaveFolder)
                 }
+                Section("Rendered maps") {
+                    Picker("Map view",selection: $model.settings.mapView) {
+                        Text("Rendered terrain").tag(1)
+                        Text("Prerendered 3D").tag(3)
+                        Text("Live 3D").tag(2)
+                        Text("Coordinates").tag(0)
+                    }
+                    Toggle("Fog of war",isOn: $model.settings.mapFog)
+                    if model.preparingMaps {
+                        ProgressView(value: model.mapFraction)
+                        Button("Cancel preparation",action: model.cancelMapPreparation)
+                    } else {
+                        Button("Prepare maps…",action: model.prepareMaps)
+                            .disabled(model.config.gameDir == nil)
+                    }
+                    if let progress=model.mapProgress {Text(progress).font(.caption).foregroundStyle(.secondary)}
+                }
                 Section("Controls") {
                     HStack {
                         Toggle("Mouse camera", isOn: $model.settings.mouseLook)

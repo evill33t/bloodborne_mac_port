@@ -45,7 +45,7 @@ arm64 Metal host; game hooks and networking run in the x86-64 Rosetta game proce
 | F8, or hold the controller touchpad | Rendered terrain map, lamps, saved exploration, cleared areas, teammates and own bloodstain; travel to lit lamps |
 | G, or double-tap the touchpad | Ping where the camera aims; right-click the map to ping a location |
 | A single touchpad tap | The game's original gesture menu, after the double-tap interval |
-| F7, or L3 + Square | Free camera; use again to return |
+| F7, or L3 + Square | Free camera when **Team > Online display > Free camera hotkey** is enabled; use again to return |
 | Team menu > Trade items | Offer carried goods, equipment or Blood Echoes; confirm the offer, then the recipient accepts or declines |
 | Attack a downed teammate | Build revive progress; holding Circle while downed gives up |
 | Options during a cutscene | Vote to skip |
@@ -74,25 +74,42 @@ The map defaults to **Rendered terrain**. It draws the player's own MSB placemen
 geometry and BC1/BC7 textures, with baked lighting, color grading, point lights and collision
 floors. No game assets or premade terrain atlas are bundled.
 
-In **F8 > View**, choose **Live 3D** for the optional native Metal view, or **Coordinates** for
-the grid. Drag to pan, scroll or use the slider to zoom, use **Fit area** to frame the area,
-and enable **Follow player** to recenter. Live 3D adds **Turn** and **Tilt**. Both projections
-retain teammate positions, lamps, bloodstains and pings. Right-click pings lie on the camera's
-current floor height; roofs and elevated surfaces are not ray-picked. Travel still uses the
-lit-lamp list. The flat terrain view automatically shows collision floors when indoors.
+In **F8 > View**, choose **Rendered terrain**, **Prerendered**, **Live 3D**, or
+**Coordinates**. Prepared areas join one atlas using the reference's world offsets, with
+localized place and lamp names. The selected area stays sharp; other areas use cached overview
+pictures. The live Metal view combines prepared geometry with a shared depth buffer. Far areas
+use simplified geometry; generation is asynchronous, so newly requested areas appear as ready.
 
-**Fog of war** reveals terrain around explored ground, the player and lit lamps; cleared areas
-show fully. Turning it off previews the entire terrain. The view and fog choices are saved
-as `map_view=0|1|2` (default 1) and `map_fog=0|1` (default 1) in `bbport.ini`.
+On the map, the left stick or WASD pans; L2/R2 or -/= zooms. The right stick rotates/tilts live
+3D and zooms a flat view. Q/E or L1/R1 changes area, Triangle/Tab frames the whole atlas,
+Options/C recenters, L3/V switches 2D/3D, and R3/F switches automatic floors, roofs and floors.
+A central crosshair snaps toward nearby lit lamps; Cross/Enter or clicking a lit lamp asks before
+travelling. Square or right-click places a ping on the area's sampled terrain height, with the
+player's height as fallback where no surface is available. Mouse dragging pans, the wheel zooms,
+and a right drag rotates live 3D. The guide switches between keyboard caps and game button art.
 
-An area's first request generates its terrain on a utility worker; the coordinate map remains
-usable while it works. Live 3D also generates a simplified colored mesh. Compressed `.bbmap`
-and `.bbmesh` files live under `map/metal-v1-<asset-signature>/` in `BB_GPU_USER_DIR`, alongside
-the existing GPU caches. The signature includes map-file names, sizes and modification times,
-following mod-view links. Source changes select a new cache directory; deleting this generated
-folder safely rebuilds it. Texture-only modifications that deliberately preserve both size
-and timestamp require a manual cache removal. CPU results retain one area and GPU resources
-are held through command-buffer completion; 3D buffers are released when its view closes.
+**Team > Online display** controls compass visibility/position (top, bottom, or around the
+middle), bloodstain visibility, team pings, the ping key, the free-camera shortcut and menu
+language. The reference's 20 language choices and automatic game-language selection are
+available. Item, lamp and area names come from the corresponding game message files, with an
+English fallback when that language is absent. The world browser shows creation/last-played
+information, lamp counts and characters, disables busy worlds and confirms forgetting one.
+
+**Fog of war** reveals explored ground and areas around the player and lit lamps; cleared areas
+show fully. The UI receives saved exploration for the atlas's other areas in the background.
+View and fog choices persist as `map_view=0|1|2|3` (coordinates/terrain/live/prerendered) and
+`map_fog=0|1`. The default remains rendered terrain.
+
+The launcher's **General > Rendered maps > Prepare maps…** generates maps before playing,
+shows prepared/total progress and supports cancellation. `bbmap-prepare` is packaged with the
+app. It uses the same cache and never writes to game files. An area's first in-game request
+also generates it on a utility worker. Compressed `.bbmap` and `.bbmesh` files live under
+`map/metal-v1-<asset-signature>/` in `BB_GPU_USER_DIR`; prerendered angles use `_v1` through
+`_v4`. The signature includes map-file names, sizes and modification times, following mod-view
+links. Texture edits preserving both size and timestamp require manual cache removal.
+Full-resolution charts use a 128 MiB LRU budget (one oversized chart may exceed it); overview
+pictures and coarse geometry remain for the atlas. The selected area's full mesh is retained
+separately. Metal resources stay alive through command-buffer completion.
 
 The team leader's launcher settings choose rot, group travel, travel voting and enemy scaling.
 The harder-enemy field accepts `off` or three multipliers from 1 to 10 (HP, damage, poise).

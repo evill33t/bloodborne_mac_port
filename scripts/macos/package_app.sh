@@ -31,7 +31,7 @@ py_release=20260924
 py_name=cpython-3.12.14+20260924-aarch64-apple-darwin-install_only_stripped.tar.gz
 py_sha256=c2edb321cd32ec2b170df208db0446dccc4398db602ca27cf2079098fb1f7d9d
 
-for f in out/bb-probe out/gpu/libbbgpu.dylib out/bbgpu-host out/bbgpu-host-macos27 out/gpu-arm64/libbbgpu.dylib; do
+for f in out/bb-probe out/gpu/libbbgpu.dylib out/bbgpu-host out/bbgpu-host-macos27 out/gpu-arm64/libbbgpu.dylib out/gpu-arm64/bbmap-prepare; do
     [[ -f $f ]] || { echo "Missing $f: build first (bash build_macos.sh)." >&2; exit 1; }
 done
 
@@ -42,7 +42,7 @@ rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/port/scripts" "$contents/Resources/licenses"
 
 # Executables: library search goes to Frameworks/ only (the build's rpaths name this checkout).
-install -m755 out/bb-probe out/bbgpu-host out/bbgpu-host-macos27 "$contents/MacOS/"
+install -m755 out/gpu-arm64/bbmap-prepare out/bb-probe out/bbgpu-host out/bbgpu-host-macos27 "$contents/MacOS/"
 set_rpath() { # file new-rpath
     local file=$1 path
     while read -r path; do
@@ -50,7 +50,7 @@ set_rpath() { # file new-rpath
     done < <(otool -l "$file" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
     install_name_tool -add_rpath "$2" "$file"
 }
-for exe in bb-probe bbgpu-host bbgpu-host-macos27; do
+for exe in bb-probe bbgpu-host bbgpu-host-macos27 bbmap-prepare; do
     set_rpath "$contents/MacOS/$exe" @executable_path/../Frameworks
 done
 
