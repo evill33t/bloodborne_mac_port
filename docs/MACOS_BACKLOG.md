@@ -21,6 +21,20 @@ Each item: what was done for now, what the refinement is, and where it lives.
 
 ## 1. Stability
 
+- **8 GB Macs (2026-10-26, owner question).** The owner saw under 6 GB in Activity Monitor at
+  540p → 1080p (FSR 3.1). Today an 8 GB Mac stops at start: `buffer_cache.cpp` asserts a 5 GiB
+  Metal buffer, and maxBufferLength is ~60% of memory (~4.5 GiB). The `runs` layout (default on
+  ≤ 24 GB since 0.5.9) never needs one buffer that large (largest run ~3.3 GiB), so the assert
+  should apply to `legacy` only. The real risk is the ~3.5 GB of pinned GPU memory on top of macOS
+  and the game (the #69 swap slide). Simulate on the M4 Max as for #69: `iogpu.wired_limit_mb`
+  ~5300, a helper locking ~40 GB, `BB_MAX_BUFFER_GIB=4`, 540p → 1080p; ship only if it holds
+  30+ FPS without swapping.
+- **`tests/test_run_settings.py` fails on master, and no build script runs it (2026-10-26, found
+  by evill33t on #90).** `test_outputs_other_than_1080p_patch_the_render_size_and_restarts_recompute_it`: the third restart
+  (back to 1080p) expects `BB_RENDER_RES` 640x360 and gets none. Run it with
+  `cd tests && python3 -m unittest test_run_settings` (it imports `paths` from `tests/`). Decide
+  whether run.sh or the expectation is wrong, then add the suite to `build_macos.sh --test` so
+  restart-settings regressions show up.
 - **Opening-movie freeze and crash on new games (#46, #50, #51, #24, #84): fixed 2026-10-26 on
   branch `cutscene-race`, for the 0.5.x hotfix.** Two causes (FINDINGS 2026-10-26): the AvPlayer
   stop request missed a decoder whose `jthread` the demuxer had taken to join (freeze in
@@ -926,6 +940,18 @@ Each item: what was done for now, what the refinement is, and where it lives.
     the default layout in the README.
   - Split mode: mouse events live in the GPU host's window; extend the shared block's keyboard
     bridge (`bbgpu_split_keyboard`) with mouse deltas and buttons.
+  *2026-10-27 (branch `input-bindings`, docs/DESIGN_INPUT.md):* rebindable keys and mouse buttons
+  (`bind_*` in bbport.ini, `src/runtime_bindings.c`), the wheel, a walk key, a launcher Controls
+  page, vertical mouse speed. Still open, in order:
+  - **Mouse too slow (player feedback):** the mouse is a right stick, so it can never turn faster
+    than the stick at full deflection (reached at 650 points/s). Calibrate turn rate per stick
+    value with the pad file (`rx=`), linearise the curve with that table, shorten the 33 ms speed
+    window, then a test build for players.
+  - **Direct camera (spike, about a day):** find the camera's yaw/pitch in game memory and add the
+    mouse motion to them while the camera is free (not locked on, not in cutscenes or menus);
+    stick fallback otherwise. No speed ceiling, 1:1 feel.
+  - Rebinding in the in-game menu (today: the launcher, applied at the next start); controller
+    button remapping on the same model.
 
 - **Updater trust (2026-10-20, launcher About + updates).** The launcher's updater
   (`launcher/App/Updater.swift`) checks the download against GitHub's SHA-256 asset digest, the

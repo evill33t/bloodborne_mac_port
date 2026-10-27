@@ -106,11 +106,13 @@ struct Values {
     std::atomic<bool> hdr_scene_active{false};
     std::atomic<float> hdr_headroom{1.0f}, hdr_potential{1.0f};
     bool startup_hdr = false;
-    /// Mouse look (bbport_mouse.cpp): bbport.ini mouse_look, mouse_sensitivity, mouse_invert_y.
+    /// Mouse look (bbport_mouse.cpp): bbport.ini mouse_look, mouse_sensitivity (0.1-10),
+    /// mouse_vertical (vertical speed relative to horizontal, 0.25-4), mouse_invert_y.
     /// Off by default: on, the first left click in the window captures the cursor, for gamepad
     /// players too. Players turn it on in the menu (Display > Mouse camera).
     std::atomic<bool> mouse_look{false};
     std::atomic<float> mouse_sensitivity{1.0f};
+    std::atomic<float> mouse_vertical{1.0f};
     std::atomic<bool> mouse_invert_y{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
     // Fixed at launch: native scene/UI patch dimensions, requiring a restart.

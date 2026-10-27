@@ -4,7 +4,7 @@ import AppKit
 import Combine
 import Foundation
 
-enum LauncherPage: Hashable { case general, advanced, achievements, online }
+enum LauncherPage: Hashable { case general, advanced, controls, achievements, online }
 /// The Discord sign-in to The Hunter's Dream, as the Online tab shows it.
 enum SignInState: Equatable {
     case idle, starting
