@@ -137,7 +137,7 @@ do {
     var other = IniFile(text: "output_res=3008x1692\nupscaler=fsr4\nfps_cap=45\npreset=9\nsharpness=7\nfsr4_auto_exposure=1\n")
     let odd = GameSettings(ini: other)
     check(odd.output == PixelSize(3008, 1692) && odd.upscaler == .fsr4, "unlisted output and FSR 4 kept")
-    check(odd.frameCap == .fps60 && odd.preset == 0 && odd.sharpness == 0.3, "invalid values -> defaults")
+    check(odd.frameCap == .fps60 && odd.preset == defaults.preset && odd.sharpness == 0.3, "invalid values -> defaults")
     odd.apply(to: &other)
     check(other["output_res"] == "3008x1692" && other["upscaler"] == "fsr4", "written back unchanged")
     check(other["fsr4_auto_exposure"] == "1" && other["renderer"] == nil, "other keys kept; no renderer key")
