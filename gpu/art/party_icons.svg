@@ -1,0 +1,364 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 896 128" width="896" height="128">
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Party death icons, drawn for this port (none of it is the game's). The atlas order is
+     BbPartyIcons::Icon: hunter, downed, fallen, elsewhere, strike, give up, revive ring.
+     The rings' red share and the revive ring's percentage are drawn live over them. The h-* glyphs are the
+     party HUD's list (scripts/party_hud_icons.bin), in the style of the game's Blood Echoes and Insight icons.
+     Rebuild party_icons.bin with scripts/party_icons_atlas.py after an edit. -->
+<defs>
+    <linearGradient id="g-bone" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#f4eee1"/><stop offset=".55" stop-color="#c9bfaa"/><stop offset="1" stop-color="#6f6658"/>
+    </linearGradient>
+    <linearGradient id="g-steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9d5cd"/><stop offset=".35" stop-color="#8a847b"/><stop offset=".7" stop-color="#4a4541"/><stop offset="1" stop-color="#9a948a"/>
+    </linearGradient>
+    <linearGradient id="g-cloth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3f3835"/><stop offset="1" stop-color="#161312"/>
+    </linearGradient>
+    <radialGradient id="g-blood" cx=".38" cy=".35" r=".75">
+      <stop offset="0" stop-color="#f05a45"/><stop offset=".35" stop-color="#b8241b"/><stop offset=".8" stop-color="#6a0f0b"/><stop offset="1" stop-color="#2e0504"/>
+    </radialGradient>
+    <radialGradient id="g-medal" cx=".5" cy=".38" r=".7">
+      <stop offset="0" stop-color="#332b28"/><stop offset=".7" stop-color="#171312"/><stop offset="1" stop-color="#0a0807"/>
+    </radialGradient>
+    <radialGradient id="g-flame" cx=".5" cy=".65" r=".6">
+      <stop offset="0" stop-color="#fff4dc"/><stop offset=".35" stop-color="#e9b98a"/><stop offset=".7" stop-color="#c42a20"/><stop offset="1" stop-color="#4a0806" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="g-trail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4eee1" stop-opacity="0"/><stop offset=".45" stop-color="#e8dccb" stop-opacity=".85"/><stop offset="1" stop-color="#c42a20"/>
+    </linearGradient>
+    <clipPath id="c-inner"><circle cx="64" cy="64" r="51.5"/></clipPath>
+    <pattern id="p-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(40)">
+      <line x1="0" y1="0" x2="0" y2="4" stroke="#000" stroke-width="1.1" opacity=".55"/>
+    </pattern>
+    <pattern id="p-hatch-fine" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(-35)">
+      <line x1="0" y1="0" x2="0" y2="3" stroke="#000" stroke-width=".7" opacity=".45"/>
+    </pattern>
+    <filter id="f-worn" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.1" numOctaves="2" seed="7" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -0.7 1.22" result="m"/>
+      <feComposite in="SourceGraphic" in2="m" operator="in"/>
+    </filter>
+    <filter id="f-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- The shared medallion: a dark iron disc, double rim, four studs and curled filigree between them. -->
+    <symbol id="frame" viewBox="0 0 128 128">
+      <circle cx="64" cy="64" r="58" fill="url(#g-medal)"/>
+      <circle cx="64" cy="64" r="58" fill="none" stroke="url(#g-steel)" stroke-width="3.5"/>
+      <circle cx="64" cy="64" r="52.5" fill="none" stroke="#5c554e" stroke-width="1"/>
+      <circle cx="64" cy="64" r="61" fill="none" stroke="#000" stroke-width="1.5" opacity=".6"/>
+      <g fill="url(#g-steel)" stroke="#1a1716" stroke-width=".8">
+        <path d="M64 1 L69 6 L64 11 L59 6Z"/><path d="M64 117 L69 122 L64 127 L59 122Z"/>
+        <path d="M1 64 L6 59 L11 64 L6 69Z"/><path d="M117 64 L122 59 L127 64 L122 69Z"/>
+      </g>
+      <g fill="none" stroke="#7d766d" stroke-width="1.1" stroke-linecap="round" opacity=".85">
+        <path d="M24 22 q6 -5 12 -3 q-4 1 -5 5 q-1 -4 -7 -2"/>
+        <path d="M104 22 q-6 -5 -12 -3 q4 1 5 5 q1 -4 7 -2"/>
+        <path d="M24 106 q6 5 12 3 q-4 -1 -5 -5 q-1 4 -7 2"/>
+        <path d="M104 106 q-6 5 -12 3 q4 -1 5 -5 q1 4 7 2"/>
+      </g>
+    </symbol>
+
+    <symbol id="i-hunter" viewBox="0 0 128 128">
+      <use href="#frame"/>
+      <g clip-path="url(#c-inner)"><g transform="translate(64 64) scale(0.84) translate(-64 -64)">
+      <g filter="url(#f-worn)">
+        <!-- mantle and shoulders -->
+        <path d="M24 112 Q30 92 48 86 L64 96 L80 86 Q98 92 104 112 Q84 118 64 118 Q44 118 24 112Z" fill="url(#g-cloth)" stroke="#8c877e" stroke-width="1.2"/>
+        <path d="M24 112 Q30 92 48 86 L64 96 L80 86 Q98 92 104 112 Q84 118 64 118 Q44 118 24 112Z" fill="url(#p-hatch)"/>
+        <path d="M48 86 L56 104 M80 86 L72 104" stroke="#5c554e" stroke-width="1"/>
+        <!-- scarf over the mouth -->
+        <path d="M46 78 Q64 90 82 78 L80 88 Q64 98 48 88Z" fill="#2c2624" stroke="#8c877e" stroke-width="1"/>
+        <path d="M50 82 Q64 90 78 82" stroke="#5c554e" stroke-width=".8" fill="none"/>
+        <!-- face in shadow under the brim -->
+        <ellipse cx="64" cy="72" rx="17" ry="9" fill="#050404"/>
+        <path d="M55 71 l5 1 M68 72 l5 -1" stroke="#c42a20" stroke-width="1.6" stroke-linecap="round" filter="url(#f-glow)"/>
+        <!-- tricorn crown -->
+        <path d="M40 60 L50 26 Q64 16 78 26 L88 60 Q64 54 40 60Z" fill="#2a2523" stroke="url(#g-bone)" stroke-width="1.6"/>
+        <path d="M40 60 L50 26 Q64 16 78 26 L88 60 Q64 54 40 60Z" fill="url(#p-hatch-fine)"/>
+        <path d="M54 28 Q60 40 58 56" stroke="#6f6658" stroke-width="1" fill="none"/>
+        <!-- band -->
+        <path d="M42 54 Q64 48 86 54 L87 60 Q64 54 41 60Z" fill="#7a1511"/>
+        <!-- brim, three upturned points -->
+        <path d="M8 62 Q30 48 42 58 Q64 66 86 58 Q98 48 120 62 Q104 74 64 74 Q24 74 8 62Z" fill="#332d2a" stroke="url(#g-bone)" stroke-width="1.8"/>
+        <path d="M14 63 Q40 70 64 70 Q88 70 114 63" stroke="#000" stroke-width="2" fill="none" opacity=".6"/>
+        <path d="M12 61 Q28 52 40 58" stroke="#f4eee1" stroke-width="1" fill="none" opacity=".7"/>
+      </g>
+      </g></g>
+    </symbol>
+
+    <symbol id="i-down" viewBox="0 0 128 128">
+      <use href="#frame"/>
+      <g clip-path="url(#c-inner)"><g>
+      <!-- revive ring track; its red share is drawn live -->
+      <circle cx="64" cy="64" r="46" fill="none" stroke="#2a2523" stroke-width="7"/>
+      <circle cx="64" cy="64" r="50" fill="none" stroke="#5c554e" stroke-width=".8"/>
+      <circle cx="64" cy="64" r="42" fill="none" stroke="#5c554e" stroke-width=".8"/>
+      <g filter="url(#f-worn)">
+        <!-- pool and splatter -->
+        <ellipse cx="64" cy="92" rx="22" ry="5" fill="#4a0806"/>
+        <circle cx="40" cy="90" r="2" fill="#6a0f0b"/><circle cx="90" cy="93" r="1.6" fill="#6a0f0b"/><circle cx="84" cy="88" r="1.1" fill="#8e1a16"/>
+        <!-- the drop -->
+        <path d="M64 24 C64 24 44 54 44 68 a20 20 0 0 0 40 0 C84 54 64 24 64 24Z" fill="url(#g-blood)" stroke="#2e0504" stroke-width="1.2"/>
+        <path d="M54 66 a10 10 0 0 0 6 12" stroke="#ffd2c4" stroke-width="2.2" fill="none" stroke-linecap="round" opacity=".75"/>
+        <ellipse cx="56" cy="56" rx="2.4" ry="4" fill="#ffe4da" opacity=".7" transform="rotate(25 56 56)"/>
+        <!-- a drip running off the drop -->
+        <path d="M70 87 q1 4 0 7 a1.6 1.6 0 0 0 3 0 q-1 -3 0 -7Z" fill="#8e1a16"/>
+      </g>
+      </g></g>
+    </symbol>
+
+    <symbol id="i-dead" viewBox="0 0 128 128">
+      <use href="#frame"/>
+      <g clip-path="url(#c-inner)"><g transform="translate(64 64) scale(0.86) translate(-64 -64)">
+      <!-- pale moon behind -->
+      <circle cx="84" cy="40" r="17" fill="#cfc6b2" opacity=".18"/>
+      <circle cx="84" cy="40" r="17" fill="none" stroke="#cfc6b2" stroke-width=".8" opacity=".35"/>
+      <g filter="url(#f-worn)">
+        <!-- gothic headstone with a pointed arch -->
+        <path d="M38 104 V54 Q38 34 64 22 Q90 34 90 54 V104Z" fill="url(#g-bone)" stroke="#2a2523" stroke-width="1.5"/>
+        <path d="M38 104 V54 Q38 34 64 22 Q90 34 90 54 V104Z" fill="url(#p-hatch-fine)" opacity=".7"/>
+        <path d="M44 100 V56 Q44 40 64 30 Q84 40 84 56 V100" fill="none" stroke="#6f6658" stroke-width="1.1"/>
+        <!-- carved cross -->
+        <path d="M64 40 V82 M52 52 H76" stroke="#2a2523" stroke-width="5" stroke-linecap="square"/>
+        <path d="M65.5 41 V81 M53 53.5 H75" stroke="#f4eee1" stroke-width="1" opacity=".5"/>
+        <!-- crack -->
+        <path d="M80 60 l-5 8 l3 5 l-6 9 l2 6" stroke="#2a2523" stroke-width="1.3" fill="none"/>
+        <!-- ground and grass -->
+        <path d="M18 104 Q64 98 110 104 L110 112 Q64 116 18 112Z" fill="#231e1c"/>
+        <path d="M30 104 l2 -7 l1 7 M36 104 l3 -9 l0 9 M92 103 l2 -8 l1 8 M98 104 l3 -6 l0 6" stroke="#5c554e" stroke-width="1.2" fill="none"/>
+        <path d="M60 104 q4 -5 8 0" stroke="#8e1a16" stroke-width="1.6" fill="none"/>
+      </g>
+      </g></g>
+    </symbol>
+
+    <symbol id="i-lantern" viewBox="0 0 128 128">
+      <use href="#frame"/>
+      <g clip-path="url(#c-inner)"><g transform="translate(64 64) scale(0.86) translate(-64 -64)">
+      <circle cx="64" cy="70" r="30" fill="url(#g-flame)" opacity=".35"/>
+      <g filter="url(#f-worn)">
+        <!-- hanging ring and hook -->
+        <circle cx="64" cy="17" r="6" fill="none" stroke="url(#g-steel)" stroke-width="2.6"/>
+        <path d="M64 23 V30" stroke="#8a847b" stroke-width="2.4"/>
+        <!-- cap with rivets -->
+        <path d="M46 40 L82 40 L74 30 L54 30Z" fill="url(#g-steel)" stroke="#1a1716" stroke-width="1"/>
+        <path d="M42 44 H86 L82 40 H46Z" fill="#4a4541" stroke="#1a1716" stroke-width="1"/>
+        <circle cx="56" cy="35" r="1.3" fill="#1a1716"/><circle cx="64" cy="35" r="1.3" fill="#1a1716"/><circle cx="72" cy="35" r="1.3" fill="#1a1716"/>
+        <!-- glass and flame -->
+        <rect x="46" y="44" width="36" height="46" fill="#2a1513"/>
+        <path d="M64 52 C64 52 54 68 54 76 a10 10 0 0 0 20 0 C74 68 64 52 64 52Z" fill="url(#g-flame)" filter="url(#f-glow)"/>
+        <path d="M64 64 C64 64 60 72 60 76 a4 4 0 0 0 8 0 C68 72 64 64 64 64Z" fill="#fff4dc"/>
+        <!-- cage -->
+        <g stroke="url(#g-steel)" stroke-width="2.4">
+          <path d="M46 44 V90 M82 44 V90 M64 44 V50"/>
+          <path d="M46 60 H50 M78 60 H82 M46 76 H50 M78 76 H82" stroke-width="1.6"/>
+        </g>
+        <path d="M46 44 V90 H82 V44" fill="none" stroke="#1a1716" stroke-width=".8"/>
+        <!-- base -->
+        <path d="M40 90 H88 L82 98 H46Z" fill="url(#g-steel)" stroke="#1a1716" stroke-width="1"/>
+        <path d="M50 98 H78 L74 104 H54Z" fill="#4a4541" stroke="#1a1716" stroke-width="1"/>
+      </g>
+      </g></g>
+    </symbol>
+
+    <symbol id="i-strike" viewBox="0 0 128 128">
+      <use href="#frame"/>
+      <g clip-path="url(#c-inner)"><g transform="translate(64 64) scale(0.86) translate(-64 -64)">
+      <!-- a crescent blade trail sweeping down into an impact, blood thrown off it -->
+      <path d="M20 34 Q64 14 100 70 Q62 30 20 34Z" fill="url(#g-trail)" filter="url(#f-glow)"/>
+      <path d="M24 33 Q64 18 98 66" stroke="#f4eee1" stroke-width="1.4" fill="none" opacity=".8"/>
+      <path d="M30 44 Q60 32 86 64" stroke="#c42a20" stroke-width="1.2" fill="none" opacity=".7"/>
+      <path d="M26 54 Q52 44 72 66" stroke="#8e1a16" stroke-width="1" fill="none" opacity=".6"/>
+      <g transform="translate(96 72)" filter="url(#f-glow)">
+        <path d="M0 -24 L5 -6 L20 -14 L9 -1 L26 4 L8 6 L14 22 L1 9 L-8 24 L-5 6 L-24 8 L-8 -1 L-20 -16 L-3 -6Z" fill="#c42a20"/>
+        <path d="M0 -14 L3 -4 L12 -8 L6 0 L16 3 L5 4 L8 13 L0 6 L-5 14 L-3 4 L-14 5 L-5 -1 L-11 -9 L-2 -4Z" fill="#f4eee1"/>
+      </g>
+      <g fill="url(#g-blood)" filter="url(#f-worn)">
+        <path d="M78 92 C78 92 70 101 70 106 a8 8 0 0 0 16 0 C86 101 78 92 78 92Z"/>
+        <path d="M60 86 C60 86 55 92 55 95 a5 5 0 0 0 10 0 C65 92 60 86 60 86Z"/>
+        <circle cx="48" cy="98" r="2.6"/><circle cx="66" cy="110" r="2"/><circle cx="92" cy="104" r="2.2"/><circle cx="40" cy="88" r="1.6"/><circle cx="104" cy="96" r="1.4"/>
+      </g>
+      </g></g>
+    </symbol>
+
+    <symbol id="i-skull" viewBox="0 0 128 128">
+      <use href="#frame"/>
+      <g clip-path="url(#c-inner)"><g transform="translate(64 64) scale(0.86) translate(-64 -64)">
+      <g filter="url(#f-worn)">
+        <!-- cranium -->
+        <path d="M64 18 C38 18 26 36 26 56 C26 70 34 78 40 82 V96 H88 V82 C94 78 102 70 102 56 C102 36 90 18 64 18Z" fill="url(#g-bone)" stroke="#2a2523" stroke-width="1.6"/>
+        <path d="M26 56 C26 70 34 78 40 82 V96 H56 Q44 76 40 56 Q38 40 50 24 C34 30 26 42 26 56Z" fill="url(#p-hatch)" opacity=".7"/>
+        <!-- sutures -->
+        <path d="M64 19 l-2 5 l3 4 l-3 5 l2 4" stroke="#6f6658" stroke-width="1.1" fill="none"/>
+        <path d="M40 30 q6 3 10 1 q5 -2 9 1" stroke="#6f6658" stroke-width="1" fill="none"/>
+        <!-- eye sockets with an ember -->
+        <path d="M38 58 Q40 46 52 48 Q60 50 58 62 Q54 70 44 68 Q36 66 38 58Z" fill="#0a0807"/>
+        <path d="M90 58 Q88 46 76 48 Q68 50 70 62 Q74 70 84 68 Q92 66 90 58Z" fill="#0a0807"/>
+        <circle cx="49" cy="59" r="2.2" fill="#c42a20" filter="url(#f-glow)"/>
+        <circle cx="79" cy="59" r="2.2" fill="#c42a20" filter="url(#f-glow)"/>
+        <!-- nose -->
+        <path d="M64 66 L58 80 Q64 83 70 80Z" fill="#0a0807"/>
+        <!-- cheekbones -->
+        <path d="M36 70 Q44 76 54 74 M92 70 Q84 76 74 74" stroke="#6f6658" stroke-width="1.2" fill="none"/>
+        <!-- teeth -->
+        <path d="M44 86 H84" stroke="#2a2523" stroke-width="1.4"/>
+        <path d="M50 84 V96 M57 84 V97 M64 84 V97 M71 84 V97 M78 84 V96" stroke="#2a2523" stroke-width="1.4"/>
+        <!-- crack -->
+        <path d="M84 26 l-4 8 l4 5 l-5 9" stroke="#2a2523" stroke-width="1.3" fill="none"/>
+      </g>
+      <path d="M28 108 Q64 102 100 108" stroke="#8e1a16" stroke-width="2.6" fill="none"/>
+      <circle cx="64" cy="109" r="2.4" fill="#c42a20"/>
+      </g></g>
+    </symbol>
+
+    <symbol id="i-ring" viewBox="0 0 128 128">
+      <circle cx="64" cy="64" r="60" fill="#0a0807" opacity=".6"/>
+      <!-- the red share and the percentage are drawn live over this -->
+      <g fill="none" stroke-width="12" transform="rotate(-90 64 64)">
+        <circle cx="64" cy="64" r="48" stroke="#2a2523"/>
+      </g>
+      <circle cx="64" cy="64" r="55" fill="none" stroke="url(#g-steel)" stroke-width="2.2"/>
+      <circle cx="64" cy="64" r="41" fill="none" stroke="url(#g-steel)" stroke-width="2.2"/>
+      <!-- a tick every tenth, one stud where the ring starts -->
+      <g stroke="#1a1716" stroke-width="1.6">
+        <path d="M64 42 V47" transform="rotate(36 64 64)"/><path d="M64 42 V47" transform="rotate(72 64 64)"/>
+        <path d="M64 42 V47" transform="rotate(108 64 64)"/><path d="M64 42 V47" transform="rotate(144 64 64)"/>
+        <path d="M64 42 V47" transform="rotate(180 64 64)"/><path d="M64 42 V47" transform="rotate(216 64 64)"/>
+        <path d="M64 42 V47" transform="rotate(252 64 64)"/><path d="M64 42 V47" transform="rotate(288 64 64)"/>
+        <path d="M64 42 V47" transform="rotate(324 64 64)"/>
+      </g>
+      <path d="M64 2 L70 10 L64 22 L58 10Z" fill="url(#g-steel)" stroke="#1a1716" stroke-width=".9"/>
+      <circle cx="64" cy="64" r="36" fill="none" stroke="#7d766d" stroke-width="1" opacity=".8"/>
+    </symbol>
+    <!-- The HUD list's glyphs, as the game's Blood Echoes and Insight icons: engraved bone-white shapes with a dark
+         edge, hatched shading and worn grain, no frame (the downed drop in blood red, its ring filled in the strip). -->
+    <linearGradient id="h-white" x1="0" y1="0" x2="0.25" y2="1">
+      <stop offset="0" stop-color="#f8f5ee"/><stop offset=".5" stop-color="#dcd5c7"/><stop offset="1" stop-color="#9c9484"/>
+    </linearGradient>
+    <linearGradient id="h-red" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#ea5544"/><stop offset=".5" stop-color="#b3241b"/><stop offset="1" stop-color="#5e0c09"/>
+    </linearGradient>
+    <pattern id="h-hatch" width="3.5" height="3.5" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <line x1="0" y1="0" x2="0" y2="3.5" stroke="#2b2522" stroke-width="1" opacity=".55"/>
+    </pattern>
+    <filter id="h-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="3" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -0.55 1.18" result="m"/>
+      <feComposite in="SourceGraphic" in2="m" operator="in" result="worn"/>
+      <feDropShadow in="worn" dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity=".9"/>
+    </filter>
+    <symbol id="h-hunter" viewBox="0 0 128 128">
+      <g filter="url(#h-shadow)" stroke="#0b0909" stroke-width="3" stroke-linejoin="round">
+        <!-- coat collar and shoulders -->
+        <path d="M28 118 Q34 97 50 91 L64 101 L78 91 Q94 97 100 118Z" fill="url(#h-white)"/>
+        <path d="M28 118 Q34 97 50 91 L60 99 Q46 104 42 118Z" fill="url(#h-hatch)" stroke="none"/>
+        <path d="M50 91 L57 112 M78 91 L71 112" stroke-width="1.6" fill="none"/>
+        <!-- scarf over the face, the face in the brim's shadow -->
+        <path d="M47 82 Q64 94 81 82 L79 91 Q64 101 49 91Z" fill="#cfc8ba" stroke-width="2.4"/>
+        <path d="M51 86 Q64 93 77 86" stroke-width="1.2" fill="none"/>
+        <ellipse cx="64" cy="77" rx="16" ry="6.5" fill="#120e0d" stroke="none"/>
+        <!-- tricorn crown with its crease -->
+        <path d="M44 66 L53 30 Q64 21 75 30 L84 66 Q64 60 44 66Z" fill="url(#h-white)"/>
+        <path d="M44 66 L53 30 Q57 27 60 26 Q54 44 54 64Z" fill="url(#h-hatch)" stroke="none"/>
+        <path d="M60 27 Q63 44 62 62" stroke-width="1.4" fill="none"/>
+        <!-- band -->
+        <path d="M45 58 Q64 53 83 58 L84 65 Q64 60 44 65Z" fill="#8e1a16" stroke-width="2"/>
+        <!-- brim, upturned points, its edge -->
+        <path d="M9 70 Q31 55 44 63 Q64 71 84 63 Q97 55 119 70 Q102 84 64 84 Q26 84 9 70Z" fill="url(#h-white)"/>
+        <path d="M16 72 Q40 80 64 80 Q88 80 112 72" stroke-width="1.6" fill="none"/>
+        <path d="M14 70 Q30 61 41 66" stroke="#fffdf8" stroke-width="1.6" fill="none"/>
+      </g>
+    </symbol>
+    <symbol id="h-lantern" viewBox="0 0 128 128">
+      <g filter="url(#h-shadow)" stroke="#0b0909" stroke-width="3" stroke-linejoin="round">
+        <circle cx="64" cy="13" r="7" fill="none" stroke="#0b0909" stroke-width="8"/>
+        <circle cx="64" cy="13" r="7" fill="none" stroke="#dcd6ca" stroke-width="4"/>
+        <path d="M60 20 H68 V27 H60Z" fill="url(#h-white)" stroke-width="2"/>
+        <path d="M44 38 H84 L76 27 H52Z" fill="url(#h-white)"/>
+        <path d="M54 31 H74" stroke-width="1.4"/>
+        <circle cx="56" cy="34" r="1.4" fill="#0b0909" stroke="none"/><circle cx="64" cy="34" r="1.4" fill="#0b0909" stroke="none"/><circle cx="72" cy="34" r="1.4" fill="#0b0909" stroke="none"/>
+        <path d="M40 38 H88 V92 H40Z" fill="url(#h-white)"/>
+        <path d="M49 45 H79 V85 H49Z" fill="#1a1312"/>
+        <path d="M64 49 C64 49 54 64 54 72 a10 10 0 0 0 20 0 C74 64 64 49 64 49Z" fill="#e2a66d" stroke="none"/>
+        <path d="M64 61 C64 61 60 68 60 72 a4 4 0 0 0 8 0 C68 68 64 61 64 61Z" fill="#fff1d6" stroke="none"/>
+        <path d="M58 45 V85 M70 45 V85 M49 58 H79 M49 72 H79" stroke="#cfc8ba" stroke-width="2.2"/>
+        <path d="M40 38 V92 H48 V38Z" fill="url(#h-hatch)" stroke="none"/>
+        <path d="M34 92 H94 L86 104 H42Z" fill="url(#h-white)"/>
+        <path d="M48 104 H80 L76 114 H52Z" fill="url(#h-white)"/>
+        <path d="M40 98 H88" stroke-width="1.4"/>
+      </g>
+    </symbol>
+    <symbol id="h-dead" viewBox="0 0 128 128">
+      <g filter="url(#h-shadow)" stroke="#0b0909" stroke-width="3" stroke-linejoin="round">
+        <path d="M34 110 V52 Q34 30 64 16 Q94 30 94 52 V110Z" fill="url(#h-white)"/>
+        <path d="M40 106 V54 Q40 37 64 24 Q88 37 88 54 V106" fill="none" stroke-width="1.5"/>
+        <path d="M34 110 V52 Q34 30 64 16 Q46 32 44 54 V110Z" fill="url(#h-hatch)" stroke="none"/>
+        <path d="M58 36 H70 V52 H82 V64 H70 V96 H58 V64 H46 V52 H58Z" fill="#1a1312"/>
+        <path d="M80 70 l-5 7 l3 5 l-5 8 l2 6" stroke-width="1.6" fill="none"/>
+        <path d="M18 110 H110 V120 H18Z" fill="url(#h-white)"/>
+        <path d="M18 114 H110" stroke-width="1.2"/>
+        <path d="M26 110 l2 -8 l2 8 M33 110 l3 -10 l1 10 M96 110 l2 -7 l2 7 M103 110 l2 -9 l1 9" stroke-width="1.4" fill="none"/>
+      </g>
+    </symbol>
+    <symbol id="h-down" viewBox="0 0 128 128">
+      <circle cx="64" cy="64" r="52" fill="none" stroke="#000" stroke-width="12" opacity=".6"/>
+      <circle cx="64" cy="64" r="52" fill="none" stroke="#dcd6ca" stroke-width="7" opacity=".3"/>
+      <path d="M64 7 L68 12 L64 17 L60 12Z" fill="#dcd6ca" stroke="#0b0909" stroke-width="1.5"/>
+      <g filter="url(#h-shadow)">
+        <path d="M64 26 C64 26 40 60 40 76 a24 24 0 0 0 48 0 C88 60 64 26 64 26Z" fill="url(#h-red)"
+              stroke="#0b0909" stroke-width="3" stroke-linejoin="round"/>
+        <path d="M64 26 C64 26 40 60 40 76 a24 24 0 0 0 14 22 Q46 80 64 26Z" fill="url(#h-hatch)" opacity=".7"/>
+        <path d="M71 50 Q78 62 79 74" stroke="#ffd9cf" stroke-width="3" fill="none" stroke-linecap="round" opacity=".85"/>
+        <ellipse cx="74" cy="82" rx="3" ry="4.5" fill="#ffe2da" opacity=".7"/>
+        <path d="M58 99 q1 6 0 9 a2.2 2.2 0 0 0 4 0 q-1 -3 0 -9Z" fill="#8e1a16" stroke="#0b0909" stroke-width="1.2"/>
+      </g>
+    </symbol>
+    <!-- The party list's portrait frame (hud_patch.py: 80 px on the HUD round the 64 px portrait, whose edge is at
+         r 51.2 here): a dark rim over the picture's edge with a pale hairline, a silver ring, a dark gap and a thin
+         outer line, gothic points at the four sides with curls along the ring, studs and pips between them. -->
+    <linearGradient id="hf-silver" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3eee4"/><stop offset=".4" stop-color="#b9b2a6"/><stop offset=".7" stop-color="#6e6860"/><stop offset="1" stop-color="#cfc8bc"/>
+    </linearGradient>
+    <filter id="hf-soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="1.6"/>
+    </filter>
+    <g id="hf-curls" fill="none" stroke-linecap="round">
+      <path d="M60.6 7.8 C57 4.9 53 4.6 49.4 6.9 M67.4 7.8 C71 4.9 75 4.6 78.6 6.9" stroke="#0b0909" stroke-width="2.6"/>
+      <path d="M60.6 7.8 C57 4.9 53 4.6 49.4 6.9 M67.4 7.8 C71 4.9 75 4.6 78.6 6.9" stroke="url(#hf-silver)" stroke-width="1.2"/>
+    </g>
+    <g id="hf-point">
+      <use href="#hf-curls"/>
+      <circle cx="49" cy="7.4" r="1.3" fill="#d9d3c8" stroke="#0b0909" stroke-width=".6"/>
+      <circle cx="79" cy="7.4" r="1.3" fill="#d9d3c8" stroke="#0b0909" stroke-width=".6"/>
+      <path d="M64 0.8 L67.8 7.6 L64 13 L60.2 7.6Z" fill="url(#hf-silver)" stroke="#0b0909" stroke-width=".9" stroke-linejoin="round"/>
+      <path d="M64 3.4 L64 10.6" stroke="#5a544d" stroke-width=".7"/>
+    </g>
+    <symbol id="h-frame" viewBox="0 0 128 128">
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#000" stroke-width="10" opacity=".55" filter="url(#hf-soft)"/>
+      <circle cx="64" cy="64" r="52.4" fill="none" stroke="#0c0a09" stroke-width="3.2"/>
+      <circle cx="64" cy="64" r="51" fill="none" stroke="#b5ad9f" stroke-width=".8" opacity=".85"/>
+      <circle cx="64" cy="64" r="55" fill="none" stroke="url(#hf-silver)" stroke-width="2.6"/>
+      <circle cx="64" cy="64" r="57.2" fill="none" stroke="#0c0a09" stroke-width="1.6"/>
+      <circle cx="64" cy="64" r="58.4" fill="none" stroke="#a39c90" stroke-width=".8"/>
+      <use href="#hf-point"/>
+      <use href="#hf-point" transform="rotate(90 64 64)"/>
+      <use href="#hf-point" transform="rotate(180 64 64)"/>
+      <use href="#hf-point" transform="rotate(270 64 64)"/>
+      <g fill="url(#hf-silver)" stroke="#0b0909" stroke-width=".6">
+        <circle cx="102.9" cy="25.1" r="1.7"/><circle cx="25.1" cy="25.1" r="1.7"/>
+        <circle cx="102.9" cy="102.9" r="1.7"/><circle cx="25.1" cy="102.9" r="1.7"/>
+      </g>
+      <g fill="#c9c2b6" stroke="#0b0909" stroke-width=".4"><circle cx="86.35" cy="10.04" r=".9"/><circle cx="41.65" cy="10.04" r=".9"/><circle cx="86.35" cy="117.96" r=".9"/><circle cx="41.65" cy="117.96" r=".9"/><circle cx="10.04" cy="41.65" r=".9"/><circle cx="10.04" cy="86.35" r=".9"/><circle cx="117.96" cy="41.65" r=".9"/><circle cx="117.96" cy="86.35" r=".9"/></g>
+    </symbol>
+  </defs>
+<use href="#i-hunter" x="0" width="128" height="128"/>
+<use href="#i-down" x="128" width="128" height="128"/>
+<use href="#i-dead" x="256" width="128" height="128"/>
+<use href="#i-lantern" x="384" width="128" height="128"/>
+<use href="#i-strike" x="512" width="128" height="128"/>
+<use href="#i-skull" x="640" width="128" height="128"/>
+<use href="#i-ring" x="768" width="128" height="128"/>
+</svg>

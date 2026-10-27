@@ -18,6 +18,7 @@ namespace {
 MTLPixelFormat expected_format = MTLPixelFormatInvalid;
 id<MTLDevice> overlay_device;
 std::array<id<MTLTexture>,4> portraits;
+std::array<id<MTLTexture>,8> artwork;
 std::array<u32,4> portrait_versions{};
 NSMutableArray<id>* frame_portraits;
 id<MTLCommandBuffer> frame_buffer;
@@ -90,6 +91,19 @@ void* PortraitTexture(unsigned slot,u32 version,const u8* rgba,u32 side) {
     }
     [frame_portraits addObject:portraits[slot]];
     return (__bridge void*)portraits[slot];
+}
+
+void* ArtworkTexture(unsigned slot,const u8* rgba,u32 width,u32 height) {
+    if(slot>=artwork.size() || !overlay_device || !width || !height || !rgba) return nullptr;
+    if(!artwork[slot]) {
+        auto* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:width height:height mipmapped:NO];
+        desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead;
+        id<MTLTexture> texture=[overlay_device newTextureWithDescriptor:desc];
+        if(!texture) return nullptr;
+        [texture replaceRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0 withBytes:rgba bytesPerRow:width*4];
+        artwork[slot]=texture;
+    }
+    [frame_portraits addObject:artwork[slot]];return (__bridge void*)artwork[slot];
 }
 
 void* MapTexture(u64 version,const BbMapArt::Chart& chart,const u8* rgba) {

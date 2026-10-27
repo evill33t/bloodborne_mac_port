@@ -844,6 +844,11 @@ saves and settings as the Finder launcher.
 
 This port stands entirely on the work of others:
 
+- **Kaniel / [lKaniel](https://github.com/lKaniel)** — the
+  [bloodborne-server co-op client and UI](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/bbport),
+  including the hunter cards, medallions, status icons and custom artwork adapted for Metal.
+  Original paths, file hashes and author credits are retained in
+  [co-op provenance](gpu/bbseamless/PROVENANCE.md).
 - **deadinside28** — author of `bbport`, the original native Linux port of Bloodborne: the flat memory image approach, the HLE
   runtime, the two-stage Vulkan draw pipeline, synthetic motion vectors and the upscaler
   integration.

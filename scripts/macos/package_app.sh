@@ -140,6 +140,7 @@ find "$py" -name __pycache__ -type d -prune -exec rm -rf {} +
 # Licences: the port's (GPL), Python's and the bundled or compiled-in third-party code.
 lic=$contents/Resources/licenses
 cp LICENSE "$lic/LICENSE-bloodborne-mac-port.txt"
+cp gpu/art/README.md "$lic/PROVENANCE-coop-artwork.md"
 cp "$stdlib/LICENSE.txt" "$lic/LICENSE-Python.txt"
 for pair in SDL:LICENSE.txt Vulkan-Headers:LICENSE.md SPIRV-Cross:LICENSE FFmpeg:COPYING.LGPLv2.1 \
             FFmpeg:LICENSE.md fmt:LICENSE magic_enum:LICENSE miniz:LICENSE robin-map:LICENSE \

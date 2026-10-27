@@ -1571,6 +1571,156 @@
       "path": "../../tests/test_map_art.cpp",
       "source": "bbport/tests/test_map_art.cpp",
       "sha256": "52ea7fddd8186d862d7aa18228cdce216ff468c052a54034e9a8e959d8155dad"
+    },
+    {
+      "path": "../../gpu/shim/bbport_coop_art.h",
+      "source": "bbport/gpu/shim/bbport_coop_art.h",
+      "sha256": "be96a27af214e886dae00733fa7ee16281f82b685ff408c19c5c6f91976099b5"
+    },
+    {
+      "path": "../../gpu/shim/bbport_coop_art.cpp",
+      "source": "bbport/gpu/shim/bbport_coop_art.cpp",
+      "sha256": "917a3f716c1f5b671519d81d27b59d7e590ae5c30428d74ecd3ba38aa5792ad4"
+    },
+    {
+      "path": "../../gpu/shim/bbport_party_icons.h",
+      "source": "bbport/gpu/shim/bbport_party_icons.h",
+      "sha256": "2a6097011037ed3206bed8d0d3634a0bf24c5b187cede9c87804a978f6e54684"
+    },
+    {
+      "path": "../../gpu/shim/bbport_party_icons.cpp",
+      "source": "bbport/gpu/shim/bbport_party_icons.cpp",
+      "sha256": "f47c7e7d80042ff40784b500c9ddae56d4149bc101380a314497293aed3fa3a7"
+    },
+    {
+      "path": "../../gpu/shim/bbport_party_layout.h",
+      "source": "bbport/gpu/shim/bbport_party_layout.h",
+      "sha256": "d0463fa5c10f67568d2e268df85eb7e27204b28c15d20a68efe08c1baeb11241"
+    },
+    {
+      "path": "../../gpu/art/coop_art.bin",
+      "source": "bbport/gpu/art/coop_art.bin",
+      "sha256": "818f974aaa3f3b54a0a082e1f582af19d3e9bfb1187cf0e28e8632edf1e1b735"
+    },
+    {
+      "path": "../../gpu/art/party_icons.bin",
+      "source": "bbport/gpu/art/party_icons.bin",
+      "sha256": "570e2170316bd7dbe9a0dee918b7e40b94e4bccb1385c4f19dbf3e0ca24e1885"
+    },
+    {
+      "path": "../../gpu/art/party_icons.svg",
+      "source": "bbport/gpu/art/party_icons.svg",
+      "sha256": "0ba7ae9770fc81cf35277f0d57aef5e139cde969bf3e9102855a9e683909182c"
+    },
+    {
+      "path": "../../gpu/art/coop/backdrop.png",
+      "source": "bbport/gpu/art/coop/backdrop.png",
+      "sha256": "6fa1acafe1f6aef5dbf36b3e66dd6dc47b07f389f5bed203b8192f9255ccbac3"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-downed.png",
+      "source": "bbport/gpu/art/coop/badge-downed.png",
+      "sha256": "183dcd45981e320a37afd688c790dd973793e9d39be902de20e3cdd9c75cbf32"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-elsewhere.png",
+      "source": "bbport/gpu/art/coop/badge-elsewhere.png",
+      "sha256": "14838bf96d8ddfdc7b72df9c680d3358101201187cc0c056501b4e0c09ba9da1"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-fallen.png",
+      "source": "bbport/gpu/art/coop/badge-fallen.png",
+      "sha256": "0e827af81f899c32a355a70e723e93cda8d513f1b722412a260ea068f50a9459"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-hunter.png",
+      "source": "bbport/gpu/art/coop/badge-hunter.png",
+      "sha256": "05c138c8108b3d8d24786fa01d0b1dff2115706140713613656a1eef3c78271c"
+    },
+    {
+      "path": "../../gpu/art/coop/card.png",
+      "source": "bbport/gpu/art/coop/card.png",
+      "sha256": "784ec6bc9fd5331467afcabb9f0cc5ef737ff9f9795c2d8f5fe69f9f2d2f3d79"
+    },
+    {
+      "path": "../../gpu/art/coop/divider.png",
+      "source": "bbport/gpu/art/coop/divider.png",
+      "sha256": "c040b656f6407cb9fade9c46f149fddaa0761329d0a0f49bdb7d6218cf9c5874"
+    },
+    {
+      "path": "../../gpu/art/coop/mark-invite.png",
+      "source": "bbport/gpu/art/coop/mark-invite.png",
+      "sha256": "906da3b5ad72ef98299c69e363cda404e20ad7e0bb6ca89db846bb1d1c0a6303"
+    },
+    {
+      "path": "../../gpu/art/coop/mark-leader.png",
+      "source": "bbport/gpu/art/coop/mark-leader.png",
+      "sha256": "c645a773c38f853362e479940875b579b9ba5b6da6f4728d531d8aec1ef0d229"
+    },
+    {
+      "path": "../../gpu/art/coop/mark-ready.png",
+      "source": "bbport/gpu/art/coop/mark-ready.png",
+      "sha256": "25ceee8af3b032ef9b94d714d2ef272bd94f64b05613af6ce45bb5f3c412aa25"
+    },
+    {
+      "path": "../../gpu/art/coop/medallion-ready.png",
+      "source": "bbport/gpu/art/coop/medallion-ready.png",
+      "sha256": "d3dc2dce84e0efdee58815ed56c003071a996855d4b5c22f47a093f24c891fb2"
+    },
+    {
+      "path": "../../gpu/art/coop/medallion.png",
+      "source": "bbport/gpu/art/coop/medallion.png",
+      "sha256": "3cf0bd3b3c95eadbd33896d38a4158c49616d12743f11efca8a5a3625949798a"
+    },
+    {
+      "path": "../../gpu/art/coop/portrait-frame.png",
+      "source": "bbport/gpu/art/coop/portrait-frame.png",
+      "sha256": "db9660538285948c5d2ebb25a4317b9e4a3bbc914632983baa62ec67547a77a7"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil0.png",
+      "source": "bbport/gpu/art/coop/sigil0.png",
+      "sha256": "6f6509863b8281462999d66e4f27447f9ea84edfbdcbdfba97a0395aff75b6c4"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil1.png",
+      "source": "bbport/gpu/art/coop/sigil1.png",
+      "sha256": "a0f918de51d484077c77d1e0d73f9a09d1d2ead33bd5af4095d2da3a350a4779"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil2.png",
+      "source": "bbport/gpu/art/coop/sigil2.png",
+      "sha256": "fb5a6b8b210304324bd1ef31a44acb7e63bce01ec83e1cec192824e3704388dc"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil3.png",
+      "source": "bbport/gpu/art/coop/sigil3.png",
+      "sha256": "e35444793f2fc5da5c253307e8d1d5c47d28e6d8d185422e4fefa2673e925e79"
+    },
+    {
+      "path": "../../gpu/art/coop/title-ornament.png",
+      "source": "bbport/gpu/art/coop/title-ornament.png",
+      "sha256": "418216c74e3db26218dda28626e230b94f31f129c063b2e8f90a225a63c6a3f3"
+    },
+    {
+      "path": "../../scripts/coop_art.py",
+      "source": "bbport/scripts/coop_art.py",
+      "sha256": "b3cab184d11dd94c4dccfb9fa3dd25878b51eab9b9505782a332d9f77b022b02"
+    },
+    {
+      "path": "../../scripts/party_icons_atlas.py",
+      "source": "bbport/scripts/party_icons_atlas.py",
+      "sha256": "8096c2046954909bdf1a8c5fb4e994ae00cb88e45fecf51ca9ce73a71e368edd"
+    },
+    {
+      "path": "../../tests/test_coop_art.cpp",
+      "source": "bbport/tests/test_coop_art.cpp",
+      "sha256": "d068b5cc142b81b313ceb3df6cfb2daa6a7d94ba9888e21efed701f588f17517"
+    },
+    {
+      "path": "../../tests/test_party_icons.cpp",
+      "source": "bbport/tests/test_party_icons.cpp",
+      "sha256": "714f3b1b2ae2f2a4b18af295efd536e745b91e81378f6c7245470e7655f502c9"
     }
   ],
   "path_base": "gpu/bbseamless; ../../ paths refer to repository scripts"

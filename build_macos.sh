@@ -136,6 +136,12 @@ if [[ ${1:-} == --test ]]; then
     out/seamless-mac-test
     bash tests/test_map.sh arm64
     bash tests/test_map.sh x86_64
+    for art in coop_art party_icons; do
+        /usr/bin/clang++ -std=c++20 -O2 -I. -Igpu/shim -I"$ROOT/deps/arm64/include/miniz" \
+            -DBB_COOP_ART_PATH="\"$ROOT/gpu/art/coop_art.bin\"" -DBB_PARTY_ICONS_PATH="\"$ROOT/gpu/art/party_icons.bin\"" \
+            "tests/test_$art.cpp" "gpu/shim/bbport_$art.cpp" "$ROOT/deps/arm64/lib/libminiz.a" -o "out/$art-test"
+        "out/$art-test"
+    done
     if [[ -f out/gpu/libbbseamless.dylib ]]; then
         /usr/bin/clang++ -std=c++20 "${ARCH[@]}" -I. tests/test_seamless_module.cpp -o out/seamless-module-test
         out/seamless-module-test "$ROOT/out/gpu/libbbseamless.dylib" default
@@ -239,6 +245,8 @@ if [[ ${1:-} == --test ]]; then
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: overlay-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/overlay-test 2>&1 | grep -E '^(PASS|FAIL)'
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: overlay-test (validation)'; exit 1; }
+        ninja -C out/gpu-arm64 coop-presentation-test >/dev/null
+        MTL_DEBUG_LAYER=1 out/gpu-arm64/coop-presentation-test
         # Saved upscaler choices (unavailable providers run as a fallback, the ini keeps the
         # user's value).
         ninja -C out/gpu-arm64 upscaler-support-test >/dev/null

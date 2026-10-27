@@ -1,6 +1,14 @@
 # Reference client sources
 
 Imported from [lKaniel/bloodborne-server at 8d5e54f](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1).
+Original co-op client author: **Kaniel / lKaniel**
+([GitHub](https://github.com/lKaniel)). The Mac overlay/Metal foundation and original
+`tests/test_mtl_overlay.mm` harness are by **Mark Hall**, as credited in their retained
+SPDX copyright headers in this repository
+([Metal overlay source](https://github.com/evill33t/bloodborne_mac_port/blob/4451b9f851667e48aaa56e0e1597aa7f55642bb9/gpu/shim/bbport_overlay_metal.mm),
+[test harness](https://github.com/evill33t/bloodborne_mac_port/blob/4451b9f851667e48aaa56e0e1597aa7f55642bb9/tests/test_mtl_overlay.mm)). New adaptation commits cite these sources and
+authors explicitly in their commit messages, without claiming original authors co-authored
+the Mac adaptations.
 The project and retained source headers grant GPL-2.0-or-later; retain individual copyright
 and third-party notices. The repository's `LICENSE` applies. The existing THD online foundation
 has separate GPL-3.0-or-later provenance in `docs/ONLINE_PROVENANCE.md`.
@@ -22,6 +30,15 @@ has separate GPL-3.0-or-later provenance in `docs/ONLINE_PROVENANCE.md`.
 copies also carry `adapted_sha256`; paths are relative to this directory. `touch.h` extracts
 the reference runtime's MapHold gesture state, with the complete original file hash retained.
 The event helper under `scripts/seamless/` comes from `tools/re/party_boss_events.py`.
+The reference's co-op artwork, status icons, editable PNG/SVG sources and packers are retained
+under `../art/`, `../../scripts/coop_art.py` and `../../scripts/party_icons_atlas.py`.
+`../shim/bbport_coop_art.*`, `bbport_party_icons.*`, `bbport_party_layout.h` and the matching
+art decoder tests retain their original source hashes. Kaniel's packer describes the custom
+co-op artwork as drawn for the reference with Nano Banana; it is separate from game-owned
+art. The Mac `bbport_coop_style.*` and presentation changes adapt the reference's
+[`MenuArt`, `CoopArt`, `Team`, `Party`, and `Compass` UI](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/bbport/gpu/shim/bbport_overlay.cpp).
+Game menu textures, gauge strips and the menu font are read from the player's own files at
+runtime and are never included in these artwork files or release packages.
 The `text/` helpers come from `bbport/gpu/shim/bbport_game_art.*`,
 `bbport_save_editor.h` and `bbport_save_editor_items.cpp`; read-only text/texture parsing is
 used for the UI. Kernel error/time headers retain their emulator source paths in the manifest.

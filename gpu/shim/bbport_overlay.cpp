@@ -3,6 +3,7 @@
 #define IMGUI_DEFINE_MATH_OPERATORS // ImVec2 arithmetic for the custom-drawn controls
 #include "bbport_overlay.h"
 #include "bbport_coop_ui.h"
+#include "bbport_coop_style.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1735,6 +1736,7 @@ void Render(void* command_buffer, void* target, u32 width, u32 height) {
     }
     io.DeltaTime = ms > 0.0f && ms < 1000.0f ? ms / 1000.0f : 1.0f / 60.0f;
     ApplyScale(float(height));
+    if(BbCoopOverlay::Visible()) BbCoopStyle::Prepare();
 
     MetalBackend::Frame(command_buffer, target, [&] {
         ImGui::NewFrame();

@@ -50,6 +50,20 @@ arm64 Metal host; game hooks and networking run in the x86-64 Rosetta game proce
 | Attack a downed teammate | Build revive progress; holding Circle while downed gives up |
 | Options during a cutscene | Vote to skip |
 
+The co-op screens follow the Windows reference's presentation: framed hunter cards, ready and
+leader marks, medallions, silver dividers, and a shared loading screen. Live portraits appear
+in the party HUD, compass and map when received; hunter sigils fill in before a portrait is
+available. The HUD uses the game's own HP-bar art with vial/bullet counts and distinct downed,
+dead and elsewhere states. Downed players get a revive ring and give-up progress; duel
+countdowns and connection/invasion notices remain visible without a permanent debug panel.
+
+Team, trade, map and invitation dialogs use the player's game menu textures/font, with
+fallbacks when files cannot be read. These styles apply only to co-op; macOS settings retain
+their existing presentation. Standard ImGui controls keep keyboard/controller navigation;
+the primary hunt or return action gets initial focus. Custom co-op artwork is embedded in
+both GPU library slices, so the packaged app has the same presentation. Original authors,
+sources and license details are recorded in [provenance](../gpu/bbseamless/PROVENANCE.md).
+
 The client retains the pinned reference's shared world/events/enemy ownership and HP,
 independent travel and session restoration, team HUD/portraits/compass/pings, down/revive/wipe
 and spectating, rot, trading (including equipment payloads), chalice sharing, bloodstain

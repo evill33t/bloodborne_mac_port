@@ -155,3 +155,43 @@ Evidence: `out/ingame-terrain-2026-10-27/validation.json`, per-role scripts/logs
 `guest/received-map-ping.png`. This is bounded Central Yharnam gameplay and Cathedral Ward
 asset parsing evidence; full DLC/chalice terrain coverage and mixed Windows/Mac play were
 not exercised. No server deployment or firewall change was required.
+
+## Windows-style co-op presentation - 2026-10-27
+
+Adapted Kaniel / lKaniel's reference artwork and the `MenuArt`, `CoopArt`, `Team`, `Party`
+and `Compass` presentation to the existing native Metal overlay. Retained original atlas
+sources, hashes and GPL notices, and credited Mark Hall's Mac overlay and test harness.
+Commit messages include original-source URLs, pinned revisions and author credits.
+
+The UI now has four framed hunter cards with ready/leader marks and empty places, portrait
+medallions on the party list/compass/map, the game's own HP-bar art and font, vial/bullet
+counts, downed/dead/elsewhere states, revive/give-up indicators, and illustrated team loading.
+Team, map, trading and question dialogs share the reference's silver/stone treatment.
+Sigils substitute for portraits before a live image is available.
+
+- Two actual game clients authenticated and joined the same remote hunt. Both asserted two
+  session members and two party members. Real GPU portraits displayed in the HUD and team
+  cards. The illustrated loading screen displayed each hunter's joining stage and percentage.
+- Inspected the party HUD, team menu and terrain-map menu in-game. A visible layout warning
+  in the initial card action buttons was corrected; the final run had no ImGui errors or
+  Metal validation findings. Escape/F6/F8 navigation and the existing command bridge remain
+  in use. Original seed save hashes stayed unchanged.
+- `build_macos.sh --test` passed. Imported atlas tests check geometry/transparency, gray
+  treatment and malformed files. A native Metal fixture renders team, HUD, downed, loading
+  and trade states at 960x720, 1152x720, 1920x1080 and 3440x1440, checking input ownership,
+  restoration of the Mac settings theme, ImGui errors, and unretained GPU resource lifetime.
+  The fixture also passes without game art/fonts; game-file visuals were checked separately.
+- Follow-up checks cover a zero-progress revive ring, silver checkbox styling and the trade
+  inventory's flexible height, which reserves room for quantity/offer controls. The final
+  development app includes artwork provenance in its licenses directory.
+- The signed packaged app authenticated with its bundled Python/runtime, entered a real
+  hunt, and displayed the themed Team and trade menus. Checked the trade footer and return
+  controls. Its original selected saves stayed unchanged; no ImGui or Metal errors occurred.
+  Deep strict signature verification passed. Focused Metal checks were repeated after the
+  final layout/color/ring changes.
+
+Evidence: `out/ingame-coop-ui-2026-10-27/` (initial `host/guest`, corrected
+`final-host/final-guest`), `out/coop-ui-fixtures/` (synthetic states), and
+`out/coop-ui-full-test.log`. Fixture downed/dead states are presentation checks; the earlier
+real revival/PvP gameplay evidence remains separate. The Mac settings UI retains its existing
+style, and the backend/protocol are unchanged.
