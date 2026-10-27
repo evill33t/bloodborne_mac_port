@@ -5,6 +5,7 @@
  * versions (runtime_services.c). Trophies, voice and the store/profile dialogs always stay here. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_save_txn.h"
 #include "gpu/bbnet/bbnet.h"
 #include "gpu/bbseamless/client.h"
 #include "gpu/bbgpu.h"
@@ -117,7 +118,10 @@ static BbNetResolveFn module_resolve(void) {
         const BbSeamlessHost seamless_host={.abi=BBSEAMLESS_ABI_VERSION,.net=host,
             .thread_attach=runtime_thread_attach_host,.memory_protection=runtime_memory_protection,
             .trophy_unlock=party_trophy,.publish_ui=bbgpu_coop_publish,
-            .next_command=bbgpu_coop_next_command,.take_portrait=bbgpu_coop_take_portrait,.user_dir=game_user};
+            .next_command=bbgpu_coop_next_command,.take_portrait=bbgpu_coop_take_portrait,.user_dir=game_user,
+            .reward_lookup=runtime_reward_lookup,.reward_begin=runtime_reward_begin,
+            .reward_arm=runtime_reward_arm,.reward_disarm=runtime_reward_disarm,
+            .reward_cancel=runtime_reward_cancel_before_apply};
         if (seamless_init) initialized=seamless_init(&seamless_host);
         if (!found || initialized) coop_unavailable("client module failed its ABI check; rebuild the client");
     } else if (init) initialized=init(&host);

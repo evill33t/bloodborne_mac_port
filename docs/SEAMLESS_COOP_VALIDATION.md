@@ -314,7 +314,8 @@ the native HUD showed the award. Those attempts are not counted as passing asser
 
 This verifies Mac/Mac invasions on the deployed server. It does not certify mixed Windows/Mac
 play, retail native kind/sign, covenant-specific rewards or an atomic exactly-once award
-across a crash between applying inventory and acknowledging the grant.
+across a crash between applying inventory and acknowledging the grant. The covenant/atomic
+follow-up below supersedes those two implementation limits.
 
 The complete `build_macos.sh --test` suite, five launch/save-isolation cases and focused native
 visual/socket/memory guards passed. All 344 source-manifest hashes matched. The signed
@@ -326,3 +327,82 @@ before and after gameplay. All test games were stopped; selected seed saves and 
 eboot hashes remained unchanged. Evidence: `out/ingame-invasion-rewards-2026-10-27/validation.json`,
 the per-role logs/screenshots/results, `out/invasion-regression-tests.log` and
 `out/invasion-package.log`. No app was installed over the user's existing build.
+
+
+## Covenant rewards and crash-atomic payouts - 2026-10-27
+
+The [deployment and durability record](SEAMLESS_INVASION_REWARDS.md#covenants-and-durable-delivery)
+identifies the attributed server commits, native source evidence, image and rollback helper.
+The deployed ARM64 server passed ten focused CTest targets, including covenant/legacy
+negotiation and durable mailbox publication/ACK failure/restart cases. The Mac native module
+now uses host ABI 4 for bounded receipt and save-transaction callbacks. All 344 adapted-source
+manifest entries matched after the change.
+
+The player's own unmodified 1.09 item lots establish one Blood Dreg for the Corruption oath
+(effect 6100, original ItemLot 5500/5510). Radiance, Hunter and blood-addled Hunter sibling lots
+are empty. Tests use the reference autoplay driver to establish the actual native oath marker,
+not the rune's unrelated secondary effect 180010; this is not manual rune-menu testing.
+A native inventory probe verified goods704 overflow from 99 held / 0 stored to 99 held / 1 stored.
+
+The real native serializer writes the complete 0x140000-byte image and then ftruncates to that
+same size. Initial development runs incorrectly cleared coverage on that same-size truncate;
+they withheld receipts/ACKs and are retained as failed runs. Range proof now preserves existing
+bytes, clips only a shrink and counts no unwritten extension. The native barrier, full-write
+proof, backup postimage and atomic save/receipt exchange then succeeded in the game.
+
+| Crash boundary / native check | Result |
+| --- | --- |
+| Corruption defender defeats invader | 300 to 446 Echoes, current Insight 0 to 1, Blood Dregs 0 to 1 |
+| Kill after save+receipt, before ACK (`trace-host-2`) | Server retained one pending grant; canonical save held its matching receipt |
+| Receipt replay (`after-commit-reconnect`) | ACK without another native award; mailbox became empty with its counter unchanged |
+| Enemy-isolated reload (`checked-after-commit`) | 446 Echoes / 1 Insight / 1 held Dreg retained; no change over 30 seconds |
+| Kill after memory application, before save (`atomic-invader`) | No local receipt; server retained one pending covenant grant |
+| Replay (`after-apply-reconnect`) | One application, fresh native save, durable receipt and ACK; 348 Echoes / 1 Insight / 99 held + 1 stored Dregs retained unchanged over 30 seconds |
+
+An initial post-commit reconnect allowed the nearby Brainsucker to grab the character and
+apply native Insight-drain effect 4681. Its assertion failure and screenshot are retained;
+the successful repeat disables that enemy. The pre-save invader run also exposed a separate
+native return-warp timing problem: the co-op trip could report home while GlobalState+0x1520
+still marked a native warp, so transient Insight could be placed on the outgoing body.
+Its Echoes updated but Insight did not; the transaction withheld its ACK. The final client
+uses the existing native warp/loading and pending summon-reload gates and a settled live
+character/map before applying. Recovery still replays the entire uncommitted grant once.
+The earlier `pre-save-*` driver timed out before its target became available and is not a pass.
+The final build repeated an actual target-killed victory: native checks observed the next
+award's Echoes, Insight and stored Dreg, queued the fresh save, and reached its before-ACK
+pause with the matching receipt visible. The host's death assertion passed. The invader's
+shortened ten-second attack-driver assertion expired just before the native end arrived;
+that driver is retained as failed, rather than relabeled as a wholly passing script.
+
+The native PvP checks use isolated copied saves, positioning/godmode for setup and a real R1
+final blow after removing the victim's godmode and setting HP to one. They are not full-HP
+balance tests. Original seed saves and source eboot hashes remained unchanged.
+
+The canonical `build_macos.sh --test` suite passed. Storage fixtures passed on arm64 and x86_64,
+including real fork/SIGKILL before application, during a partial write, before flush/exchange
+and after exchange; replay, changed payload/account/slot, backup fallback, metadata preservation,
+profile locking, linked paths, capacity refusal and subsequent ordinary saves are covered.
+Capacity is checked before applying/pinning a reward, and directory read errors fail closed.
+These deterministic kill/flush-failure tests do not certify physical power-cut behavior.
+
+The guarantee covers a durably committed server payout and the corresponding local native
+save/receipt. Active invasions remain memory-only before the server ledger commit. External
+save rollback/editing or deleting receipts, malicious local modification and storage without
+atomic exchange/durable flush are outside that contract. Windows/Mac cross-play and the
+retail-exact economy at every level remain unverified. Offline saves retain their prior path.
+
+The final signed `0.6.0-seamless-atomic-dev` package (160 MiB; ZIP 60 MiB) used its bundled
+Python, native runtime, module and Metal host against `bloodborne.phobos.services`. After the
+final kill-before-ACK it loaded 396 Echoes / 2 Insight and 99 held / 2 stored Blood Dregs,
+acknowledged the existing receipt without applying another native award, and kept those
+values unchanged for 30 seconds (`PACKAGED_ATOMIC_PAYOUT_PASS`). Native red tint was absent
+outside the invasion. Both test mailboxes were empty with their next-ID counters unchanged
+by replay, and had zero owner mismatches or unexpected grants. Metal validation reported
+no gameplay findings. Deep strict app-signature verification passed before and after play;
+selected seed saves and the original source eboot hash matched. Every test game was stopped.
+
+Evidence is retained under `out/ingame-covenant-atomic-2026-10-27/`: `validation.json`, the
+per-role logs/scripts/results/screenshots, native parameter/repository fact reports, pending
+mailbox snapshots at both kill boundaries and the final empty-mailbox snapshot. Build and
+package logs are `out/covenant-regression-tests.log` and `out/covenant-package.log`.
+The package was not installed over the user's existing app.

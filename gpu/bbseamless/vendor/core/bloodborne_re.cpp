@@ -272,6 +272,18 @@ bool HasPlayerEffect(u64 player, s32 effect_id) {
     return false;
 }
 
+u32 OwnCovenantEffect() {
+    const u64 player=GetLocalPlayer();
+    u32 oath=0;
+    // Native 1.09 oath markers (Paramdex and native PvP award branches).
+    for(const u32 effect:{6100u,6110u,6120u,6130u}) {
+        if(!HasPlayerEffect(player,effect)) continue;
+        if(oath) return 0; // Conflicting modified markers are not a valid covenant.
+        oath=effect;
+    }
+    return oath;
+}
+
 u32 GetCurrentPackedMap() {
     const u64 map_list =
         image_base != 0 ? ReadValue<u64>(image_base + CurrentMapListPointerOffset, 0) : 0;

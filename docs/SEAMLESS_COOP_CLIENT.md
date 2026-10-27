@@ -172,6 +172,20 @@ reward item type. Solo reward acknowledgements use the lobby stream even without
 Ordinary item offers/refunds cannot issue Insight. Server source and rollback details are in
 [the deployment record](SEAMLESS_INVASION_REWARDS.md).
 
+Covenant rewards follow the original native PvP item lots: a winner wearing Corruption gets
+one Blood Dreg in addition to Insight/Echoes. Radiance, Hunter and blood-addled Hunter PvP lots
+contain no additional item. The server freezes the native oath marker for the visit; changing
+it during combat cannot change the payout. Inventory overflow uses the game's storage path
+(99 held / 99 stored); a completely full inventory retains the grant until space is available.
+
+Invasion payouts are acknowledged only after a fresh native character save and its receipt
+are committed together. The Mac runtime stages the complete online save directory, verifies
+the character write, flushes it and exchanges directories atomically. Native backup fallback
+also contains the credited character image. Reconnecting after a crash replays an uncommitted
+grant or acknowledges an existing matching receipt without awarding again. Keep the complete
+per-server save directory, including its hidden receipt folder, when moving it. External save
+editing/restoration that removes those receipts is outside this transaction guarantee.
+
 Hook admission checks the supported 1.09 title IDs and original instruction signatures before
 mutation. The known 1.09 executable with stale 1.00 SFO metadata is accepted only by its exact
 container SHA-256. Unknown images, conflicting hook bytes, missing libraries or ABI mismatch

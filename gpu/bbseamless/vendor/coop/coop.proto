@@ -222,6 +222,9 @@ message Vitals {
     // Kaniel 2026-10-25: the bosses (handles) this member's game runs now, so that every game picks
     // the same runner for a fight (BossRunnerPick). The server keeps it with the rest.
     repeated uint32 bosses = 18;
+    // Equipped native oath marker, for frozen invasion rewards: 0 none/unknown,
+    // 6100 Corruption, 6110 Radiance, 6120 Hunter, 6130 blood-addled Hunter.
+    uint32 covenant_effect = 19;
 }
 message VitalsBoard {
     message Member {
@@ -455,6 +458,7 @@ message Envelope {
 message InvadeRequest {
     uint32 level = 1; // the invader's character level (0: unknown, no level band)
     bool cancel = 2;
+    uint32 covenant_effect = 3; // native oath marker, as Vitals.covenant_effect
 }
 
 // server -> the target team's games and the invader: an invader approaches (the team's notice
@@ -631,6 +635,9 @@ message LobbyHello {
     // Opt-in extension: server-issued invasion victory grants (Insight kind 4, reason 2).
     // False for original clients, which must never receive these grants. Wire-compatible with 8.
     bool invasion_rewards = 5;
+    // Opt-in extension of reason-2 grants: optional one Blood Dreg (goods 704).
+    // Requires invasion_rewards too; legacy reward clients keep their original shape.
+    bool covenant_rewards = 6;
 }
 
 // game -> server: what the player did in the lobby. The answer is the LobbyState (with a notice

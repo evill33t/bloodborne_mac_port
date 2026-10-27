@@ -39,6 +39,12 @@
 #include <deque>
 #include <functional>
 
+extern "C" int bbseamless_reward_lookup(const char*,uint64_t,const void*,size_t,int);
+extern "C" int bbseamless_reward_begin(const char*,uint64_t,const void*,size_t,int);
+extern "C" int bbseamless_reward_arm(uint64_t,int);
+extern "C" int bbseamless_reward_disarm(uint64_t);
+extern "C" int bbseamless_reward_cancel(uint64_t);
+
 namespace Core::Bloodborne {
 namespace {
 
@@ -753,6 +759,172 @@ void RemoveBellItems() {
     }
 }
 
+namespace {
+constexpr u64 NativeSaveIdleOffset=0x0156AA10,NativeFreshSaveOffset=0x0156D570;
+constexpr std::array<u8,18> NativeSaveIdleBytes{0x48,0x8b,0x05,0x61,0xbc,0xfe,0x03,0x83,0xb8,0x54,0x15,0,0,0,0x0f,0x94,0xc0,0xc3};
+constexpr std::array<u8,25> NativeFreshSaveBytes{0x55,0x48,0x89,0xe5,0x41,0x57,0x41,0x56,0x41,0x55,0x41,0x54,0x53,0x48,0x83,0xec,0x48,0x89,0xd3,0x41,0x89,0xf6,0x41,0x89,0xfd};
+
+// The original native repository is the inventory pointer at PlayerGameData+0x5B0.
+// Both it and +0x328 use 16-byte entries; capacities are 99 held and 99 stored (Goods704).
+std::optional<u32> DregsInInventory(u64 inventory) {
+    if(inventory<0x10000 || !HasMemoryAccess(inventory,0x90,MemoryProt::CpuRead)) return {};
+    const s32 last=ReadValue<s32>(inventory,0x88);
+    const u32 split=ReadValue<u32>(inventory,0x24);
+    if(last < -1 || last>=0x1000 || split>0x1000) return {};
+    u32 count=0;
+    for(s32 index=0;index<=last;++index) {
+        const bool first=static_cast<u32>(index)<split;
+        const u64 entries=ReadValue<u64>(inventory,first?0x58:0x48);
+        const u64 entry=entries+16ull*(first?static_cast<u32>(index):static_cast<u32>(index)-split);
+        if(entries<0x10000 || !HasMemoryAccess(entry,16,MemoryProt::CpuRead)) return {};
+        if(ReadValue<u32>(entry,0) && ReadValue<u32>(entry,4)==(GoodsCategory|BloodborneCoop::BloodDregGoods)) {
+            const u32 n=ReadValue<u32>(entry,8);
+            if(n>99 || count>99-n) return {};
+            count+=n;
+        }
+    }
+    return count;
+}
+
+bool NativeSaveReady() {
+    const u64 global=GetGlobalState();
+    return global>=0x10000 && HasMemoryAccess(global+0x1490,0x1580-0x1490,MemoryProt::CpuRead) &&
+        ReadValue<s32>(global,0x1490)==character_slot.load() && ReadValue<u8>(global,0x1578)!=0 &&
+        std::ranges::equal(std::span<const u8>{reinterpret_cast<const u8*>(image_base+NativeSaveIdleOffset),NativeSaveIdleBytes.size()},NativeSaveIdleBytes) &&
+        std::ranges::equal(std::span<const u8>{reinterpret_cast<const u8*>(image_base+NativeFreshSaveOffset),NativeFreshSaveBytes.size()},NativeFreshSaveBytes) &&
+        reinterpret_cast<bool PS4_SYSV_ABI (*)()>(image_base+NativeSaveIdleOffset)();
+}
+
+std::string RewardScope() {
+    std::string scope;
+    for(const char* name:{"BB_SHADNET_SERVER","BB_SHADNET_SERVER_KEY","BB_SHADNET_NPID"}) {
+        const char* value=std::getenv(name);
+        const std::string part=value?value:"";
+        scope+=std::to_string(part.size())+":"+part;
+    }
+    return scope;
+}
+
+// Deterministic real-game kill/restart probes are enabled only with the existing autoplay rig.
+bool RewardTestPause(const char* point) {
+    const char* rig=std::getenv("SHADPS4_BLOODBORNE_AUTOPLAY");
+    const char* pause=std::getenv("BB_TEST_INVASION_PAUSE");
+    if(!rig || !*rig || !pause || std::strcmp(pause,point)) return false;
+    static std::set<std::string> reported;
+    if(reported.insert(point).second) LOG_INFO(Debug,"Co-op atomic reward test pause: {}",point);
+    return true;
+}
+
+struct AtomicReward {
+    u64 id=0,data=0;
+    int slot=-1;
+    std::string scope,payload;
+    s32 echoes=0,insight=0;
+    std::optional<u32> dregs;
+    bool queued=false,echoes_verified=false,insight_verified=false,dregs_verified=false;
+    s64 retry_at=0;
+};
+std::optional<AtomicReward> atomic_reward;
+
+// No TradeClient::Take until commit: its in-memory 'granted' set is not a durable receipt.
+bool TakeAtomicReward(const bbcoop::TradeGrant& grant) {
+    if(BloodborneCoop::TradeGrantItemsProblem(grant)) return false;
+    const int slot=character_slot.load();
+    if(slot<0 || slot>9) return false;
+    const std::string scope=RewardScope(),payload=grant.SerializeAsString();
+    const int recorded=bbseamless_reward_lookup(scope.c_str(),grant.id(),payload.data(),payload.size(),slot);
+    if(recorded==1) {
+        if(RewardTestPause("before-ack")) return false;
+        if(atomic_reward && atomic_reward->id==grant.id()) atomic_reward.reset();
+        LOG_INFO(Debug,"Co-op invasion reward: durable receipt {} acknowledged",grant.id());
+        return true;
+    }
+    if(recorded<0 || (atomic_reward && (atomic_reward->id!=grant.id() || atomic_reward->payload!=payload || atomic_reward->scope!=scope))) return false;
+    const u64 data=PlayerGameData(),global=GetGlobalState(),player=GetLocalPlayer();
+    const u32 map=GetCurrentPackedMap();
+    const bool ready=data>=0x10000 && global>=0x10000 && player>=0x10000 &&
+        HasMemoryAccess(global,0x1521,MemoryProt::CpuRead) &&
+        ReadValue<u8>(global,0x08)==0 && ReadValue<u8>(global,0x1520)==0 &&
+        IsUsablePackedMap(map) && LocalPlayerPosition() && !HasPlayerEffect(player,9001) &&
+        !Invading() && !PartyTripActive() && !guest_lamp_trip_at.has_value() &&
+        pending_summon_reload_map.load(std::memory_order_acquire)==0 &&
+        pending_summon_reload_state_map.load(std::memory_order_acquire)==0 &&
+        HasMemoryAccess(data+0x80,0x18,MemoryProt::CpuRead);
+    // The trip state can report home while the native return warp still owns the body.
+    // As in the reference responder resume, wait for the native warp byte to clear and
+    // the same live character/map to settle before adding transient Insight effect 4680.
+    static u64 settled_player=0,settled_data=0;
+    static u32 settled_map=0;
+    static int settled_slot=-1;
+    static s64 settled_since=-1;
+    if(!ready) {settled_since=-1;return false;}
+    const s64 now=SteadyMilliseconds();
+    if(settled_since<0 || settled_player!=player || settled_data!=data || settled_map!=map || settled_slot!=slot) {
+        settled_player=player;settled_data=data;settled_map=map;settled_slot=slot;settled_since=now;
+    }
+    if(!atomic_reward && now-settled_since<3'000) return false;
+    if(atomic_reward && (atomic_reward->slot!=slot || atomic_reward->data!=data)) {
+        // A different character loaded before an uncommitted award could be saved.
+        if(!atomic_reward->queued && !bbseamless_reward_cancel(atomic_reward->id)) atomic_reward.reset();
+        return false;
+    }
+    if(!atomic_reward) {
+        if(!NativeSaveReady() || !HasVirtual(player,CharacterAddSpEffectSlot,AddSpEffectOffset,"atomic Insight") ||
+           !HasVirtual(player,0x3D0,AddSoulsOffset,"atomic Echoes")) return false;
+        AtomicReward pending{.id=grant.id(),.data=data,.slot=slot,.scope=scope,.payload=payload,
+                             .echoes=ReadValue<s32>(data,0x94),.insight=std::min(ReadValue<s32>(data,0x84)+1,99)};
+        const TradeItems items=TradeItemsOf(grant.items());
+        for(const TradeItem& item:items) {
+            if(item.kind==TradeItemKind::Echoes) pending.echoes=static_cast<s32>(std::min<u64>(u64(std::max(pending.echoes,0))+item.count,999'999'999));
+            if(item.kind==TradeItemKind::Goods) {
+                const u64 item_man=ReadValue<u64>(image_base+MapItemManPointerOffset,0);
+                if(!HasVtable(item_man,MapItemManVtable,"atomic Blood Dreg")) return false;
+                const auto counts=InvasionDregs();
+                if(!counts || counts->first+counts->second>=198) return false;
+                pending.dregs=counts->first+counts->second+1;
+            }
+        }
+        if(bbseamless_reward_begin(scope.c_str(),grant.id(),payload.data(),payload.size(),slot)) return false;
+        atomic_reward=std::move(pending); // Pins the old canonical save before any memory award.
+        AddTradeItems(items);
+        LOG_INFO(Debug,"Co-op invasion reward: {} applied once; waiting for native save",grant.id());
+    }
+    AtomicReward& pending=*atomic_reward;
+    if(RewardTestPause("after-apply")) return false;
+    pending.echoes_verified|=ReadValue<s32>(data,0x94)==pending.echoes;
+    pending.insight_verified|=ReadValue<s32>(data,0x84)==pending.insight;
+    const auto counts=pending.dregs?InvasionDregs():std::nullopt;
+    pending.dregs_verified|=!pending.dregs || (counts && counts->first+counts->second==*pending.dregs);
+    // Prove each native application once; later legitimate spending must not pin autosaves.
+    if(!pending.echoes_verified || !pending.insight_verified || !pending.dregs_verified) return false;
+    if(SteadyMilliseconds()<pending.retry_at) return false;
+    if(!NativeSaveReady()) return false;
+    if(pending.queued) {
+        // A failed write/sync/swap cannot consume the grant. Retry a fresh snapshot, not the award.
+        if(bbseamless_reward_disarm(grant.id())) return false;
+        pending.queued=false;
+    }
+    if(bbseamless_reward_arm(grant.id(),slot)) return false;
+    // Independently verified 1.09 native wrapper 0x1C2A9F0 uses (-1,0,0). This synchronously
+    // serializes current game data, then queues a fresh 0x140000 character file. Idle is 1554=0.
+    const bool saved=reinterpret_cast<bool PS4_SYSV_ABI (*)(s32,bool,bool)>(image_base+NativeFreshSaveOffset)(-1,false,false);
+    if(!saved) {bbseamless_reward_disarm(grant.id());return false;}
+    pending.queued=true;
+    pending.retry_at=SteadyMilliseconds()+1'000;
+    LOG_INFO(Debug,"Co-op invasion reward: {} fresh native save queued for slot {}",grant.id(),slot);
+    return false; // Only runtime's durably swapped save+receipt may release the acknowledgement.
+}
+} // namespace
+
+std::optional<std::pair<u32,u32>> InvasionDregs() {
+    const u64 data=PlayerGameData();
+    if(data<0x10000 || !HasMemoryAccess(data+0x5B0,8,MemoryProt::CpuRead)) return {};
+    const auto held=DregsInInventory(data+InventoryOffset);
+    const auto stored=DregsInInventory(ReadValue<u64>(data,0x5B0));
+    if(!held || !stored) return {};
+    return std::pair{*held,*stored};
+}
+
 void TickTrades() {
     if (!TradeSwitchOn() || !trade_sites.load()) {
         return;
@@ -760,6 +932,7 @@ void TickTrades() {
     RemoveBellItems();
     std::vector<TradeItems> add;
     std::vector<bbcoop::Envelope> replies;
+    std::vector<bbcoop::Envelope> rewards;
     {
         std::scoped_lock lock{trade_mutex};
         // Grants wait while the player is not in the world (a load): the popup needs it.
@@ -767,12 +940,12 @@ void TickTrades() {
         std::deque<bbcoop::Envelope> kept;
         for (bbcoop::Envelope& envelope : trade_inbox) {
             const bool reward=envelope.has_trade_grant() && envelope.trade_grant().reason()==static_cast<u32>(BloodborneCoop::TradeGrantReason::InvasionReward);
-            if (envelope.has_trade_grant() && (!can_add || (reward && !HasVirtual(GetLocalPlayer(),CharacterAddSpEffectSlot,AddSpEffectOffset,"invasion reward ready")))) {
+            if(reward) { rewards.push_back(std::move(envelope));continue; }
+            if (envelope.has_trade_grant() && !can_add) {
                 kept.push_back(std::move(envelope));
                 continue;
             }
             TradeClient::Taken taken = client.Take(envelope);
-            if(reward && !taken.add.empty()) LOG_INFO(Debug,"Co-op invasion reward: grant {} for invasion {} accepted",envelope.trade_grant().id(),envelope.trade_grant().trade());
             for (TradeItems& items : taken.add) {
                 add.push_back(std::move(items));
             }
@@ -789,7 +962,15 @@ void TickTrades() {
             }
         }
     }
-    // Added before the acks go: a crash in between hands the grant again (once more at worst).
+    for(bbcoop::Envelope& envelope:rewards) {
+        if(TakeAtomicReward(envelope.trade_grant())) {
+            bbcoop::Envelope ack;ack.mutable_trade_granted()->set_id(envelope.trade_grant().id());
+            QueueInvasionRewardAck(std::move(ack));
+        } else {
+            std::scoped_lock lock{trade_mutex};trade_inbox.push_back(std::move(envelope));
+        }
+    }
+    // Ordinary trades retain the reference path; invasion payouts use the transaction above.
     for (const TradeItems& items : add) {
         AddTradeItems(items);
     }

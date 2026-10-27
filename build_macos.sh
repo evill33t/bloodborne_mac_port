@@ -121,6 +121,8 @@ if [[ ${1:-} == --test ]]; then
     out/runtime-test
     "$CC" "${cflags[@]}" -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
+    "$CC" "${cflags[@]}" -DBB_SAVE_TXN_TESTING -Isrc tests/test_save_txn.c src/runtime_save_txn.c -o out/save-txn-test
+    out/save-txn-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
     out/sema-test
     "$CC" "${cflags[@]}" -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test

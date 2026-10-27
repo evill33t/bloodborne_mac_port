@@ -1112,6 +1112,8 @@ void FinishWaitingJoins(bool in_session);
 void ResendOwnDataOnChange(bool in_session);
 void LogMemberDataChanges(bool in_session);
 u64 OwnGameData();
+u32 OwnCovenantEffect();
+std::optional<std::pair<u32,u32>> InvasionDregs();
 void InstallSeamlessTravel(u64 base, u64 image_size);
 void EndSessionOnWorldTeardown();
 void ReviveGuestAfterGhostDeath();

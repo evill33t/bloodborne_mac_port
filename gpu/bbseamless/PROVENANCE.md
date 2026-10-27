@@ -111,3 +111,16 @@ The existing Mark Hall native-runtime/test foundations remain credited.
 The local `invasion_visual.h` adapter admits only a blank runtime effect row or its own
 previous result, derives the appearance from the player's own loaded parameter data and
 retains the existing full-HP fallback policy. It distributes no game parameter bytes.
+
+The covenant/atomic follow-up uses the original FromSoftware 1.09 PvP item lots 5500/5510,
+empty covenant lots 5600–5810, oath effects and goods 704, inspected from the player's own
+assets using the [Paramdex field definitions](https://github.com/soulsmods/Paramdex/tree/292ac5c10ace71116466cf8cd99c7dc034ef7602/BB/Defs)
+and Soulstruct's event readers (Grimrukh and contributors). The optional wire fields and
+reward validation extend Kaniel's protocol; separate server commits `ebbef913` and `9e60cec7`
+retain the original source/author trailers.
+
+The native save sites were independently checked in the owned executable, guided by
+vladtepes22's [SaveRequest research](https://github.com/vladtepes22/NightwatchCoop/blob/db7c9fb2f07a007a9bb53d3056a425c887c9d4b3/engine/gpu/shim/party/game_state.cpp).
+The new Mac directory/receipt transaction continues Mark Hall's runtime/save foundation
+and Kaniel's [temporary-close save work](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/bbport/src/runtime_file.c).
+No Nightwatch implementation or native save/parameter data is included in the distribution.

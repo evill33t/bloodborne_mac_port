@@ -1,6 +1,13 @@
 /* Exercise actual guest file operations on a linked overlay and writable saves. */
 #include "../src/runtime_file.c"
 
+void runtime_save_txn_file_opened(int fd,const char* path,int write) {(void)fd;(void)path;(void)write;}
+void runtime_save_txn_file_written(int fd,int64_t at,uint64_t size,int64_t result) {(void)fd;(void)at;(void)size;(void)result;}
+void runtime_save_txn_file_closed(int fd,int error) {(void)fd;(void)error;}
+void runtime_save_txn_file_truncated(int fd,int64_t length,int result) {(void)fd;(void)length;(void)result;}
+void runtime_save_txn_path_mutated(const char* path) {(void)path;}
+int runtime_save_txn_write_allowed(const char* path) {(void)path;return 0;}
+
 void runtime_coop_file_opened(const char *path) { (void)path; }
 #include <assert.h>
 static int32_t guest_errno;

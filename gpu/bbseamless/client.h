@@ -6,7 +6,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define BBSEAMLESS_ABI_VERSION 3
+#define BBSEAMLESS_ABI_VERSION 4
 #define BBSEAMLESS_DEFAULT_HOST "bloodborne.phobos.services"
 #define BBSEAMLESS_DEFAULT_LINK BBSEAMLESS_DEFAULT_HOST ":31314"
 #define BBSEAMLESS_DEFAULT_WEBAPI "http://" BBSEAMLESS_DEFAULT_HOST ":31315"
@@ -23,6 +23,11 @@ typedef struct BbSeamlessHost {
     int (*next_command)(BbCoopCommand *command);
     int (*take_portrait)(uint8_t *rgba, uint32_t capacity);
     const char *user_dir;
+    int (*reward_lookup)(const char*,uint64_t,const void*,size_t,int);
+    int (*reward_begin)(const char*,uint64_t,const void*,size_t,int);
+    int (*reward_arm)(uint64_t,int);
+    int (*reward_disarm)(uint64_t);
+    int (*reward_cancel)(uint64_t);
 } BbSeamlessHost;
 typedef void (*BbSeamlessFrameFn)(uint32_t*,uint8_t[4],uint8_t*,uint8_t*,int32_t*);
 typedef int (*BbSeamlessInitFn)(const BbSeamlessHost *host);

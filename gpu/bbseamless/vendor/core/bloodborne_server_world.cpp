@@ -418,6 +418,7 @@ void SendLobby(s64 now_ms) {
         hello.mutable_lobby_hello()->set_name(lobby_name);
         hello.mutable_lobby_hello()->set_playing(lobby_playing);
         hello.mutable_lobby_hello()->set_invasion_rewards(true);
+        hello.mutable_lobby_hello()->set_covenant_rewards(true);
         stream->Send(EncodeEnvelope(hello), now_ms);
         // A reconnect or character-name update must not let a member overwrite its host's rules.
         const auto& state = team_gate.Lobby();
@@ -1221,6 +1222,7 @@ void SendServerVitals(const MemberVitals& mine, std::span<const ReviveHitTotal> 
     vitals.set_level(mine.level);
     vitals.set_boss(mine.boss);
     vitals.set_killed_by_invader(mine.killed_by_invader);
+    vitals.set_covenant_effect(OwnCovenantEffect());
     vitals.set_lamp_uses(mine.lamp_uses);
     for (const u32 boss : mine.bosses) {
         vitals.add_bosses(boss);
@@ -2746,6 +2748,7 @@ void SendInvadeRequest(bool cancel) {
                               ? ReadValue<s32>(data, 0x90)
                               : 0;
         envelope.mutable_invade_request()->set_level(level > 0 && level < 1000 ? level : 0);
+        envelope.mutable_invade_request()->set_covenant_effect(OwnCovenantEffect());
     }
     QueueLobby(std::move(envelope));
 }

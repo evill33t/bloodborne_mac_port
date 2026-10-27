@@ -43,7 +43,9 @@ extern "C" __attribute__((visibility("default"))) int bbseamless_init(const BbSe
     if (!supplied || supplied->abi != BBSEAMLESS_ABI_VERSION ||
         supplied->net.abi != BBNET_ABI_VERSION || !supplied->net.thread_spawn ||
         !supplied->net.thread_join || !supplied->thread_attach || !supplied->memory_protection ||
-        !supplied->publish_ui || !supplied->next_command || !supplied->take_portrait)
+        !supplied->publish_ui || !supplied->next_command || !supplied->take_portrait ||
+        !supplied->reward_lookup || !supplied->reward_begin || !supplied->reward_arm ||
+        !supplied->reward_disarm || !supplied->reward_cancel)
         return -1;
     host = *supplied;
     // Only this optional client module chooses our hosted server. Explicit overrides survive.
@@ -80,6 +82,16 @@ extern "C" int runtime_memory_protection(uintptr_t address, uintptr_t* start,
 extern "C" int32_t runtime_trophy_unlock_from_party(int32_t trophy) {
     return host.trophy_unlock ? host.trophy_unlock(trophy) : -1;
 }
+
+extern "C" int bbseamless_reward_lookup(const char* scope,uint64_t id,const void* payload,size_t size,int slot) {
+    return host.reward_lookup(scope,id,payload,size,slot);
+}
+extern "C" int bbseamless_reward_begin(const char* scope,uint64_t id,const void* payload,size_t size,int slot) {
+    return host.reward_begin(scope,id,payload,size,slot);
+}
+extern "C" int bbseamless_reward_arm(uint64_t id,int slot) { return host.reward_arm(id,slot); }
+extern "C" int bbseamless_reward_disarm(uint64_t id) { return host.reward_disarm(id); }
+extern "C" int bbseamless_reward_cancel(uint64_t id) { return host.reward_cancel(id); }
 
 namespace Common::FS {
 const std::filesystem::path& GetUserPath(PathType type) {

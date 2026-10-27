@@ -1372,6 +1372,16 @@ bool AutoplayExpectWallet(const AutoplayStep& step) {
     return true;
 }
 
+bool AutoplayExpectDregs(const AutoplayStep& step) {
+    const auto counts=InvasionDregs();
+    if(!counts) {step.failure="no native Dreg inventories";return false;}
+    LOG_INFO(Debug,"Bloodborne autoplay Blood Dregs: held {} stored {}",counts->first,counts->second);
+    if(counts->first!=step.Number(0,0) || counts->second!=step.Number(1,0)) {
+        step.failure=fmt::format("Blood Dregs held {} stored {}",counts->first,counts->second);return false;
+    }
+    return true;
+}
+
 // add-effect <SpEffect>: the effect put on the player through its own add-effect virtual, as the
 // game's events do (4680: a point of Insight, common event 9350's; the rig's characters have few).
 bool AutoplayAddEffect(const AutoplayStep& step) {
@@ -2452,6 +2462,7 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"add-effect", AutoplayAddEffect},
     {"note-wallet", AutoplayNoteWallet},
     {"expect-wallet", AutoplayExpectWallet},
+    {"expect-dregs", AutoplayExpectDregs},
     {"object", AutoplayObject},
     {"peek", AutoplayPeekOrPoke},
     {"poke", AutoplayPeekOrPoke},

@@ -36,6 +36,10 @@ int main(int argc,char** argv) {
     host.net.thread_spawn=Spawn;host.net.thread_join=Join;host.net.thread_exit=Exit;host.net.memory_is_mapped=Mapped;
     host.thread_attach=Attach;host.memory_protection=Protection;host.publish_ui=Publish;host.next_command=Command;
     host.take_portrait=Model;host.user_dir=user.c_str();
+    host.reward_lookup=[](const char*,uint64_t,const void*,size_t,int){return 0;};
+    host.reward_begin=host.reward_lookup;
+    host.reward_arm=[](uint64_t,int){return 0;};
+    host.reward_disarm=[](uint64_t){return 0;};host.reward_cancel=host.reward_disarm;
     assert(init(nullptr)==-1);host.abi=0;assert(init(&host)==-1);host.abi=BBSEAMLESS_ABI_VERSION;
     assert(init(&host)==0);assert(resolve("Nlev7Lg8k3A#libSceNet#libSceNet")!=0);
     assert(std::strcmp(std::getenv("BB_SHADNET_WEBAPI"),custom?"http://different.example:31315":BBSEAMLESS_DEFAULT_WEBAPI)==0);

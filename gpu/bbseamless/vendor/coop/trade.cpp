@@ -102,20 +102,24 @@ std::optional<std::string> TradeGrantItemsProblem(const bbcoop::TradeGrant& gran
         return TradeItemsProblem(items, false);
     }
     if (reason != TradeGrantReason::InvasionReward ||
-        (grant.id() & InvasionRewardGrantBit) == 0 || items.empty() || items.size() > 2) {
+        (grant.id() & InvasionRewardGrantBit) == 0 || items.empty() || items.size() > 3) {
         return "not a known server grant";
     }
     bool insight = false;
     bool echoes = false;
+    bool blood_dreg = false;
     for (const TradeItem& item : items) {
-        if (item.id != 0 || !item.name.empty() || !item.data.empty()) {
+        if (!item.name.empty() || !item.data.empty()) {
             return "not an invasion reward";
         }
-        if (item.kind == TradeItemKind::Insight && item.count == 1 && !insight) {
+        if (item.kind == TradeItemKind::Insight && item.id == 0 && item.count == 1 && !insight) {
             insight = true;
-        } else if (item.kind == TradeItemKind::Echoes && item.count > 0 &&
+        } else if (item.kind == TradeItemKind::Echoes && item.id == 0 && item.count > 0 &&
                    item.count <= MaxTradeEchoes && !echoes) {
             echoes = true;
+        } else if (item.kind == TradeItemKind::Goods && item.id == BloodDregGoods &&
+                   item.count == 1 && !blood_dreg) {
+            blood_dreg = true;
         } else {
             return "not an invasion reward";
         }
@@ -274,8 +278,8 @@ void TradeDesk::Grant(Result& result, const std::string& member, u64 trade, cons
         return;
     }
     bbcoop::TradeGrant grant;
-    grant.set_id(next_id++ | (reason == TradeGrantReason::InvasionReward
-                                   ? InvasionRewardGrantBit : 0));
+    const u64 id = next_id++;
+    grant.set_id(id | (reason == TradeGrantReason::InvasionReward ? InvasionRewardGrantBit : 0));
     grant.set_trade(trade);
     grant.set_from(from);
     grant.set_from_name(from_name);
@@ -394,7 +398,8 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
     if (found == open.end() || found->second.to != member) {
         // Over already (expired, withdrawn) or not this member's: what it took comes back.
         if (answer.accept()) {
-            Grant(result, member, answer.id(), {}, {}, RefundableItems(taken), TradeGrantReason::Returned);
+            Grant(result, member, answer.id(), {}, {}, RefundableItems(taken),
+                  TradeGrantReason::Returned);
         }
         bbcoop::Envelope closed;
         closed.mutable_trade_closed()->set_id(answer.id());
@@ -408,7 +413,8 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
     const Open trade = found->second;
     if (taken != trade.want) {
         // It took something else than what was asked: no exchange, both sides get theirs back.
-        Grant(result, member, answer.id(), {}, {}, RefundableItems(taken), TradeGrantReason::Returned);
+        Grant(result, member, answer.id(), {}, {}, RefundableItems(taken),
+              TradeGrantReason::Returned);
         Close(result, answer.id(), TradeState::Declined);
         return result;
     }
@@ -425,11 +431,15 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
 }
 
 TradeDesk::Result TradeDesk::InvasionVictory(const std::string& member, u64 invasion,
-                                            const std::string& defeated, u32 echoes) {
+                                            const std::string& defeated, u32 echoes,
+                                            bool blood_dreg) {
     Result result;
     TradeItems items{{TradeItemKind::Insight, 0, 1}};
     if (echoes > 0 && echoes <= MaxTradeEchoes) {
         items.push_back({TradeItemKind::Echoes, 0, echoes});
+    }
+    if (blood_dreg) {
+        items.push_back({TradeItemKind::Goods, BloodDregGoods, 1});
     }
     Grant(result, member, invasion, defeated, "Invasion victory", std::move(items),
           TradeGrantReason::InvasionReward);
