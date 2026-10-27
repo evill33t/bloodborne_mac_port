@@ -2,6 +2,7 @@
 #include "sys/epoll.h"
 #include "mac_memory.h"
 #include "touch.h"
+#include "invasion_visual.h"
 #include "common/float_chars.h"
 #include <cassert>
 #include <cerrno>
@@ -11,6 +12,19 @@
 #include <sys/mman.h>
 #include <unistd.h>
 int main() {
+    // A cosmetic row may replace only a known blank or its own prior result; preserve mods.
+    std::array<uint8_t,BbInvasionVisual::RowSize> blank{},visual{},source{};
+    uint16_t state=276;float rate=.7f,duration=-1.f;
+    std::memcpy(source.data()+0x156,&state,2);std::memcpy(source.data()+0x10,&rate,4);std::memcpy(source.data()+8,&duration,4);
+    const auto original_source=source;
+    assert(BbInvasionVisual::Prepare(visual,blank,source));
+    std::memcpy(&rate,visual.data()+0x10,4);assert(rate==1.f && source==original_source);
+    assert(BbInvasionVisual::Prepare(visual,blank,source));
+    visual[0x20]=99;const auto modified=visual;
+    assert(!BbInvasionVisual::Prepare(visual,blank,source) && visual==modified);
+    visual=blank;source[0x156]=0;
+    assert(!BbInvasionVisual::Prepare(visual,blank,source) && visual==blank);
+    assert(!BbInvasionVisual::Prepare(std::span(visual).first(3),blank,original_source));
     int a[2],b[2];assert(socketpair(AF_UNIX,SOCK_STREAM,0,a)==0);assert(socketpair(AF_UNIX,SOCK_STREAM,0,b)==0);
     const int queue=epoll_create1(EPOLL_CLOEXEC);assert(queue>=0);
     epoll_event input{EPOLLIN,{.u64=7}},out[8];
@@ -52,5 +66,5 @@ int main() {
     touch={};touch.Step(true,0,1000,side);touch.Step(false,0,51000,side);
     assert(touch.Step(true,0,100000,side)==2 && side==-1); // second tap pings
     assert(touch.Step(false,0,120000,side)==0 && side==-1);
-    puts("PASS: Mac socket readiness, failed modification, duplicate user data, EOF, memory protection, float parsing, map hold and ping taps");
+    puts("PASS: guarded invasion visual rows, Mac sockets, EOF, memory protection, float parsing, map hold and ping taps");
 }

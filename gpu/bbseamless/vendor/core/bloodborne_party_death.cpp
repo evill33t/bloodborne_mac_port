@@ -892,6 +892,37 @@ bool PS4_SYSV_ABI SkipDownedBodyBarDamage(u64, const GuestRegisterSnapshot* regi
     return SkipsEnemyBarDamage(static_cast<u32>(registers->rsi), bar_bodies);
 }
 
+// Complete Kaniel's fallback on the receiving game too (GAME_SIDE_PLAN section 3).
+// SetChrType's native binding writes +0x78 and calls virtual +0x1A0; a team write alone
+// leaves the remote copy's phantom type unchanged. Never change an unvouched body.
+void RefreshInvaderTypes(std::span<const OtherPlayer> players, std::span<const u32> invaders) {
+    struct Saved {u32 handle; s32 type;};
+    static std::map<u64,Saved> saved;
+    std::set<u64> present;
+    for(const OtherPlayer& other:players) {
+        const u64 character=other.character;
+        const u32 handle=ReadValue<u32>(character,0x08);
+        present.insert(character);
+        auto previous=saved.find(character);
+        if(previous!=saved.end() && previous->second.handle!=handle) {saved.erase(previous);previous=saved.end();}
+        const bool hostile=std::ranges::find(invaders,handle)!=invaders.end();
+        if(!hostile && previous==saved.end()) continue;
+        if(!HasMemoryAccess(character+0x78,4,MemoryProt::CpuWrite) ||
+           !HasVirtual(character,0x1A0,RefreshCharacterTypeOffset,"invasion type refresh")) continue;
+        const s32 current=ReadValue<s32>(character,0x78);
+        if(hostile && previous==saved.end()) previous=saved.emplace(character,Saved{handle,current}).first;
+        const s32 desired=hostile?InvaderCharacterType:previous->second.type;
+        SetInvasionTint(character,hostile);
+        if(current!=desired && (hostile || current==InvaderCharacterType)) {
+            WriteValue(character,0x78,desired);
+            reinterpret_cast<void PS4_SYSV_ABI (*)(u64)>(image_base+RefreshCharacterTypeOffset)(character);
+            LOG_INFO(Debug,"Co-op invasion appearance: body {:#x} type {} -> {}",handle,current,desired);
+        }
+        if(!hostile) saved.erase(character);
+    }
+    std::erase_if(saved,[&](const auto& entry){return !present.contains(entry.first);});
+}
+
 // The downed bodies here take the invaders' team (DownedTeams) and give it back once up.
 void SetDownedTeams(PartyDeathRun& run, std::span<const DownedBody> bodies,
                     std::span<const OtherPlayer> players) {
@@ -912,6 +943,7 @@ void SetDownedTeams(PartyDeathRun& run, std::span<const DownedBody> bodies,
                                    ReadValue<s32>(other.character, CharacterTeamOffset)});
     }
     const std::vector<u32> invaders = InvaderHandles();
+    RefreshInvaderTypes(players,invaders);
     for (const CopyTeam& write :
          run.downed_teams.Tick(downed, present, invaders, invasion_fallback_switch)) {
         for (const OtherPlayer& other : players) {

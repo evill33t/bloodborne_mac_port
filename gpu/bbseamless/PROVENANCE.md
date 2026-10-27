@@ -89,3 +89,25 @@ adapts Kaniel's visible Windows Map card using the same read-only map parsers an
 cache as the game. The retained collision reader credits **MikeTat1988 / Hunter's Atlas**
 ([original project](https://github.com/MikeTat1988/HuntersAtlas)); no game-owned art, fonts,
 geometry or textures are added to the distribution.
+
+The invasion follow-up extends Kaniel / lKaniel's `bloodborne_invasion`, hostile-body and
+`TradeDesk` design, with original implementation contributions by **Vitalii Shevchuk** and
+the **shadNet / shadPS4 projects**. The separate server extension is committed as
+`4201408d919f9787af43a075068947a44e95a231` and
+`fceb97debb950b94df220c9963ccced4ad31fa2a` on top of the pinned server source; both commits
+carry original-author and original-source trailers. Its shared protocol/trade adaptations
+are included here with updated adapted hashes; the server itself remains in its own checkout.
+
+Native visual research also credits **vladtepes22**,
+[`NightwatchCoop/party_glow_rules.h` at db7c9fb2](https://github.com/vladtepes22/NightwatchCoop/blob/db7c9fb2f07a007a9bb53d3056a425c887c9d4b3/engine/gpu/shim/party/party_glow_rules.h),
+for the effect/stateInfo/VFX relationship. The original
+[`Paramdex Bloodborne definitions`](https://github.com/soulsmods/Paramdex/tree/master/BB/Defs)
+and [effect names](https://github.com/soulsmods/Paramdex/blob/292ac5c10ace71116466cf8cd99c7dc034ef7602/BB/Names/SpEffectParam.txt)
+identify 9026 as invasion guest play (names integrated by **Natalie Weizenbaum**, with
+Smithbox/Paramdex contributors). These sources guide read-only inspection of the player's
+1.09 parameters; no Nightwatch implementation or game parameter data is copied into the port.
+The existing Mark Hall native-runtime/test foundations remain credited.
+
+The local `invasion_visual.h` adapter admits only a blank runtime effect row or its own
+previous result, derives the appearance from the player's own loaded parameter data and
+retains the existing full-HP fallback policy. It distributes no game parameter bytes.

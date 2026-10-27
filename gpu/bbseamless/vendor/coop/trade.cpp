@@ -56,6 +56,21 @@ std::optional<std::string> ItemProblem(const TradeItem& item) {
     return std::nullopt;
 }
 
+// A malformed client claim is not an inventory we may safely recreate. Return only valid,
+// distinct ordinary items, including on late answers and refused offers; never mint Insight
+// or an unknown kind by calling it a refund.
+TradeItems RefundableItems(std::span<const TradeItem> items) {
+    TradeItems safe;
+    for (const TradeItem& item : items) {
+        if (!ItemProblem(item) && !std::ranges::any_of(safe, [&](const TradeItem& other) {
+                return item.kind == other.kind && item.id == other.id && item.data == other.data;
+            })) {
+            safe.push_back(item);
+        }
+    }
+    return safe;
+}
+
 } // namespace
 
 std::optional<std::string> TradeItemsProblem(std::span<const TradeItem> items, bool allow_empty) {
@@ -75,6 +90,37 @@ std::optional<std::string> TradeItemsProblem(std::span<const TradeItem> items, b
         }
     }
     return std::nullopt;
+}
+
+std::optional<std::string> TradeGrantItemsProblem(const bbcoop::TradeGrant& grant) {
+    const TradeItems items = TradeItemsOf(grant.items());
+    const auto reason = static_cast<TradeGrantReason>(grant.reason());
+    if (reason == TradeGrantReason::Received || reason == TradeGrantReason::Returned) {
+        if ((grant.id() & InvasionRewardGrantBit) != 0) {
+            return "an ordinary grant with a reward id";
+        }
+        return TradeItemsProblem(items, false);
+    }
+    if (reason != TradeGrantReason::InvasionReward ||
+        (grant.id() & InvasionRewardGrantBit) == 0 || items.empty() || items.size() > 2) {
+        return "not a known server grant";
+    }
+    bool insight = false;
+    bool echoes = false;
+    for (const TradeItem& item : items) {
+        if (item.id != 0 || !item.name.empty() || !item.data.empty()) {
+            return "not an invasion reward";
+        }
+        if (item.kind == TradeItemKind::Insight && item.count == 1 && !insight) {
+            insight = true;
+        } else if (item.kind == TradeItemKind::Echoes && item.count > 0 &&
+                   item.count <= MaxTradeEchoes && !echoes) {
+            echoes = true;
+        } else {
+            return "not an invasion reward";
+        }
+    }
+    return insight ? std::nullopt : std::optional<std::string>{"no victory Insight"};
 }
 
 namespace {
@@ -228,7 +274,8 @@ void TradeDesk::Grant(Result& result, const std::string& member, u64 trade, cons
         return;
     }
     bbcoop::TradeGrant grant;
-    grant.set_id(next_id++);
+    grant.set_id(next_id++ | (reason == TradeGrantReason::InvasionReward
+                                   ? InvasionRewardGrantBit : 0));
     grant.set_trade(trade);
     grant.set_from(from);
     grant.set_from_name(from_name);
@@ -324,8 +371,9 @@ TradeDesk::Result TradeDesk::Offer(const std::string& from, const bbcoop::TradeO
         Status(result, trade, id, TradeState::Refused, *problem);
         result.log.push_back("trade " + std::to_string(id) + " from " + from +
                              " refused: " + *problem);
-        // What was taken out comes back, whatever it was (the giver's game took it already).
-        Grant(result, from, id, trade.to, trade.to_name, trade.give, TradeGrantReason::Returned);
+        // Return only ordinary, valid items; malformed claims cannot become grants.
+        Grant(result, from, id, trade.to, trade.to_name, RefundableItems(trade.give),
+              TradeGrantReason::Returned);
         result.changed = true;
         return result;
     }
@@ -346,7 +394,7 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
     if (found == open.end() || found->second.to != member) {
         // Over already (expired, withdrawn) or not this member's: what it took comes back.
         if (answer.accept()) {
-            Grant(result, member, answer.id(), {}, {}, taken, TradeGrantReason::Returned);
+            Grant(result, member, answer.id(), {}, {}, RefundableItems(taken), TradeGrantReason::Returned);
         }
         bbcoop::Envelope closed;
         closed.mutable_trade_closed()->set_id(answer.id());
@@ -360,7 +408,7 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
     const Open trade = found->second;
     if (taken != trade.want) {
         // It took something else than what was asked: no exchange, both sides get theirs back.
-        Grant(result, member, answer.id(), {}, {}, taken, TradeGrantReason::Returned);
+        Grant(result, member, answer.id(), {}, {}, RefundableItems(taken), TradeGrantReason::Returned);
         Close(result, answer.id(), TradeState::Declined);
         return result;
     }
@@ -373,6 +421,18 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
     Grant(result, trade.from, answer.id(), trade.to, trade.to_name, trade.want,
           TradeGrantReason::Received);
     result.changed = true;
+    return result;
+}
+
+TradeDesk::Result TradeDesk::InvasionVictory(const std::string& member, u64 invasion,
+                                            const std::string& defeated, u32 echoes) {
+    Result result;
+    TradeItems items{{TradeItemKind::Insight, 0, 1}};
+    if (echoes > 0 && echoes <= MaxTradeEchoes) {
+        items.push_back({TradeItemKind::Echoes, 0, echoes});
+    }
+    Grant(result, member, invasion, defeated, "Invasion victory", std::move(items),
+          TradeGrantReason::InvasionReward);
     return result;
 }
 
@@ -478,7 +538,7 @@ void TradeDesk::Restore(const bbcoop::StoredTrades& stored, s64 now_ms) {
     }
     for (const bbcoop::StoredGrant& grant : stored.grants()) {
         grants[grant.member()][grant.grant().id()] = grant.grant();
-        next_id = std::max(next_id, grant.grant().id() + 1);
+        next_id = std::max(next_id, (grant.grant().id() & ~InvasionRewardGrantBit) + 1);
     }
 }
 
@@ -572,6 +632,9 @@ TradeClient::Taken TradeClient::Take(const bbcoop::Envelope& envelope) {
         break;
     case bbcoop::Envelope::kTradeGrant: {
         const bbcoop::TradeGrant& grant = envelope.trade_grant();
+        if (TradeGrantItemsProblem(grant)) {
+            break; // no application and no ack for an invalid or server-only forged grant
+        }
         if (granted.insert(grant.id()).second) {
             TradeItems items = TradeItemsOf(grant.items());
             const auto reason = static_cast<TradeGrantReason>(grant.reason());

@@ -148,9 +148,29 @@ needed. Turning a hunt's allowance off also ends a visit.
 The Mac client enables the reference's hostile compatibility fallback because the server's
 placeholder native kind/sign otherwise produced a friendly cooperator. Two actual Mac clients
 verified matching, notice, entry, native PvP damage, host cancellation and return to the
-invader's own lamp with world flags restored. Retail red tint/native kind/sign, rewards and
-mixed Windows/Mac invasions remain unverified. See the dated invasion follow-up in the
+invader's own lamp with world flags restored. The follow-up adds native red appearance and
+server-issued victory rewards. Native retail kind/sign and mixed Windows/Mac invasions
+remain unverified. See the dated invasion follow-ups in the
 [validation record](SEAMLESS_COOP_VALIDATION.md).
+
+The appearance uses the game's own invasion VFX from effect 9026. A guarded, otherwise unused
+runtime parameter row carries that visual independently of the cooperator session controller;
+the port's existing full-HP behavior is retained. Only the identified invader receives it, on
+its own screen and the defenders' screens, and it is removed when the visit ends. Original
+game parameters on disk stay untouched; conflicting modified rows are left alone.
+
+Our server's victory policy awards **one Insight**, plus Echoes calculated from the defeated
+player's level: 10% for an invading winner and 30% for the defending host. The documented
+previous-level polynomial applies at levels 10–544; unsupported or unknown levels award
+Insight only. This is the server's explicit policy, without a claim of exact retail economy.
+The server pays a joined invader's death or an invader-attributed host kill; cancelling,
+disconnecting, disabling invasions, a boss entry, timeout or party wipe pays nothing.
+
+Rewards use an authenticated player's persistent mailbox and the existing item-grant path.
+Updated clients opt in through an appended lobby capability; older clients receive no new
+reward item type. Solo reward acknowledgements use the lobby stream even without a party.
+Ordinary item offers/refunds cannot issue Insight. Server source and rollback details are in
+[the deployment record](SEAMLESS_INVASION_REWARDS.md).
 
 Hook admission checks the supported 1.09 title IDs and original instruction signatures before
 mutation. The known 1.09 executable with stale 1.00 SFO metadata is accepted only by its exact

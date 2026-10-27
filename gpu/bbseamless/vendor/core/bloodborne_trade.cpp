@@ -543,6 +543,16 @@ void AddTradeItems(std::span<const TradeItem> items, ItemPopup popup) {
         made.clear();
     };
     for (const TradeItem& item : items) {
+        if(item.kind==TradeItemKind::Insight) {
+            // Server-only validated grant (TradeGrantItemsProblem), never an offer or refund.
+            // Common event 9350 awards one Insight through effect 4680, as GiveEncounterInsight.
+            const u64 player=GetLocalPlayer();
+            if(item.id==0 && item.count==1 && HasVirtual(player,CharacterAddSpEffectSlot,AddSpEffectOffset,"invasion reward Insight")) {
+                reinterpret_cast<AddSpEffectFn>(image_base+AddSpEffectOffset)(player,4680,player,0,1,0,1.f,1.f,1.f,1.f,1.f,0);
+                LOG_INFO(Debug,"Co-op invasion reward: native Insight +1");
+            }
+            continue;
+        }
         if (list.count == std::size(list.entries)) {
             give();
         }
@@ -578,6 +588,7 @@ void AddTradeItems(std::span<const TradeItem> items, ItemPopup popup) {
             }
             continue;
         }
+        if(item.kind!=TradeItemKind::Goods) continue;
         list.entries[list.count++] = {GoodsHandle | item.id, GoodsCategory | item.id,
                                       static_cast<s32>(item.count), -1};
     }
@@ -755,11 +766,13 @@ void TickTrades() {
         const bool can_add = GetLocalPlayer() >= 0x10000 && PlayerGameData() >= 0x10000;
         std::deque<bbcoop::Envelope> kept;
         for (bbcoop::Envelope& envelope : trade_inbox) {
-            if (envelope.has_trade_grant() && !can_add) {
+            const bool reward=envelope.has_trade_grant() && envelope.trade_grant().reason()==static_cast<u32>(BloodborneCoop::TradeGrantReason::InvasionReward);
+            if (envelope.has_trade_grant() && (!can_add || (reward && !HasVirtual(GetLocalPlayer(),CharacterAddSpEffectSlot,AddSpEffectOffset,"invasion reward ready")))) {
                 kept.push_back(std::move(envelope));
                 continue;
             }
             TradeClient::Taken taken = client.Take(envelope);
+            if(reward && !taken.add.empty()) LOG_INFO(Debug,"Co-op invasion reward: grant {} for invasion {} accepted",envelope.trade_grant().id(),envelope.trade_grant().trade());
             for (TradeItems& items : taken.add) {
                 add.push_back(std::move(items));
             }
@@ -781,7 +794,9 @@ void TickTrades() {
         AddTradeItems(items);
     }
     for (bbcoop::Envelope& reply : replies) {
-        QueueServerWorld(std::move(reply));
+        if(reply.has_trade_granted() && (reply.trade_granted().id() & BloodborneCoop::InvasionRewardGrantBit))
+            QueueInvasionRewardAck(std::move(reply));
+        else QueueServerWorld(std::move(reply));
     }
     if (const auto tick = trade_ui_tick.load(); tick != nullptr && TradesOn()) {
         tick();

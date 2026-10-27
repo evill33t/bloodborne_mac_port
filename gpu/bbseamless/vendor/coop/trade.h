@@ -35,6 +35,7 @@ enum class TradeItemKind : u32 {
     Echoes = 1, // Blood Echoes (id 0)
     Goods = 2,  // goods (consumables, materials, key items), by EquipParamGoods id
     Item = 3,   // an item of its own (weapon, armor, gem): category | id, one each, with its data
+    Insight = 4, // server-issued invasion reward only (id 0); never tradeable
 };
 enum class TradeState : u32 {
     Open = 1,
@@ -47,6 +48,7 @@ enum class TradeState : u32 {
 enum class TradeGrantReason : u32 {
     Received = 0, // the other member's part of a trade
     Returned = 1, // the member's own items back
+    InvasionReward = 2, // server-issued victory: one Insight and optional Blood Echoes
 };
 
 struct TradeItem {
@@ -64,6 +66,8 @@ using TradeItems = std::vector<TradeItem>;
 // carry them (the top 4 bits).
 constexpr u32 BloodVialGoods = 1000;
 constexpr u32 QuicksilverBulletGoods = 900;
+// Reward mailboxes use the high bit, so their acknowledgements cannot consume a party's trade.
+constexpr u64 InvasionRewardGrantBit = u64{1} << 63;
 constexpr u32 MaxTradeEchoes = 999'999'999;
 constexpr u32 MaxTradeGoods = 99;
 constexpr u32 MaxTradeGoodsId = 0x7FFFFF; // the game's goods handles keep 23 bits
@@ -82,6 +86,7 @@ struct TradeGood {
 };
 inline constexpr TradeGood TradeGoods[]{
     {TradeItemKind::Echoes, 0, "Blood Echoes", "Blood Echoes"},
+    {TradeItemKind::Insight, 0, "Insight", "Insight"},
     {TradeItemKind::Goods, BloodVialGoods, "Blood Vial", "Blood Vials"},
     {TradeItemKind::Goods, QuicksilverBulletGoods, "Quicksilver Bullet", "Quicksilver Bullets"},
 };
@@ -91,6 +96,8 @@ const TradeGood* FindTradeGood(TradeItemKind kind, u32 id);
 // of 0 or over the limit (one of an item of its own), a name or data too long, an item twice.
 // `allow_empty`: the asked-for side may be empty, the offered one not.
 std::optional<std::string> TradeItemsProblem(std::span<const TradeItem> items, bool allow_empty);
+// Checks a server grant separately: Insight is valid only in the exact invasion-reward shape.
+std::optional<std::string> TradeGrantItemsProblem(const bbcoop::TradeGrant& grant);
 // "5 Blood Vials, 1,000 Blood Echoes, Saw Cleaver +5, Molotov Cocktail x3": how the game words a
 // trade's items (others than the known goods by their names, "an item" without one).
 std::string TradeItemsText(std::span<const TradeItem> items);
@@ -147,6 +154,9 @@ public:
     Result Answer(const std::string& member, const bbcoop::TradeAnswer& answer);
     Result Cancel(const std::string& member, u64 id);
     Result Granted(const std::string& member, u64 grant);
+    // Server-only victory payment, persisted and replayed by the normal grant/ack machinery.
+    Result InvasionVictory(const std::string& member, u64 invasion,
+                           const std::string& defeated, u32 echoes);
     // Offers past their time, back to their givers.
     Result Expire(s64 now_ms);
     // A member's game said hello (a new run): what it is owed again, its grants and the offers

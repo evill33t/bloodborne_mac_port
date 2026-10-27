@@ -84,8 +84,8 @@ are integrated; trophy persistence also has a focused native test. Legacy retail
 ghosts and bloodstains use the configured backend endpoints, but each was not separately
 placed/replayed in this run. That initial map was a coordinate/exploration view; terrain maps
 were added in the follow-up below. Invasions were enabled and tested in the follow-up below; their
-retail red tint/native kind/sign, rewards/covenants and mixed Windows/Mac behavior remain
-unverified.
+retail native kind/sign, covenant rewards and mixed Windows/Mac behavior remain unverified.
+Native red tint and server victory rewards are covered by the later follow-up below.
 
 The parity follow-up below adds explicit equipment/gem trading, spectator recovery and
 group-travel refusal coverage; those were limits of the initial run above.
@@ -268,5 +268,61 @@ stopped after the checks.
 These results establish the listed native client behaviors and the exercised Mac/Mac paths.
 They do not certify Windows/Mac cross-play, complete campaign/boss/DLC/chalice progression,
 every retail message/ghost/bloodstain action, or the upstream/backend's unknown retail invasion
-kind/sign, tint and reward behavior. The Mac-specific renderer/settings/launcher remain native;
+kind/sign or retail-exact reward behavior. Native tint and the explicit server reward policy
+are covered below. The Mac-specific renderer/settings/launcher remain native;
 Windows Vulkan/provider-specific renderer features are outside this online-client integration.
+
+## Native invasion tint and victory rewards - 2026-10-27
+
+The separate [server extension and rollback record](SEAMLESS_INVASION_REWARDS.md) identifies
+the deployed source/image, capability negotiation, authenticated durable mailboxes and reward
+policy. Its ten server test targets passed. Two isolated Mac clients then exercised that
+deployment on `bloodborne.phobos.services`, with Metal validation enabled and copied saves.
+
+The visual uses the player's own native 1.09 invasion effect 9026 (stateInfo 276 / SFX 212).
+It is copied at runtime into guarded unused effect 5700 with a full-HP factor, preserving
+the fallback's existing 594 maximum HP. The original parameter row is unchanged; no game
+parameter data is distributed. Tests reject unexpected rows and conflicting mod data.
+Only server-identified hostile bodies receive it. Both the visiting player and its remote
+copy asserted effect 5700; return home asserted its removal. The final `visual-invader`
+capture shows the red native appearance with normal camera framing. Its cancellation check
+also verifies the effect clears when the host disables invasions, without another victory
+grant. The host-side effect assertion passed; its screenshot does not frame the remote body.
+
+| Real-game outcome | Observed native inventory/state |
+| --- | --- |
+| Host defeats joined invader | Host: 300 to 446 Echoes, current Insight 0 to 1; same deltas verified again after 25 seconds |
+| Solo invader defeats host | Invader: 300 to 348 Echoes, current Insight 0 to 1; same deltas verified again after 25 seconds |
+| Defeated host | No Insight reward; native death dropped its 300 Echoes |
+| Invader return | Solo state restored, native red effect absent; original world/return behavior retained |
+| Winner reconnect | Persisted wallet 348 Echoes / 1 Insight; no further change during a 30-second observation |
+| Server acknowledgements | Both test mailboxes had zero pending grants, zero owner mismatches and zero unexpected grants after reconnect |
+
+Passing roles are `checked-defender`, `checked-defeated`, `attack-host`, `attack-invader` and
+`reconnect-invader` under `out/ingame-invasion-rewards-2026-10-27/`. Their `autoplay.txt`,
+`user/log/seamless.log`, screenshots and results retain the exact checks. The wallet probe
+reads the HUD's current Insight at PlayerGameData +0x84, not its base value at +0x80.
+The level-10 Echo amounts above test the documented server policy, not every retail level.
+
+These were controlled native PvP final-blow checks using the reference autoplay driver:
+positioning and godmode isolated setup, the nearby enemy was disabled, then the victim's
+godmode was removed and HP set to one before a real R1 hit drove the native death/return
+pipeline. They are not full-HP duel or natural matchmaking balance tests. Earlier attempts
+are retained: direct type changes alone did not establish tint; a lethal `hit` fixture lost
+its target body; an initial wallet assertion read base Insight and was corrected after
+the native HUD showed the award. Those attempts are not counted as passing assertions.
+
+This verifies Mac/Mac invasions on the deployed server. It does not certify mixed Windows/Mac
+play, retail native kind/sign, covenant-specific rewards or an atomic exactly-once award
+across a crash between applying inventory and acknowledging the grant.
+
+The complete `build_macos.sh --test` suite, five launch/save-isolation cases and focused native
+visual/socket/memory guards passed. All 344 source-manifest hashes matched. The signed
+`0.6.0-seamless-invasions-dev` app (160 MiB; ZIP 60 MiB) then ran its bundled Python, runtime,
+online module and native Metal host against the default server. It loaded a copy of the
+winning save at 348 Echoes / 1 Insight, kept that wallet unchanged, and had no red effect
+outside an invasion (`PACKAGED_INVASION_PASS`). Deep strict signature verification passed
+before and after gameplay. All test games were stopped; selected seed saves and the original
+eboot hashes remained unchanged. Evidence: `out/ingame-invasion-rewards-2026-10-27/validation.json`,
+the per-role logs/screenshots/results, `out/invasion-regression-tests.log` and
+`out/invasion-package.log`. No app was installed over the user's existing build.

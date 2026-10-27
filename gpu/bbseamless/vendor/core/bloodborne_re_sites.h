@@ -90,6 +90,8 @@ constexpr u64 EventManPointerOffset = 0x0553B108; // SprjEventMan
 
 // SetChrType(_, entity, type) event binding: sets +0x78 and refreshes the character (vtable 0x1A0).
 constexpr u64 SetChrTypeOffset = 0x01338DF0;
+// 1.09 SetChrType's virtual +0x1A0, verified against the player's four vtables.
+constexpr u64 RefreshCharacterTypeOffset = 0x018C2A00;
 constexpr u64 SummonSessionRulesPointerOffset = 0x0553D6D0;
 
 // The world teardown (0x019470F0), where it loads the session rules to decide whether to stop

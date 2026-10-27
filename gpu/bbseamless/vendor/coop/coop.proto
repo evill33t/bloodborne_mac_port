@@ -256,7 +256,7 @@ message Portrait {
 // before it accepts. Every hand-over is a grant, kept on the server (and on disk) until the
 // member's game says it added it.
 message TradeItem {
-    uint32 kind = 1;  // TradeItemKind: 1 Blood Echoes, 2 goods, 3 an item of its own
+    uint32 kind = 1;  // TradeItemKind: 1 Blood Echoes, 2 goods, 3 an item of its own, 4 reward Insight
     uint32 id = 2;    // goods: the EquipParamGoods id; an item: category | id; echoes: 0
     uint32 count = 3;
     string name = 4;  // the item's name in the giver's game (the words of the boxes)
@@ -316,7 +316,7 @@ message TradeGrant {
     string from = 3;
     string from_name = 4;
     repeated TradeItem items = 5;
-    uint32 reason = 6; // TradeGrantReason: 0 received, 1 returned
+    uint32 reason = 6; // TradeGrantReason: 0 received, 1 returned, 2 invasion victory
 }
 message TradeGranted {
     uint64 id = 1;
@@ -628,6 +628,9 @@ message LobbyHello {
     string member = 2; // its board name (the online id in hex)
     string name = 3;   // the online id, as players see it
     bool playing = 4;  // in a world (a save loaded), not at the title
+    // Opt-in extension: server-issued invasion victory grants (Insight kind 4, reason 2).
+    // False for original clients, which must never receive these grants. Wire-compatible with 8.
+    bool invasion_rewards = 5;
 }
 
 // game -> server: what the player did in the lobby. The answer is the LobbyState (with a notice

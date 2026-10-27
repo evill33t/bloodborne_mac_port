@@ -417,6 +417,7 @@ void SendLobby(s64 now_ms) {
         hello.mutable_lobby_hello()->set_member(lobby_member);
         hello.mutable_lobby_hello()->set_name(lobby_name);
         hello.mutable_lobby_hello()->set_playing(lobby_playing);
+        hello.mutable_lobby_hello()->set_invasion_rewards(true);
         stream->Send(EncodeEnvelope(hello), now_ms);
         // A reconnect or character-name update must not let a member overwrite its host's rules.
         const auto& state = team_gate.Lobby();
@@ -2753,6 +2754,7 @@ void SendInvadeRequest(bool cancel) {
 // again, to its own respawn lamp (the kept world's); its flags come back once there. A dead
 // invader first gets up where it fell (its death script's hook, ReviveInvaderInPlace).
 void InvaderGoHome(bool died, bool tell_server) {
+    SetInvasionTint(GetLocalPlayer(),false);
     {
         // The target world's enemy owners are not its own world's.
         std::scoped_lock lock{owners_mutex};
@@ -2791,6 +2793,13 @@ constexpr s64 InvaderReviveWaitMs = 8'000;
 } // namespace
 
 namespace Coop {
+
+void QueueInvasionRewardAck(bbcoop::Envelope envelope) {
+    // Solo games have no party Hello; that outbox only forwards map/vitals during a visit.
+    // Reward mailboxes belong to the authenticated lobby and must be acknowledged there.
+    if(envelope.has_trade_granted() && (envelope.trade_granted().id() & BloodborneCoop::InvasionRewardGrantBit))
+        QueueLobby(std::move(envelope));
+}
 
 void InvasionRequest(bool cancel) {
     if (!team_switch) {
@@ -3013,6 +3022,7 @@ void TickInvasion() {
     if (phase == InvaderTrip::Phase::Visiting && invasion_fallback_switch && frame.settled) {
         // The game sets the type back on its loads (PhantomHome): kept for the whole visit.
         const u64 player = GetLocalPlayer();
+        SetInvasionTint(player,true);
         if (player >= 0x10000 && HasMemoryAccess(player, 0x7C, MemoryProt::CpuRead) &&
             ReadValue<s32>(player, 0x78) != InvaderCharacterType) {
             reinterpret_cast<void PS4_SYSV_ABI (*)(u64, s32, s32)>(image_base + SetChrTypeOffset)(

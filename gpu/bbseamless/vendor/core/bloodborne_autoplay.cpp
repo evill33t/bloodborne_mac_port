@@ -90,6 +90,7 @@ struct AutoplayRun {
     u32 attack_handle = 0;
     std::optional<u32> attack_placed; // the attack cycle the player was last put in place for
     s32 noted_max_hp = 0;             // note-max-hp: the player's max HP then
+    std::optional<std::pair<s32,s32>> noted_wallet; // echoes and Insight before a reward
     u32 pickup_handle = 0;            // pickup: the map item it went for
     LampPosition pickup_at{};         // pickup: where the player was put on it
     s32 hit_from_hp = 0;              // hit: the target's HP when it began
@@ -1009,7 +1010,7 @@ bool AutoplayReviveDowned(const AutoplayStep& step) {
     return false;
 }
 
-// press <button> [<ms>], stick <x> <y> [<ms>]: held for that long (150 ms).
+// press <button> [<ms>], stick/look <x> <y> [<ms>]: left/right stick held (150 ms).
 bool AutoplayPressOrStick(const AutoplayStep& step) {
     const bool press = step.command.verb == "press";
     u32 buttons = 0;
@@ -1023,7 +1024,7 @@ bool AutoplayPressOrStick(const AutoplayStep& step) {
     } else {
         const u32 x = static_cast<u32>(std::clamp(step.Number(0, 128), 0.0, 255.0));
         const u32 y = static_cast<u32>(std::clamp(step.Number(1, 128), 0.0, 255.0));
-        sticks = x | (y << 8) | 0x80800000;
+        sticks = step.command.verb=="look"?0x8080 | (x<<16) | (y<<24):x | (y << 8) | 0x80800000;
     }
     autoplay_buttons.store(buttons);
     autoplay_sticks.store(sticks);
@@ -1348,6 +1349,26 @@ bool AutoplayRaiseStat(const AutoplayStep& step) {
     WriteValue(mine, at, static_cast<s32>(before + step.Number(1, 1)));
     LOG_INFO(Debug, "Bloodborne autoplay raise-stat: +{:#x} {} -> {}", at, before,
              ReadValue<s32>(mine, at));
+    return true;
+}
+
+// Real inventory evidence, not an injected result: compare a finished invasion with its
+// starting wallet. PlayerGameData offsets follow Kaniel's bbport_save_editor.h, 1.09.
+bool AutoplayNoteWallet(const AutoplayStep& step) {
+    const u64 data=OwnGameData();
+    if(data<0x10000 || !HasMemoryAccess(data+0x80,0x18,MemoryProt::CpuRead)) {step.failure="no wallet";return false;}
+    // +0x80 is the base value; the HUD's current Insight is +0x84.
+    autoplay_run.noted_wallet=std::pair{ReadValue<s32>(data,0x94),ReadValue<s32>(data,0x84)};
+    LOG_INFO(Debug,"Bloodborne autoplay wallet: echoes {} insight {} level {}",autoplay_run.noted_wallet->first,autoplay_run.noted_wallet->second,ReadValue<s32>(data,0x90));
+    return true;
+}
+bool AutoplayExpectWallet(const AutoplayStep& step) {
+    const u64 data=OwnGameData();
+    if(!autoplay_run.noted_wallet || data<0x10000 || !HasMemoryAccess(data+0x80,0x18,MemoryProt::CpuRead)) {step.failure="no noted wallet";return false;}
+    const auto [echoes,insight]=*autoplay_run.noted_wallet;
+    const s32 delta_echoes=ReadValue<s32>(data,0x94)-echoes,delta_insight=ReadValue<s32>(data,0x84)-insight;
+    if((step.Arg(0)!="any" && delta_echoes!=step.Number(0,0)) || delta_insight!=step.Number(1,0)) {step.failure=fmt::format("wallet delta echoes {} insight {}",delta_echoes,delta_insight);return false;}
+    LOG_INFO(Debug,"Bloodborne autoplay wallet verified: echoes {:+} insight {:+}",delta_echoes,delta_insight);
     return true;
 }
 
@@ -2404,6 +2425,7 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"revive-downed", AutoplayReviveDowned},
     {"press", AutoplayPressOrStick},
     {"stick", AutoplayPressOrStick},
+    {"look", AutoplayPressOrStick},
     {"set-flag", AutoplaySetFlag},
     {"return-point", AutoplayReturnPoint},
     {"expect-flag", AutoplayExpectOrWaitFlag},
@@ -2428,6 +2450,8 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"dump", AutoplayDump},
     {"raise-stat", AutoplayRaiseStat},
     {"add-effect", AutoplayAddEffect},
+    {"note-wallet", AutoplayNoteWallet},
+    {"expect-wallet", AutoplayExpectWallet},
     {"object", AutoplayObject},
     {"peek", AutoplayPeekOrPoke},
     {"poke", AutoplayPeekOrPoke},

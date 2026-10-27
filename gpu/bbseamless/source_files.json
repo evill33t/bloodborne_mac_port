@@ -561,7 +561,8 @@
     {
       "path": "vendor/coop/coop.proto",
       "source": "server/coop/coop.proto",
-      "sha256": "745b677b9103c6f43e2763cef6f9f6ae426733640ed79021d4475c2f03060a5b"
+      "sha256": "745b677b9103c6f43e2763cef6f9f6ae426733640ed79021d4475c2f03060a5b",
+      "adapted_sha256": "e8e461a5efd9a826cc4f65c42b724bf27f5b180b06e1e1b677c7cde87b2c9671"
     },
     {
       "path": "vendor/coop/coop_messages.cpp",
@@ -651,12 +652,14 @@
     {
       "path": "vendor/coop/trade.cpp",
       "source": "server/coop/trade.cpp",
-      "sha256": "3dbd8b15c9a3d66f29f68ea570151a2aab583898968453c780b45355c8eda874"
+      "sha256": "3dbd8b15c9a3d66f29f68ea570151a2aab583898968453c780b45355c8eda874",
+      "adapted_sha256": "82a918da1db5394eba9d24823a4b5162fdc20441ac87a59e106034c2daf757c0"
     },
     {
       "path": "vendor/coop/trade.h",
       "source": "server/coop/trade.h",
-      "sha256": "9b19d9bec023fa765feba4c296877d39901d0a9d18a928e5000a43a7e22117cd"
+      "sha256": "9b19d9bec023fa765feba4c296877d39901d0a9d18a928e5000a43a7e22117cd",
+      "adapted_sha256": "a812d7cf171712f4f1874f497997971c02da8a7be2135998f600345f215be128"
     },
     {
       "path": "vendor/coop/world_log.cpp",
@@ -682,7 +685,7 @@
       "path": "vendor/core/bloodborne_autoplay.cpp",
       "source": "emulator/src/core/bloodborne_autoplay.cpp",
       "sha256": "c498ac6d67886503bdd399b8a68dd90df035872ad73e53d9080a29c296100243",
-      "adapted_sha256": "a737efa37f88b9e1f9092c07cb6acaff8647c5003619864cdfc84cf5138148df"
+      "adapted_sha256": "8c7ba4a23aa119272f14bae5908c8e09bb1115c3adf7d2225b9eb4b99a7ed10e"
     },
     {
       "path": "vendor/core/bloodborne_boards.cpp",
@@ -815,7 +818,7 @@
       "path": "vendor/core/bloodborne_party_death.cpp",
       "source": "emulator/src/core/bloodborne_party_death.cpp",
       "sha256": "41bd83cc8d4361dde63923155f7fd430fed9d888fd7581c184bb69abb02f7bc9",
-      "adapted_sha256": "802b926c689a6a3542768eeb895ea2254612eda0836c2b6f3a99a10fcabed935"
+      "adapted_sha256": "58163337779e46908a3f255773480bf357515f9c710482b47f5c3b06a9ce99e4"
     },
     {
       "path": "vendor/core/bloodborne_party_rules.cpp",
@@ -863,7 +866,8 @@
     {
       "path": "vendor/core/bloodborne_re.cpp",
       "source": "emulator/src/core/bloodborne_re.cpp",
-      "sha256": "b6cbe64f326973d8c7a18472ef9d6df64feca3420d0b386c5774459832e0cad8"
+      "sha256": "b6cbe64f326973d8c7a18472ef9d6df64feca3420d0b386c5774459832e0cad8",
+      "adapted_sha256": "a8a379f0aa04f4e3edd932ee3d6db373c59542eedd579a481c5a482bc802b260"
     },
     {
       "path": "vendor/core/bloodborne_re.h",
@@ -873,12 +877,14 @@
     {
       "path": "vendor/core/bloodborne_re_internal.h",
       "source": "emulator/src/core/bloodborne_re_internal.h",
-      "sha256": "cfd810ad9f928d4404f74b29fa1948db6f2268b51b55411a84aaf61bfa97d6df"
+      "sha256": "cfd810ad9f928d4404f74b29fa1948db6f2268b51b55411a84aaf61bfa97d6df",
+      "adapted_sha256": "22b125e056c1dea577dbf91e2f8f4e0ade52f6f70bcb209419e5042ee598f718"
     },
     {
       "path": "vendor/core/bloodborne_re_sites.h",
       "source": "emulator/src/core/bloodborne_re_sites.h",
-      "sha256": "ff562186df2b48c8f59368630797abdbba272b7d22c276a6922316cf8199afa6"
+      "sha256": "ff562186df2b48c8f59368630797abdbba272b7d22c276a6922316cf8199afa6",
+      "adapted_sha256": "47efbc8678f5fac8cd05d5598c7dafe9f3183ed85fe9973072be8576a10d0ac5"
     },
     {
       "path": "vendor/core/bloodborne_re_tracer.cpp",
@@ -899,7 +905,7 @@
       "path": "vendor/core/bloodborne_server_world.cpp",
       "source": "emulator/src/core/bloodborne_server_world.cpp",
       "sha256": "65f115aca84d42cf82107eb9b4def126e542daf44e3d7f10eaaf9fcfb72da99d",
-      "adapted_sha256": "905231c52bfd9ba13af2ff7e950c5853ac6d8dff87812137e5da4130f8978c36"
+      "adapted_sha256": "35fffba557d19155756eab65956a727a22b23824eced48be17432e7a5e326133"
     },
     {
       "path": "vendor/core/bloodborne_spectate.cpp",
@@ -930,7 +936,7 @@
       "path": "vendor/core/bloodborne_trade.cpp",
       "source": "emulator/src/core/bloodborne_trade.cpp",
       "sha256": "f11abcfa8cd9184edb616b9eefab7b1c71a39bf14e808f46fb5251cb509b4248",
-      "adapted_sha256": "026c3f6fc53ac5ae11faa6c371b7ee5ca821ec2ea1df8abe88f47df6b477aae0"
+      "adapted_sha256": "6e0e075958638f96253588974ee9c53f3bff889251714a27051afc10bac2a291"
     },
     {
       "path": "vendor/core/bloodborne_trade.h",

@@ -1029,6 +1029,8 @@ void RestoreInvasionHomeOnLoad();
 // lets the death through, and the invader's own death in the target's world (revived in place,
 // InvaderGoHome takes it home).
 void SetInvaderHandles(std::vector<u32> handles);
+void SetInvasionTint(u64 character, bool on);
+void QueueInvasionRewardAck(bbcoop::Envelope envelope);
 std::vector<u32> InvaderHandles();
 bool IsInvaderHandle(u32 handle);
 void NoteInvaderHit();

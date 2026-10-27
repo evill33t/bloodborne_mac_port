@@ -7,6 +7,7 @@
 #include "core/bloodborne_re.h"
 #include "core/bloodborne_re_internal.h"
 #include "core/bloodborne_write_watch.h"
+#include "../../invasion_visual.h"
 
 #include <algorithm>
 #include <array>
@@ -147,6 +148,38 @@ bool HasVirtual(u64 object, u64 slot, u64 function, std::string_view site) {
     }
     LogRefusedCall(site, object);
     return false;
+}
+
+void SetInvasionTint(u64 character,bool on) {
+    constexpr s32 red=BbInvasionVisual::Effect,blue=9006;
+    if(!on) {
+        if(HasPlayerEffect(character,red) && EndPlayerEffect(character,red))
+            LOG_INFO(Debug,"Co-op invasion appearance: body {:#x} red effect off",ReadValue<u32>(character,0x08));
+        return;
+    }
+    // Native 1.09: 9026 is normal-invasion guest play, stateInfo 276 -> VFX SFX 212.
+    // Paramdex's original row names/definitions and NightwatchCoop's effect/VFX research
+    // identify this path. Keep the port's existing full-HP policy when adding its visual.
+    const u64 param=FindLoadedParam("SP_EFFECT_PARAM_ST");
+    const auto table=param?WritableSpEffects(param):std::nullopt;
+    const auto row=table?FindParamRow(*table,red):std::nullopt;
+    const auto blank=table?FindParamRow(*table,0):std::nullopt;
+    const auto source=table?FindParamRow(*table,BbInvasionVisual::SourceEffect):std::nullopt;
+    if(!row || !blank || !source || *row+0x210>table->size() || *blank+0x210>table->size() || *source+0x210>table->size()) return;
+    // Refuse a parameter alias: modifying it must never alter another effect's row.
+    const u16 count=ReadValue<u16>(param,0xA);
+    for(u16 i=0;i<count;++i) {
+        const u64 entry=0x40+u64(i)*24;
+        if(ReadValue<u64>(param,entry)!=red && ReadValue<u64>(param,entry+8)==*row) return;
+    }
+    if(!BbInvasionVisual::Prepare(table->subspan(*row,0x210),table->subspan(*blank,0x210),table->subspan(*source,0x210))) return;
+    // The copied visual persists independently of the native session-kind controller.
+    if(HasPlayerEffect(character,BbInvasionVisual::SourceEffect)) EndPlayerEffect(character,BbInvasionVisual::SourceEffect);
+    if(HasPlayerEffect(character,blue)) EndPlayerEffect(character,blue);
+    if(!HasPlayerEffect(character,red) && HasVirtual(character,CharacterAddSpEffectSlot,AddSpEffectOffset,"invasion red effect")) {
+        reinterpret_cast<AddSpEffectFn>(image_base+AddSpEffectOffset)(character,red,character,0,1,0,1.f,1.f,1.f,1.f,1.f,0);
+        LOG_INFO(Debug,"Co-op invasion appearance: body {:#x} native red effect {} on",ReadValue<u32>(character,0x08),red);
+    }
 }
 
 bool WriteTransportedSummonPlacement(u64 state, const SummonPlacementDescriptor& placement) {
