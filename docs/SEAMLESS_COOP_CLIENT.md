@@ -9,10 +9,16 @@ pinned at `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`. The default server is
 
 Build dependencies with `bash scripts/macos/bootstrap_deps.sh`, then run
 `bash build_macos.sh`. Both online modules are included by default. Choose **Seamless Co-op**
-in the launcher's **Online** tab and enable **Play online**. Select Continue or Load Game to choose your character; its team
-screen opens before entering the world. A new configuration selects
-Seamless; existing explicit THD/shadNet choices and accounts retain their pool. Offline play
-remains the default until online play is enabled.
+in the **Game mode** selector at the top of the launcher, then press **Play**. This enables
+co-op on `bloodborne.phobos.services`; its server and host rules are in the **Online** tab.
+Select Continue or Load Game to choose your character; its team screen opens before entering
+the world.
+
+Choose **Regular** to return to normal gameplay and your normal save folder. Switching modes
+keeps your co-op saves, server settings and accounts. The choice is remembered for the next
+launch, including when **Show launcher every time** is off. New configurations start in Regular
+with online play off. Existing regular online pools and accounts retain their selection;
+The Hunter's Dream and shadNet remain available in the **Online** tab.
 
 For a command-line launch, set the following in `bbport.ini`:
 

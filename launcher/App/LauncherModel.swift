@@ -388,7 +388,7 @@ final class LauncherModel: ObservableObject {
         }
         guard backUpSavesIfNeeded() else { onExit?(-1); return }
         let plan = layout.launchPlan(gameDir: game, saveDir: config.saveDir, dataDir: dataDir,
-                                     env: config.environment(adding: env))
+                                     env: online.launchEnvironment(adding: config.environment(adding: env)))
         do {
             let log = try SessionLogWriter(folder: logsFolder, appVersion: appVersion)
             log.note("Bloodborne for Mac \(appVersion) on \(SystemInfo.current(appVersion: appVersion).line); "

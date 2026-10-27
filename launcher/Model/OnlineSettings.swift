@@ -15,6 +15,13 @@ enum OnlinePool: String, CaseIterable, Identifiable {
     }
 }
 
+/// The game mode shown before Play, independent of which settings page is open.
+enum PlayMode: String, CaseIterable, Identifiable {
+    case regular, seamless
+    var id: String { rawValue }
+    var label: String { self == .regular ? "Regular" : "Seamless Co-op" }
+}
+
 /// A secret the launcher never shows or logs: absent, in the login keychain (the ini says
 /// `keychain`, the way scripts/online.py writes it), or written in the file (kept as read).
 enum StoredSecret: Equatable {
@@ -74,6 +81,29 @@ struct OnlineSettings: Equatable {
     var thdToken = StoredSecret.none
     var upnp = true
     var p2pPort = OnlineSettings.defaultP2PPort
+
+    /// Uses the existing online keys so old settings and the Online tab stay in sync.
+    var playMode: PlayMode {
+        get { online && pool == .seamless ? .seamless : .regular }
+        set {
+            switch newValue {
+            case .seamless:
+                pool = .seamless
+                online = true
+            case .regular:
+                if pool == .seamless { online = false }
+            }
+        }
+    }
+
+    /// The launcher's visible choice wins over inherited online-mode flags. Other diagnostic
+    /// overrides keep their normal precedence; command-line run.sh behavior is unchanged.
+    func launchEnvironment(adding env: [String: String]) -> [String: String] {
+        var result = env
+        result["BB_ONLINE"] = online ? "1" : "0"
+        result["BB_NET_BACKEND"] = pool == .huntersdream ? "thd" : pool.rawValue
+        return result
+    }
 
     init() {}
 

@@ -19,14 +19,26 @@ struct LauncherView: View {
             // Not a TabView: on macOS 26.0.1 switching back to a tab re-inserts its cached view
             // graph and SwiftUI's accessibility nodes loop on a dependency cycle, printing it
             // forever with the window frozen (#47, sampled by the reporter).
-            Picker("", selection: $page) {
-                Text("General").tag(Page.general)
-                Text("Advanced").tag(Page.advanced)
-                Text("Online").tag(Page.online)
+            HStack {
+                Picker("Game mode", selection: $model.online.playMode) {
+                    ForEach(PlayMode.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(model.running)
+                .accessibilityIdentifier("launchMode")
+                .help("Regular uses normal gameplay and saves. Seamless Co-op connects to your co-op server with separate saves. Regular online pools are available in the Online tab.")
+                Spacer()
+                Picker("", selection: $page) {
+                    Text("General").tag(Page.general)
+                    Text("Advanced").tag(Page.advanced)
+                    Text("Online").tag(Page.online)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            .padding(.horizontal)
             .padding(.top, 10)
             Group {
                 switch page {

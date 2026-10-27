@@ -406,3 +406,30 @@ per-role logs/scripts/results/screenshots, native parameter/repository fact repo
 mailbox snapshots at both kill boundaries and the final empty-mailbox snapshot. Build and
 package logs are `out/covenant-regression-tests.log` and `out/covenant-package.log`.
 The package was not installed over the user's existing app.
+
+
+## Launcher Regular / Seamless Co-op selector (2026-10-27)
+
+The Game mode selector is visible above every settings page and derives its state from the
+existing online settings. Seamless enables its pool; Regular disables seamless while retaining
+existing regular online pools and all account/server settings. The launcher sends its visible
+online/backend choice explicitly, so contradictory inherited mode flags do not select another
+mode. Command-line environment precedence is unchanged.
+
+`bash scripts/macos/build_launcher.sh --test`, the five seamless launch tests and
+`bash tests/test_launch_settings.sh` passed. Model tests cover mode/account preservation,
+settings reload, legacy online pools and the real shell settings reader with conflicting flags.
+The local packaged app was updated and passed deep/strict code-signature verification.
+
+A live packaged-launcher smoke selected both modes with Accessibility controls. Regular
+rendered the title screen without loading the co-op module or creating a co-op namespace.
+Seamless loaded `libbbseamless.dylib`, reached the signed-in title menu and received a server
+welcome from `bloodborne.phobos.services:31314`. The mode controls were disabled while each
+game ran. A launcher restart restored Seamless, and selecting Regular was saved on quit.
+The configured 30 FPS preference remained intact (the co-op session still uses fixed 60 FPS).
+
+Evidence: `out/launcher-mode-ui-2026-10-27/validation.json`, UI snapshots, launcher screenshots
+and separate startup/native logs. These are launch/title/server-connection checks; no new
+world, duel or multiplayer-session coverage is claimed. Test copies isolated all save writes;
+the source save hashes and 56 checked original executable/event assets matched afterward.
+The normal save copy also remained unchanged during the co-op run. All test processes stopped.
