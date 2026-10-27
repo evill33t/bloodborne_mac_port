@@ -161,6 +161,45 @@ check_secret $'online=1\nshadnet_npid=hunter\nshadnet_password=inline\nthd_onlin
 [[ ! -e $fake/calls ]] || { echo "FAIL: offline launch settings looked in the keychain: $(tr '\n' ' ' < "$fake/calls")"; exit 1; }
 echo "PASS: launch settings (fps_cap, fullscreen, texture_compression, game_timing, online, p2p_port, online_pool, keychain secrets)"
 
+display() { # ini text, expected BB_DISPLAY (- = unset), extra environment...
+    printf '%s' "$1" > "$ini"
+    local got
+    got=$(env -u BB_DISPLAY "${@:3}" /bin/bash -c \
+        'source scripts/launch_settings.sh; bb_launch_settings "$1"; printf "%s" "${BB_DISPLAY:--}"' _ "$ini")
+    if [[ $got != "$2" ]]; then
+        echo "FAIL: display for $(printf %q "$1") ${*:3}: got '$got', want '$2'"
+        exit 1
+    fi
+}
+uuid=37D8832A-2D66-02CA-B9F7-8F30A301B230
+display "display=$uuid"$'\n' "$uuid"
+display "display=$uuid"$'\r\n' "$uuid"                  # CRLF
+display $'upscaler=off\n' "-"                           # absent: the main display
+display $'display=\n' "-"                               # empty: the main display
+display $'display=main; rm -rf /\n' "-"                 # not a UUID: ignored
+display "display=$uuid"$'\n' "OTHER" BB_DISPLAY=OTHER   # explicit environment wins
+env -u BB_DISPLAY -u BB_LAUNCH_AUTO_DISPLAY /bin/bash -c '
+    source scripts/launch_settings.sh
+    printf "display=%s\n" "$2" > "$1"
+    bb_launch_settings "$1"
+    [[ $BB_DISPLAY == "$2" ]] || exit 1
+    printf "display=%s\n" "$3" > "$1"
+    bb_launch_settings "$1"
+    [[ $BB_DISPLAY == "$3" ]] || exit 1
+    printf "fps_cap=60\n" > "$1"
+    bb_launch_settings "$1"
+    [[ -z ${BB_DISPLAY:-} ]] || exit 1
+    export BB_DISPLAY=EXPLICIT
+    bb_launch_settings "$1"
+    [[ $BB_DISPLAY == EXPLICIT ]]
+' _ "$ini" "$uuid" "47D8832A-2D66-02CA-B9F7-8F30A301B230" || {
+    echo "FAIL: restart changes/removes the selected display and keeps an explicit override"; exit 1;
+}
+rm -f "$ini"
+/bin/bash -c 'source scripts/launch_settings.sh; bb_launch_settings /nonexistent/bbport.ini' ||
+    { echo "FAIL: launch settings with a missing file"; exit 1; }
+echo "PASS: launch settings (fps_cap, fullscreen, texture_compression, game_timing, display)"
+
 # In-game restart inherits the old environment: disabling wide mode must clear only our
 # overrides and keep the user's external patch list and explicit memory limit.
 (

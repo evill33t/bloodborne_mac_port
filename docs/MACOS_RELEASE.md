@@ -34,7 +34,7 @@ Do not put private keys, Apple passwords or tokens in this repository.
 ```sh
 BB_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
 BB_NOTARY_PROFILE='your-keychain-profile' \
-bash scripts/macos/package_app.sh 0.5.9-dev.20261027.1
+bash scripts/macos/package_app.sh 0.5.10-dev.20261027.1
 ```
 
 Packaging signs each nested Mach-O file before signing the app. Developer ID signatures use

@@ -156,6 +156,21 @@ do {
     check(file["metal_hud"] == "1", "apply writes the Metal HUD key")
     check(file["texture_compression"] == "1", "apply writes the texture compression key")
     check(file["game_timing"] == "fixed", "apply writes the game timing key")
+    check(file["display"] == nil, "main display: no display key")
+    let uuid = "37D8832A-2D66-02CA-B9F7-8F30A301B230"
+    var onDisplay = GameSettings(ini: IniFile(text: "display=\(uuid.lowercased())\n"))
+    check(onDisplay.display == uuid, "read display, normalised to upper case")
+    check(GameSettings(ini: IniFile(text: "display=main\n")).display == nil, "invalid display -> main")
+    var displayFile = IniFile(text: "display=\(uuid)\n")
+    onDisplay.display = nil
+    onDisplay.apply(to: &displayFile)
+    check(displayFile["display"] == nil, "main display removes the key")
+    let screens = [GameDisplay(uuid: uuid, name: "Built-in (main)")]
+    check(GameDisplay.choices(connected: screens, saved: nil) == screens, "choices: connected displays")
+    check(GameDisplay.choices(connected: screens, saved: uuid) == screens, "choices: saved and connected")
+    let missing = "11111111-2222-3333-4444-555555555555"
+    check(GameDisplay.choices(connected: screens, saved: missing).last == GameDisplay(uuid: missing, name: "Display not connected"),
+          "choices: a saved display that isn't connected stays listed")
     check(file.text.hasPrefix("# header\n"), "header kept")
     // Review focus 3: reloading after the game's menu changed the file picks up its values.
     file["preset"] = "3"
@@ -730,7 +745,7 @@ do {
 // High-resolution ultrawide selection on memory-constrained Macs.
 do {
     let gib: UInt64 = 1024 * 1024 * 1024
-    for size in [PixelSize(3440, 1440), PixelSize(5120, 1440)] {
+    for size in [PixelSize(3440, 1440), PixelSize(5120, 1440), PixelSize(5120, 2160)] {
         check(Resolution.ultrawideMemoryWarning(size, memoryBytes: 16 * gib) != nil, "16 GB wide memory warning")
         check(Resolution.ultrawideMemoryWarning(size, memoryBytes: 24 * gib) == nil, "24 GB boundary")
         check(Resolution.ultrawideMemoryWarning(size, memoryBytes: 64 * gib) == nil, "64 GB wide selection")
@@ -739,7 +754,8 @@ do {
     check(Resolution.ultrawideMemoryWarning(PixelSize(2560, 1600), memoryBytes: 16 * gib) != nil
           && Resolution.ultrawideMemoryWarning(PixelSize(1920, 1200), memoryBytes: 16 * gib) == nil, "16:10 memory warning")
     check(Resolution.wideLabel(PixelSize(1920, 1200)) == "1920 × 1200 · 16:10" && Resolution.wideLabel(PixelSize(3440, 1440)).hasSuffix("21:9")
-          && Resolution.wideLabel(PixelSize(2560, 1080)).hasSuffix("21:9") && Resolution.wideLabel(PixelSize(5120, 1440)).hasSuffix("32:9"), "aspect labels")
+          && Resolution.wideLabel(PixelSize(2560, 1080)).hasSuffix("21:9") && Resolution.wideLabel(PixelSize(5120, 1440)).hasSuffix("32:9")
+          && Resolution.wideLabel(PixelSize(5120, 2160)).hasSuffix("21:9"), "aspect labels")
     let sixteen = GameSettings(ini: IniFile(text: "ultrawide_res=2560x1600\n"))
     check(sixteen.ultrawide && sixteen.wideOutput == PixelSize(2560, 1600), "16:10 from bbport.ini")
 }

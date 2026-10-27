@@ -209,6 +209,10 @@ struct Info : InfoPersistent {
         return *reinterpret_cast<const T*>(&FlatUserData()[sharp_idx]);
     }
 
+    /// bbport: table pointers below this read as zeros, as the GPU's faulting reads do. The
+    /// game leaves some unused ones null (#74: a vertex table during the Ebrietas fight).
+    static constexpr VAddr MinTableAddress = 0x10000;
+
     template <typename T>
     T ReadUdReg(u32 ptr_index, u32 dword_offset) const noexcept {
         T data{};
@@ -227,7 +231,7 @@ struct Info : InfoPersistent {
         VAddr base;
         std::memcpy(&base, ud.data() + ptr_index, sizeof(base));
         base &= 0xFFFFFFFFFFFFULL;
-        if (base) {
+        if (base >= MinTableAddress) {
             BbGuest::Read(&data, base + byte_offset, sizeof(data));
         }
         return data;
@@ -263,6 +267,10 @@ struct Info : InfoPersistent {
         ASSERT(tess_consts_dword_offset >= 0); // We've already tracked the V# UD
         auto buf = ReadUdReg<AmdGpu::Buffer>(static_cast<u32>(tess_consts_ptr_base),
                                              static_cast<u32>(tess_consts_dword_offset));
+        if (buf.base_address < MinTableAddress) [[unlikely]] {
+            tess_constants = {};
+            return;
+        }
         BbGuest::Read(&tess_constants, buf.base_address, sizeof(tess_constants));
     }
 

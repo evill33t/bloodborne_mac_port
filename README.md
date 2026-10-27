@@ -8,15 +8,17 @@ This is an experimental development build. Included features and draft integrati
 
 Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
 
+Recent mainline sync: upstream **0.5.10** (`ce29673`) adds preferred-display selection, cursor hiding, 5120×2160 support, an updater shutdown fix and null-table GPU protection. This branch also retains the broader guarded descriptor-copy checks from PR #98.
+
 ## Features
 
 ### Launcher, settings and controls
 
 - Bundled fallback app icon from the Windows launcher, replaced at runtime by the selected game’s icon when available. [Branding sources and credits](assets/branding/README.md).
-- Native SwiftUI launcher with **General, Advanced, Controls, Achievements and Online** pages; game-folder validation, save-folder selection and remembered settings.
+- Native SwiftUI launcher with **General, Advanced, Controls, Achievements and Online** pages; game-folder validation, save-folder selection, preferred-display selection with disconnected-display fallback, and remembered settings.
 - A persistent **Regular / Seamless Co-op** selector above the pages. New configurations start in Regular with online play off. Switching modes preserves each mode's saves, accounts and server settings; the choice also applies when the launcher is hidden.
 - In-game settings with **⌘,** or **L3 + R3**, native **Mac Settings** and **Exit Game** entries, and a launcher **Stop** button with process cleanup and crash-report recovery.
-- Keyboard, mouse and SDL3 gamepad support, including controller selection, touchpad gestures, keyboard text entry and mouse camera capture. Rebind keys, mouse buttons and wheel steps in **Controls**; clear individual actions, inspect shared bindings or restore defaults. Left Alt walks at half stick deflection. Mouse sensitivity, vertical multiplier, inversion and camera-key behavior are configurable.
+- Keyboard, mouse and SDL3 gamepad support, including controller selection, touchpad gestures, keyboard text entry and mouse camera capture. Rebind keys, mouse buttons and wheel steps in **Controls**; clear individual actions, inspect shared bindings or restore defaults. Left Alt walks at half stick deflection. Mouse sensitivity, vertical multiplier, inversion and camera-key behavior are configurable. A still cursor hides over the game after three seconds.
 - Mods and cheats manager with import, enable/disable, ordering, conflict reporting, backups and private launch views. Community patches include frame-rate, camera, intro and visual options. Original game files remain the source for generated views. See [Mods](docs/MODS.md).
 - Local achievements browser, base-game platinum progression, DLC trophies, per-save-profile history, optional in-game banners and trophy artwork read from your own dump. Shared co-op unlocks use the same local history and achievement UI. See [Achievements](docs/ACHIEVEMENTS.md).
 - Built-in benchmark workflow with isolated benchmark settings/saves, when the required local benchmark data is available; dated logs, crash reports, About information and optional update checks with a test-build preference. Checkout builds are updated with Git; upstream release downloads do not contain every `dev` integration.
@@ -27,7 +29,7 @@ Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_
 | --- | --- |
 | Direct Metal | Native arm64 GPU process, Metal command encoding, shader translation to MSL and Metal resource management. Vulkan-named compatibility files/types remain in the source; the running renderer uses neither a Vulkan loader nor MoltenVK. |
 | Upscaling and anti-aliasing | **MetalFX Temporal** is the recommended default. MetalFX Spatial, AMD FSR 3.1, TAA and Off are also available, with presets, sharpening and motion/reactivity controls. **Spatial: lighter on the GPU, shimmers more in motion.** |
-| Resolution and aspect ratio | 720p, 1080p, 1440p and 4K output choices, native 16:10/ultrawide modes, separate scene/UI sizing, plus an optional live-resolution path. Some changes require restarting the game. |
+| Resolution and aspect ratio | 720p, 1080p, 1440p and 4K output choices, native 16:10/ultrawide modes including 5120×2160 (21:9), separate scene/UI sizing, plus an optional live-resolution path. Some changes require restarting the game. |
 | Frame rates | 30/40/60/90/120 FPS cap choices, fixed or variable timing, optional frame pacing and a guarded experimental adaptive timing adapter. Seamless co-op uses the reference client's fixed 60 FPS timing. See [Adaptive FPS](docs/ADAPTIVE_FPS.md). |
 | Texture and memory handling | Lossless texture compression, bounded GPU arenas, guest-memory mappings, resource retirement and synchronization fixes, including a separate host reservation path for macOS 27. Performance and memory needs depend on the area and settings. |
 | Shader and draw work | Pipeline/shader caches, background compilation with Wait/Skip/Balanced policies, resource-binding caching and fullscreen load avoidance. Skip policies can temporarily omit draws while compilation finishes. |
@@ -252,6 +254,8 @@ Dependency pins and package notices are maintained in the bootstrap/package scri
 ### Mac-port contributors and testers
 
 In addition to Mark Hall and Ronny Stiftel, retained Mac contributions include **[Noel Miller](https://github.com/noelmiller)** (native GPU host, macOS 27, input, memory and online foundations), **[Mojahed Abushawish](https://github.com/MojahedAbushawish)** (texture compression, mouse camera, memory and renderer fixes), **[DiAvisoo](https://github.com/DiAvisoo)** (ultrawide, launch checks, audio diagnostics and Stop), **[satperm](https://github.com/satperm)** (About, updates, logs and crash reports), and **[soulripper13](https://github.com/soulripper13)** (Dock icon). **zackcage6** contributed Windows testing and bug reports. Thanks to the other upstream contributors and everyone who supplied reports, logs and gameplay measurements; their individual authorship remains in Git history and source notices.
+
+Recent upstream reports and testing: **@wgorecodes** (preferred display), **@lifeos-creator** (updater), **@ELLDev and @GChaucer** (GPU faults in fights), and **@brewboi** (5120×2160 and cursor hiding), alongside the contributors and testers credited upstream.
 
 ## License
 

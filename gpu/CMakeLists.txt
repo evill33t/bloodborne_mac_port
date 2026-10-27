@@ -267,7 +267,7 @@ if (APPLE)
     list(REMOVE_ITEM METAL_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/shadps4/video_core/renderer_metal/mtl_screen_lighting.mm)
     target_sources(bbgpu PRIVATE ${METAL_SOURCES})
     target_link_libraries(bbgpu PRIVATE bbmetal_core "-framework Metal" "-framework QuartzCore"
-        "-framework CoreGraphics" "-framework ImageIO" "-framework Foundation" "-framework AppKit")
+        "-framework CoreGraphics" "-framework ColorSync" "-framework ImageIO" "-framework Foundation" "-framework AppKit")
     foreach(source IN LISTS METAL_SOURCES)
         if (source MATCHES "\\.mm$")
             set_source_files_properties(${source} PROPERTIES COMPILE_OPTIONS

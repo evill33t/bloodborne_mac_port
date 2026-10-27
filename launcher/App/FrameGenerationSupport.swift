@@ -17,10 +17,18 @@ enum FrameGenerationSupport {
         return false
     }
 
-    static var launchDisplay: FrameGenerationDisplay? {
-        // SDL_WINDOWPOS_CENTERED starts the game on the primary display. A suitable secondary
-        // screen must not hide an incompatible mode on the screen where the game will open.
-        guard let screen = NSScreen.screens.first,
+    static func launchDisplay(preferred: String? = nil) -> FrameGenerationDisplay? {
+        // Match the preferred-display picker and BB_DISPLAY override. A disconnected saved
+        // display falls back to the primary one, as the SDL window does.
+        let selected = preferred.flatMap { preferred in
+            NSScreen.screens.first { screen in
+                guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                      let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value)?.takeRetainedValue(),
+                      let text = CFUUIDCreateString(nil, uuid) as String? else { return false }
+                return text.caseInsensitiveCompare(preferred) == .orderedSame
+            }
+        }
+        guard let screen = selected ?? NSScreen.screens.first,
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
         let shortest = screen.minimumRefreshInterval
         let longest = screen.maximumRefreshInterval

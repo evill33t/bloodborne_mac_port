@@ -856,6 +856,17 @@ Each item: what was done for now, what the refinement is, and where it lives.
 
 ## 3. Mac GUI
 
+- **Fixed in 0.5.10: the old launcher stayed open after an update (#96, 2026-10-27).** AppKit
+  refuses to quit while a sheet is attached: `NSApp.terminate` returns without asking the
+  delegate, so 0.5.9-test1 stayed on "Installing…" (⌘Q dead too) beside the new copy. Reproduced
+  with the real 0.5.9-test1 → 0.5.9 update in a scratch folder. #87 (after 0.5.9) hides the
+  windows first, which takes the sheet down; `Updater.install` now also `exit(0)`s if terminate
+  still returns. Verified: the old copy exits ~7 s after Install, the new one opens alone.
+  *Still open:* the fix runs in the *old* copy, so updating **from** 0.5.9 to 0.5.10 shows the
+  bug once more (say so in the 0.5.10 notes: quit the old window with Force Quit). Also, ⌘Q is
+  ignored whenever a launcher sheet is open (any sheet, not only updates): standard AppKit, but
+  players read it as a hang; consider ending the sheet in `applicationShouldTerminate`'s path.
+
 - **Local apps from `make_app.sh` never get Game Mode (2026-10-26).** Its `bbgpu-host*` are
   symlinks into `out/`, so macOS sees anonymous processes outside the bundle and gamepolicyd only
   recognises the launcher (packaged apps: all three processes, "Plist category type"). Copy or
@@ -868,11 +879,9 @@ Each item: what was done for now, what the refinement is, and where it lives.
   UI Fixes" mod (Nexus 207) replaces them; consider pointing to it from the launcher when 16:10
   is chosen (the mod manager can load it).
 
-- **Preferred display (#60, 2026-10-24).** The window always opens centred on the main display
-  (`gpu/shim/window.cpp`, `SDL_WINDOWPOS_CENTERED`) and the default resolution comes from it
-  (`gpu/shim/bbgpu.cpp`). Add a `display=` setting chosen in the launcher, applied with
-  `SDL_WINDOWPOS_CENTERED_DISPLAY(id)`, and keep resolution/ultrawide per display so docking does
-  not reset them.
+- **Resolution per display (#60, 2026-10-24).** The display choice is done (2026-10-26: launcher
+  `display=` UUID → `BB_DISPLAY`, window centred on it, vblank from it). Still open: keep
+  resolution/ultrawide per display so docking does not reset them.
 - **Leftover game processes (#71, 2026-10-24).** After a force-quit of a hung game, `bb-probe`
   and a GPU host stuck in exit stay alive and the launcher refuses to start ("only one copy").
   `stop_host` no longer waits forever after SIGKILL (fixes-0.5.6); the launcher should also offer
