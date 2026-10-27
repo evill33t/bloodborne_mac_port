@@ -239,7 +239,7 @@ void HeroBackdrop(ImDrawList* draw,ImVec2 at,ImVec2 end) {
     } else Art(draw,BbCoopArt::Piece::Backdrop,at,end);
     draw->AddRectFilled(at,end,IM_COL32(0,0,0,80));
 }
-bool Begin(const char* title,bool* open,ImGuiWindowFlags flags,bool hero) {
+bool Begin(const char* title,bool* open,ImGuiWindowFlags flags) {
     const std::string translated=std::string(Text(title))+"###"+title;
     if(flags&ImGuiWindowFlags_AlwaysAutoResize) {
         const auto display=ImGui::GetIO().DisplaySize;
@@ -248,8 +248,7 @@ bool Begin(const char* title,bool* open,ImGuiWindowFlags flags,bool hero) {
     const bool visible=ImGui::Begin(translated.c_str(),nullptr,flags|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoCollapse);
     if(!visible) return false;
     auto* draw=ImGui::GetWindowDrawList();const auto at=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
-    if(hero) HeroBackdrop(draw,at,ImVec2(at.x+size.x,at.y+size.y));
-    else if(wall) if(void* texture=BbOverlay::MetalBackend::ArtworkTexture(2,wall->rgba.data(),wall->width,wall->height)) {
+    if(wall) if(void* texture=BbOverlay::MetalBackend::ArtworkTexture(2,wall->rgba.data(),wall->width,wall->height)) {
         draw->AddImage(Ref(texture),at,ImVec2(at.x+size.x,at.y+size.y),ImVec2(0,0),ImVec2(1,1),Tint(.9f));
         draw->AddRectFilled(at,ImVec2(at.x+size.x,at.y+size.y),IM_COL32(0,0,0,100));
     }

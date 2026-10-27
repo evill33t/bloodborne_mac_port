@@ -19,9 +19,10 @@ Both checkout and self-contained apps get this fallback. Selecting a supported g
 still replaces the running icon with the player's `sce_sys/icon0.png`; clearing the folder
 or selecting a folder without readable icon artwork restores the bundled icon.
 
-The original 1536×1024 JPEG is embedded in both GPU-library architectures. The team setup
-panel and “Entering the hunt” screen draw it with a centered crop that preserves aspect ratio,
-with darkening for text contrast. Decoding uses ImageIO and the existing native Metal overlay;
+The original 1536×1024 JPEG is embedded in both GPU-library architectures. It fills the screen
+behind the team setup window, replacing the gray surrounding area; the setup window retains
+the game's menu styling. It also backs the “Entering the hunt” screen. A centered crop preserves
+aspect ratio, with darkening for text contrast. Decoding uses ImageIO and the existing native Metal overlay;
 its resource survives completion of unretained command buffers. Other co-op dialogs keep
 the existing game-menu styling. No network image fetch is needed at runtime.
 
