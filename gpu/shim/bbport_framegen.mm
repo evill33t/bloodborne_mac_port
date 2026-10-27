@@ -174,7 +174,7 @@ void UpdateDisplayTiming(void* cocoa_window, bool fullscreen) {
 }
 bool Active() {
     const auto& s = BbSettings::Get();
-    return Requested() && s.framegen_supported && s.upscaler != BbSettings::UpscalerOff &&
+    return !s.startup_hdr && Requested() && s.framegen_supported && s.upscaler != BbSettings::UpscalerOff &&
            s.upscaler != BbSettings::UpscalerSpatial &&
            DisplaySupported();
 }

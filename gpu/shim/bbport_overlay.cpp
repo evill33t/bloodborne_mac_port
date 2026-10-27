@@ -646,6 +646,12 @@ int current_tab = TabDisplay;
 std::atomic<bool> gamepad_in_use{false}; // last menu input came from a pad: show L1/R1 hints
 
 void DisplayTab(BbSettings::Values& s) {
+    BeginCard("HDR presentation", int(s.hdr != s.startup_hdr));
+    Toggle("HDR (experimental)", s.hdr, int(s.hdr != s.startup_hdr));
+    SliderRow("Highlights", s.hdr_highlights, 0.0f, 1.0f, "Recover scene highlights within the display's available brightness range.");
+    Note(s.hdr_potential > 1.0f ? "Display supports HDR; available brightness adapts automatically."
+                              : "This display currently offers SDR brightness. HDR falls back to SDR luminance.");
+    EndCard();
     const char* wide = std::getenv("BB_ULTRAWIDE_RES");
     const bool native_wide = wide && wide[0];
     if (native_wide) {
@@ -726,7 +732,7 @@ void DisplayTab(BbSettings::Values& s) {
 
     BeginCard("Frame generation", int(BbSettings::FrameGenerationNeedsRestart()));
     const bool temporal = upscaler_on && upscaler != BbSettings::UpscalerSpatial;
-    const bool framegen_available = s.framegen_supported && temporal && BbFrameGen::DisplaySupported();
+    const bool framegen_available = !s.startup_hdr && s.framegen_supported && temporal && BbFrameGen::DisplaySupported();
     ImGui::BeginDisabled(!framegen_available || s.framegen_forced);
     Toggle("MetalFX 2x (experimental)", s.framegen);
     ImGui::EndDisabled();
@@ -735,6 +741,8 @@ void DisplayTab(BbSettings::Values& s) {
     if (!temporal) {
         Note("Choose MetalFX, FSR 3.1, or TAA above. Native 16:10 and ultrawide output "
              "and MetalFX Spatial cannot provide frame generation inputs.");
+    } else if (s.startup_hdr) {
+        Note("Frame generation is unavailable with HDR presentation.");
     } else if (!s.framegen_supported) {
         Note("Unavailable in this session. Requires macOS 26 or newer, a supported GPU, "
              "and the temporal renderer.");
@@ -1147,7 +1155,7 @@ void Menu() {
 
     // Footer: status on the left, actions on the right.
     {
-        bool restart = s.object_motion != s.startup_object_motion ||
+        bool restart = s.hdr != s.startup_hdr || s.object_motion != s.startup_object_motion ||
                        s.model_lod != s.startup_model_lod ||
                        s.live_resolution != s.startup_live_resolution ||
                        BbSettings::ResolutionNeedsRestart() ||

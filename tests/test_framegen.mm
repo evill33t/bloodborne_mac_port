@@ -83,6 +83,10 @@ void Policy() {
     settings.framegen_real_cap = 60;
     settings.display_timing = {120, 0};
     Expect(BbFrameGen::Active(), "supported launch activates generation at 120 Hz / 60 FPS");
+    settings.startup_hdr = true;
+    Expect(!BbFrameGen::Active(), "HDR suspends the SDR-only interpolation path");
+    settings.startup_hdr = false;
+    Expect(BbFrameGen::Active(), "SDR retains frame generation after HDR guard");
     settings.display_timing = {60, 0};
     Expect(!BbFrameGen::Active(), "moving the window to 60 Hz suspends generation");
     settings.display_timing = {144, 0};

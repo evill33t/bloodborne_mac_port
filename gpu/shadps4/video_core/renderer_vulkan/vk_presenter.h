@@ -19,6 +19,7 @@
 #include "video_core/renderer_metal/mtl_device.h"
 #include "video_core/renderer_metal/mtl_object.h"
 #include "video_core/renderer_metal/mtl_present.h"
+#include "video_core/renderer_metal/mtl_hdr.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -43,6 +44,9 @@ struct Frame {
     Metal::Object texture; ///< id<MTLTexture>, BGRA8Unorm render target (empty: never drawn)
     Metal::Object generated; ///< optional post-processed intermediate image, same dimensions
     BbFrameGen::FramePtr framegen; ///< pins inputs until both presents complete
+    Metal::Object hdr_texture; ///< linear scene, consumed by the EDR presenter
+    Metal::Object hdr_overlay; ///< normal-brightness UI, drawable-sized, present queue only
+    u32 hdr_overlay_width{}, hdr_overlay_height{};
     u64 ready_tick{};      ///< draw-scheduler tick that wrote it; 0: blank (Present clears)
     bool is_hdr{false};
     u32 id{};
@@ -178,6 +182,7 @@ private:
     HostPasses::FsrPass::Settings fsr_settings{};
     HostPasses::PostProcessingPass pp_pass;
     std::unique_ptr<Metal::PresentQueue> present_queue;
+    std::unique_ptr<Metal::HdrPasses> hdr_passes;
     std::shared_ptr<FramePool> pool;
     std::shared_ptr<BbFrameRates::Tracker> frame_rates{std::make_shared<BbFrameRates::Tracker>()};
     BbFrameRates::PresentAverage present_average;

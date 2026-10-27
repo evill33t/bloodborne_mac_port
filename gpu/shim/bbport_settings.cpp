@@ -3,6 +3,7 @@
 #include "bbport_settings.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,7 +32,7 @@ bool OwnedKey(const std::string& key) {
     static constexpr const char* owned[] = {
         "upscaler", "preset", "sharpen", "sharpness", "jitter", "reactive", "object_motion",
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps", "achievement_banners",
-        "frame_pacing", "framegen",
+        "frame_pacing", "framegen", "hdr", "hdr_highlights",
         "model_lod", "output_res",
         "live_resolution", "shader_compile", "renderer", "fps_cap", "game_timing",
         "fullscreen", "metal_hud", "texture_compression",
@@ -100,6 +101,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.metal_hud = i != 0;
     } else if (key == "texture_compression") {
         v.texture_compression = i != 0;
+    } else if (key == "hdr") {
+        v.hdr = i != 0;
+    } else if (key == "hdr_highlights") {
+        v.hdr_highlights = std::isfinite(f) ? Clamp(f, 0.0f, 1.0f) : 0.5f;
     } else if (key == "mouse_look") {
         v.mouse_look = i != 0;
     } else if (key == "mouse_sensitivity") {
@@ -153,6 +158,8 @@ void Load() {
     v.fullscreen = false;
     v.metal_hud = false;
     v.texture_compression = true;
+    v.hdr = false;
+    v.hdr_highlights = 0.5f;
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -215,6 +222,7 @@ void Load() {
     // reads it.
     v.requested_upscaler = v.upscaler.load();
     v.startup_preset = v.preset;
+    v.startup_hdr = v.hdr;
     v.startup_upscaler = v.upscaler;
     v.startup_object_motion = v.object_motion;
     v.startup_framegen = v.framegen;
@@ -353,6 +361,7 @@ void Save() {
                  int(v.mouse_look.load()), v.mouse_sensitivity.load(),
                  int(v.mouse_invert_y.load()));
     // Read by patches.py at start.
+    std::fprintf(file, "hdr=%d\nhdr_highlights=%.2f\n", int(v.hdr.load()), v.hdr_highlights.load());
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }
