@@ -41,7 +41,7 @@ int main() {
     FILE* f = std::fopen(path, "w");
     assert(f);
     std::fprintf(f, "# a comment\nupscaler=fsr3\nfps_cap=40\ngame_timing=adaptive\nfullscreen=1\nrenderer=metal\npreset=2\n"
-                    "mouse_look=1\nmouse_sensitivity=2.50\nmouse_invert_y=1\nhdr=1\nhdr_highlights=0.75\n");
+                    "mouse_look=1\nmouse_sensitivity=2.50\nmouse_invert_y=1\nhdr=1\nhdr_highlights=0.75\nhdr_paper_white=1.25\nhdr_peak=4\n");
     std::fclose(f);
     Load();
     assert(!Get().framegen && !Get().startup_framegen && !Get().framegen_forced);
@@ -53,11 +53,20 @@ int main() {
     Get().mouse_look = true;
     Get().mouse_sensitivity = 2.25f;
     Get().mouse_invert_y = true;
-    assert(Get().hdr && Get().startup_hdr && Get().hdr_highlights == 0.75f);
-    Get().hdr = false; Get().hdr_highlights = 0.25f;
+    assert(Get().hdr && Get().startup_hdr && Get().hdr_paper_white == 1.25f && Get().hdr_peak == 4.0f);
+    Get().preset = NativeAA;
+    assert(NativeHdrSupported());
+    Get().preset = 1;
+    assert(!NativeHdrSupported());
+    Get().preset = NativeAA;
+    setenv("BB_RENDER_RES", "1920x1080", 1);
+    assert(!NativeHdrSupported());
+    unsetenv("BB_RENDER_RES");
+    Get().hdr = false; Get().hdr_paper_white = 0.75f; Get().hdr_peak = 0.0f;
     Get().preset = 3;
     Save();
     std::string text = Read(path);
+    assert(Count(text, "hdr_highlights=0.75") == 0);
     assert(Get().startup_hdr); // menu edits do not change the running layer
     assert(Count(text, "achievement_banners=0") == 1);
     assert(Count(text, "mouse_look=1") == 1);
@@ -74,7 +83,7 @@ int main() {
     assert(Count(text, "game_timing=adaptive") == 1);
     assert(Count(text, "mouse_look=1") == 1 && Count(text, "mouse_sensitivity=2.25") == 1);
     assert(Count(text, "mouse_invert_y=1") == 1);
-    assert(Count(text, "hdr=0") == 1 && Count(text, "hdr_highlights=0.25") == 1);
+    assert(Count(text, "hdr=0") == 1 && Count(text, "hdr_paper_white=0.75") == 1 && Count(text, "hdr_peak=0.00") == 1);
     assert(Count(text, "renderer=") == 0); // the removed renderer setting is dropped
     assert(Count(text, "preset=3") == 1 && Count(text, "preset=2") == 0);
     assert(Count(text, "upscaler=fsr3") == 1 && Count(text, "# a comment") == 0);
@@ -94,7 +103,7 @@ int main() {
     std::fclose(f);
     Load();
     assert(Get().output_res == OutputDefault && Get().upscaler == UpscalerOff);
-    assert(!Get().hdr && !Get().startup_hdr && Get().hdr_highlights == 0.5f);
+    assert(!Get().hdr && !Get().startup_hdr && Get().hdr_paper_white == 1.0f && Get().hdr_peak == 0.0f);
     assert(Get().preset == NativeAA && Get().live_resolution == 0);
     Save();
     text = Read(path);

@@ -397,7 +397,7 @@ int main() {
         }
         Snapshot(t, "display-provider-controls.png");
         // Five segments: Off, FSR 3.1, TAA, MetalFX, Spatial. Drawable pixels at density 1.
-        constexpr float metalfx_x = 1710.0f, spatial_x = 1862.0f, upscaler_y = 354.0f;
+        constexpr float metalfx_x = 1710.0f, spatial_x = 1862.0f, upscaler_y = 670.0f;
         Click(t, metalfx_x, upscaler_y);
         Expect(s.requested_upscaler == BbSettings::UpscalerMetalFx &&
                    s.upscaler == BbSettings::UpscalerMetalFx,
@@ -437,7 +437,7 @@ int main() {
         for (int i = 0; i < 4; ++i) Present(t, true);
         // The Frame generation row, below the upscaler card, at this drawable size.
         Snapshot(t, "display-framegen-controls.png");
-        constexpr float fx = 1300.0f, fy = 548.0f;
+        constexpr float fx = 1300.0f, fy = 864.0f;
         Click(t, fx, fy);
         Expect(s.framegen && BbSettings::FrameGenerationNeedsRestart() && !s.startup_framegen,
                "framegen toggle requests a restart without changing the running mode");

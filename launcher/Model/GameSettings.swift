@@ -137,7 +137,8 @@ struct GameSettings: Equatable {
     var showFPS = false
     var achievementBanners = true
     var hdr = false
-    var hdrHighlights = 0.5
+    var hdrPaperWhite = 1.0
+    var hdrPeak = 0.0
     var metalHUD = false
     /// bbport.ini mouse_look (PR #20): the mouse turns the camera after a click in the window,
     /// and the arrow keys are the d-pad.
@@ -183,8 +184,11 @@ struct GameSettings: Equatable {
         if let v = flag("show_fps") { showFPS = v }
         if let v = flag("achievement_banners") { achievementBanners = v }
         if let v = flag("hdr") { hdr = v }
-        if let v = ini["hdr_highlights"].flatMap(Double.init), v.isFinite {
-            hdrHighlights = min(max(v, 0), 1)
+        if let v = ini["hdr_paper_white"].flatMap(Double.init), v.isFinite {
+            hdrPaperWhite = min(max(v, 0.5), 2)
+        }
+        if let v = ini["hdr_peak"].flatMap(Double.init), v.isFinite {
+            hdrPeak = v > 0 ? min(max(v, 1), 16) : 0
         }
         if let v = flag("metal_hud") { metalHUD = v }
         if let v = flag("mouse_look") { mouseLook = v }
@@ -225,7 +229,9 @@ struct GameSettings: Equatable {
         ini["show_fps"] = showFPS ? "1" : "0"
         ini["achievement_banners"] = achievementBanners ? "1" : "0"
         ini["hdr"] = hdr ? "1" : "0"
-        ini["hdr_highlights"] = String(format: "%.2f", hdrHighlights)
+        ini["hdr_highlights"] = nil
+        ini["hdr_paper_white"] = String(format: "%.2f", hdrPaperWhite)
+        ini["hdr_peak"] = String(format: "%.2f", hdrPeak)
         ini["metal_hud"] = metalHUD ? "1" : "0"
         ini["mouse_look"] = mouseLook ? "1" : "0"
         for effect in Self.effects {
