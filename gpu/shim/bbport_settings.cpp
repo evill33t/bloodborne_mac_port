@@ -27,7 +27,7 @@ bool OwnedKey(const std::string& key) {
         "upscaler", "preset", "sharpen", "sharpness", "jitter", "reactive", "object_motion",
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps",
         "frame_pacing",
-        "model_lod", "output_res",
+        "model_lod", "output_res", "map_view", "map_fog",
         "live_resolution", "shader_compile", "renderer",
         "mouse_look", "mouse_sensitivity", "mouse_invert_y"};
     for (const char* k : owned) {
@@ -88,6 +88,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.mouse_invert_y = i != 0;
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
+    } else if (key == "map_view") {
+        v.map_view = std::clamp(i, 0, 2);
+    } else if (key == "map_fog") {
+        v.map_fog = i != 0;
     } else if (key == "live_resolution") {
         v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
     } else if (key == "shader_compile") {
@@ -307,6 +311,8 @@ void Save() {
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }
+    std::fprintf(file, "map_view=%d\n",v.map_view.load());
+    std::fprintf(file, "map_fog=%d\n",int(v.map_fog.load()));
     std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
                  OutputWidths[v.output_res], OutputHeights[v.output_res]);
     // Read by run.sh at start.

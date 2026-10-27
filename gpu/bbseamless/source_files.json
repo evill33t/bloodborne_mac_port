@@ -1551,6 +1551,26 @@
       "path": "vendor/shadnet/shadnet.proto",
       "source": "server/src/shadnet.proto",
       "sha256": "a6a1879daf244c6a0578d64b9ef96d40b8a9c8054d751e7bd840f79f8e7502fc"
+    },
+    {
+      "path": "../shim/bbport_map_art.cpp",
+      "source": "bbport/gpu/shim/bbport_map_art.cpp",
+      "sha256": "692467a3982b7525db0b090d1dc9972ff41af4da88f4026a2ea99127cfe7c65a"
+    },
+    {
+      "path": "../shim/bbport_map_art.h",
+      "source": "bbport/gpu/shim/bbport_map_art.h",
+      "sha256": "3c39ce6609f165684a686135acc86ccd0626c7bfe29d9992d98d4ebefb572147"
+    },
+    {
+      "path": "../shim/bbport_map_collision.cpp",
+      "source": "bbport/gpu/shim/bbport_map_collision.cpp",
+      "sha256": "b96c33b95620d3a87f682979a6570958a043a4826137bada5604a20797793af9"
+    },
+    {
+      "path": "../../tests/test_map_art.cpp",
+      "source": "bbport/tests/test_map_art.cpp",
+      "sha256": "52ea7fddd8186d862d7aa18228cdce216ff468c052a54034e9a8e959d8155dad"
     }
   ],
   "path_base": "gpu/bbseamless; ../../ paths refer to repository scripts"

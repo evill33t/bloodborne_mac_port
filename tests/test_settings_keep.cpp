@@ -44,11 +44,16 @@ int main() {
     Load();
     assert(Get().upscaler == UpscalerFsr3 && Get().preset == 2);
     Get().preset = 3;
+    Get().map_view = 2;
     Save();
     std::string text = Read(path);
     assert(Count(text, "fps_cap=40") == 1 && Count(text, "fullscreen=1") == 1);
     assert(Count(text, "renderer=") == 0); // the removed renderer setting is dropped
     assert(Count(text, "preset=3") == 1 && Count(text, "preset=2") == 0);
+    assert(Count(text, "map_view=2") == 1);
+    Get().map_view = 0;
+    Load();
+    assert(Get().map_view == 2);
     assert(Count(text, "upscaler=fsr3") == 1 && Count(text, "# a comment") == 0);
     Save(); // again: still once each
     text = Read(path);

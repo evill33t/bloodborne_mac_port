@@ -42,7 +42,7 @@ arm64 Metal host; game hooks and networking run in the x86-64 Rosetta game proce
 | Control | Action |
 | --- | --- |
 | F6, or Co-op Team in the settings overlay | Team creation, invites by name/code, online hunters, readiness, world selection, join/leave and death mode |
-| F8, or hold the controller touchpad | World map, lamps, saved exploration, cleared areas, teammates and own bloodstain; travel to lit lamps |
+| F8, or hold the controller touchpad | Rendered terrain map, lamps, saved exploration, cleared areas, teammates and own bloodstain; travel to lit lamps |
 | G, or double-tap the touchpad | Ping where the camera aims; right-click the map to ping a location |
 | A single touchpad tap | The game's original gesture menu, after the double-tap interval |
 | F7, or L3 + Square | Free camera; use again to return |
@@ -56,7 +56,29 @@ and spectating, rot, trading (including equipment payloads), chalice sharing, bl
 retention, boss/event adaptations, shared trophies, optional enemy scaling/harder enemies,
 team duels, and invasion requests. Incoming trophies are recorded in the co-op save folder's
 `trophies.log`, using the port's existing `id timestamp` format, without echoing them back.
-The map uses a coordinate chart and exploration shading; it does not bundle a terrain atlas.
+The map defaults to **Rendered terrain**. It draws the player's own MSB placements, FLVER
+geometry and BC1/BC7 textures, with baked lighting, color grading, point lights and collision
+floors. No game assets or premade terrain atlas are bundled.
+
+In **F8 > View**, choose **Live 3D** for the optional native Metal view, or **Coordinates** for
+the grid. Drag to pan, scroll or use the slider to zoom, use **Fit area** to frame the area,
+and enable **Follow player** to recenter. Live 3D adds **Turn** and **Tilt**. Both projections
+retain teammate positions, lamps, bloodstains and pings. Right-click pings lie on the camera's
+current floor height; roofs and elevated surfaces are not ray-picked. Travel still uses the
+lit-lamp list. The flat terrain view automatically shows collision floors when indoors.
+
+**Fog of war** reveals terrain around explored ground, the player and lit lamps; cleared areas
+show fully. Turning it off previews the entire terrain. The view and fog choices are saved
+as `map_view=0|1|2` (default 1) and `map_fog=0|1` (default 1) in `bbport.ini`.
+
+An area's first request generates its terrain on a utility worker; the coordinate map remains
+usable while it works. Live 3D also generates a simplified colored mesh. Compressed `.bbmap`
+and `.bbmesh` files live under `map/metal-v1-<asset-signature>/` in `BB_GPU_USER_DIR`, alongside
+the existing GPU caches. The signature includes map-file names, sizes and modification times,
+following mod-view links. Source changes select a new cache directory; deleting this generated
+folder safely rebuilds it. Texture-only modifications that deliberately preserve both size
+and timestamp require a manual cache removal. CPU results retain one area and GPU resources
+are held through command-buffer completion; 3D buffers are released when its view closes.
 
 The team leader's launcher settings choose rot, group travel, travel voting and enemy scaling.
 The harder-enemy field accepts `off` or three multipliers from 1 to 10 (HP, damage, poise).
@@ -126,7 +148,8 @@ logs distinguish successful assertions from failed fixture attempts; forced deat
 revive test, and `cut-link` takes seconds. Original seed hashes were checked after each run.
 Final reconnect/travel results are recorded in `docs/SEAMLESS_COOP_VALIDATION.md`.
 
-`build_macos.sh --test` includes the launch identity/save/route checks, actual dylib ABI and
+`build_macos.sh --test` includes map format/raster/cache tests and camera/ping/fog tests on
+both architectures, the launch identity/save/route checks, actual dylib ABI and
 fail-closed image checks, Mac socket readiness/Mach protections/touch gestures, shared trophy
 persistence, existing online imports/codec/session tests, runtime pad tests, launcher model
 checks and process-ring tests. See [source provenance](../gpu/bbseamless/PROVENANCE.md).

@@ -134,6 +134,8 @@ if [[ ${1:-} == --test ]]; then
     /usr/bin/clang++ -std=c++23 "${ARCH[@]}" -Igpu/bbseamless/include -Igpu/bbseamless \
         tests/test_seamless_mac.cpp gpu/bbseamless/mac_epoll.cpp -o out/seamless-mac-test
     out/seamless-mac-test
+    bash tests/test_map.sh arm64
+    bash tests/test_map.sh x86_64
     if [[ -f out/gpu/libbbseamless.dylib ]]; then
         /usr/bin/clang++ -std=c++20 "${ARCH[@]}" -I. tests/test_seamless_module.cpp -o out/seamless-module-test
         out/seamless-module-test "$ROOT/out/gpu/libbbseamless.dylib" default

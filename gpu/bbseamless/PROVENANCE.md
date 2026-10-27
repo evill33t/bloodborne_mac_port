@@ -23,15 +23,23 @@ copies also carry `adapted_sha256`; paths are relative to this directory. `touch
 the reference runtime's MapHold gesture state, with the complete original file hash retained.
 The event helper under `scripts/seamless/` comes from `tools/re/party_boss_events.py`.
 The `text/` helpers come from `bbport/gpu/shim/bbport_game_art.*`,
-`bbport_save_editor.h` and `bbport_save_editor_items.cpp`; only read-only game text parsing is
+`bbport_save_editor.h` and `bbport_save_editor_items.cpp`; read-only text/texture parsing is
 used for the UI. Kernel error/time headers retain their emulator source paths in the manifest.
+
+The terrain readers/rasterizer in `../shim/bbport_map_art.*`, `bbport_map_collision.cpp` and
+`../../tests/test_map_art.cpp` retain the pinned reference's source hashes. Collision reading
+also retains its Hunter's Atlas GPL notice. The native GPU target compiles the existing
+`text/bbport_game_art.cpp` through a shim without loading the network module. The worker/cache,
+map camera/fog and Metal resource ownership are local adapters. The live Metal shader in
+`../shim/bbport_overlay_metal.mm` ports the reference's
+`bbport/gpu/shim/shaders/map_3d.vert` and `map_3d.frag`; it uses no Vulkan renderer or loader.
 
 Local adapters include `CMakeLists.txt`, `client.h`, `mac_client.cpp`, `mac_epoll.cpp`,
 `mac_memory.h`, `native_ui.cpp`, `ui.h`, `touch.h`, `include/common/float_chars.h` and the export
 list. Adaptations supply kqueue readiness, Mach memory/protection queries, libc++ compatibility
 on macOS 15, pthread attachment and the port's runtime callbacks. The native Metal overlay,
 versioned cross-process snapshots/actions and Metal portrait readback live in `gpu/shim/` and
-`gpu/shadps4/video_core/texture_cache/`. No renderer from the reference project is imported.
+`gpu/shadps4/video_core/texture_cache/`. No Vulkan renderer from the reference project is imported.
 
 The normal bootstrap pins Zydis 4.1.1 at
 `a2278f1d254e492f6a6b39f6cb5d1f5d515659dc` (including Zycore), and Xbyak at

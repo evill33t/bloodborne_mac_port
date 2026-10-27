@@ -696,8 +696,9 @@ Choose **Seamless Co-op** in the launcher's Online tab for the integrated
 [bloodborne-server client](docs/SEAMLESS_COOP_CLIENT.md), using
 `bloodborne.phobos.services` by default. Turn **Play online** on; registration is automatic.
 Use **F6** for teams and trading, **F8** for map/travel, **G** for pings and **F7** for free
-camera. Offline saves are preserved in a separate namespace. The branch includes the
-reference's game hooks and native Mac controls/HUD; see the linked guide for tested behavior
+camera. Offline saves are preserved in a separate namespace. Terrain maps use your own game
+files, with an optional **F8 > View > Live 3D** Metal view. The branch includes the reference's
+game hooks and native Mac controls/HUD; see the linked guide for tested behavior
 and the remaining campaign, DLC and cross-platform validation limits.
 
 Step-by-step setup and troubleshooting for the retained THD and shadNet pools:

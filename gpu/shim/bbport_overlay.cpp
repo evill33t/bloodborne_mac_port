@@ -1666,7 +1666,8 @@ void ScriptedInput() {
             const std::string chars = t.substr(5);
             event.text.text = chars.c_str();
             HandleEvent(event);
-        } else if (float x = 0, y = 0; std::sscanf(t.c_str(), "click:%f,%f", &x, &y) == 2) {
+        } else if (float x = 0, y = 0; std::sscanf(t.c_str(), "click:%f,%f", &x, &y) == 2 ||
+                   std::sscanf(t.c_str(), "right-click:%f,%f", &x, &y) == 2) {
             // Window id 0: no window, density 1, so the coordinates are drawable pixels.
             SDL_Event event{};
             event.type = SDL_EVENT_MOUSE_MOTION;
@@ -1676,7 +1677,7 @@ void ScriptedInput() {
             for (const bool down : {true, false}) {
                 event = {};
                 event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
-                event.button.button = SDL_BUTTON_LEFT;
+                event.button.button = t.starts_with("right-click:") ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
                 event.button.down = down;
                 event.button.x = x;
                 event.button.y = y;

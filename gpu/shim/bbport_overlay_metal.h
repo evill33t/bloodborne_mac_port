@@ -9,6 +9,7 @@
 
 #include <functional>
 #include "common/types.h"
+#include "bbport_map_art.h"
 
 namespace Metal {
 class Device;
@@ -26,5 +27,13 @@ bool Init(Metal::Device& device, u32 pixel_format);
 void Frame(void* command_buffer, void* target, const std::function<void()>& build);
 // A cached co-op portrait, kept alive through completion of the frame that draws it.
 void* PortraitTexture(unsigned slot, u32 version, const u8* rgba, u32 side);
+// Current terrain image; replacements and 3D resources survive command-buffer completion.
+void* MapTexture(u64 version, const BbMapArt::Chart& chart, const u8* rgba);
+struct MapCamera {
+    float cx, cy, cz, zoom, yaw, pitch, width, height;
+};
+void* Map3d(u32 map, const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
+            const BbMapArt::Chart& chart, const MapCamera& camera);
+void ClearMap3d();
 
 } // namespace BbOverlay::MetalBackend

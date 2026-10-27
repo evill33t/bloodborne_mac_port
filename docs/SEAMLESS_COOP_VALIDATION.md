@@ -82,8 +82,8 @@ voting, item/equipment trades beyond echoes, cutscene voting and shared trophy d
 not all individually exercised in-game. Their reference implementations and client controls
 are integrated; trophy persistence also has a focused native test. Legacy retail messages,
 ghosts and bloodstains use the configured backend endpoints, but each was not separately
-placed/replayed in this run. The map is a coordinate/exploration view rather than the
-reference's terrain atlas. Invasions were enabled and tested in the follow-up below; their
+placed/replayed in this run. That initial map was a coordinate/exploration view; terrain maps
+were added in the follow-up below. Invasions were enabled and tested in the follow-up below; their
 retail red tint/native kind/sign, rewards/covenants and mixed Windows/Mac behavior remain
 unverified.
 
@@ -117,3 +117,41 @@ logs/scripts/results, `shots/hostile-arrived.png`, `shots/pvp-damage.png` and `s
 The earlier friendly native-kind attempt is retained in `native-kind/`. Both clients were
 stopped after the checks. The HUD now describes searching, arrival, active invasion and return
 in ordinary text, without internal player IDs or numeric protocol phases.
+
+## Rendered terrain and live Metal map - 2026-10-27
+
+Reused the pinned reference's MSB/FLVER/TPF/BTL/collision readers and terrain rasterizer,
+with a native utility worker/cache and Metal 3D pass. All terrain comes from the player's
+own files. The coordinate fallback works while terrain is being generated or unavailable.
+The optional 3D view renders a simplified mesh with vertex colors and detailed terrain
+textures on top surfaces. Its walls are approximations, not the retail renderer's materials.
+
+- Central Yharnam generated a textured chart in 14.6 seconds and its live mesh in 15.5 seconds
+  on this Mac. The generated cache files were 8.5 MiB and 16 MiB. Both clients subsequently
+  loaded the chart in 0.1–0.3 seconds and the host loaded its mesh in 0.2 seconds.
+- Two isolated real Mac clients joined the same hunt on `bloodborne.phobos.services`. Both
+  asserted a two-member game session and party. The flat and 3D views showed the teammate
+  marker; the host's native right-click in its rotated 3D map produced a ping on the guest's
+  flat terrain map. The scripted map-ping path also passed its native ping assertion.
+- Checked the visible fog toggle, fit-area control, 46-degree live rotation, and
+  closing/reopening the 3D view. Controls stayed visible after the layout fix.
+  Mouse picking uses the camera's floor plane, not a ray through the roof/wall mesh.
+- Metal validation was enabled. The successful two-client run had no failed autoplay steps,
+  shader errors, GPU faults or Metal validation assertions. Original seed save hashes and
+  executable hash remained unchanged. Both clients were stopped after the checks.
+- Map parser/raster/cache and floor-replacement fixtures, projection/ping round trips, soft fog, mesh persistence,
+  worker cache eviction and missing-area fallback pass on arm64 and x86-64. Real asset checks
+  verified Yharnam's three lamps and Cathedral Ward's 92 collision meshes / 466,650 floor
+  triangles, including a floor under the Grand Cathedral lamp. Settings round-trip and all
+  five launch/save-isolation tests passed.
+- `BB_LTO=OFF BB_NET=ON bash build_macos.sh --test` passed, including process-split, launcher
+  and native Metal checks. The rebuilt 155 MiB app / 55 MiB ZIP passed deep strict signature
+  verification. Its bundled Python/scripts, x86 runtime and arm64 Metal host authenticated,
+  entered the world and displayed the live terrain map (`PACKAGED_TERRAIN_PASS`); both cache
+  loads took 0.1 seconds. The app signature still verified after that game session.
+
+Evidence: `out/ingame-terrain-2026-10-27/validation.json`, per-role scripts/logs/results,
+`host/terrain-3d-rotated.png`, `host/reopened-3d.png`, `guest/terrain-full.png` and
+`guest/received-map-ping.png`. This is bounded Central Yharnam gameplay and Cathedral Ward
+asset parsing evidence; full DLC/chalice terrain coverage and mixed Windows/Mac play were
+not exercised. No server deployment or firewall change was required.

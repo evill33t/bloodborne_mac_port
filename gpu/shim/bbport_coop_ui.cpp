@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_coop_ui.h"
 #include "bbport_split.h"
+#include "bbport_map_charts.h"
+#include "bbport_map_view.h"
+#include "bbport_settings.h"
+#include "bbport_map_fog.h"
 #include "bbport_overlay_metal.h"
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -165,7 +169,11 @@ void Trade(const BbCoopUi& s) {
     } ImGui::End();
 }
 void Map(const BbCoopUi& s) {
-    bool open=true;ImGui::SetNextWindowSize(ImVec2(820*ImGui::GetFontSize()/17,650*ImGui::GetFontSize()/17),ImGuiCond_FirstUseEver);
+    bool open=true;
+    const float scale=ImGui::GetFontSize()/17;
+    const ImVec2 limit(ImGui::GetIO().DisplaySize.x-40,ImGui::GetIO().DisplaySize.y-60);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(std::min(650*scale,limit.x),std::min(780*scale,limit.y)),limit);
+    ImGui::SetNextWindowSize(ImVec2(std::min(920*scale,limit.x),std::min(820*scale,limit.y)),ImGuiCond_FirstUseEver);
     if(ImGui::Begin("World map",&open)) {
         if(!s.has_map) ImGui::TextUnformatted("Waiting for the game map...");
         const auto& map=s.map;
@@ -182,32 +190,89 @@ void Map(const BbCoopUi& s) {
         if(s.explored_map!=shown) {
             BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_AREA;c.map=shown;Send(c);
         }
-        ImGui::SliderFloat("Zoom",&zoom,0.1f,5.0f,"%.1f");
-        const ImVec2 start=ImGui::GetCursorScreenPos(),size=ImVec2(std::max(250.0f,ImGui::GetContentRegionAvail().x),300);
-        ImGui::InvisibleButton("map canvas",size);auto* draw=ImGui::GetWindowDrawList();
-        draw->AddRectFilled(start,ImVec2(start.x+size.x,start.y+size.y),IM_COL32(18,24,28,255));
-        float cx=shown==map.map?map.x:0,cz=shown==map.map?map.z:0;
-        if(shown!=map.map) for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) if(map.lamps[i].map==shown) {cx=map.lamps[i].x;cz=map.lamps[i].z;break;}
-        auto at=[&](float x,float z) {return ImVec2(start.x+size.x*.5f+(x-cx)*zoom,start.y+size.y*.5f-(z-cz)*zoom);};
-        draw->PushClipRect(start,ImVec2(start.x+size.x,start.y+size.y),true);
+        int view=BbSettings::Get().map_view;
+        if(ImGui::Combo("View",&view,"Coordinates\0Rendered terrain\0Live 3D\0")) {BbSettings::Get().map_view=view;BbSettings::Save();}
+        bool fog=BbSettings::Get().map_fog;
+        if(ImGui::Checkbox("Fog of war",&fog)) {BbSettings::Get().map_fog=fog;BbSettings::Save();}
+        auto chart=view?BbMapCharts::Get(shown):nullptr;
+        auto mesh=view==2 && chart?BbMapCharts::GetMesh(shown):nullptr;
+        const bool live=view==2 && chart && mesh;
+        static bool follow=true;static float pan_x=0,pan_z=0,yaw=0,pitch=.9f;
+        static uint32_t previous=0;
+        if(previous!=shown) {pan_x=pan_z=0;previous=shown;follow=true;}
+        ImGui::SliderFloat("Zoom",&zoom,.1f,12.f,"%.1f px/m");
+        ImGui::Checkbox("Follow player",&follow);ImGui::SameLine();
+        const bool fit=ImGui::Button("Fit area");
+        if(view==2) {ImGui::SliderAngle("Turn",&yaw,-180,180);ImGui::SliderAngle("Tilt",&pitch,20,90);}
+        const ImVec2 start=ImGui::GetCursorScreenPos(),size=ImVec2(std::max(250.f,ImGui::GetContentRegionAvail().x),std::max(100.f,ImGui::GetContentRegionAvail().y-140.f-ImGui::GetTextLineHeightWithSpacing()*7-ImGui::GetFrameHeightWithSpacing()));
+        ImGui::InvisibleButton("map canvas",size,ImGuiButtonFlags_MouseButtonLeft|ImGuiButtonFlags_MouseButtonRight);
+        const bool hovered=ImGui::IsItemHovered();auto* draw=ImGui::GetWindowDrawList();
+        const ImVec2 end(start.x+size.x,start.y+size.y);
+        float cx=shown==map.map?map.x:0,cz=shown==map.map?map.z:0,cy=shown==map.map?map.y:0;
+        if(shown!=map.map) for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) if(map.lamps[i].map==shown) {cx=map.lamps[i].x;cz=map.lamps[i].z;cy=map.lamps[i].y;break;}
+        if(follow) {pan_x=cx;pan_z=cz;}
+        if(fit && chart) {follow=false;pan_x=chart->x0+chart->width/chart->ppm*.5f;pan_z=chart->z1-chart->height/chart->ppm*.5f;zoom=std::min(size.x/(chart->width/chart->ppm),size.y/(chart->height/chart->ppm))*.95f;}
+        BbMapView::Camera camera{pan_x,cy,pan_z,zoom,live?yaw:0,live?pitch:1.5707963268f};
+        if(hovered && ImGui::GetIO().MouseWheel!=0) zoom=std::clamp(zoom*std::pow(1.15f,ImGui::GetIO().MouseWheel),.1f,12.f);
+        if(hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+            const auto& delta=ImGui::GetIO().MouseDelta;auto p=camera.Ground(-delta.x,-delta.y);
+            pan_x=p[0];pan_z=p[1];follow=false;camera.x=pan_x;camera.z=pan_z;
+        }
+        camera.zoom=zoom;
+        auto at=[&](float x,float z,float y) {auto p=camera.Project(x,y,z);return ImVec2(start.x+size.x*.5f+p[0],start.y+size.y*.5f+p[1]);};
+        draw->PushClipRect(start,end,true);draw->AddRectFilled(start,end,IM_COL32(18,24,28,255));
         bool cleared=false;
         for(int i=0;i<std::clamp(map.cleared_count,0,24);++i) cleared|=map.cleared[i]==shown;
-        if(cleared) draw->AddRectFilled(start,ImVec2(start.x+size.x,start.y+size.y),IM_COL32(38,54,48,255));
-        else if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192);++i) {
-            const float x=s.explored[2*i]*BBCOOP_MAP_CELL,z=s.explored[2*i+1]*BBCOOP_MAP_CELL;
-            draw->AddRectFilled(at(x,z+BBCOOP_MAP_CELL),at(x+BBCOOP_MAP_CELL,z),IM_COL32(45,65,61,255));
+        if(chart) {
+            static uint64_t last=0;static std::vector<uint8_t> pixels;
+            uint64_t stamp=14695981039346656037ull;
+            auto mix=[&](uint64_t n){stamp^=n;stamp*=1099511628211ull;};
+            const bool floor=!live && shown==map.map && BbMapArt::UnderRoof(*chart,map.x,map.y,map.z);
+            mix(reinterpret_cast<uintptr_t>(chart.get()));mix(shown);mix(cleared);mix(fog);
+            mix(uint64_t(int64_t(std::floor(map.x/2))));mix(uint64_t(int64_t(std::floor(map.z/2))));mix(floor?uint64_t(int64_t(std::floor(cy))):UINT64_MAX);
+            if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192)*2;++i) mix(uint16_t(s.explored[i]));
+            for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) mix(map.lamps[i].lit);
+            if(last!=stamp) {
+                pixels=chart->rgba;if(floor) BbMapArt::FloorView(*chart,std::floor(cy),pixels.data());
+                std::vector<BbMapArt::Vec3> reveal;
+                if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192);++i)
+                    reveal.push_back({(s.explored[2*i]+.5f)*float(BBCOOP_MAP_CELL),(s.explored[2*i+1]+.5f)*float(BBCOOP_MAP_CELL),40});
+                for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {const auto& lamp=map.lamps[i];
+                    if(lamp.map==shown && lamp.lit) reveal.push_back({lamp.x,lamp.z,60});}
+                if(map.has_me && shown==map.map) reveal.push_back({map.x,map.z,40});
+                if(fog && !cleared) BbMapView::Fog(*chart,reveal,pixels);
+                last=stamp;
+            }
+            void* texture=BbOverlay::MetalBackend::MapTexture(stamp,*chart,pixels.data());
+            if(live) texture=BbOverlay::MetalBackend::Map3d(shown,mesh,*chart,{camera.x,camera.y,camera.z,camera.zoom,camera.yaw,camera.pitch,size.x,size.y});
+            const ImTextureRef ref{static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture))};
+            if(texture) {
+                if(live) draw->AddImage(ref,start,end);
+                else draw->AddImage(ref,at(chart->x0,chart->z1,cy),at(chart->x0+chart->width/chart->ppm,chart->z1-chart->height/chart->ppm,cy));
+            }
+        } else {
+            if(cleared) draw->AddRectFilled(start,end,IM_COL32(38,54,48,255));
+            else if(s.explored_map==shown) for(int i=0;i<std::clamp(s.explored_count,0,8192);++i) {
+                const float x=s.explored[2*i]*BBCOOP_MAP_CELL,z=s.explored[2*i+1]*BBCOOP_MAP_CELL;
+                draw->AddRectFilled(at(x,z+float(BBCOOP_MAP_CELL),cy),at(x+float(BBCOOP_MAP_CELL),z,cy),IM_COL32(45,65,61,255));
+            }
+            for(float x=0;x<size.x;x+=40) draw->AddLine(ImVec2(start.x+x,start.y),ImVec2(start.x+x,end.y),IM_COL32(40,48,52,255));
+            for(float y=0;y<size.y;y+=40) draw->AddLine(ImVec2(start.x,start.y+y),ImVec2(end.x,start.y+y),IM_COL32(40,48,52,255));
         }
-        for(float x=0;x<size.x;x+=40) draw->AddLine(ImVec2(start.x+x,start.y),ImVec2(start.x+x,start.y+size.y),IM_COL32(40,48,52,255));
-        for(float y=0;y<size.y;y+=40) draw->AddLine(ImVec2(start.x,start.y+y),ImVec2(start.x+size.x,start.y+y),IM_COL32(40,48,52,255));
-        for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {const auto& lamp=map.lamps[i];if(lamp.map==shown) draw->AddCircleFilled(at(lamp.x,lamp.z),5,lamp.lit?IM_COL32(255,210,90,255):IM_COL32(100,100,100,255));}
-        for(int i=0;i<std::clamp(map.member_count,0,4);++i) {const auto& m=map.members[i];if(m.map==shown && m.has_at) {auto p=at(m.x,m.z);draw->AddCircleFilled(p,5,IM_COL32(80,200,255,255));draw->AddText(ImVec2(p.x+7,p.y),IM_COL32_WHITE,Hunter(m.name));}}
-        if(map.has_me && shown==map.map) draw->AddCircleFilled(at(map.x,map.z),6,IM_COL32(130,255,150,255));
-        if(map.has_stain && map.stain.map==shown) draw->AddCircleFilled(at(map.stain.x,map.stain.z),6,IM_COL32(230,60,70,255));
-        for(int i=0;i<std::clamp(s.pings.count,0,4);++i) {const auto& ping=s.pings.pings[i];if(ping.map==shown) draw->AddCircle(at(ping.x,ping.z),9,IM_COL32(255,240,130,255),0,2);}
+        for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {const auto& lamp=map.lamps[i];if(lamp.map==shown) draw->AddCircleFilled(at(lamp.x,lamp.z,lamp.y),5,lamp.lit?IM_COL32(255,210,90,255):IM_COL32(100,100,100,255));}
+        for(int i=0;i<std::clamp(map.member_count,0,4);++i) {const auto& m=map.members[i];if(m.map==shown && m.has_at) {auto p=at(m.x,m.z,m.y);draw->AddCircleFilled(p,5,IM_COL32(80,200,255,255));draw->AddText(ImVec2(p.x+7,p.y),IM_COL32_WHITE,Hunter(m.name));}}
+        if(map.has_me && shown==map.map) draw->AddCircleFilled(at(map.x,map.z,map.y),6,IM_COL32(130,255,150,255));
+        if(map.has_stain && map.stain.map==shown) draw->AddCircleFilled(at(map.stain.x,map.stain.z,map.stain.y),6,IM_COL32(230,60,70,255));
+        for(int i=0;i<std::clamp(s.pings.count,0,4);++i) {const auto& ping=s.pings.pings[i];if(ping.map==shown) draw->AddCircle(at(ping.x,ping.z,ping.y),9,IM_COL32(255,240,130,255),0,2);}
         draw->PopClipRect();
-        if(ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) { const auto p=ImGui::GetIO().MousePos;BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_PING;c.map=shown;c.x=cx+(p.x-start.x-size.x*.5f)/zoom;c.z=cz-(p.y-start.y-size.y*.5f)/zoom;c.y=map.y;Send(c); }
-        ImGui::TextDisabled("Green: you   Blue: teammates   Gold: lit lamps   Red: bloodstain   Right-click: ping");
-        ImGui::TextDisabled(cleared?"Area cleared":"Explored ground is shaded green; exploration is saved.");
+        if(hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+            const auto p=ImGui::GetIO().MousePos;auto ground=camera.Ground(p.x-start.x-size.x*.5f,p.y-start.y-size.y*.5f);
+            BbCoopCommand c{};c.version=BB_COOP_UI_VERSION;c.action=BB_COOP_MAP_PING;c.map=shown;c.x=ground[0];c.z=ground[1];c.y=cy;Send(c);
+        }
+        if(view && (!chart || (view==2 && !mesh))) ImGui::TextWrapped("%s",BbMapCharts::Status(shown,chart && view==2).c_str());
+        ImGui::TextDisabled("Drag: pan   Scroll: zoom   Right-click: ping at your floor height");
+        ImGui::TextDisabled("Green: you   Blue: teammates   Gold: lit lamps   Red: bloodstain");
+        ImGui::TextDisabled(cleared?"Area cleared":"Unexplored terrain is dimmed; exploration is saved.");
         if(map.has_stain) ImGui::Text("Bloodstain: %d echoes",map.stain.echoes);
         if(ImGui::BeginChild("lamps",ImVec2(0,140))) for(int i=0;i<std::clamp<int>(map.lamp_count,0,BBCOOP_MAP_LAMPS);++i) {
             const auto& lamp=map.lamps[i];if(lamp.map!=shown) continue;ImGui::PushID(i);
@@ -325,6 +390,7 @@ bool Shortcut(const SDL_Event& e) {
 }
 void Render() {
     static BbCoopUi s{};{std::scoped_lock lock{snapshot_mutex};s=latest;}
+    if(!s.enabled || !s.map_screen || BbSettings::Get().map_view!=2) BbOverlay::MetalBackend::ClearMap3d();
     if(!s.enabled) return;
     trade_capture=trade_open;
     Hud(s);if(s.team_screen) Team(s);if(s.map_screen) Map(s);Trade(s);Questions(s);

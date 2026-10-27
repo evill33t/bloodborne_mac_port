@@ -88,6 +88,8 @@ struct Values {
     /// Applied at start (patches.py); the menu shows when a restart is needed.
     std::atomic<bool> effects[EffectCount]{};
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
+    std::atomic<int> map_view{1}; ///< 0 coordinates, 1 rendered terrain, 2 live Metal 3D (opt in)
+    std::atomic<bool> map_fog{true}; ///< reveal terrain near explored ground and lit lamps
     std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
     /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest
     /// on the Steam Deck and older GPUs), -1 auto (off on a Mac), 1 on. On restart.

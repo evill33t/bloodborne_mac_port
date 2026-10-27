@@ -64,6 +64,8 @@ if ((${#private_views[@]})); then
     cleanup_views() { "$PYTHON" -c 'import shutil,sys; [shutil.rmtree(p) for p in sys.argv[1:]]' "${private_views[@]}"; }
     trap cleanup_views EXIT
 fi
+# The native map renderer reads the same mod/online view as the game, never writes to it.
+export BB_MAP_GAME_DIR="$game"
 "$PYTHON" scripts/prepare.py "$game" --out "$out"
 "$PYTHON" scripts/link_libc.py "$game" --out "$out"
 "$PYTHON" scripts/link_modules.py "$game" --out "$out"
