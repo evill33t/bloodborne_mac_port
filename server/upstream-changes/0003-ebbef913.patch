@@ -1,0 +1,1293 @@
+From ebbef91358246c860bee80f03393fa56de2810a6 Mon Sep 17 00:00:00 2001
+From: Ronny Stiftel <ronny.stiftel@tomcom.de>
+Date: Tue, 27 Oct 2026 17:34:59 +0100
+Subject: [PATCH] Award covenant Blood Dregs from frozen native oath metadata
+
+Use the original 1.09 native PvP reward calls and ItemLotParam rows: Corruption
+awards one goods-704 Blood Dreg, while the original Radiance, Hunter and
+blood-addled Hunter lots contain no item. Freeze normalized oath metadata at
+match/join; mid-visit swaps cannot change the winner's entitlement.
+
+Add the append-only covenant capability and validate the precise extended grant
+shape. Legacy reward clients retain Insight/Echoes grants. Pending Dreg grants
+remain whole and durable through old-client reconnects, and resume on a capable
+login or capability upgrade. Document original asset checksums, native addresses,
+field layouts and the 99-held/99-repository Blood Dreg capacity.
+
+Validation: isolated opc ARM64 Docker image built successfully; all 10 focused
+CTest suites passed, including frozen oath/empty-lot fixtures, both victory roles,
+malformed goods, legacy shapes, solo durable reconnect and acknowledgement. No
+production service, data, configuration or unrelated container was changed.
+The client remains responsible for crash-atomic inventory/save delivery.
+
+Original-author: FromSoftware (original Bloodborne 1.09 game, data and events)
+Original-author: Kaniel / lKaniel (original invasion and co-op design/source)
+Original-author: Vitalii Shevchuk (original source history)
+Original-author: shadNet Project contributors (original SPDX copyright holders)
+Original-author: Soulsmods/Paramdex contributors (EvanDeadlySins, GiveMeThePowa, katalash, Pavuk, thefifthmatt, TKGP/JKAnderson, Vawser; field definitions)
+Original-author: Grimrukh / Soulstruct (event instruction alias corroboration)
+Original-source: Owner-supplied read-only Bloodborne 1.09 CUSA00900 archives and reconstructed eboot; checksums/addresses in docs/invasions/COVENANT_REWARDS_EVIDENCE.json
+Original-source: https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/coop/trade.cpp
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/src/bloodborne_world.cpp
+Original-source: https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/ItemLotParam.xml
+Original-source: https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/GemeffectParam.xml
+Original-source: https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/EquipParamGoods.xml
+Original-source: https://github.com/Grimrukh/soulstruct/blob/main/src/soulstruct/bloodborne/events/emevd/emedf.py
+---
+ docs/INVASIONS.md                             |  11 +-
+ docs/INVASION_COVENANT_REWARDS.md             |  88 +++
+ docs/invasions/COVENANT_REWARDS_EVIDENCE.json | 576 ++++++++++++++++++
+ server/coop/coop.proto                        |   7 +
+ server/coop/invasions.h                       |  18 +
+ server/coop/trade.cpp                         |  18 +-
+ server/coop/trade.h                           |   5 +-
+ server/src/bloodborne_world.cpp               |  34 +-
+ server/src/bloodborne_world.h                 |   8 +-
+ server/tests/test_bloodborne_trade.cpp        |  40 ++
+ server/tests/test_bloodborne_world.cpp        | 116 ++++
+ 11 files changed, 903 insertions(+), 18 deletions(-)
+ create mode 100644 docs/INVASION_COVENANT_REWARDS.md
+ create mode 100644 docs/invasions/COVENANT_REWARDS_EVIDENCE.json
+
+diff --git a/docs/INVASIONS.md b/docs/INVASIONS.md
+index 1663aeab..1986d1b0 100644
+--- a/docs/INVASIONS.md
++++ b/docs/INVASIONS.md
+@@ -165,6 +165,9 @@ payment, so duplicate death/end reports cannot issue another reward. A notice ca
+ joining, environmental host death, party wipe, boss, timeout, disconnect, cancelled search, or
+ turning invasions off never pays. Guests do not get the host's defending reward.
+ 
++A covenant-capable Corruption winner additionally receives one Blood Dreg, from the original
++native PvP reward lots. See [covenant rewards and primary evidence](INVASION_COVENANT_REWARDS.md).
++
+ The payment is one Insight, plus Blood Echoes according to the explicit server policy in
+ `InvasionVictoryEchoes`: 10% for an invading winner, 30% for a defending host, of
+ `max(0, floor(0.02 L^3 + 3.06 L^2 + 105.6 L - 895))`. The defeated hunter's level is frozen at
+@@ -179,8 +182,9 @@ kind. Opting in requires implementing all of the following:
+ 
+ - `TradeItemKind::Insight=4`, id 0, count 1, empty name/data; it is server-issued and cannot be
+   offered, requested, answered, refunded, or otherwise supplied by a client.
+-- `TradeGrantReason::InvasionReward=2`; its exact item shape is one Insight plus at most one
+-  ordinary Echoes item (kind 1, id 0, positive count). Other items/reasons are rejected.
++- `TradeGrantReason::InvasionReward=2`; its original item shape is one Insight plus at most one
++  ordinary Echoes item (kind 1, id 0, positive count). Covenant-capable clients may additionally
++  receive one goods-704 Blood Dreg; other goods/items/reasons are rejected.
+ - Reward grant IDs have bit 63 set. Ordinary party trade IDs do not. The client applies a valid
+   grant once per run and sends `TradeGranted{id}` only after applying it.
+ 
+@@ -207,4 +211,5 @@ Project contributors, [pinned server source](https://github.com/lKaniel/bloodbor
+ and [invasion lifecycle](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/src/bloodborne_world.cpp).
+ The durable reward mailbox, capability, validation and tests here extend those original
+ GPL-2.0-or-later sources; they do not change their attribution or claim original authorship.
+-Covenant-specific rewards and the Bell-Ringing Woman remain outside this change.
++Covenant-specific reward inventory is described in the linked follow-up; the Bell-Ringing Woman
++remains outside this change.
+diff --git a/docs/INVASION_COVENANT_REWARDS.md b/docs/INVASION_COVENANT_REWARDS.md
+new file mode 100644
+index 00000000..a6fae59d
+--- /dev/null
++++ b/docs/INVASION_COVENANT_REWARDS.md
+@@ -0,0 +1,88 @@
++# Covenant rewards for server-authoritative invasions
++
++A winning hunter wearing **Corruption** receives one Blood Dreg (goods 704), in addition to the
++existing server victory payment. Radiance, Hunter, and the blood-addled Hunter state have no
++extra item payment in the original 1.09 reward lots. They retain the existing Insight/Echoes
++payment. This change does not invent a covenant material for those oaths.
++
++## Original evidence
++
++The owner supplied Bloodborne 1.09 CUSA00900. The original, read-only game archives and their
++embedded row names/values are the primary source. No modified game assets are distributed.
++`docs/invasions/COVENANT_REWARDS_EVIDENCE.json` records the archive/extracted-table checksums,
++native call locations, and the small relevant row facts.
++
++| Native oath marker | GemeffectParam row | Original PvP item lots (host / guest) | Additional item |
++| --- | --- | --- | --- |
++| 6100 Corruption | 2108001 | 5500 / 5510 | goods 704, quantity 1 |
++| 6110 Radiance / Executioner | 2107001 | 5600 / 5610 | none (category -1, item 0) |
++| 6120 Hunter | 2110001 | 5700 / 5710 | none (category -1, item 0) |
++| 6130 blood-addled Hunter state | native effect marker | 5800 / 5810 | none (category -1, item 0) |
++
++The Corruption rows have one enabled slot: category 4 (goods), item 704, weight 100, quantity 1;
++all other weights are zero. `item.msgbnd` FMG 10 names goods 704 **Blood Dreg**. `menu.msgbnd`
++FMG 31/33 identifies the Corruption, Radiance, and Hunter runes and describes their oaths.
++The native reward code checks each of the four effect IDs and selects the corresponding lot:
++Corruption's guest check at virtual `0x01382B08` calls the award for lot 5510 at `0x01382B26`;
++its host check at `0x013830C8` calls lot 5500 at `0x013830E9`. Both call `0x017DDC50`.
++The adjoining branches select the Radiance, Hunter, and blood-addled Hunter lots above.
++The ELF's load-file offset is virtual address + `0x4000`; the evidence records that distinction.
++This is static native/data evidence, not a claim that this document observed runtime awards.
++
++Original `EquipParamGoods` row 704 allows **99 held and 99 in the repository**. Its signed
++16-bit `maxNum` field at row offset `0x36` and `maxRepositoryNum` at `0x48` both contain 99;
++`isDeposit` at byte `0x45`, bit 4, is set. The table establishes capacity and deposit eligibility;
++it does not prove that a particular native inventory call automatically moves overflow to storage.
++A client must verify the actual awarded count and keep the grant pending when capacity blocks it.
++
++For corroboration, common events 9360/9480 require effect 6100 and character type 0 or 1 before
++awarding NPC lot 5520; that lot also gives one Blood Dreg. Dungeon NPC lot 5530 is a different,
++chance-based drop and is not used for player-versus-player rewards.
++
++The original rune text says the Executioners will not cooperate with Vilebloods and describes
++Hunter of Hunters targets. Hostility/matchmaking is separate from this server's reward inventory:
++the original Radiance/Hunter item lots are empty, so those descriptions do not imply extra loot.
++
++## Protocol and lifecycle
++
++The append-only protocol remains 8:
++
++- `Vitals.covenant_effect=19` reports the equipped native marker for the defending hunter.
++- `InvadeRequest.covenant_effect=3` reports the invading hunter's marker.
++- Allowed values are 0, 6100, 6110, 6120 and 6130; unknown values normalize to 0.
++- The invading oath is frozen at match, and the target host's oath at join, alongside the
++  defeated-level snapshots. Changing a rune or the death report during a visit does not change
++  an invasion's reward entitlement.
++- `LobbyHello.covenant_rewards=6`, together with `invasion_rewards=5`, opts in to the extended
++  reason-2 grant: one Insight, optional Echoes, optional one goods-704 Blood Dreg. Every item has
++  empty name/data fields. Only the exact quantity/id is valid; other goods or duplicate items
++  are rejected. Ordinary legitimate trading of Blood Dregs remains supported.
++
++A client with only the original reward capability receives the original Insight/Echoes shape.
++A pending extended grant is withheld whole when an older client reconnects; it stays durable in
++its authenticated mailbox and is replayed when a covenant-capable client signs in. A capability
++upgrade on the same connection also resumes it. The mailbox does not discard or partially pay
++an extended grant to accommodate an old validator. The client owns applying and durably saving
++its payment before acknowledging; this server change does not itself make inventory/save writes
++atomic.
++
++Only the existing joined victory endings pay. Cancellation, environment death of the host,
++party wipe, boss, timeout, disconnect, search cancellation and pre-join death remain unpaid.
++A defending reward belongs to the session host, and a target-kill reward requires
++`killed_by_invader=true`. Guests do not inherit either hunter's covenant entitlement.
++
++## Sources and authors
++
++- FromSoftware: original Bloodborne 1.09 game code, `gameparam.parambnd.dcx` tables,
++  `common.emevd.dcx`, and English game FMGs supplied read-only by the owner.
++- Kaniel / [lKaniel](https://github.com/lKaniel), Vitalii Shevchuk and shadNet Project
++  contributors: [pinned invasion/trade/world-store foundation](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server).
++- Soulsmods/Paramdex contributors (EvanDeadlySins, GiveMeThePowa, katalash, Pavuk, thefifthmatt,
++  TKGP/JKAnderson, Vawser): [ItemLotParam fields](https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/ItemLotParam.xml),
++  [GemeffectParam fields](https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/GemeffectParam.xml),
++  [EquipParamGoods fields](https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/EquipParamGoods.xml).
++  Their [README](https://github.com/soulsmods/Paramdex#readme) identifies the Bloodborne paramdefs
++  as originally shipped with the game and lists the contributors.
++- Grimrukh: [Soulstruct's Bloodborne EMEVD definitions](https://github.com/Grimrukh/soulstruct/blob/main/src/soulstruct/bloodborne/events/emevd/emedf.py),
++  consulted to corroborate event instruction aliases; the actual reward rows/calls above come
++  from the supplied game's original assets and native code.
+diff --git a/docs/invasions/COVENANT_REWARDS_EVIDENCE.json b/docs/invasions/COVENANT_REWARDS_EVIDENCE.json
+new file mode 100644
+index 00000000..46acce99
+--- /dev/null
++++ b/docs/invasions/COVENANT_REWARDS_EVIDENCE.json
+@@ -0,0 +1,576 @@
++{
++  "source_game": "Bloodborne 1.09 CUSA00900",
++  "authors": [
++    "FromSoftware (original game/data/events)",
++    "Kaniel/lKaniel, Vitalii Shevchuk, shadNet contributors (co-op foundation)",
++    "Soulsmods/Paramdex contributors (field definitions)"
++  ],
++  "sources": [
++    "https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/ItemLotParam.xml",
++    "https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/GemeffectParam.xml",
++    "https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/EquipParamGoods.xml"
++  ],
++  "item_lots": [
++    {
++      "id": 5500,
++      "offset": 234528,
++      "original_name": "血族誓約BJ装着時のマルチPvP報酬（ホスト）",
++      "item_ids": [
++        704,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        4,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5510,
++      "offset": 234676,
++      "original_name": "血族誓約BJ装着時のマルチPvP報酬（ゲスト）",
++      "item_ids": [
++        704,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        4,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5520,
++      "offset": 234824,
++      "original_name": "血族誓約BJ装着時のNPC撃破報酬",
++      "item_ids": [
++        704,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        4,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5530,
++      "offset": 234972,
++      "original_name": "血族誓約BJ装着時のNPC撃破報酬（ダンジョン用）",
++      "item_ids": [
++        0,
++        704,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        4,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        99,
++        1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5600,
++      "offset": 235120,
++      "original_name": "血族狩り誓約BJ装着時のマルチPvP報酬（ホスト）",
++      "item_ids": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5610,
++      "offset": 235268,
++      "original_name": "血族狩り誓約BJ装着時のマルチPvP報酬（ゲスト）",
++      "item_ids": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5700,
++      "offset": 235416,
++      "original_name": "狩人狩り誓約BJ装着時のマルチPvP報酬（ホスト）",
++      "item_ids": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5710,
++      "offset": 235564,
++      "original_name": "狩人狩り誓約BJ装着時のマルチPvP報酬（ゲスト）",
++      "item_ids": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5800,
++      "offset": 235712,
++      "original_name": "血に狂った狩人狩り時のマルチPvP報酬（ホスト）",
++      "item_ids": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    },
++    {
++      "id": 5810,
++      "offset": 235860,
++      "original_name": "血に狂った狩人狩り時のマルチPvP報酬（ゲスト）",
++      "item_ids": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "categories": [
++        -1,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "base_weights": [
++        100,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ],
++      "quantities": [
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0,
++        0
++      ]
++    }
++  ],
++  "gems": [
++    {
++      "id": 2107001,
++      "offset": 965008,
++      "original_name": "誓約：血族狩り",
++      "effect": 6110
++    },
++    {
++      "id": 2107002,
++      "offset": 965044,
++      "original_name": "誓約：血族狩り 効果",
++      "effect": 180000
++    },
++    {
++      "id": 2108001,
++      "offset": 965080,
++      "original_name": "誓約：血族",
++      "effect": 6100
++    },
++    {
++      "id": 2108002,
++      "offset": 965116,
++      "original_name": "誓約：血族　効果",
++      "effect": 180010
++    },
++    {
++      "id": 2110001,
++      "offset": 965152,
++      "original_name": "誓約：狩人狩り",
++      "effect": 6120
++    },
++    {
++      "id": 2110002,
++      "offset": 965188,
++      "original_name": "誓約：狩人狩り　効果",
++      "effect": 180020
++    }
++  ],
++  "asset_hashes": {
++    "ItemLotParam": "b4afa2bd11f44780ca88a19a1af047a335bdf14dc9740c77b973c677ca66c2f9",
++    "GemeffectParam": "f4d5d1c33ea1317acee163c485086ff0587ecbd4ee093f91ed00344ad9dc9cf0",
++    "event/common.emevd.dcx": "0cb9f4e5c18b394c4c50ae5642fd40e431fd84db617f4d57be8f65c34242f64f",
++    "param/gameparam/gameparam.parambnd.dcx": "581e28302a231a10ad333806dfc90f41425db4f9f146799dca625f8d83c760c3",
++    "msg/enggb/item.msgbnd.dcx": "ae44ad89e6def2675d0c01eb0da2a8e05a34e8a275cd681d433389db1911a93d",
++    "msg/enggb/menu.msgbnd.dcx": "90c8d4e3173dc4066e066acc8249b57c6df8d11594d0f0899557954466500fa1",
++    "EquipParamGoods": "55544837b0bd3564f3c49637bb3a167d7646f4b405ec61ebdced74ec72cd79a9"
++  },
++  "eboot": {
++    "path": "owner-supplied reconstructed 1.09 eboot.elf",
++    "sha256": "cec1b276e7f9e4db978e57f524f41fbaac594530a3437b002e23f3fab14b4f86",
++    "elf_load_file_to_virtual_delta": -16384,
++    "corruption_guest_marker_check": "0x01382b08",
++    "corruption_guest_lot_call": "0x01382b26",
++    "corruption_host_marker_check": "0x013830c8",
++    "corruption_host_lot_call": "0x013830e9"
++  },
++  "findings": [
++    "Corruption marker6100: one goods704 Blood Dreg in both native PvP reward lots5500/5510.",
++    "Radiance6110, Hunter6120 and blood-addledHunter6130 native PvP lots5600/5610/5700/5710/5800/5810 contain no items.",
++    "Hostile cooperator matchmaking is separate from reward inventory; no extra Radiance/Hunter material should be invented.",
++    "Common events9360/9480 grant NPC Blood Dreg lot5520 with Corruption marker6100; this is corroboration, not the PvP reward source.",
++    "Goods704 has maxNum99, maxRepositoryNum99, isDeposit1 in the supplied original data; automatic native overflow routing was not runtime-verified."
++  ],
++  "analysis_limits": [
++    "Original game archives read without modification.",
++    "Relevant BND4/PARAM/FMG facts decoded using their native formats and Paramdex field definitions.",
++    "Native calls inspected offline with LLVM objdump; no runtime award observation is implied.",
++    "REA native provider unavailable for the supplied reconstructed target; no provider/tool installation performed."
++  ],
++  "blood_dreg_capacity": {
++    "row": 704,
++    "row_offset": "0x2314",
++    "param_sha256": "55544837b0bd3564f3c49637bb3a167d7646f4b405ec61ebdced74ec72cd79a9",
++    "schema_sha256": "482ed48e5c6aa8db5cc86088149c19d31f0dbab7d089a45b5d6d0d0dbfef778c",
++    "maxNum": {
++      "offset": "0x36",
++      "bit": null,
++      "value": 99,
++      "type": "s16"
++    },
++    "maxRepositoryNum": {
++      "offset": "0x48",
++      "bit": null,
++      "value": 99,
++      "type": "s16"
++    },
++    "isDeposit": {
++      "offset": "0x45",
++      "bit": 4,
++      "value": 1,
++      "type": "u8"
++    },
++    "isOnlyOne": {
++      "offset": "0x45",
++      "bit": 2,
++      "value": 0,
++      "type": "u8"
++    },
++    "isAutoReplenish": {
++      "offset": "0x47",
++      "bit": 0,
++      "value": 0,
++      "type": "u8"
++    },
++    "isGuestDrop": {
++      "offset": "0x47",
++      "bit": 3,
++      "value": 0,
++      "type": "u8"
++    }
++  }
++}
+diff --git a/server/coop/coop.proto b/server/coop/coop.proto
+index 06900703..bc032b08 100644
+--- a/server/coop/coop.proto
++++ b/server/coop/coop.proto
+@@ -222,6 +222,9 @@ message Vitals {
+     // Kaniel 2026-10-25: the bosses (handles) this member's game runs now, so that every game picks
+     // the same runner for a fight (BossRunnerPick). The server keeps it with the rest.
+     repeated uint32 bosses = 18;
++    // Equipped native oath marker, for frozen invasion rewards: 0 none/unknown,
++    // 6100 Corruption, 6110 Radiance, 6120 Hunter, 6130 blood-addled Hunter.
++    uint32 covenant_effect = 19;
+ }
+ message VitalsBoard {
+     message Member {
+@@ -455,6 +458,7 @@ message Envelope {
+ message InvadeRequest {
+     uint32 level = 1; // the invader's character level (0: unknown, no level band)
+     bool cancel = 2;
++    uint32 covenant_effect = 3; // native oath marker, as Vitals.covenant_effect
+ }
+ 
+ // server -> the target team's games and the invader: an invader approaches (the team's notice
+@@ -631,6 +635,9 @@ message LobbyHello {
+     // Opt-in extension: server-issued invasion victory grants (Insight kind 4, reason 2).
+     // False for original clients, which must never receive these grants. Wire-compatible with 8.
+     bool invasion_rewards = 5;
++    // Opt-in extension of reason-2 grants: optional one Blood Dreg (goods 704).
++    // Requires invasion_rewards too; legacy reward clients keep their original shape.
++    bool covenant_rewards = 6;
+ }
+ 
+ // game -> server: what the player did in the lobby. The answer is the LobbyState (with a notice
+diff --git a/server/coop/invasions.h b/server/coop/invasions.h
+index e0283e11..fea43839 100644
+--- a/server/coop/invasions.h
++++ b/server/coop/invasions.h
+@@ -57,6 +57,24 @@ constexpr bool InLevelBand(u32 invader, u32 member) {
+ // for provenance and the boundary between this explicit server policy and retail verification.
+ u32 InvasionVictoryEchoes(u32 defeated_level, bool invader_won);
+ 
++// Native 1.09 GemeffectParam oath markers; an unknown client value is never a covenant.
++// See docs/INVASION_COVENANT_REWARDS.md for original assets, field definitions and native calls.
++constexpr u32 CorruptionCovenantEffect = 6100;
++constexpr u32 RadianceCovenantEffect = 6110;
++constexpr u32 HunterCovenantEffect = 6120;
++constexpr u32 BloodAddledHunterCovenantEffect = 6130;
++constexpr u32 NormalizeCovenantEffect(u32 effect) {
++    switch (effect) {
++    case CorruptionCovenantEffect:
++    case RadianceCovenantEffect:
++    case HunterCovenantEffect:
++    case BloodAddledHunterCovenantEffect:
++        return effect;
++    default:
++        return 0;
++    }
++}
++
+ // A team world as the matcher sees it.
+ struct InvasionTarget {
+     struct Member {
+diff --git a/server/coop/trade.cpp b/server/coop/trade.cpp
+index a140812f..005e35ab 100644
+--- a/server/coop/trade.cpp
++++ b/server/coop/trade.cpp
+@@ -102,20 +102,24 @@ std::optional<std::string> TradeGrantItemsProblem(const bbcoop::TradeGrant& gran
+         return TradeItemsProblem(items, false);
+     }
+     if (reason != TradeGrantReason::InvasionReward ||
+-        (grant.id() & InvasionRewardGrantBit) == 0 || items.empty() || items.size() > 2) {
++        (grant.id() & InvasionRewardGrantBit) == 0 || items.empty() || items.size() > 3) {
+         return "not a known server grant";
+     }
+     bool insight = false;
+     bool echoes = false;
++    bool blood_dreg = false;
+     for (const TradeItem& item : items) {
+-        if (item.id != 0 || !item.name.empty() || !item.data.empty()) {
++        if (!item.name.empty() || !item.data.empty()) {
+             return "not an invasion reward";
+         }
+-        if (item.kind == TradeItemKind::Insight && item.count == 1 && !insight) {
++        if (item.kind == TradeItemKind::Insight && item.id == 0 && item.count == 1 && !insight) {
+             insight = true;
+-        } else if (item.kind == TradeItemKind::Echoes && item.count > 0 &&
++        } else if (item.kind == TradeItemKind::Echoes && item.id == 0 && item.count > 0 &&
+                    item.count <= MaxTradeEchoes && !echoes) {
+             echoes = true;
++        } else if (item.kind == TradeItemKind::Goods && item.id == BloodDregGoods &&
++                   item.count == 1 && !blood_dreg) {
++            blood_dreg = true;
+         } else {
+             return "not an invasion reward";
+         }
+@@ -427,12 +431,16 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
+ }
+ 
+ TradeDesk::Result TradeDesk::InvasionVictory(const std::string& member, u64 invasion,
+-                                            const std::string& defeated, u32 echoes) {
++                                            const std::string& defeated, u32 echoes,
++                                            bool blood_dreg) {
+     Result result;
+     TradeItems items{{TradeItemKind::Insight, 0, 1}};
+     if (echoes > 0 && echoes <= MaxTradeEchoes) {
+         items.push_back({TradeItemKind::Echoes, 0, echoes});
+     }
++    if (blood_dreg) {
++        items.push_back({TradeItemKind::Goods, BloodDregGoods, 1});
++    }
+     Grant(result, member, invasion, defeated, "Invasion victory", std::move(items),
+           TradeGrantReason::InvasionReward);
+     return result;
+diff --git a/server/coop/trade.h b/server/coop/trade.h
+index 09d67228..ba663d59 100644
+--- a/server/coop/trade.h
++++ b/server/coop/trade.h
+@@ -48,7 +48,7 @@ enum class TradeState : u32 {
+ enum class TradeGrantReason : u32 {
+     Received = 0, // the other member's part of a trade
+     Returned = 1, // the member's own items back
+-    InvasionReward = 2, // server-issued victory: one Insight and optional Blood Echoes
++    InvasionReward = 2, // server victory: Insight, optional Echoes and covenant Blood Dreg
+ };
+ 
+ struct TradeItem {
+@@ -65,6 +65,7 @@ using TradeItems = std::vector<TradeItem>;
+ // own (weapons, armor, gems and runes), each with its data. Item categories as the game's item ids
+ // carry them (the top 4 bits).
+ constexpr u32 BloodVialGoods = 1000;
++constexpr u32 BloodDregGoods = 704; // original ItemLotParam 5500/5510, one for Corruption victories
+ constexpr u32 QuicksilverBulletGoods = 900;
+ // Reward mailboxes use the high bit, so their acknowledgements cannot consume a party's trade.
+ constexpr u64 InvasionRewardGrantBit = u64{1} << 63;
+@@ -156,7 +157,7 @@ public:
+     Result Granted(const std::string& member, u64 grant);
+     // Server-only victory payment, persisted and replayed by the normal grant/ack machinery.
+     Result InvasionVictory(const std::string& member, u64 invasion,
+-                           const std::string& defeated, u32 echoes);
++                           const std::string& defeated, u32 echoes, bool blood_dreg = false);
+     // Offers past their time, back to their givers.
+     Result Expire(s64 now_ms);
+     // A member's game said hello (a new run): what it is owed again, its grants and the offers
+diff --git a/server/src/bloodborne_world.cpp b/server/src/bloodborne_world.cpp
+index 70e45774..9d6bd2f5 100644
+--- a/server/src/bloodborne_world.cpp
++++ b/server/src/bloodborne_world.cpp
+@@ -1357,6 +1357,7 @@ void Service::TakeBoard(Member& member, PartyWorld& world, const bbcoop::Envelop
+         return;
+     case bbcoop::Envelope::kVitals: {
+         member.level = envelope.vitals().level();
++        member.covenant_effect = NormalizeCovenantEffect(envelope.vitals().covenant_effect());
+         member.boss = envelope.vitals().boss();
+         std::uint32_t wipe_before = 0;
+         if (invasions.contains(world.name)) {
+@@ -1640,6 +1641,7 @@ Service::Result Service::Receive(const ServerLink::Endpoint& from, const QByteAr
+                               .arg(QString::fromStdString(Who(member))));
+         member.party.clear();
+         member.invasion_rewards = false; // renegotiate before sending an extension to a new game
++        member.covenant_rewards = false;
+         // An invader's game that started over is home: its invasion is over.
+         searches.erase(member.key);
+         if (const QString invaded = InvadedBy(member.key); !invaded.isEmpty()) {
+@@ -2182,7 +2184,10 @@ void Service::OnLobbyHello(Member& member, const bbcoop::LobbyHello& hello, qint
+     member.lobby = hello.member();
+     member.display = hello.name();
+     const bool rewards_before = std::exchange(member.invasion_rewards, hello.invasion_rewards());
+-    if (member.invasion_rewards && (arrived || !rewards_before)) {
++    const bool covenants_before = std::exchange(member.covenant_rewards,
++                                                hello.invasion_rewards() && hello.covenant_rewards());
++    if (member.invasion_rewards &&
++        (arrived || !rewards_before || (!covenants_before && member.covenant_rewards))) {
+         ResumeRewards(member, now_ms, result);
+     }
+     if (arrived) {
+@@ -2845,7 +2850,8 @@ void Service::OnInvadeRequest(Member& member, const bbcoop::InvadeRequest& reque
+             QStringLiteral("invasions: %1 refused: %2").arg(who, QString::fromStdString(refused)));
+         return;
+     }
+-    searches[member.key] = {request.level(), now_ms};
++    searches[member.key] = {request.level(), now_ms,
++                            NormalizeCovenantEffect(request.covenant_effect())};
+     result.log.append(
+         QStringLiteral("invasions: %1 (level %2) looks for a world").arg(who).arg(request.level()));
+     Match(now_ms, result);
+@@ -2860,6 +2866,7 @@ void Service::TakeHostile(Member& member, const bbcoop::Envelope& envelope, qint
+         return;
+     case bbcoop::Envelope::kVitals: {
+         member.level = envelope.vitals().level();
++        member.covenant_effect = NormalizeCovenantEffect(envelope.vitals().covenant_effect());
+         if (envelope.vitals().vital() == 3 && !invaded.isEmpty()) { // Vital: dead
+             EndInvasion(invaded, bbcoop::InvasionEnd::INVADER_DIED, now_ms, result);
+             return;
+@@ -2958,6 +2965,7 @@ void Service::Match(qint64 now_ms, Result& result) {
+         invasion.invader_name = invader.lobby;
+         invasion.target = world.session->host();
+         invasion.invader_level = search->second.level;
++        invasion.invader_covenant = search->second.covenant_effect;
+         invasion.matched_ms = now_ms;
+         bbcoop::Envelope notice;
+         notice.mutable_invasion_notice()->set_id(invasion.id);
+@@ -3026,6 +3034,7 @@ void Service::JoinInvasion(PartyWorld& world, Invasion& invasion, qint64 now_ms,
+             if (member.name == invasion.target) {
+                 message.set_map(member.map);
+                 invasion.target_level = member.level;
++                invasion.target_covenant = member.covenant_effect;
+             }
+             SendTo(member, joined, now_ms);
+         }
+@@ -3049,13 +3058,15 @@ void Service::EndInvasion(const QString& world, bbcoop::InvasionEnd::Reason reas
+             if (reason == bbcoop::InvasionEnd::INVADER_DIED && member.party == world &&
+                 member.name == invasion.target && !member.hostile) {
+                 RewardInvasion(member, invasion.id, invasion.invader_name,
+-                               InvasionVictoryEchoes(invasion.invader_level, false), now_ms, result);
++                               InvasionVictoryEchoes(invasion.invader_level, false),
++                               invasion.target_covenant, now_ms, result);
+                 break;
+             }
+             if (reason == bbcoop::InvasionEnd::TARGET_KILLED && killed_by_invader &&
+                 member.key == invasion.invader) {
+                 RewardInvasion(member, invasion.id, invasion.target,
+-                               InvasionVictoryEchoes(invasion.target_level, true), now_ms, result);
++                               InvasionVictoryEchoes(invasion.target_level, true),
++                               invasion.invader_covenant, now_ms, result);
+                 break;
+             }
+         }
+@@ -3121,7 +3132,14 @@ QString Service::RewardFolder(const Member& member) const {
+ void Service::DeliverRewards(Member& member, PartyWorld& mailbox, TradeDesk::Result grants,
+                              qint64 now_ms, Result& result) {
+     for (const TradeDesk::Send& send : grants.sends) {
+-        if (send.to == member.lobby && member.invasion_rewards) {
++        const bool needs_covenant = send.envelope.has_trade_grant() &&
++            std::ranges::any_of(send.envelope.trade_grant().items(), [](const auto& item) {
++                return item.kind() == static_cast<u32>(TradeItemKind::Goods);
++            });
++        // A legacy reward client cannot validate the extended shape. Keep the whole durable
++        // grant for its next capable login rather than partially paying or dropping the Dreg.
++        if (send.to == member.lobby && member.invasion_rewards &&
++            (!needs_covenant || member.covenant_rewards)) {
+             SendTo(member, send.envelope, now_ms);
+         }
+     }
+@@ -3145,7 +3163,8 @@ void Service::ResumeRewards(Member& member, qint64 now_ms, Result& result) {
+ }
+ 
+ void Service::RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
+-                             std::uint32_t echoes, qint64 now_ms, Result& result) {
++                             std::uint32_t echoes, std::uint32_t covenant_effect,
++                             qint64 now_ms, Result& result) {
+     if (!winner.invasion_rewards || winner.lobby.empty()) {
+         result.log.append(QStringLiteral("invasions: victory %1 has no reward-capable winner")
+                               .arg(invasion));
+@@ -3159,7 +3178,8 @@ void Service::RewardInvasion(Member& winner, quint64 invasion, const std::string
+     }
+     PartyWorld& mailbox = WorldFor(name, now_ms, result);
+     DeliverRewards(winner, mailbox,
+-                   mailbox.trades.InvasionVictory(winner.lobby, invasion, defeated, echoes),
++                   mailbox.trades.InvasionVictory(winner.lobby, invasion, defeated, echoes,
++                       winner.covenant_rewards && covenant_effect == CorruptionCovenantEffect),
+                    now_ms, result);
+ }
+ 
+diff --git a/server/src/bloodborne_world.h b/server/src/bloodborne_world.h
+index 476f89e7..6a4909c1 100644
+--- a/server/src/bloodborne_world.h
++++ b/server/src/bloodborne_world.h
+@@ -380,6 +380,8 @@ private:
+         bool boss = false;
+         std::string display; // its lobby hello's name (as players see it)
+         bool invasion_rewards = false; // LobbyHello's explicit extension capability
++        bool covenant_rewards = false; // can consume the extra Blood Dreg reward item
++        std::uint32_t covenant_effect = 0; // normalized native oath marker, last vitals
+     };
+     // Invasions: one invader on its way to (or in) a team world.
+     struct Invasion {
+@@ -389,6 +391,8 @@ private:
+         std::string target;       // the member it hunts: the session's host
+         std::uint32_t invader_level = 0; // frozen at match; never the death report's level
+         std::uint32_t target_level = 0;  // frozen at join
++        std::uint32_t invader_covenant = 0; // frozen at match, from the invasion request
++        std::uint32_t target_covenant = 0;  // frozen at join, never the death report's oath
+         qint64 matched_ms = 0;
+         bool joined = false;
+         qint64 joined_ms = 0;
+@@ -400,6 +404,7 @@ private:
+     struct Search {
+         std::uint32_t level = 0;
+         qint64 since_ms = 0;
++        std::uint32_t covenant_effect = 0;
+     };
+ 
+     PartyWorld& WorldFor(const QString& name, qint64 now_ms, Result& result);
+@@ -533,7 +538,8 @@ private:
+     void DeliverRewards(Member& member, PartyWorld& mailbox,
+                         BloodborneCoop::TradeDesk::Result grants, qint64 now_ms, Result& result);
+     void RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
+-                        std::uint32_t echoes, qint64 now_ms, Result& result);
++                        std::uint32_t echoes, std::uint32_t covenant_effect,
++                        qint64 now_ms, Result& result);
+     QString InvadedBy(quint64 link) const;
+     // An invasion's link gone: its own (the invader's) or its target's host's.
+     void InvasionLinkGone(quint64 link, qint64 now_ms, Result& result);
+diff --git a/server/tests/test_bloodborne_trade.cpp b/server/tests/test_bloodborne_trade.cpp
+index 84749e46..67836182 100644
+--- a/server/tests/test_bloodborne_trade.cpp
++++ b/server/tests/test_bloodborne_trade.cpp
+@@ -606,6 +606,45 @@ int TestServerOnlyRewardsAndRefundSafety() {
+   return 0;
+ }
+ 
++int TestCovenantGrantShapeIsNarrow() {
++  TradeDesk desk;
++  const auto paid = desk.InvasionVictory("red", 7, "host", 48, true);
++  CHECK(paid.sends.size() == 1);
++  const auto& grant = paid.sends.front().envelope.trade_grant();
++  CHECK(!TradeGrantItemsProblem(grant));
++  CHECK(grant.items_size() == 3);
++  CHECK((TradeItemsOf(grant.items()) == TradeItems{
++      {TradeItemKind::Insight, 0, 1}, Echoes(48), {TradeItemKind::Goods, BloodDregGoods, 1}}));
++  for (const u32 id : {0u, 705u, 1700u, 1000u, 0xffffffffu}) {
++    auto forged = grant;
++    forged.mutable_items(2)->set_id(id);
++    CHECK(TradeGrantItemsProblem(forged).has_value());
++  }
++  for (const u32 count : {0u, 2u, 99u}) {
++    auto forged = grant;
++    forged.mutable_items(2)->set_count(count);
++    CHECK(TradeGrantItemsProblem(forged).has_value());
++  }
++  auto forged = grant;
++  forged.mutable_items(2)->set_data("not a reward payload");
++  CHECK(TradeGrantItemsProblem(forged).has_value());
++  forged = grant;
++  forged.mutable_items(2)->set_name("Blood Dreg");
++  CHECK(TradeGrantItemsProblem(forged).has_value());
++  forged = grant;
++  *forged.mutable_items(1) = forged.items(2); // two Dregs, even within the maximum three items
++  CHECK(TradeGrantItemsProblem(forged).has_value());
++  forged = grant;
++  forged.mutable_items()->DeleteSubrange(0, 1); // no Insight
++  CHECK(TradeGrantItemsProblem(forged).has_value());
++  TradeClient client;
++  CHECK(client.Take(paid.sends.front().envelope).add.size() == 1);
++  CHECK(client.Take(paid.sends.front().envelope).add.empty());
++  // It remains an ordinary legitimate goods item too; no regression to the original any-item trade.
++  CHECK(!TradeItemsProblem(TradeItems{{TradeItemKind::Goods, BloodDregGoods, 1}}, false));
++  return 0;
++}
++
+ int TestEchoesPicker() {
+   // Blood Echoes go in round steps that fit what the player holds: under a
+   // hundred presses to any of them, all of them past the last (Kaniel
+@@ -637,6 +676,7 @@ int main() {
+   failed += TestItems();
+   failed += TestEchoesPicker();
+   failed += TestServerOnlyRewardsAndRefundSafety();
++  failed += TestCovenantGrantShapeIsNarrow();
+   failed += TestAnyItemGiven();
+   failed += TestGiveAccepted();
+   failed += TestSwap();
+diff --git a/server/tests/test_bloodborne_world.cpp b/server/tests/test_bloodborne_world.cpp
+index fd41155c..b7aa230e 100644
+--- a/server/tests/test_bloodborne_world.cpp
++++ b/server/tests/test_bloodborne_world.cpp
+@@ -145,6 +145,7 @@ struct Game {
+     envelope.mutable_lobby_hello()->set_name("Player " + name);
+     envelope.mutable_lobby_hello()->set_playing(playing);
+     envelope.mutable_lobby_hello()->set_invasion_rewards(invasion_rewards);
++    envelope.mutable_lobby_hello()->set_covenant_rewards(covenant_rewards);
+     Send(envelope, now_ms);
+   }
+   void Team(bbcoop::TeamRequest::Action action, qint64 now_ms,
+@@ -163,6 +164,7 @@ struct Game {
+     bbcoop::Envelope envelope;
+     envelope.mutable_invade_request()->set_level(level);
+     envelope.mutable_invade_request()->set_cancel(cancel);
++    envelope.mutable_invade_request()->set_covenant_effect(covenant_effect);
+     Send(envelope, now_ms);
+   }
+   void Vitals(u32 map, u32 vital, qint64 now_ms, u32 level = 0,
+@@ -175,6 +177,7 @@ struct Game {
+     envelope.mutable_vitals()->set_level(level);
+     envelope.mutable_vitals()->set_boss(boss);
+     envelope.mutable_vitals()->set_killed_by_invader(killed_by_invader);
++    envelope.mutable_vitals()->set_covenant_effect(covenant_effect);
+     envelope.mutable_vitals()->mutable_at()->set_x(1);
+     Send(envelope, now_ms);
+   }
+@@ -296,6 +299,8 @@ struct Game {
+   }
+   bool enemy_owner = true; // runs phase 4's owners (its hello says)
+   bool invasion_rewards = false;
++  bool covenant_rewards = false;
++  u32 covenant_effect = 0;
+   std::vector<bbcoop::TradeGrant> grants;
+   TradeClient trades;
+   std::vector<TradeItems> added; // what its trades added
+@@ -2762,6 +2767,17 @@ struct InvasionRig {
+     }
+     Step();
+   }
++  void EnableCovenants(u32 host_oath, u32 invader_oath) {
++    a.covenant_effect = host_oath;
++    red.covenant_effect = invader_oath;
++    for (Game* game : games) {
++      game->invasion_rewards = true;
++      game->covenant_rewards = true;
++      game->LobbyHello(true, now);
++    }
++    a.Vitals(InvadedMap, 1, now, 50);
++    Step();
++  }
+   void Allow(bool allow) {
+     bbcoop::Envelope envelope;
+     envelope.mutable_team_request()->set_action(bbcoop::TeamRequest::INVADERS);
+@@ -3476,6 +3492,104 @@ int VictoryRewardsUseSoloMailboxesAndSurviveRestart() {
+   return 0;
+ }
+ 
++int CovenantRewardsFollowFrozenNativeOaths() {
++  CHECK(NormalizeCovenantEffect(6100) == CorruptionCovenantEffect);
++  CHECK(NormalizeCovenantEffect(6110) == RadianceCovenantEffect);
++  CHECK(NormalizeCovenantEffect(6120) == HunterCovenantEffect);
++  CHECK(NormalizeCovenantEffect(6130) == BloodAddledHunterCovenantEffect);
++  CHECK(NormalizeCovenantEffect(12345) == 0);
++  CHECK(NormalizeCovenantEffect(0xffffffff) == 0);
++  // Native lots 5500/5510 contain one Dreg; 5600/5610/5700/5710/5800/5810 are empty.
++  for (const u32 effect : {0u, 6100u, 6110u, 6120u, 6130u, 12345u}) {
++    for (const bool host_wins : {true, false}) {
++      InvasionRig rig;
++      rig.EnableCovenants(effect, effect);
++      CHECK(rig.Invade());
++      // Neither swapping out a Corruption rune nor swapping one in mid-visit changes rewards.
++      rig.a.covenant_effect = effect == 6100 ? 0 : 6100;
++      rig.red.covenant_effect = rig.a.covenant_effect;
++      rig.a.Vitals(InvadedMap, 1, rig.now, 50);
++      rig.red.Vitals(InvadedMap, 1, rig.now, 60);
++      rig.Step();
++      if (host_wins) {
++        rig.red.Vitals(InvadedMap, 3, rig.now, 60);
++      } else {
++        rig.a.Vitals(InvadedMap, 3, rig.now, 50, false, true);
++      }
++      rig.Step();
++      const auto& winner = host_wins ? rig.a : rig.red;
++      const auto& loser = host_wins ? rig.red : rig.a;
++      CHECK(winner.grants.size() == 1 && loser.grants.empty() && rig.b.grants.empty());
++      const auto& grant = winner.grants.front();
++      CHECK(!TradeGrantItemsProblem(grant));
++      const auto items = TradeItemsOf(grant.items());
++      CHECK(items.size() == (effect == 6100 ? 3 : 2));
++      const auto dregs = std::ranges::count_if(items, [](const TradeItem& item) {
++        return item.kind == TradeItemKind::Goods && item.id == BloodDregGoods && item.count == 1;
++      });
++      CHECK(dregs == (effect == 6100 ? 1 : 0));
++    }
++  }
++  // A reward-capable client without the covenant extension keeps the original two-item grant.
++  for (const bool host_wins : {true, false}) {
++    InvasionRig old;
++    old.EnableRewards();
++    old.a.covenant_effect = old.red.covenant_effect = CorruptionCovenantEffect;
++    old.a.Vitals(InvadedMap, 1, old.now, 50);
++    old.Step();
++    CHECK(old.Invade());
++    if (host_wins) old.red.Vitals(InvadedMap, 3, old.now, 60);
++    else old.a.Vitals(InvadedMap, 3, old.now, 50, false, true);
++    old.Step();
++    const auto& winner = host_wins ? old.a : old.red;
++    CHECK(winner.grants.size() == 1);
++    CHECK(winner.grants.front().items_size() == 2);
++  }
++  return 0;
++}
++
++int ExtendedCovenantGrantsWaitForACapableReconnect() {
++  QTemporaryDir folder;
++  CHECK(folder.isValid());
++  qint64 now = 0;
++  {
++    InvasionRig rig{true, true, folder.path()};
++    rig.EnableCovenants(RadianceCovenantEffect, CorruptionCovenantEffect);
++    CHECK(rig.Invade());
++    rig.red.deaf = true;
++    rig.a.Vitals(InvadedMap, 3, rig.now, 50, false, true);
++    rig.Step();
++    rig.service.Drain();
++    now = rig.now + 100;
++  }
++  {
++    Service service{folder.path()};
++    service.Load(now);
++    Game old{1002, "rr", 800};
++    old.invasion_rewards = true;
++    old.LobbyHello(true, now);
++    Pump(service, {&old}, now);
++    CHECK(old.grants.empty() && old.added.empty()); // old validator cannot accept a Dreg
++    old.covenant_rewards = true;
++    old.LobbyHello(true, now + 10);
++    Pump(service, {&old}, now + 10);
++    CHECK(old.grants.size() == 1 && old.added.size() == 1);
++    CHECK((old.added.front() == TradeItems{
++        {TradeItemKind::Insight, 0, 1}, {TradeItemKind::Echoes, 0, 1453},
++        {TradeItemKind::Goods, BloodDregGoods, 1}}));
++    CHECK(service.PartyOf(old.endpoint).isEmpty());
++    service.Drain();
++  }
++  Service after_ack{folder.path()};
++  after_ack.Load(now + 20);
++  Game again{1002, "rr", 801};
++  again.invasion_rewards = again.covenant_rewards = true;
++  again.LobbyHello(true, now + 20);
++  Pump(after_ack, {&again}, now + 20);
++  CHECK(again.grants.empty() && again.added.empty());
++  return 0;
++}
++
+ int AnInvasionLivesWithTheCapsAndTheCollector() {
+   {
+     BloodborneWorld::Limits limits;
+@@ -3787,6 +3901,8 @@ int main() {
+        EachEndTellsEveryoneAndRestoresTheRouting},
+       {"VictoryRewardsUseSoloMailboxesAndSurviveRestart",
+        VictoryRewardsUseSoloMailboxesAndSurviveRestart},
++      {"CovenantRewardsFollowFrozenNativeOaths", CovenantRewardsFollowFrozenNativeOaths},
++      {"ExtendedCovenantGrantsWaitForACapableReconnect", ExtendedCovenantGrantsWaitForACapableReconnect},
+       {"AnInvasionLivesWithTheCapsAndTheCollector",
+        AnInvasionLivesWithTheCapsAndTheCollector},
+       {"AForgottenHostedWorldIsRestoredToItsPlayer",
+-- 
+2.54.0 (Apple Git-157)
+

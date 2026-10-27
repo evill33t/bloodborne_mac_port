@@ -1,0 +1,737 @@
+From 9e60cec70e589a199cf86771de4844fe556562d4 Mon Sep 17 00:00:00 2001
+From: Ronny Stiftel <ronny.stiftel@tomcom.de>
+Date: Tue, 27 Oct 2026 17:53:30 +0100
+Subject: [PATCH] Commit invasion reward mailboxes before publishing grants and
+ ACKs
+
+Stage reward and acknowledgement changes in a copy of the confirmed TradeDesk.
+Wait for a checked synchronous completion on the existing WorldWriter FIFO so
+older async snapshots finish first. Flush/fsync the temporary ledger, commit its
+atomic rename and fsync the containing directory and ancestors before publishing
+state or queuing a grant. Keep prior memory and the frozen invasion entitlement
+on failure, with a bounded one-second retry backoff.
+
+Load authenticated reward mailboxes from trades.pb independently of world.pb.
+Refuse present corrupt/empty ledgers and invalid counters instead of resetting
+an already observed grant sequence. Ordinary trade snapshots use the same checked
+file/directory persistence primitive; protocol and covenant shapes stay unchanged.
+
+Validation: isolated opc Linux ARM64 Docker build; all 10 focused CTest suites
+passed. New fixtures inspect disk inside actual grant delivery before Drain,
+restart a trades-only mailbox, order old queued snapshots before a durable ACK,
+inject four write-boundary faults, retain failed ACK memory, retry failed grants,
+and preserve corrupt/empty ledgers. These are process/fault fixtures, not physical
+power-cut tests; successful filesystem fsync semantics remain the storage contract.
+No deployed service, configuration, data or unrelated container was changed.
+
+Original-author: Kaniel / lKaniel (original co-op, world store and writer source)
+Original-author: Vitalii Shevchuk (original source history)
+Original-author: shadNet Project contributors (original SPDX copyright holders)
+Original-author: FromSoftware (original Bloodborne native reward/game data)
+Original-author: The Qt Company and Qt contributors (QSaveFile API contract)
+Original-author: Linux man-pages project contributors / Michael Kerrisk (fsync directory requirement)
+Original-source: https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/src/bloodborne_world.cpp
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/tests/test_world_writer.cpp
+Original-source: https://doc.qt.io/qt-6/qsavefile.html
+Original-source: https://github.com/qt/qtbase/blob/dev/src/corelib/io/qsavefile.cpp
+Original-source: https://man7.org/linux/man-pages/man2/fsync.2.html
+Original-source: Owner-supplied read-only Bloodborne 1.09 CUSA00900; prior covenant facts/checksums in docs/invasions/COVENANT_REWARDS_EVIDENCE.json
+---
+ docs/INVASIONS.md                      |  12 +-
+ docs/INVASION_COVENANT_REWARDS.md      |  34 ++++-
+ server/src/bloodborne_world.cpp        | 184 ++++++++++++++++++-------
+ server/src/bloodborne_world.h          |  16 ++-
+ server/tests/test_bloodborne_world.cpp | 124 ++++++++++++++++-
+ server/tests/test_world_writer.cpp     |  58 ++++++++
+ 6 files changed, 368 insertions(+), 60 deletions(-)
+
+diff --git a/docs/INVASIONS.md b/docs/INVASIONS.md
+index 1986d1b0..57d62902 100644
+--- a/docs/INVASIONS.md
++++ b/docs/INVASIONS.md
+@@ -160,8 +160,9 @@ all but the Sinister bell, with the native kind/sign (the fallback behind
+ 
+ The server issues a reward only for a **joined** invasion that it ends as `INVADER_DIED`
+ (the defending session host wins), or `TARGET_KILLED` with the victim's
+-`Vitals.killed_by_invader=true` (the invader wins). The record is removed before issuing the
+-payment, so duplicate death/end reports cannot issue another reward. A notice cancelled before
++`Vitals.killed_by_invader=true` (the invader wins). The reward and next grant counter become
++durable before publication, and the invasion retires before another message is processed, so
++duplicate death/end reports cannot issue another reward. A notice cancelled before
+ joining, environmental host death, party wipe, boss, timeout, disconnect, cancelled search, or
+ turning invasions off never pays. Guests do not get the host's defending reward.
+ 
+@@ -195,9 +196,10 @@ clients supply no mailbox key. It is never the invaded team's world. A party-fre
+ receive and acknowledge a reward; its high-bit ACK is intercepted before hostile/party routing.
+ An ACK from another authenticated identity cannot clear that mailbox. Pending grants and the
+ next grant counter survive restart in `trades.pb`. A successful capable lobby hello resends
+-pending grants; a legacy hello preserves them without sending them. The existing grant safety
+-boundary remains: replay is once per **game run**, not an atomic transaction across a game crash
+-between saving its inventory and acknowledging the grant.
++pending grants; a legacy hello preserves them without sending them. The server now confirms
++file and directory durability through the ordered writer before publishing a grant or ACK removal;
++see [the durable server boundary](INVASION_COVENANT_REWARDS.md#durable-server-commit-boundary).
++Client inventory/save transaction behavior remains a separate client responsibility.
+ 
+ Both refused offers and late/mismatched answers now refund only valid ordinary items. The old
+ "return whatever the client claimed" behavior could launder an unknown kind into an application
+diff --git a/docs/INVASION_COVENANT_REWARDS.md b/docs/INVASION_COVENANT_REWARDS.md
+index a6fae59d..042987e7 100644
+--- a/docs/INVASION_COVENANT_REWARDS.md
++++ b/docs/INVASION_COVENANT_REWARDS.md
+@@ -63,8 +63,8 @@ A pending extended grant is withheld whole when an older client reconnects; it s
+ its authenticated mailbox and is replayed when a covenant-capable client signs in. A capability
+ upgrade on the same connection also resumes it. The mailbox does not discard or partially pay
+ an extended grant to accommodate an old validator. The client owns applying and durably saving
+-its payment before acknowledging; this server change does not itself make inventory/save writes
+-atomic.
++its payment before acknowledging; see the server commit boundary below. Client inventory/save
++atomicity is a separate implementation and must be tested in the game.
+ 
+ Only the existing joined victory endings pay. Cancellation, environment death of the host,
+ party wipe, boss, timeout, disconnect, search cancellation and pre-join death remain unpaid.
+@@ -86,3 +86,33 @@ A defending reward belongs to the session host, and a target-kill reward require
+ - Grimrukh: [Soulstruct's Bloodborne EMEVD definitions](https://github.com/Grimrukh/soulstruct/blob/main/src/soulstruct/bloodborne/events/emevd/emedf.py),
+   consulted to corroborate event instruction aliases; the actual reward rows/calls above come
+   from the supplied game's original assets and native code.
++
++## Durable server commit boundary
++
++A new reward and its next grant counter are staged in a copy of the confirmed mailbox. A
++synchronous completion task enters the same FIFO `WorldWriter` queue as older asynchronous
++snapshots, so none of those snapshots can overwrite a newer confirmed reward or ACK afterward.
++The writer checks the full write, explicitly flushes and fsyncs the temporary file, commits its
++atomic rename, then fsyncs the containing directory and ancestors (including newly initialized
++mailbox parents). Direct overwrite fallback remains disabled. Only a successful completion
++publishes the new mailbox state and queues the grant to the client. ACK removal follows the
++same boundary, retaining the prior confirmed in-memory grant on failure.
++
++The existing authenticated `trades.pb` ledger is sufficient to load a mailbox after restart;
++`world.pb` is not a prerequisite. A present unreadable ledger, including an invalid zero/high-bit
++counter, fails closed instead of becoming a fresh counter. A failed new payment sends nothing
++and keeps the frozen invasion entitlement active for a later dead-Vitals retry, with a one-second
++failure backoff. In-memory-only server configurations have no disk durability guarantee.
++
++Focused tests check durable bytes during the actual grant-delivery callback, before any Drain;
++process-stop/restart with no world file; queued older snapshots before a durable ACK; failures
++before file sync, before rename, after rename, and after directory sync; failed grant publication;
++failed ACK retention/retry; and corrupt-ledger preservation. These are controlled process/fault
++fixtures, not physical power-cut tests. Durability depends on the filesystem/storage honoring
++successful fsync calls. The checked path was built/tested on the deployed Linux ARM64 platform;
++Windows directory flush support is not claimed as tested.
++
++The distinction follows [Qt's QSaveFile atomic replacement contract](https://doc.qt.io/qt-6/qsavefile.html)
++and the [Linux man-pages fsync directory requirement](https://man7.org/linux/man-pages/man2/fsync.2.html)
++(Linux man-pages project contributors; Michael Kerrisk). Original Kaniel/lKaniel, Vitalii Shevchuk
++and shadNet source attribution remains above and in every implementation commit.
+diff --git a/server/src/bloodborne_world.cpp b/server/src/bloodborne_world.cpp
+index 9d6bd2f5..74d902ef 100644
+--- a/server/src/bloodborne_world.cpp
++++ b/server/src/bloodborne_world.cpp
+@@ -8,6 +8,7 @@
+ #include <condition_variable>
+ #include <deque>
+ #include <functional>
++#include <future>
+ #include <mutex>
+ #include <set>
+ #include <thread>
+@@ -31,6 +32,7 @@
+ #include <io.h>
+ #include <windows.h>
+ #else
++#include <fcntl.h>
+ #include <unistd.h>
+ #endif
+ 
+@@ -91,7 +93,7 @@ QString Hex(quint64 value) {
+ 
+ // Phase 11: what was written reaches the disk, not only the system's cache (a power cut or a
+ // crash of the PC keeps it).
+-bool SyncToDisk(QFile& file) {
++bool SyncToDisk(QFileDevice& file) {
+     if (!file.flush()) {
+         return false;
+     }
+@@ -103,6 +105,27 @@ bool SyncToDisk(QFile& file) {
+ #endif
+ }
+ 
++
++// A successful rename is not yet a durable directory entry. Sync both the mailbox directory
++// and its parent: the first reward may have just created the mailbox directory itself.
++bool SyncDirectory(const QString& path) {
++#ifdef Q_OS_WIN
++    const HANDLE handle = CreateFileW(reinterpret_cast<const wchar_t*>(path.utf16()),
++        GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
++        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
++    if (handle == INVALID_HANDLE_VALUE) return false;
++    const bool ok = FlushFileBuffers(handle) != 0;
++    CloseHandle(handle);
++    return ok;
++#else
++    const int fd = open(QFile::encodeName(path).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
++    if (fd < 0) return false;
++    const bool ok = fsync(fd) == 0;
++    close(fd);
++    return ok;
++#endif
++}
++
+ } // namespace
+ 
+ QString PartyFolderName(const QByteArray& party) {
+@@ -219,25 +242,40 @@ bool WorldStore::Compact(const bbcoop::StoredWorld& world, const QDate& today) {
+ 
+ std::optional<bbcoop::StoredTrades> WorldStore::LoadTrades() const {
+     QFile file{QDir{folder}.filePath(TradesFile)};
+-    if (!file.open(QIODevice::ReadOnly)) {
++    if (!QFileInfo{file}.isFile() || !file.open(QIODevice::ReadOnly)) {
+         return std::nullopt;
+     }
+     const QByteArray bytes = file.readAll();
+     bbcoop::StoredTrades trades;
+-    if (!trades.ParseFromArray(bytes.constData(), static_cast<int>(bytes.size()))) {
++    if (file.error() != QFileDevice::NoError ||
++        !trades.ParseFromArray(bytes.constData(), static_cast<int>(bytes.size())) ||
++        trades.next_id() == 0 || trades.next_id() >= InvasionRewardGrantBit) {
+         return std::nullopt;
+     }
+     return trades;
+ }
+ 
+-bool WorldStore::SaveTrades(const bbcoop::StoredTrades& trades) {
+-    QDir{}.mkpath(folder);
++bool WorldStore::SaveTrades(const bbcoop::StoredTrades& trades, const TradesWriteCheck& check) {
++    const auto proceed = [&](TradesWritePoint point) { return !check || check(point); };
++    if (!QDir{}.mkpath(folder)) return false;
+     QSaveFile file{QDir{folder}.filePath(TradesFile)};
+-    if (!file.open(QIODevice::WriteOnly)) {
++    file.setDirectWriteFallback(false);
++    const QByteArray bytes = Serialized(trades);
++    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() ||
++        !proceed(TradesWritePoint::BeforeFileSync) || !SyncToDisk(file) ||
++        !proceed(TradesWritePoint::BeforeRename) || !file.commit()) {
+         return false;
+     }
+-    file.write(Serialized(trades));
+-    return file.commit();
++    if (!proceed(TradesWritePoint::AfterRename)) return false;
++    // Include ancestors that mkpath (or an older queued world snapshot) just created.
++    QString directory = QDir{folder}.absolutePath();
++    for (;;) {
++        if (!SyncDirectory(directory)) return false;
++        const QString parent = QFileInfo{directory}.dir().absolutePath();
++        if (parent == directory) break;
++        directory = parent;
++    }
++    return proceed(TradesWritePoint::AfterDirectorySync);
+ }
+ 
+ struct WorldWriter::State {
+@@ -419,6 +457,25 @@ void WorldWriter::SaveTrades(const QString& folder, bbcoop::StoredTrades trades)
+     });
+ }
+ 
++bool WorldWriter::SaveTradesDurable(const QString& folder, bbcoop::StoredTrades trades,
++                                    WorldStore::TradesWriteCheck check) {
++    if (state->abandon) return false;
++    auto completion = std::make_shared<std::promise<bool>>();
++    auto done = completion->get_future();
++    state->Push(folder, [folder, trades = std::move(trades), check = std::move(check),
++                         completion](State& s) {
++        const bool ok = WorldStore{folder}.SaveTrades(trades, check);
++        if (!ok) s.Log(QStringLiteral("world store %1: durable trades write failed").arg(folder));
++        completion->set_value(ok);
++    });
++    // The same FIFO queue owns every trades.pb write, including ordinary asynchronous saves.
++    // No older queued snapshot can overwrite this acknowledged completion afterwards.
++    while (done.wait_for(std::chrono::milliseconds{10}) != std::future_status::ready) {
++        if (state->abandon) return false;
++    }
++    return done.get();
++}
++
+ void WorldWriter::SaveTeamWorld(const QString& dir, bbcoop::TeamWorld world, const QDate& today) {
+     state->Push(dir, [dir, world = std::move(world), today](State& s) {
+         QDir{}.mkpath(dir);
+@@ -1053,12 +1110,10 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
+     if (envelope.has_trade_granted() &&
+         (envelope.trade_granted().id() & InvasionRewardGrantBit) != 0) {
+         if (member.invasion_rewards && !member.lobby.empty()) {
+-            const QString name = RewardFolder(member);
+-            if (worlds.contains(name) || (!folder.isEmpty() && LoadWorld(name, now_ms, result))) {
+-                PartyWorld& mailbox = worlds.at(name);
+-                DeliverRewards(member, mailbox,
+-                               mailbox.trades.Granted(member.lobby, envelope.trade_granted().id()),
+-                               now_ms, result);
++            if (PartyWorld* mailbox = RewardMailbox(member, false, now_ms, result)) {
++                TradeDesk staged = mailbox->trades;
++                auto ack = staged.Granted(member.lobby, envelope.trade_granted().id());
++                DeliverRewards(member, *mailbox, std::move(staged), std::move(ack), now_ms, result);
+             }
+         }
+         return;
+@@ -3051,26 +3106,29 @@ void Service::EndInvasion(const QString& world, bbcoop::InvasionEnd::Reason reas
+     if (found == invasions.end()) {
+         return;
+     }
+-    const Invasion invasion = std::move(found->second);
+-    invasions.erase(found); // retire first: a repeated end/death report cannot mint another grant
++    const Invasion invasion = found->second;
++    // A failed persistence attempt publishes nothing and keeps the frozen entitlement alive.
++    // A repeated dead Vitals can retry; successful publication retires before another message.
++
+     if (invasion.joined) {
+         for (auto& [key, member] : members) {
+             if (reason == bbcoop::InvasionEnd::INVADER_DIED && member.party == world &&
+                 member.name == invasion.target && !member.hostile) {
+-                RewardInvasion(member, invasion.id, invasion.invader_name,
+-                               InvasionVictoryEchoes(invasion.invader_level, false),
+-                               invasion.target_covenant, now_ms, result);
++                if (!RewardInvasion(member, invasion.id, invasion.invader_name,
++                                    InvasionVictoryEchoes(invasion.invader_level, false),
++                                    invasion.target_covenant, now_ms, result)) return;
+                 break;
+             }
+             if (reason == bbcoop::InvasionEnd::TARGET_KILLED && killed_by_invader &&
+                 member.key == invasion.invader) {
+-                RewardInvasion(member, invasion.id, invasion.target,
+-                               InvasionVictoryEchoes(invasion.target_level, true),
+-                               invasion.invader_covenant, now_ms, result);
++                if (!RewardInvasion(member, invasion.id, invasion.target,
++                                    InvasionVictoryEchoes(invasion.target_level, true),
++                                    invasion.invader_covenant, now_ms, result)) return;
+                 break;
+             }
+         }
+     }
++    invasions.erase(found); // durable grant/counter first; duplicate end/death cannot pay again
+     bbcoop::Envelope envelope;
+     envelope.mutable_invasion_end()->set_id(invasion.id);
+     envelope.mutable_invasion_end()->set_reason(reason);
+@@ -3108,6 +3166,9 @@ void Service::CheckInvasion(const PartyWorld& world, const Member& member,
+         return;
+     }
+     if (member.name == found->second.target && vitals.vital() == 3) { // Vital: dead
++        if (const auto winner = members.find(found->second.invader);
++            vitals.killed_by_invader() && winner != members.end() &&
++            now_ms < winner->second.reward_retry_ms) return;
+         result.log.append(
+             QStringLiteral("invasions: %1 died%2")
+                 .arg(QString::fromStdString(member.name),
+@@ -3129,15 +3190,49 @@ QString Service::RewardFolder(const Member& member) const {
+     return FolderOf(QByteArray{"invasion-rewards:"} + member.online_id.toHex());
+ }
+ 
+-void Service::DeliverRewards(Member& member, PartyWorld& mailbox, TradeDesk::Result grants,
+-                             qint64 now_ms, Result& result) {
++Service::PartyWorld* Service::RewardMailbox(Member& member, bool create, qint64 now_ms,
++                                                Result& result) {
++    if (now_ms < member.reward_retry_ms) return nullptr;
++    const QString name = RewardFolder(member);
++    if (auto found = worlds.find(name); found != worlds.end() && found->second.reward_mailbox)
++        return &found->second;
++    const QString path = QDir{folder}.filePath(name);
++    if (writer && writer->Pending(path)) writer->Drain();
++    auto store = folder.isEmpty() ? nullptr : std::make_unique<WorldStore>(path);
++    const auto stored = store ? store->LoadTrades() : std::nullopt;
++    // A present unreadable ledger is never an empty ledger: resetting next_id could replay an
++    // already committed award under an old id. Keep it intact for operator recovery.
++    if (store && QFileInfo::exists(QDir{path}.filePath(TradesFile)) && !stored) {
++        member.reward_retry_ms = now_ms + 1000;
++        result.log.append(QStringLiteral("invasion rewards: unreadable mailbox, refusing payments"));
++        return nullptr;
++    }
++    if (!stored && !create) return nullptr;
++    if (!RoomFor(name, now_ms, result)) return nullptr;
++    PartyWorld& mailbox = worlds[name];
++    mailbox.name = name;
++    mailbox.store = std::move(store);
++    mailbox.reward_mailbox = true;
++    if (stored) mailbox.trades.Restore(*stored, now_ms);
++    return &mailbox;
++}
++
++bool Service::DeliverRewards(Member& member, PartyWorld& mailbox, TradeDesk staged,
++                             TradeDesk::Result grants, qint64 now_ms, Result& result) {
++    // Include unchanged resumes: they must never expose a state whose durability is uncertain.
++    // Staging keeps a failed ACK from erasing the last confirmed in-memory pending grant.
++    if (mailbox.store && !writer->SaveTradesDurable(mailbox.store->Folder(), staged.Stored())) {
++        member.reward_retry_ms = now_ms + 1000;
++        result.log.append(QStringLiteral("invasion rewards: persistence failed; no grant published"));
++        return false;
++    }
++    member.reward_retry_ms = 0;
++    mailbox.trades = std::move(staged);
+     for (const TradeDesk::Send& send : grants.sends) {
+         const bool needs_covenant = send.envelope.has_trade_grant() &&
+             std::ranges::any_of(send.envelope.trade_grant().items(), [](const auto& item) {
+                 return item.kind() == static_cast<u32>(TradeItemKind::Goods);
+             });
+-        // A legacy reward client cannot validate the extended shape. Keep the whole durable
+-        // grant for its next capable login rather than partially paying or dropping the Dreg.
+         if (send.to == member.lobby && member.invasion_rewards &&
+             (!needs_covenant || member.covenant_rewards)) {
+             SendTo(member, send.envelope, now_ms);
+@@ -3147,40 +3242,31 @@ void Service::DeliverRewards(Member& member, PartyWorld& mailbox, TradeDesk::Res
+         result.log.append(QStringLiteral("invasion rewards %1: %2")
+                               .arg(QString::fromStdString(member.lobby), QString::fromStdString(line)));
+     }
+-    if (grants.changed && mailbox.store) {
+-        writer->SaveTrades(mailbox.store->Folder(), mailbox.trades.Stored());
+-    }
++    return true;
+ }
+ 
+ void Service::ResumeRewards(Member& member, qint64 now_ms, Result& result) {
+-    const QString name = RewardFolder(member);
+-    // A login never creates an empty mailbox. The first completed victory creates it.
+-    if (!worlds.contains(name) && (folder.isEmpty() || !LoadWorld(name, now_ms, result))) {
+-        return;
++    if (PartyWorld* mailbox = RewardMailbox(member, false, now_ms, result)) {
++        TradeDesk staged = mailbox->trades;
++        auto grants = staged.Resume(member.lobby, now_ms);
++        DeliverRewards(member, *mailbox, std::move(staged), std::move(grants), now_ms, result);
+     }
+-    PartyWorld& mailbox = worlds.at(name);
+-    DeliverRewards(member, mailbox, mailbox.trades.Resume(member.lobby, now_ms), now_ms, result);
+ }
+ 
+-void Service::RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
++bool Service::RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
+                              std::uint32_t echoes, std::uint32_t covenant_effect,
+                              qint64 now_ms, Result& result) {
+     if (!winner.invasion_rewards || winner.lobby.empty()) {
+         result.log.append(QStringLiteral("invasions: victory %1 has no reward-capable winner")
+                               .arg(invasion));
+-        return;
+-    }
+-    const QString name = RewardFolder(winner);
+-    if (!RoomFor(name, now_ms, result)) {
+-        result.log.append(QStringLiteral("invasions: no room for victory %1's reward mailbox")
+-                              .arg(invasion));
+-        return;
+-    }
+-    PartyWorld& mailbox = WorldFor(name, now_ms, result);
+-    DeliverRewards(winner, mailbox,
+-                   mailbox.trades.InvasionVictory(winner.lobby, invasion, defeated, echoes,
+-                       winner.covenant_rewards && covenant_effect == CorruptionCovenantEffect),
+-                   now_ms, result);
++        return true; // no opted-in payment is owed
++    }
++    PartyWorld* mailbox = RewardMailbox(winner, true, now_ms, result);
++    if (!mailbox) return false;
++    TradeDesk staged = mailbox->trades;
++    auto grants = staged.InvasionVictory(winner.lobby, invasion, defeated, echoes,
++                       winner.covenant_rewards && covenant_effect == CorruptionCovenantEffect);
++    return DeliverRewards(winner, *mailbox, std::move(staged), std::move(grants), now_ms, result);
+ }
+ 
+ QString Service::InvadedBy(quint64 link) const {
+diff --git a/server/src/bloodborne_world.h b/server/src/bloodborne_world.h
+index 6a4909c1..8a0b00c7 100644
+--- a/server/src/bloodborne_world.h
++++ b/server/src/bloodborne_world.h
+@@ -14,6 +14,7 @@
+ // share out of the log.
+ #pragma once
+ 
++#include <functional>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -60,7 +61,10 @@ public:
+     bool Compact(const bbcoop::StoredWorld& world, const QDate& today = QDate::currentDate());
+     // The party's trades (trades.pb, coop/trade.h), written whole on every change.
+     std::optional<bbcoop::StoredTrades> LoadTrades() const;
+-    bool SaveTrades(const bbcoop::StoredTrades& trades);
++    // Fault checkpoints let focused storage tests stop before/after the commit boundary.
++    enum class TradesWritePoint { BeforeFileSync, BeforeRename, AfterRename, AfterDirectorySync };
++    using TradesWriteCheck = std::function<bool(TradesWritePoint)>;
++    bool SaveTrades(const bbcoop::StoredTrades& trades, const TradesWriteCheck& check = {});
+     const QString& Folder() const {
+         return folder;
+     }
+@@ -88,6 +92,9 @@ public:
+     void Compact(const QString& folder, bbcoop::StoredWorld world,
+                  const QDate& today = QDate::currentDate());
+     void SaveTrades(const QString& folder, bbcoop::StoredTrades trades);
++    // Queue behind all older snapshots, then wait for checked file+directory durability.
++    bool SaveTradesDurable(const QString& folder, bbcoop::StoredTrades trades,
++                          WorldStore::TradesWriteCheck check = {});
+     // A whole file (team_world.pb, worlds.pb), replaced at once (QSaveFile).
+     void Save(const QString& path, QByteArray bytes);
+     // team_world.pb in `dir`, with the backups before it and the day's (save-restore).
+@@ -331,6 +338,7 @@ private:
+         QString vitals_logged; // the members' states and the wipes, as last logged
+         // Its trades (coop/trade.h): the offers held and the grants owed.
+         BloodborneCoop::TradeDesk trades;
++        bool reward_mailbox = false; // trades.pb alone is authoritative; no world.pb dependency
+         // Kaniel 2026-10-25: its duels (coop/duel.h), in memory only (about the games running).
+         BloodborneCoop::DuelReferee duels;
+         // Phase 5b: a team's world (its party key is a team's), from its host's reports; read
+@@ -381,6 +389,7 @@ private:
+         std::string display; // its lobby hello's name (as players see it)
+         bool invasion_rewards = false; // LobbyHello's explicit extension capability
+         bool covenant_rewards = false; // can consume the extra Blood Dreg reward item
++        qint64 reward_retry_ms = 0; // disk failure backoff; never spin on dead Vitals
+         std::uint32_t covenant_effect = 0; // normalized native oath marker, last vitals
+     };
+     // Invasions: one invader on its way to (or in) a team world.
+@@ -535,9 +544,10 @@ private:
+     // solo invaders have no party Hello. Its grants use InvasionRewardGrantBit for safe ACKs.
+     QString RewardFolder(const Member& member) const;
+     void ResumeRewards(Member& member, qint64 now_ms, Result& result);
+-    void DeliverRewards(Member& member, PartyWorld& mailbox,
++    PartyWorld* RewardMailbox(Member& member, bool create, qint64 now_ms, Result& result);
++    bool DeliverRewards(Member& member, PartyWorld& mailbox, BloodborneCoop::TradeDesk staged,
+                         BloodborneCoop::TradeDesk::Result grants, qint64 now_ms, Result& result);
+-    void RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
++    bool RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
+                         std::uint32_t echoes, std::uint32_t covenant_effect,
+                         qint64 now_ms, Result& result);
+     QString InvadedBy(quint64 link) const;
+diff --git a/server/tests/test_bloodborne_world.cpp b/server/tests/test_bloodborne_world.cpp
+index b7aa230e..729547c8 100644
+--- a/server/tests/test_bloodborne_world.cpp
++++ b/server/tests/test_bloodborne_world.cpp
+@@ -234,6 +234,7 @@ struct Game {
+       ++owner_messages;
+     } else if (IsTradeMessage(envelope)) {
+       if (envelope.has_trade_grant()) {
++        if (on_grant) on_grant(envelope.trade_grant());
+         grants.push_back(envelope.trade_grant());
+       }
+       TradeClient::Taken taken = trades.Take(envelope);
+@@ -241,7 +242,7 @@ struct Game {
+         added.push_back(std::move(items));
+       }
+       for (const bbcoop::Envelope &reply : taken.replies) {
+-        Send(reply, now_ms);
++        if (ack_trades) Send(reply, now_ms);
+       }
+     } else if (envelope.has_welcome()) {
+       welcome = envelope.welcome();
+@@ -303,6 +304,8 @@ struct Game {
+   u32 covenant_effect = 0;
+   std::vector<bbcoop::TradeGrant> grants;
+   TradeClient trades;
++  bool ack_trades = true;
++  std::function<void(const bbcoop::TradeGrant&)> on_grant;
+   std::vector<TradeItems> added; // what its trades added
+   u32 run = 0x1001;
+   u32 number = 0;
+@@ -3590,6 +3593,122 @@ int ExtendedCovenantGrantsWaitForACapableReconnect() {
+   return 0;
+ }
+ 
++int RewardPublicationAndAckAreDurableWithoutDrain() {
++  QTemporaryDir folder;
++  CHECK(folder.isValid());
++  const QString mailbox = QDir{folder.path()}.filePath(
++      BloodborneWorld::PartyFolderName(QByteArray{"invasion-rewards:"} + QByteArray{"rr"}.toHex()));
++  bool durable_at_delivery = false;
++  qint64 now = 0;
++  {
++    InvasionRig rig{true, true, folder.path()};
++    rig.EnableCovenants(0, CorruptionCovenantEffect);
++    rig.red.ack_trades = false;
++    rig.red.on_grant = [&](const bbcoop::TradeGrant& grant) {
++      const auto stored = BloodborneWorld::WorldStore{mailbox}.LoadTrades();
++      durable_at_delivery = stored && stored->next_id() == 2 && stored->grants_size() == 1 &&
++          stored->grants(0).grant().SerializeAsString() == grant.SerializeAsString();
++    };
++    CHECK(rig.Invade());
++    rig.a.Vitals(InvadedMap, 3, rig.now, 50, false, true);
++    rig.Step();
++    CHECK(rig.red.grants.size() == 1 && durable_at_delivery);
++    CHECK(!QFile::exists(QDir{mailbox}.filePath("world.pb"))); // trades-only mailbox
++    now = rig.now + 100;
++  }
++  // A crash after persistence and before an application ACK resumes the same grant/counter,
++  // without requiring unrelated world metadata to have survived.
++  Service restarted{folder.path()};
++  restarted.Load(now);
++  Game red{1002, "rr", 901};
++  red.invasion_rewards = red.covenant_rewards = true;
++  red.LobbyHello(true, now);
++  Pump(restarted, {&red}, now);
++  CHECK(red.grants.size() == 1 && red.added.size() == 1);
++  CHECK(red.grants.front().id() == (InvasionRewardGrantBit | 1));
++  const auto acked = BloodborneWorld::WorldStore{mailbox}.LoadTrades();
++  CHECK(acked && acked->next_id() == 2 && acked->grants_size() == 0); // no Drain
++  return 0;
++}
++
++int FailedRewardWritesPublishNothingAndPreserveAckState() {
++  QTemporaryDir folder;
++  CHECK(folder.isValid());
++  const QString mailbox = QDir{folder.path()}.filePath(
++      BloodborneWorld::PartyFolderName(QByteArray{"invasion-rewards:"} + QByteArray{"rr"}.toHex()));
++  BloodborneWorld::WorldStore store{mailbox};
++  TradeDesk initial;
++  CHECK(store.SaveTrades(initial.Stored()));
++  InvasionRig rig{true, true, folder.path()};
++  rig.EnableCovenants(0, CorruptionCovenantEffect); // loads the valid empty mailbox
++  rig.red.ack_trades = false;
++  CHECK(rig.Invade());
++  const QString ledger = QDir{mailbox}.filePath("trades.pb");
++  CHECK(QFile::remove(ledger));
++  CHECK(QDir{}.mkpath(ledger)); // atomic replacement cannot replace a directory
++  rig.a.Vitals(InvadedMap, 3, rig.now, 50, false, true);
++  rig.Step();
++  CHECK(rig.red.grants.empty() && !EndedFor(rig.red, bbcoop::InvasionEnd::TARGET_KILLED));
++  CHECK(!rig.service.VisitingOf(rig.red.endpoint).isEmpty());
++  CHECK(QDir{}.rmdir(ledger));
++  rig.a.Vitals(InvadedMap, 3, rig.now + 100, 50, false, true);
++  rig.Step(100);
++  CHECK(rig.red.grants.empty()); // bounded failure backoff, even after the disk recovers
++  rig.a.Vitals(InvadedMap, 3, rig.now + 1000, 50, false, true);
++  rig.Step(1000);
++  CHECK(rig.red.grants.size() == 1 && EndedFor(rig.red, bbcoop::InvasionEnd::TARGET_KILLED));
++  CHECK(store.LoadTrades()->next_id() == 2); // failed attempt did not publish/reuse an observed id
++  const QString saved = ledger + ".saved";
++  CHECK(QFile::rename(ledger, saved));
++  CHECK(QDir{}.mkpath(ledger));
++  bbcoop::Envelope ack;
++  ack.mutable_trade_granted()->set_id(InvasionRewardGrantBit | 1);
++  rig.red.Send(ack, rig.now);
++  rig.Step(); // failed ACK persistence must leave the confirmed in-memory grant pending
++  CHECK(QDir{}.rmdir(ledger));
++  CHECK(QFile::rename(saved, ledger));
++  rig.red.invasion_rewards = false;
++  rig.red.LobbyHello(true, rig.now + 1000);
++  rig.Step(1000);
++  rig.red.invasion_rewards = true;
++  rig.red.ack_trades = true;
++  rig.red.LobbyHello(true, rig.now);
++  rig.Step();
++  CHECK(rig.red.grants.size() == 2); // replay proves failed ACK did not erase current memory
++  CHECK(rig.red.added.size() == 1); // duplicate application is suppressed
++  const auto complete = store.LoadTrades();
++  CHECK(complete && complete->next_id() == 2 && complete->grants_size() == 0);
++  return 0;
++}
++
++int CorruptRewardLedgerNeverResetsItsCounter() {
++  QTemporaryDir folder;
++  CHECK(folder.isValid());
++  const QString mailbox = QDir{folder.path()}.filePath(
++      BloodborneWorld::PartyFolderName(QByteArray{"invasion-rewards:"} + QByteArray{"rr"}.toHex()));
++  CHECK(QDir{}.mkpath(mailbox));
++  QFile ledger{QDir{mailbox}.filePath("trades.pb")};
++  CHECK(ledger.open(QIODevice::WriteOnly));
++  const QByteArray corrupt = "not-a-protobuf-ledger";
++  CHECK(ledger.write(corrupt) == corrupt.size());
++  ledger.close();
++  InvasionRig rig{true, true, folder.path()};
++  rig.EnableCovenants(0, CorruptionCovenantEffect);
++  CHECK(rig.Invade());
++  rig.a.Vitals(InvadedMap, 3, rig.now, 50, false, true);
++  rig.Step();
++  CHECK(rig.red.grants.empty());
++  CHECK(ledger.open(QIODevice::ReadOnly));
++  CHECK(ledger.readAll() == corrupt); // never overwritten with a fresh next_id=1
++  ledger.close();
++  CHECK(ledger.open(QIODevice::WriteOnly | QIODevice::Truncate));
++  ledger.close(); // an empty protobuf parses, but its absent/zero counter is not a ledger
++  rig.a.Vitals(InvadedMap, 3, rig.now + 1000, 50, false, true);
++  rig.Step(1000);
++  CHECK(rig.red.grants.empty() && ledger.size() == 0);
++  return 0;
++}
++
+ int AnInvasionLivesWithTheCapsAndTheCollector() {
+   {
+     BloodborneWorld::Limits limits;
+@@ -3903,6 +4022,9 @@ int main() {
+        VictoryRewardsUseSoloMailboxesAndSurviveRestart},
+       {"CovenantRewardsFollowFrozenNativeOaths", CovenantRewardsFollowFrozenNativeOaths},
+       {"ExtendedCovenantGrantsWaitForACapableReconnect", ExtendedCovenantGrantsWaitForACapableReconnect},
++      {"RewardPublicationAndAckAreDurableWithoutDrain", RewardPublicationAndAckAreDurableWithoutDrain},
++      {"FailedRewardWritesPublishNothingAndPreserveAckState", FailedRewardWritesPublishNothingAndPreserveAckState},
++      {"CorruptRewardLedgerNeverResetsItsCounter", CorruptRewardLedgerNeverResetsItsCounter},
+       {"AnInvasionLivesWithTheCapsAndTheCollector",
+        AnInvasionLivesWithTheCapsAndTheCollector},
+       {"AForgottenHostedWorldIsRestoredToItsPlayer",
+diff --git a/server/tests/test_world_writer.cpp b/server/tests/test_world_writer.cpp
+index 6971f88b..9aeac2f2 100644
+--- a/server/tests/test_world_writer.cpp
++++ b/server/tests/test_world_writer.cpp
+@@ -205,6 +205,60 @@ int AWorldThatDoesNotWriteKeepsItsJournal() {
+   return 0;
+ }
+ 
++// Reward publication uses this completion barrier, rather than Drain after sending. Older
++// asynchronous snapshots must finish first; a process stop immediately after it keeps the ACK.
++int DurableTradeCompletionOrdersSnapshotsAndSurvivesStop() {
++  QTemporaryDir dir;
++  CHECK(dir.isValid());
++  const QString folder = QDir{dir.path()}.filePath("new-parent/mailbox");
++  BloodborneCoop::TradeDesk desk;
++  desk.InvasionVictory("red", 9, "host", 48, true);
++  const auto pending = desk.Stored();
++  CHECK(pending.next_id() == 2 && pending.grants_size() == 1);
++  WorldWriter writer;
++  for (int at = 0; at < 32; ++at) writer.SaveTrades(folder, pending);
++  CHECK(writer.SaveTradesDurable(folder, pending));
++  CHECK(WorldStore{folder}.LoadTrades()->grants_size() == 1); // no Drain
++  desk.Granted("red", BloodborneCoop::InvasionRewardGrantBit | 1);
++  CHECK(writer.SaveTradesDurable(folder, desk.Stored()));
++  writer.Abandon(); // no final drain can repair ordering after this point
++  const auto acked = WorldStore{folder}.LoadTrades();
++  CHECK(acked && acked->next_id() == 2 && acked->grants_size() == 0);
++  CHECK(!writer.SaveTradesDurable(folder, pending));
++  return 0;
++}
++
++int TradeWriteFaultsLeaveACompleteRestartableLedger() {
++  using Point = WorldStore::TradesWritePoint;
++  for (const auto point : {Point::BeforeFileSync, Point::BeforeRename,
++                           Point::AfterRename, Point::AfterDirectorySync}) {
++    QTemporaryDir dir;
++    CHECK(dir.isValid());
++    WorldStore store{QDir{dir.path()}.filePath("mailbox")};
++    BloodborneCoop::TradeDesk desk;
++    CHECK(store.SaveTrades(desk.Stored()));
++    desk.InvasionVictory("red", 9, "host", 48, true);
++    WorldWriter writer;
++    CHECK(!writer.SaveTradesDurable(store.Folder(), desk.Stored(),
++        [point](Point at) { return at != point; }));
++    writer.Abandon();
++    const auto restored = store.LoadTrades();
++    CHECK(restored.has_value());
++    const bool replaced = point == Point::AfterRename || point == Point::AfterDirectorySync;
++    CHECK(restored->grants_size() == (replaced ? 1 : 0));
++    CHECK(restored->next_id() == (replaced ? 2 : 1));
++    if (replaced) {
++      CHECK(restored->grants(0).grant().id() == (BloodborneCoop::InvasionRewardGrantBit | 1));
++      BloodborneCoop::TradeDesk next;
++      next.Restore(*restored, 0);
++      const auto payment = next.InvasionVictory("red", 10, "host", 48);
++      CHECK(payment.sends.front().envelope.trade_grant().id() ==
++            (BloodborneCoop::InvasionRewardGrantBit | 2));
++    }
++  }
++  return 0;
++}
++
+ // The main thread's time per record: fsynced on it (the old way) and handed to
+ // the writer.
+ int TheLinkThreadNoLongerWaitsForTheDisk() {
+@@ -254,6 +308,10 @@ int main() {
+        AStopWithoutTheDrainLosesOnlyTheTail},
+       {"AWorldThatDoesNotWriteKeepsItsJournal",
+        AWorldThatDoesNotWriteKeepsItsJournal},
++      {"DurableTradeCompletionOrdersSnapshotsAndSurvivesStop",
++       DurableTradeCompletionOrdersSnapshotsAndSurvivesStop},
++      {"TradeWriteFaultsLeaveACompleteRestartableLedger",
++       TradeWriteFaultsLeaveACompleteRestartableLedger},
+       {"TheLinkThreadNoLongerWaitsForTheDisk",
+        TheLinkThreadNoLongerWaitsForTheDisk},
+   };
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,5 +1,9 @@
 # Invasion reward server extension — 2026-10-27
 
+The complete server source and all four local server changes are now included under
+[`server/`](../server/LOCAL_FORK.md), with the original patches, licenses, source manifest
+and ARM64 Docker build. The deployment records below identify the running source snapshot.
+
 Backend authority: [Kaniel / lKaniel's bloodborne-server](https://github.com/lKaniel/bloodborne-server)
 at `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`. Original implementation credits include
 Vitalii Shevchuk and shadNet contributors. The server changes live in a separate source

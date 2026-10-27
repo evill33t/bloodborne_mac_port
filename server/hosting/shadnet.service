@@ -1,0 +1,73 @@
+# systemd alternative to docker-compose. UNTESTED (checked with systemd-analyze verify only).
+# Install: binary at /opt/shadnet/shadnet, data in /var/lib/shadnet (SHADNET_HOME),
+#   useradd --system --home /var/lib/shadnet --shell /usr/sbin/nologin shadnet
+#   cp shadnet.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now shadnet
+# Backups: shadnet-backup.service + .timer below (or cron: 0 * * * * /opt/shadnet/backup.sh).
+[Unit]
+Description=shadNet Bloodborne co-op server
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=shadnet
+Group=shadnet
+Environment=SHADNET_HOME=/var/lib/shadnet
+StateDirectory=shadnet
+WorkingDirectory=/var/lib/shadnet
+ExecStart=/opt/shadnet/shadnet
+Restart=always
+RestartSec=3
+TimeoutStopSec=30
+KillSignal=SIGTERM
+
+# Resource limits: one thread per TCP client (server.cpp), a socket per client.
+LimitNOFILE=65536
+TasksMax=4096
+MemoryHigh=1536M
+MemoryMax=2G
+CPUWeight=200
+OOMScoreAdjust=-500
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/shadnet
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
+
+# --- /etc/systemd/system/shadnet-backup.service ---
+# [Unit]
+# Description=shadNet backup
+# [Service]
+# Type=oneshot
+# User=shadnet
+# Environment=DATA_DIR=/var/lib/shadnet STAGE_DIR=/var/backups/shadnet/stage
+# EnvironmentFile=/etc/shadnet/backup.env
+# ExecStart=/opt/shadnet/backup.sh
+# Nice=10
+# IOSchedulingClass=idle
+#
+# --- /etc/systemd/system/shadnet-backup.timer ---
+# [Unit]
+# Description=hourly shadNet backup
+# [Timer]
+# OnCalendar=hourly
+# RandomizedDelaySec=300
+# Persistent=true
+# [Install]
+# WantedBy=timers.target

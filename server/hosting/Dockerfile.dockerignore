@@ -1,0 +1,10 @@
+# The build context is the repository's root (hosting/Dockerfile): only server/ and the ss.info
+# template from backend/ go in.
+*
+!server
+!backend/ss_info_template.xml
+server/build*
+server/**/__pycache__
+server/hosting/secrets
+server/hosting/.env
+server/externals/protobuf/.git

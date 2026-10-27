@@ -1,0 +1,6 @@
+# Preserve original format-patches and three verbatim upstream blobs with whitespace.
+# The source manifest verifies their exact bytes; do not rewrite historical patches.
+upstream-changes/*.patch -whitespace
+/CMakeLists.txt -whitespace
+/clientsample/CMakeLists.txt -whitespace
+/clientsample/shadnet.proto -whitespace

@@ -1,0 +1,89 @@
+# shadNet hosted layout. The image is tested (docs/DEPLOY.md); this file only with `docker compose config`.
+#   cp env.example .env && edit
+#   docker compose up -d                       # shadnet + backup
+#   docker compose --profile postgres up -d    # + Postgres (nothing in shadNet uses it yet)
+#   docker compose --profile redis up -d       # + Redis (only for multi-process/multi-node)
+name: shadnet
+
+services:
+  shadnet:
+    build:
+      context: ../..              # the repository root (Dockerfile.dockerignore)
+      dockerfile: server/hosting/Dockerfile
+    image: shadnet:local
+    # Host networking: UDP 31314 sees the players' real addresses/ports (STUN, relay) and the
+    # relay skips Docker's NAT. Open only 31313/tcp, 31314/udp, 31315/tcp, 20443/tcp in the firewall.
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - shadnet-data:/data
+    stop_grace_period: 30s        # let the world journals settle
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    pids_limit: 4096              # one thread per TCP client (server.cpp), keep headroom
+    mem_limit: ${SHADNET_MEM_LIMIT:-2g}
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+    healthcheck:
+      test: ["CMD", "/opt/shadnet/healthcheck.sh"]   # the admin socket's stats (the image's own)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    image: shadnet-backup:local
+    restart: unless-stopped
+    volumes:
+      - shadnet-data:/data:ro     # read-only: the backup never touches live data
+      - backup-stage:/backup
+      - ./secrets:/run/secrets:ro # restic-password, optional ssh key for a Storage Box
+    environment:
+      BACKUP_TOOL: ${BACKUP_TOOL:-restic}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-3600}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?set RESTIC_REPOSITORY in .env}
+      RESTIC_PASSWORD_FILE: /run/secrets/restic-password
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      HEALTHCHECK_URL: ${HEALTHCHECK_URL:-}
+      # Uncomment once shadNet stores anything in Postgres:
+      # PGHOST: 127.0.0.1
+      # PGUSER: shadnet
+      # PGDATABASE: shadnet
+      # PGPASSWORD: ${POSTGRES_PASSWORD}
+    network_mode: host            # reaches Postgres on 127.0.0.1 and the backup target
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shadnet
+      POSTGRES_DB: shadnet
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=256MB"]
+    ports: ["127.0.0.1:5432:5432"]   # never public
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "shadnet"]
+      interval: 10s
+
+  redis:
+    profiles: ["redis"]
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Ephemeral by design: presence, rate-limit counters, world->worker routing. No persistence.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb",
+              "--maxmemory-policy", "volatile-lru", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    ports: ["127.0.0.1:6379:6379"]
+
+volumes:
+  shadnet-data:
+  backup-stage:
+  pg-data:

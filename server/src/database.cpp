@@ -1,0 +1,822 @@
+// SPDX-FileCopyrightText: Copyright 2019-2026 rpcsn Project
+// SPDX-FileCopyrightText: Copyright 2026 shadNet Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include <QDateTime>
+#include <QDebug>
+#include <QDir>
+#include <QFileInfo>
+#include <QRandomGenerator>
+#include <QSqlError>
+#include <QSqlRecord>
+#include <QUuid>
+#include <qcryptographichash.h>
+#include "database.h"
+#include "virtual_address.h"
+
+QByteArray Database::GenerateSalt(int bytes) {
+    QByteArray salt(bytes, Qt::Uninitialized);
+    QRandomGenerator* generator = QRandomGenerator::global();
+
+    for (int i = 0; i < bytes; ++i) {
+        salt[i] = static_cast<char>(generator->bounded(256));
+    }
+
+    return salt;
+}
+QString Database::GenerateToken(int len) {
+    const QString chars = QStringLiteral("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                         "abcdefghijklmnopqrstuvwxyz"
+                                         "0123456789");
+    QString tok;
+    tok.reserve(len);
+
+    QRandomGenerator* generator = QRandomGenerator::global();
+
+    for (int i = 0; i < len; ++i) {
+        tok.append(chars.at(generator->bounded(chars.size())));
+    }
+
+    return tok;
+}
+
+QByteArray Database::HashPassword(const QString& password, const QByteArray& salt) {
+    int iterations = 100000;
+    if (password.isEmpty() || salt.isEmpty()) {
+        return QByteArray();
+    }
+
+    QByteArray passwordUtf8 = password.toUtf8();
+    QByteArray hash = passwordUtf8 + salt;
+
+    // Apply multiple iterations of SHA-256
+    for (int i = 0; i < iterations; ++i) {
+        hash = QCryptographicHash::hash(hash, QCryptographicHash::Sha256);
+    }
+
+    return hash;
+}
+
+Database::Database(const QString& connectionName)
+    : m_connName(connectionName.isEmpty() ? QUuid::createUuid().toString(QUuid::WithoutBraces)
+                                          : connectionName) {}
+
+Database::~Database() {
+    if (m_db.isOpen())
+        m_db.close();
+    m_db = QSqlDatabase{};                    // release the reference first
+    QSqlDatabase::removeDatabase(m_connName); // now safe to remove
+}
+
+bool Database::IsOpen() const {
+    return m_db.isOpen();
+}
+
+bool Database::Open(const QString& path) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    m_db = QSqlDatabase::addDatabase("QSQLITE", m_connName);
+    m_db.setDatabaseName(path);
+    if (!m_db.open()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    Exec("PRAGMA journal_mode=WAL");
+    Exec("PRAGMA foreign_keys=ON");
+    // Connections on other threads (the TCP sessions', the link's sign-in pool) write too: wait for
+    // one another's writes instead of failing at once.
+    Exec("PRAGMA busy_timeout=5000");
+    return Migrate();
+}
+
+bool Database::Exec(const QString& sql) {
+    QSqlQuery q(m_db);
+    if (!q.exec(sql)) {
+        m_lastError = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+bool Database::Exec(QSqlQuery& q) {
+    if (!q.exec()) {
+        m_lastError = q.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Database::Migrate() {
+    Exec("CREATE TABLE IF NOT EXISTS migration("
+         "  migration_id UNSIGNED INTEGER PRIMARY KEY,"
+         "  description  TEXT NOT NULL)");
+
+    // Migration 1: core tables
+    QStringList stmts1 = {
+        "CREATE TABLE IF NOT EXISTS account("
+        "  user_id     INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  username    TEXT NOT NULL,"
+        "  hash        BLOB NOT NULL,"
+        "  salt        BLOB NOT NULL,"
+        "  avatar_url  TEXT NOT NULL,"
+        "  email       TEXT NOT NULL,"
+        "  email_check TEXT NOT NULL UNIQUE,"
+        "  token       TEXT NOT NULL,"
+        "  reset_token TEXT,"
+        "  admin       BOOL NOT NULL,"
+        "  stat_agent  BOOL NOT NULL,"
+        "  banned      BOOL NOT NULL,"
+        "  UNIQUE(username COLLATE NOCASE))",
+
+        "CREATE TABLE IF NOT EXISTS account_timestamp("
+        "  user_id          UNSIGNED BIGINT NOT NULL PRIMARY KEY,"
+        "  creation         UNSIGNED INTEGER NOT NULL,"
+        "  last_login       UNSIGNED INTEGER,"
+        "  token_last_sent  UNSIGNED INTEGER,"
+        "  reset_emit       UNSIGNED INTEGER)",
+
+        // Friendship table.
+        // user_id_1 < user_id_2 is enforced by CHECK so there is exactly one row
+        // per pair regardless of who initiated. status_user_1 and status_user_2
+        // each hold a bitmask of FriendStatus flags for their respective user.
+        "CREATE TABLE IF NOT EXISTS friendship("
+        "  user_id_1     INTEGER NOT NULL REFERENCES account(user_id) ON DELETE CASCADE,"
+        "  user_id_2     INTEGER NOT NULL REFERENCES account(user_id) ON DELETE CASCADE,"
+        "  status_user_1 INTEGER NOT NULL DEFAULT 0,"
+        "  status_user_2 INTEGER NOT NULL DEFAULT 0,"
+        "  PRIMARY KEY(user_id_1, user_id_2),"
+        "  CHECK(user_id_1 < user_id_2))",
+
+        "CREATE INDEX IF NOT EXISTS friendship_user1 ON friendship(user_id_1)",
+        "CREATE INDEX IF NOT EXISTS friendship_user2 ON friendship(user_id_2)",
+
+        // Score leaderboard configuration it has one row per (comId, boardId) pair.
+        "CREATE TABLE IF NOT EXISTS score_table("
+        "  communication_id  TEXT    NOT NULL,"
+        "  board_id          INTEGER NOT NULL,"
+        "  rank_limit        INTEGER NOT NULL DEFAULT 100,"
+        "  update_mode       INTEGER NOT NULL DEFAULT 0,"
+        "  sort_mode         INTEGER NOT NULL DEFAULT 0,"
+        "  upload_num_limit  INTEGER NOT NULL DEFAULT 10,"
+        "  upload_size_limit INTEGER NOT NULL DEFAULT 6000000,"
+        "  PRIMARY KEY(communication_id, board_id))",
+
+        // Score rows it has one per (comId, boardId, userId, characterId).
+        "CREATE TABLE IF NOT EXISTS score("
+        "  communication_id TEXT    NOT NULL,"
+        "  board_id         INTEGER NOT NULL,"
+        "  user_id          INTEGER NOT NULL,"
+        "  character_id     INTEGER NOT NULL,"
+        "  score            INTEGER NOT NULL,"
+        "  comment          TEXT,"
+        "  game_info        BLOB,"
+        "  data_id          INTEGER,"
+        "  timestamp        INTEGER NOT NULL,"
+        "  PRIMARY KEY(communication_id, board_id, user_id, character_id))",
+    };
+
+    for (const QString& s : stmts1)
+        Exec(s);
+
+    QSqlQuery ins(m_db);
+    ins.prepare("INSERT OR IGNORE INTO migration VALUES(1,'Initial setup')");
+    Exec(ins);
+
+    QStringList stmts2 = {
+        "CREATE TABLE IF NOT EXISTS title_name("
+        "  communication_id TEXT NOT NULL PRIMARY KEY,"
+        "  title_name       TEXT NOT NULL)",
+    };
+
+    for (const QString& s : stmts2)
+        Exec(s);
+
+    QSqlQuery ins2(m_db);
+    ins2.prepare("INSERT OR IGNORE INTO migration VALUES(2,'title_name mapping')");
+    Exec(ins2);
+
+    // Migration 3: each account's virtual address (virtual_address.h), one account each, so a new
+    // id cannot take (or squat) a known player's. Old accounts get theirs below.
+    {
+        QSqlQuery columns(m_db);
+        bool present = false;
+        if (columns.exec("PRAGMA table_info(account)"))
+            while (columns.next())
+                present = present || columns.value(1).toString() == "virtual_address";
+        if (!present)
+            Exec("ALTER TABLE account ADD COLUMN virtual_address INTEGER");
+    }
+    // Once: after it, an account without an address shares an older one's on purpose (and gets
+    // it when that one is deleted). Every session and sign-in thread opens a connection.
+    // Recorded only once they are stored: a database another connection wrote to past the busy
+    // timeout tries again at the next open.
+    bool assigned = false;
+    {
+        QSqlQuery done(m_db);
+        if (!done.exec("SELECT 1 FROM migration WHERE migration_id=3") || !done.next())
+            assigned = AssignVirtualAddresses();
+    }
+    Exec("CREATE UNIQUE INDEX IF NOT EXISTS account_virtual_address ON account(virtual_address)");
+    if (assigned) {
+        QSqlQuery ins3(m_db);
+        ins3.prepare("INSERT OR IGNORE INTO migration VALUES(3,'account virtual_address')");
+        Exec(ins3);
+    }
+
+    qInfo() << "Database migrations complete";
+
+    RunMaintenance();
+    return true;
+}
+
+bool Database::AssignVirtualAddresses() {
+    {
+        QSqlQuery any(m_db);
+        if (!any.exec("SELECT 1 FROM account WHERE virtual_address IS NULL LIMIT 1"))
+            return false;
+        if (!any.next())
+            return true;
+    }
+    // Immediate, and the accounts read inside it: another connection may be storing them now.
+    if (!Exec("BEGIN IMMEDIATE")) {
+        qWarning() << "Accounts: the virtual addresses are not stored yet:" << m_lastError;
+        return false;
+    }
+    QSqlQuery missing(m_db);
+    QList<QPair<qlonglong, QString>> accounts;
+    if (missing.exec("SELECT user_id, username FROM account WHERE virtual_address IS NULL "
+                     "ORDER BY user_id"))
+        while (missing.next())
+            accounts.append({missing.value(0).toLongLong(), missing.value(1).toString()});
+    int assigned = 0;
+    for (const auto& [userId, username] : accounts) {
+        const quint32 address = VirtualAddressOf(username.toUtf8());
+        if (AddressTaken(address)) {
+            // Two old accounts on one address keep signing in; their games cannot both be linked
+            // at once (server_link.cpp), as before.
+            qWarning() << "Accounts: the virtual address of" << username
+                       << "is an older account's; it keeps signing in, without an address of its "
+                          "own";
+            continue;
+        }
+        QSqlQuery set(m_db);
+        set.prepare("UPDATE account SET virtual_address=? WHERE user_id=? AND "
+                    "virtual_address IS NULL");
+        set.addBindValue(static_cast<qlonglong>(address));
+        set.addBindValue(userId);
+        if (Exec(set) && set.numRowsAffected() > 0)
+            ++assigned;
+    }
+    if (!Exec("COMMIT")) {
+        Exec("ROLLBACK");
+        qWarning() << "Accounts: the virtual addresses are not stored yet:" << m_lastError;
+        return false;
+    }
+    if (assigned > 0)
+        qInfo() << "Accounts: stored the virtual address of" << assigned << "account(s)";
+    return true;
+}
+
+bool Database::AddressTaken(quint32 address) {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT 1 FROM account WHERE virtual_address=?");
+    q.addBindValue(static_cast<qlonglong>(address));
+    return Exec(q) && q.next();
+}
+
+std::optional<DbError> Database::CreateAccount(const QString& npid, const QString& password,
+                                               const QString& avatarUrl, const QString& email) {
+    // Input validation
+    if (npid.isEmpty()) {
+        qWarning() << "createAccount: NPID is empty";
+        return DbError::InvalidInput;
+    }
+
+    if (password.isEmpty()) {
+        qWarning() << "createAccount: Password is empty";
+        return DbError::InvalidInput;
+    }
+
+    // Check database connection
+    if (!m_db.isOpen() || !m_db.isValid()) {
+        qCritical() << "createAccount: Database connection is not valid";
+        return DbError::Internal;
+    }
+
+    // Username collision check
+    {
+        QSqlQuery q(m_db);
+        if (!q.prepare("SELECT COUNT(*) FROM account WHERE username=? COLLATE NOCASE")) {
+            qCritical() << "createAccount: Failed to prepare username check query:"
+                        << q.lastError().text();
+            return DbError::Internal;
+        }
+
+        q.addBindValue(npid);
+
+        if (!q.exec()) {
+            qCritical() << "createAccount: Failed to execute username check:"
+                        << q.lastError().text();
+            return DbError::Internal;
+        }
+
+        if (!q.next()) {
+            qCritical() << "createAccount: Failed to get username check result";
+            return DbError::Internal;
+        }
+
+        if (q.value(0).toInt() > 0) {
+            qWarning() << "createAccount: Username already exists:" << npid;
+            return DbError::ExistingUsername;
+        }
+    }
+
+    // Email collision check (if email is provided)
+    if (!email.isEmpty()) {
+        QString emailCheck = email.toLower().trimmed();
+
+        // Basic email format validation
+        if (!emailCheck.contains('@') || !emailCheck.contains('.')) {
+            qWarning() << "createAccount: Invalid email format:" << email;
+            return DbError::InvalidEmail;
+        }
+
+        QSqlQuery q(m_db);
+        if (!q.prepare("SELECT COUNT(*) FROM account WHERE email_check=?")) {
+            qCritical() << "createAccount: Failed to prepare email check query:"
+                        << q.lastError().text();
+            return DbError::Internal;
+        }
+
+        q.addBindValue(emailCheck);
+
+        if (!q.exec()) {
+            qCritical() << "createAccount: Failed to execute email check:" << q.lastError().text();
+            return DbError::Internal;
+        }
+
+        if (!q.next()) {
+            qCritical() << "createAccount: Failed to get email check result";
+            return DbError::Internal;
+        }
+
+        if (q.value(0).toInt() > 0) {
+            qWarning() << "createAccount: Email already exists:" << emailCheck;
+            return DbError::ExistingEmail;
+        }
+    }
+
+    // Another account's game has this id's address: refused, so a new id never squats a known
+    // player's (the launcher makes another id).
+    const quint32 address = VirtualAddressOf(npid.toUtf8());
+    if (AddressTaken(address)) {
+        qWarning() << "createAccount: another account has the virtual address of" << npid;
+        return DbError::ExistingAddress;
+    }
+
+    // Generate cryptographic values
+    QByteArray salt = GenerateSalt();
+    if (salt.isEmpty()) {
+        qCritical() << "createAccount: Failed to generate salt";
+        return DbError::Internal;
+    }
+
+    QByteArray hash = HashPassword(password, salt);
+    if (hash.isEmpty()) {
+        qCritical() << "createAccount: Failed to generate password hash";
+        return DbError::Internal;
+    }
+
+    QString token = GenerateToken();
+    if (token.isEmpty()) {
+        qCritical() << "createAccount: Failed to generate token";
+        return DbError::Internal;
+    }
+
+    qint64 now = QDateTime::currentSecsSinceEpoch();
+
+    // Store the new account ID for later use
+    int64_t newId = -1;
+
+    // Start transaction
+    if (!m_db.transaction()) {
+        qCritical() << "createAccount: Failed to start transaction:" << m_db.lastError().text();
+        return DbError::Internal;
+    }
+
+    // Insert account
+    {
+        QSqlQuery q(m_db);
+        if (!q.prepare("INSERT INTO account(username, hash, salt, avatar_url, "
+                       "email, email_check, token, admin, stat_agent, banned, virtual_address) "
+                       "VALUES(?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?)")) {
+            qCritical() << "createAccount: Failed to prepare insert query:" << q.lastError().text();
+            m_db.rollback();
+            return DbError::Internal;
+        }
+
+        q.addBindValue(npid);
+        q.addBindValue(hash);
+        q.addBindValue(salt);
+        q.addBindValue(avatarUrl);
+        q.addBindValue(email);
+        q.addBindValue(email.isEmpty() ? "" : email.toLower().trimmed());
+        q.addBindValue(token);
+        q.addBindValue(static_cast<qlonglong>(address));
+
+        if (!q.exec()) {
+            qCritical() << "createAccount: Failed to insert account:" << q.lastError().text();
+            m_db.rollback();
+            // Another connection (a sign-in thread) made an account on this address meanwhile.
+            if (AddressTaken(address))
+                return DbError::ExistingAddress;
+
+            // Check for specific SQL errors
+            if (q.lastError().nativeErrorCode() == "19" || // SQLITE_CONSTRAINT
+                q.lastError().text().contains("UNIQUE", Qt::CaseInsensitive)) {
+                return DbError::ExistingUsername;
+            }
+            return DbError::Internal;
+        }
+
+        // Get the new account ID
+        QVariant lastId = q.lastInsertId();
+        if (!lastId.isValid() || lastId.isNull()) {
+            qCritical() << "createAccount: Failed to get last insert ID";
+            m_db.rollback();
+            return DbError::Internal;
+        }
+
+        bool ok;
+        newId = lastId.toLongLong(&ok);
+        if (!ok || newId <= 0) {
+            qCritical() << "createAccount: Invalid last insert ID:" << lastId;
+            m_db.rollback();
+            return DbError::Internal;
+        }
+    }
+
+    // Insert timestamp (using a separate query with the newId we saved)
+    {
+        QSqlQuery q2(m_db);
+        if (!q2.prepare("INSERT INTO account_timestamp(user_id, creation) VALUES(?, ?)")) {
+            qCritical() << "createAccount: Failed to prepare timestamp query:"
+                        << q2.lastError().text();
+            m_db.rollback();
+            return DbError::Internal;
+        }
+
+        q2.addBindValue(static_cast<qlonglong>(newId));
+        q2.addBindValue(now);
+
+        if (!q2.exec()) {
+            qCritical() << "createAccount: Failed to insert timestamp:" << q2.lastError().text();
+            m_db.rollback();
+            return DbError::Internal;
+        }
+    }
+
+    // Commit transaction
+    if (!m_db.commit()) {
+        qCritical() << "createAccount: Failed to commit transaction:" << m_db.lastError().text();
+        m_db.rollback();
+        return DbError::Internal;
+    }
+
+    qInfo() << "createAccount: Successfully created account:" << npid << "(ID:" << newId << ")";
+
+    return std::nullopt; // success
+}
+
+std::optional<UserRecord> Database::CheckUser(const QString& npid, const QString& password,
+                                              const QString& token, bool checkToken) {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT user_id,username,hash,salt,avatar_url,email,email_check,"
+              "token,admin,stat_agent,banned FROM account WHERE username=? COLLATE NOCASE");
+    q.addBindValue(npid);
+    if (!Exec(q) || !q.next())
+        return std::nullopt; // Empty = no such user
+
+    const QString canonicalUsername = q.value(1).toString();
+    if (canonicalUsername != npid) {
+        return std::nullopt;
+    }
+
+    UserRecord r;
+    r.userId = q.value(0).toLongLong();
+    r.username = canonicalUsername; // exact match
+    r.hash = q.value(2).toByteArray();
+    r.salt = q.value(3).toByteArray();
+    r.avatarUrl = q.value(4).toString();
+    r.email = q.value(5).toString();
+    r.emailCheck = q.value(6).toString();
+    r.token = q.value(7).toString();
+    r.admin = q.value(8).toBool();
+    r.statAgent = q.value(9).toBool();
+    r.banned = q.value(10).toBool();
+
+    QByteArray computed = HashPassword(password, r.salt);
+    if (computed != r.hash)
+        return std::nullopt; // WrongPass
+
+    if (checkToken && r.token != token)
+        return std::nullopt; // WrongToken
+
+    return r;
+}
+
+std::optional<UserRecord> Database::SignIn(const QString& npid, const QString& password,
+                                           const QString& token, bool checkToken, bool make,
+                                           DbError* why) {
+    if (auto user = CheckUser(npid, password, token, checkToken))
+        return user;
+    if (!make || password.isEmpty() || npid.size() < 3 || npid.size() > 16 ||
+        npid == QStringLiteral("DeletedUser"))
+        return std::nullopt;
+    for (const QChar& c : npid)
+        if (!c.isLetterOrNumber() && c != '-' && c != '_')
+            return std::nullopt;
+    if (GetUserId(npid))
+        return std::nullopt; // a known id with another password: not this player
+    if (const auto error = CreateAccount(
+            npid, password, QStringLiteral("https://shadps4.net/shadnet/avatars/default_01.png"),
+            npid + QStringLiteral("@player.local"))) {
+        if (why)
+            *why = *error;
+        return std::nullopt;
+    }
+    qInfo() << "signIn: made the account of player" << npid;
+    return CheckUser(npid, password, token, false);
+}
+
+std::optional<int64_t> Database::GetUserId(const QString& npid) {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT user_id FROM account WHERE username=? COLLATE NOCASE");
+    q.addBindValue(npid);
+    if (!Exec(q) || !q.next())
+        return std::nullopt;
+    return q.value(0).toLongLong();
+}
+
+std::optional<QString> Database::GetUsername(int64_t userId) {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT username FROM account WHERE user_id=?");
+    q.addBindValue(static_cast<qlonglong>(userId));
+    if (!Exec(q) || !q.next())
+        return std::nullopt;
+    return q.value(0).toString();
+}
+
+std::optional<QString> Database::GetAvatarUrl(int64_t userId) {
+    QSqlQuery q(m_db);
+    q.prepare("SELECT avatar_url FROM account WHERE user_id=?");
+    q.addBindValue(static_cast<qlonglong>(userId));
+    if (!Exec(q) || !q.next())
+        return std::nullopt;
+    return q.value(0).toString();
+}
+
+QList<QPair<int64_t, QString>> Database::GetUsernamesFromIds(const QSet<int64_t>& ids) {
+    QList<QPair<int64_t, QString>> result;
+    if (ids.isEmpty())
+        return result;
+
+    // Build IN clause
+    QStringList placeholders;
+    for (int i = 0; i < ids.size(); ++i)
+        placeholders << "?";
+    QSqlQuery q(m_db);
+    q.prepare(QString("SELECT user_id,username FROM account WHERE user_id IN (%1)")
+                  .arg(placeholders.join(',')));
+    for (int64_t id : ids)
+        q.addBindValue(static_cast<qlonglong>(id));
+    if (!Exec(q))
+        return result;
+    while (q.next())
+        result << qMakePair(q.value(0).toLongLong(), q.value(1).toString());
+    return result;
+}
+
+bool Database::UpdateLoginTime(int64_t userId) {
+    uint64_t now = static_cast<uint64_t>(QDateTime::currentSecsSinceEpoch());
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE account_timestamp SET last_login=? WHERE user_id=?");
+    q.addBindValue(static_cast<qint64>(now));
+    q.addBindValue(static_cast<qlonglong>(userId));
+    return Exec(q);
+}
+
+bool Database::BanUser(int64_t userId, bool ban) {
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE account SET banned=? WHERE user_id=?");
+    q.addBindValue(ban ? 1 : 0);
+    q.addBindValue(static_cast<qlonglong>(userId));
+    return Exec(q);
+}
+
+bool Database::DeleteUser(int64_t userId) {
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM account WHERE user_id=?");
+    q.addBindValue(static_cast<qlonglong>(userId));
+    if (!Exec(q))
+        return false;
+    AssignVirtualAddresses(); // an account that shared its address may have it now
+    return true;
+}
+
+bool Database::SetAdmin(int64_t userId, bool admin) {
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE account SET admin=? WHERE user_id=?");
+    q.addBindValue(admin ? 1 : 0);
+    q.addBindValue(static_cast<qlonglong>(userId));
+    return Exec(q);
+}
+
+int Database::TotalUsers() {
+    QSqlQuery q(m_db);
+    q.exec("SELECT COUNT(*) FROM account");
+    return q.next() ? q.value(0).toInt() : 0;
+}
+
+void Database::CleanNeverUsedAccounts() {
+    // Delete accounts that never logged in and are older than 30 days
+    uint64_t cutoff = static_cast<uint64_t>(QDateTime::currentSecsSinceEpoch()) - 30 * 86400;
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM account WHERE user_id IN ("
+              "  SELECT user_id FROM account_timestamp WHERE creation < ? AND last_login IS NULL)");
+    q.addBindValue(static_cast<qint64>(cutoff));
+    if (Exec(q) && q.numRowsAffected() > 0)
+        AssignVirtualAddresses();
+}
+
+void Database::RunMaintenance() {
+    // Remove score rows whose communication_id is blank. An empty com id is
+    // stored as 12 NUL bytes (GetNpCommId pads a missing id), so a plain '=' '''
+    // check would miss them; strip NULs (and coalesce NULL) before comparing.
+    const QString blank =
+        QStringLiteral("replace(coalesce(communication_id, ''), char(0), '') = ''");
+    for (const QString& table : {QStringLiteral("score"), QStringLiteral("score_table")}) {
+        QSqlQuery q(m_db);
+        q.prepare(QStringLiteral("DELETE FROM %1 WHERE %2").arg(table, blank));
+        if (Exec(q)) {
+            const int n = q.numRowsAffected();
+            if (n > 0) {
+                qInfo() << "Maintenance: removed" << n << "empty-comId row(s) from" << table;
+            }
+        }
+    }
+}
+
+// Title name mapping
+
+bool Database::SetTitleName(const QString& comId, const QString& titleName) {
+    if (comId.isEmpty() || titleName.isEmpty())
+        return false;
+    QSqlQuery q(m_db);
+    q.prepare("INSERT OR IGNORE INTO title_name(communication_id, title_name) "
+              "VALUES(?, ?)");
+    q.addBindValue(comId);
+    q.addBindValue(titleName);
+    return Exec(q);
+}
+
+std::optional<QString> Database::GetTitleName(const QString& comId) {
+    if (comId.isEmpty())
+        return std::nullopt;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT title_name FROM title_name WHERE communication_id=?");
+    q.addBindValue(comId);
+    if (!Exec(q) || !q.next())
+        return std::nullopt;
+    return q.value(0).toString();
+}
+
+QList<Database::GameTitleRow> Database::ListScoredGameTitles() {
+    QList<GameTitleRow> out;
+    QSqlQuery q(m_db);
+    q.prepare("SELECT s.communication_id, COALESCE(tn.title_name, '') AS name "
+              "FROM (SELECT DISTINCT communication_id FROM score) s "
+              "LEFT JOIN title_name tn ON tn.communication_id = s.communication_id "
+              "ORDER BY name ASC, s.communication_id ASC");
+    if (!Exec(q))
+        return out;
+    while (q.next()) {
+        GameTitleRow r;
+        r.comId = q.value(0).toString();
+        r.titleName = q.value(1).toString();
+        out.append(r);
+    }
+    return out;
+}
+
+// Friendship DB methods
+
+// The friendship table always stores rows with user_id_1 < user_id_2.
+// This helper returns the canonical (lower, higher) order and a flag
+// indicating whether the caller is user_id_2 (i.e. the IDs were swapped).
+static std::tuple<int64_t, int64_t, bool> orderedIds(int64_t a, int64_t b) {
+    if (a < b)
+        return {a, b, false};
+    return {b, a, true};
+}
+
+std::pair<Database::RelResult, Database::RelStatus> Database::GetRelStatus(int64_t callerId,
+                                                                           int64_t otherId) {
+    auto [id1, id2, swapped] = orderedIds(callerId, otherId);
+    QSqlQuery q(m_db);
+    q.prepare("SELECT status_user_1, status_user_2 FROM friendship "
+              "WHERE user_id_1=? AND user_id_2=?");
+    q.addBindValue(static_cast<qlonglong>(id1));
+    q.addBindValue(static_cast<qlonglong>(id2));
+    if (!Exec(q))
+        return {RelResult::Error, {}};
+    if (!q.next())
+        return {RelResult::Empty, {}};
+
+    RelStatus s;
+    uint8_t s1 = static_cast<uint8_t>(q.value(0).toInt());
+    uint8_t s2 = static_cast<uint8_t>(q.value(1).toInt());
+    s.caller = swapped ? s2 : s1;
+    s.other = swapped ? s1 : s2;
+    return {RelResult::Ok, s};
+}
+
+bool Database::SetRelStatus(int64_t callerId, int64_t otherId, uint8_t statusCaller,
+                            uint8_t statusOther) {
+    auto [id1, id2, swapped] = orderedIds(callerId, otherId);
+    uint8_t s1 = swapped ? statusOther : statusCaller;
+    uint8_t s2 = swapped ? statusCaller : statusOther;
+
+    QSqlQuery q(m_db);
+    q.prepare("INSERT INTO friendship(user_id_1, user_id_2, status_user_1, status_user_2) "
+              "VALUES(?,?,?,?) "
+              "ON CONFLICT(user_id_1, user_id_2) DO UPDATE SET "
+              "status_user_1=excluded.status_user_1, status_user_2=excluded.status_user_2");
+    q.addBindValue(static_cast<qlonglong>(id1));
+    q.addBindValue(static_cast<qlonglong>(id2));
+    q.addBindValue(s1);
+    q.addBindValue(s2);
+    return Exec(q);
+}
+
+bool Database::DeleteRel(int64_t callerId, int64_t otherId) {
+    auto [id1, id2, swapped] = orderedIds(callerId, otherId);
+    Q_UNUSED(swapped);
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM friendship WHERE user_id_1=? AND user_id_2=?");
+    q.addBindValue(static_cast<qlonglong>(id1));
+    q.addBindValue(static_cast<qlonglong>(id2));
+    return Exec(q);
+}
+
+UserRelationships Database::GetRelationships(int64_t userId) {
+    UserRelationships result;
+
+    QSqlQuery q(m_db);
+    q.prepare("SELECT user_id_1, user_id_2, status_user_1, status_user_2 "
+              "FROM friendship WHERE user_id_1=? OR user_id_2=?");
+    q.addBindValue(static_cast<qlonglong>(userId));
+    q.addBindValue(static_cast<qlonglong>(userId));
+    if (!Exec(q))
+        return result;
+
+    constexpr uint8_t F = static_cast<uint8_t>(FriendStatus::Friend);
+    constexpr uint8_t B = static_cast<uint8_t>(FriendStatus::Blocked);
+
+    while (q.next()) {
+        int64_t uid1 = q.value(0).toLongLong();
+        int64_t uid2 = q.value(1).toLongLong();
+        uint8_t su1 = static_cast<uint8_t>(q.value(2).toInt());
+        uint8_t su2 = static_cast<uint8_t>(q.value(3).toInt());
+
+        // Rotate so statusMe / statusOther are from our perspective.
+        int64_t otherId;
+        uint8_t statusMe, statusOther;
+        if (uid1 == userId) {
+            otherId = uid2;
+            statusMe = su1;
+            statusOther = su2;
+        } else {
+            otherId = uid1;
+            statusMe = su2;
+            statusOther = su1;
+        }
+
+        // Resolve the other user's npid.
+        auto npidOpt = GetUsername(otherId);
+        if (!npidOpt)
+            continue;
+        auto pair = qMakePair(otherId, *npidOpt);
+
+        if ((statusMe & F) && (statusOther & F)) {
+            result.friends.append(pair);
+        } else if ((statusMe & F) && !(statusOther & F)) {
+            result.friendRequestsSent.append(pair);
+        } else if (!(statusMe & F) && (statusOther & F)) {
+            result.friendRequestsReceived.append(pair);
+        }
+        // Blocked: we blocked them
+        if (statusMe & B) {
+            result.blocked.append(pair);
+        }
+    }
+
+    return result;
+}

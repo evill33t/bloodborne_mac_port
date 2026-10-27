@@ -1,0 +1,17 @@
+/.vs/*
+/out/*
+/build/*
+/build-*/
+/clientsample/.vs/*
+/clientsample/out/*
+/clientsample/build2/*
+/clientsample/build-*/
+*.7z
+.vscode/settings.json
+.idea/*
+clientsample/build
+cmake-build-debug/
+# Local deployments: private configuration, keys and runtime data stay outside Git.
+/hosting/.env
+/hosting/secrets/
+/hosting/data/

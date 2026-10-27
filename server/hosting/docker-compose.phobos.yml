@@ -1,0 +1,23 @@
+# Ronny Stiftel, using Kaniel/lKaniel's original hosted shadNet Docker layout.
+# Source: https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/hosting
+# Linux Docker host. Set BLOODBORNE_DATA_DIR to the existing private server data folder.
+# This standalone file is separate from opc's multi-service /docker/docker-compose.yml.
+name: bloodborne
+services:
+  bloodborne-server:
+    build:
+      context: ../..
+      dockerfile: server/hosting/Dockerfile
+      args:
+        BUILD_JOBS: "${BUILD_JOBS:-2}"
+    image: bloodborne-server:local
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - "${BLOODBORNE_DATA_DIR:?set the absolute server data directory}:/data"
+    stop_grace_period: 30s
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "5"}

@@ -1,0 +1,101 @@
+// SPDX-FileCopyrightText: Copyright 2026 shadNet Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "bloodborne_reports.h"
+#include "webapi_server.h"
+
+#include <QDebug>
+#include <QHostAddress>
+#include <QHttpServerRequest>
+#include <QHttpServerResponder>
+#include <QHttpServerResponse>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <webapi_routes_users.h>
+#include "client_session.h"
+#include "webapi_auth.h"
+#include "webapi_routes_bloodborne.h"
+#include "webapi_routes_presence.h"
+#include "webapi_routes_profile.h"
+#include "webapi_routes_session.h"
+
+WebApiServer::WebApiServer(QObject* parent) : QObject(parent) {}
+WebApiServer::~WebApiServer() = default;
+
+bool WebApiServer::Start(ConfigManager* config, const QString& dbPath, SharedState* shared) {
+    m_config = config;
+    m_shared = shared;
+
+    m_db = std::make_unique<Database>(QStringLiteral("webapi_main"));
+    if (!m_db->Open(dbPath)) {
+        qCritical() << "WebApiServer: failed to open database at" << dbPath;
+        return false;
+    }
+
+    m_http = std::make_unique<QHttpServer>(this);
+    RegisterRoutes();
+
+    m_tcp = std::make_unique<QTcpServer>(this);
+
+    const QString host = m_config->GetHost();
+    const quint16 port = m_config->GetWebApiPort().toUShort();
+    if (!m_tcp->listen(QHostAddress(host), port)) {
+        qCritical() << "WebApiServer: failed to bind" << host << ":" << port << "—"
+                    << m_tcp->errorString();
+        return false;
+    }
+
+    if (!m_http->bind(m_tcp.get())) {
+        qCritical() << "WebApiServer: QHttpServer failed to attach to listener";
+        return false;
+    }
+
+    qInfo().nospace().noquote() << "WebApiServer listening on: " << host << ":" << port;
+    return true;
+}
+
+void WebApiServer::RegisterRoutes() {
+    m_http->route("/status", [](const QHttpServerRequest&) {
+        QJsonObject body;
+        body.insert("ok", true);
+        body.insert("service", "shadnet-webapi");
+        return QHttpServerResponse{"application/json",
+                                   QJsonDocument(body).toJson(QJsonDocument::Compact),
+                                   QHttpServerResponse::StatusCode::Ok};
+    });
+
+    // user routes
+    WebApiRoutes::RegisterUserRoutes(*m_http, *m_db, *m_shared);
+    WebApiRoutes::RegisterProfileRoutes(*m_http, *m_db, *m_shared);
+    WebApiRoutes::RegisterPresenceRoutes(*m_http, *m_db, *m_shared);
+    WebApiRoutes::RegisterSessionRoutes(*m_http, *m_db, *m_shared);
+    // Hosted (http_gate.h): the summons and the token routes answer linked games' players only.
+    const HttpGate::Gate* gate = &m_shared->httpGate;
+    WebApiAuth::SetGate(gate);
+    WebApiRoutes::RegisterBloodborneRoutes(*m_http, m_config->IsBloodborneSeamlessCoopEnabled(),
+                                           gate);
+    // Phase 11: crash dumps and logs the players' launchers send after a crash. They come from the
+    // launcher (the game may be gone), so the gate is not asked; hosted: off unless HostedReports.
+    const HostedConfig hosted = m_config->GetHosted();
+    if (!hosted.enabled) {
+        RegisterReportRoutes(*m_http, *m_db, QStringLiteral("reports"));
+    } else if (hosted.reports) {
+        RegisterReportRoutes(*m_http, *m_db, QStringLiteral("reports"), 8ll * 1024 * 1024);
+    }
+
+    m_http->setMissingHandler(
+        this, [](const QHttpServerRequest& req, QHttpServerResponder& responder) {
+            qWarning() << "WebAPI: unhandled" << req.method() << req.url().path()
+                       << "(query:" << req.url().query() << ")";
+
+            QJsonObject errorObj;
+            errorObj.insert("code", static_cast<qint64>(0x80920005));
+            errorObj.insert("message", QStringLiteral("Endpoint not implemented"));
+            QJsonObject body;
+            body.insert("error", errorObj);
+            responder.sendResponse(QHttpServerResponse{
+                "application/json",
+                QJsonDocument(body).toJson(QJsonDocument::Compact),
+                QHttpServerResponder::StatusCode::NotFound,
+            });
+        });
+}

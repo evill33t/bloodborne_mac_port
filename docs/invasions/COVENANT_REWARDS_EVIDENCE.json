@@ -1,0 +1,576 @@
+{
+  "source_game": "Bloodborne 1.09 CUSA00900",
+  "authors": [
+    "FromSoftware (original game/data/events)",
+    "Kaniel/lKaniel, Vitalii Shevchuk, shadNet contributors (co-op foundation)",
+    "Soulsmods/Paramdex contributors (field definitions)"
+  ],
+  "sources": [
+    "https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/ItemLotParam.xml",
+    "https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/GemeffectParam.xml",
+    "https://github.com/soulsmods/Paramdex/blob/master/BB/Defs/EquipParamGoods.xml"
+  ],
+  "item_lots": [
+    {
+      "id": 5500,
+      "offset": 234528,
+      "original_name": "血族誓約BJ装着時のマルチPvP報酬（ホスト）",
+      "item_ids": [
+        704,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5510,
+      "offset": 234676,
+      "original_name": "血族誓約BJ装着時のマルチPvP報酬（ゲスト）",
+      "item_ids": [
+        704,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5520,
+      "offset": 234824,
+      "original_name": "血族誓約BJ装着時のNPC撃破報酬",
+      "item_ids": [
+        704,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5530,
+      "offset": 234972,
+      "original_name": "血族誓約BJ装着時のNPC撃破報酬（ダンジョン用）",
+      "item_ids": [
+        0,
+        704,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        99,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5600,
+      "offset": 235120,
+      "original_name": "血族狩り誓約BJ装着時のマルチPvP報酬（ホスト）",
+      "item_ids": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5610,
+      "offset": 235268,
+      "original_name": "血族狩り誓約BJ装着時のマルチPvP報酬（ゲスト）",
+      "item_ids": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5700,
+      "offset": 235416,
+      "original_name": "狩人狩り誓約BJ装着時のマルチPvP報酬（ホスト）",
+      "item_ids": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5710,
+      "offset": 235564,
+      "original_name": "狩人狩り誓約BJ装着時のマルチPvP報酬（ゲスト）",
+      "item_ids": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5800,
+      "offset": 235712,
+      "original_name": "血に狂った狩人狩り時のマルチPvP報酬（ホスト）",
+      "item_ids": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": 5810,
+      "offset": 235860,
+      "original_name": "血に狂った狩人狩り時のマルチPvP報酬（ゲスト）",
+      "item_ids": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "categories": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "base_weights": [
+        100,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "quantities": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "gems": [
+    {
+      "id": 2107001,
+      "offset": 965008,
+      "original_name": "誓約：血族狩り",
+      "effect": 6110
+    },
+    {
+      "id": 2107002,
+      "offset": 965044,
+      "original_name": "誓約：血族狩り 効果",
+      "effect": 180000
+    },
+    {
+      "id": 2108001,
+      "offset": 965080,
+      "original_name": "誓約：血族",
+      "effect": 6100
+    },
+    {
+      "id": 2108002,
+      "offset": 965116,
+      "original_name": "誓約：血族　効果",
+      "effect": 180010
+    },
+    {
+      "id": 2110001,
+      "offset": 965152,
+      "original_name": "誓約：狩人狩り",
+      "effect": 6120
+    },
+    {
+      "id": 2110002,
+      "offset": 965188,
+      "original_name": "誓約：狩人狩り　効果",
+      "effect": 180020
+    }
+  ],
+  "asset_hashes": {
+    "ItemLotParam": "b4afa2bd11f44780ca88a19a1af047a335bdf14dc9740c77b973c677ca66c2f9",
+    "GemeffectParam": "f4d5d1c33ea1317acee163c485086ff0587ecbd4ee093f91ed00344ad9dc9cf0",
+    "event/common.emevd.dcx": "0cb9f4e5c18b394c4c50ae5642fd40e431fd84db617f4d57be8f65c34242f64f",
+    "param/gameparam/gameparam.parambnd.dcx": "581e28302a231a10ad333806dfc90f41425db4f9f146799dca625f8d83c760c3",
+    "msg/enggb/item.msgbnd.dcx": "ae44ad89e6def2675d0c01eb0da2a8e05a34e8a275cd681d433389db1911a93d",
+    "msg/enggb/menu.msgbnd.dcx": "90c8d4e3173dc4066e066acc8249b57c6df8d11594d0f0899557954466500fa1",
+    "EquipParamGoods": "55544837b0bd3564f3c49637bb3a167d7646f4b405ec61ebdced74ec72cd79a9"
+  },
+  "eboot": {
+    "path": "owner-supplied reconstructed 1.09 eboot.elf",
+    "sha256": "cec1b276e7f9e4db978e57f524f41fbaac594530a3437b002e23f3fab14b4f86",
+    "elf_load_file_to_virtual_delta": -16384,
+    "corruption_guest_marker_check": "0x01382b08",
+    "corruption_guest_lot_call": "0x01382b26",
+    "corruption_host_marker_check": "0x013830c8",
+    "corruption_host_lot_call": "0x013830e9"
+  },
+  "findings": [
+    "Corruption marker6100: one goods704 Blood Dreg in both native PvP reward lots5500/5510.",
+    "Radiance6110, Hunter6120 and blood-addledHunter6130 native PvP lots5600/5610/5700/5710/5800/5810 contain no items.",
+    "Hostile cooperator matchmaking is separate from reward inventory; no extra Radiance/Hunter material should be invented.",
+    "Common events9360/9480 grant NPC Blood Dreg lot5520 with Corruption marker6100; this is corroboration, not the PvP reward source.",
+    "Goods704 has maxNum99, maxRepositoryNum99, isDeposit1 in the supplied original data; automatic native overflow routing was not runtime-verified."
+  ],
+  "analysis_limits": [
+    "Original game archives read without modification.",
+    "Relevant BND4/PARAM/FMG facts decoded using their native formats and Paramdex field definitions.",
+    "Native calls inspected offline with LLVM objdump; no runtime award observation is implied.",
+    "REA native provider unavailable for the supplied reconstructed target; no provider/tool installation performed."
+  ],
+  "blood_dreg_capacity": {
+    "row": 704,
+    "row_offset": "0x2314",
+    "param_sha256": "55544837b0bd3564f3c49637bb3a167d7646f4b405ec61ebdced74ec72cd79a9",
+    "schema_sha256": "482ed48e5c6aa8db5cc86088149c19d31f0dbab7d089a45b5d6d0d0dbfef778c",
+    "maxNum": {
+      "offset": "0x36",
+      "bit": null,
+      "value": 99,
+      "type": "s16"
+    },
+    "maxRepositoryNum": {
+      "offset": "0x48",
+      "bit": null,
+      "value": 99,
+      "type": "s16"
+    },
+    "isDeposit": {
+      "offset": "0x45",
+      "bit": 4,
+      "value": 1,
+      "type": "u8"
+    },
+    "isOnlyOne": {
+      "offset": "0x45",
+      "bit": 2,
+      "value": 0,
+      "type": "u8"
+    },
+    "isAutoReplenish": {
+      "offset": "0x47",
+      "bit": 0,
+      "value": 0,
+      "type": "u8"
+    },
+    "isGuestDrop": {
+      "offset": "0x47",
+      "bit": 3,
+      "value": 0,
+      "type": "u8"
+    }
+  }
+}

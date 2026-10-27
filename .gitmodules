@@ -7,3 +7,7 @@
 [submodule "third_party/LibAtrac9"]
 	path = third_party/LibAtrac9
 	url = https://github.com/Thealexbarney/LibAtrac9.git
+
+[submodule "server/externals/protobuf"]
+	path = server/externals/protobuf
+	url = https://github.com/shadexternals/protobuf.git
