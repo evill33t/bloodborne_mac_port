@@ -141,7 +141,7 @@ struct GameSettings: Equatable {
     var displayOutput: PixelSize { ultrawide ? wideOutput : output }
     var upscaler = Upscaler.metalfx
     var frameGeneration = false
-    var preset = 0
+    var preset = 1
     var sharpen = true
     var sharpness = 0.3
     var showFPS = false

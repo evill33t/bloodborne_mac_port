@@ -102,7 +102,7 @@ do {
     let badLighting = GameSettings(ini: IniFile(text: "screen_lighting=bad\nscreen_lighting_ao=nan\nscreen_lighting_gi=90\n"))
     check(badLighting.screenLighting == .off && badLighting.screenLightingAO == 0.5 && badLighting.screenLightingGI == 2,
           "screen lighting is finite and bounded")
-    check(defaults.output == PixelSize(1920, 1080) && defaults.upscaler == .metalfx && defaults.preset == 0, "default display uses MetalFX Quality")
+    check(defaults.output == PixelSize(1920, 1080) && defaults.upscaler == .metalfx && defaults.preset == 1, "default display uses MetalFX Quality")
     check(defaults.frameCap == .fps60 && !defaults.fullscreen, "default cap, window")
     check(defaults.gameTiming == .fixed && GameSettings(ini: IniFile(text: "game_timing=variable\n")).gameTiming == .variable, "game timing: default fixed, read")
     check(GameSettings(ini: IniFile(text: "game_timing=slow\n")).gameTiming == .fixed, "game timing: invalid -> fixed")
