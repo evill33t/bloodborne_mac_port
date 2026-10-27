@@ -38,10 +38,13 @@ int main() {
     unsetenv("BB_UPSCALE_PRESET");
     unsetenv("BB_RENDER_RES");
     unsetenv("BB_METAL_FRAMEGEN");
+    unsetenv("BB_SCREEN_LIGHTING");
+    unsetenv("BB_SCREEN_LIGHTING_AO");
+    unsetenv("BB_SCREEN_LIGHTING_GI");
     FILE* f = std::fopen(path, "w");
     assert(f);
     std::fprintf(f, "# a comment\nupscaler=fsr3\nfps_cap=40\ngame_timing=adaptive\nfullscreen=1\nrenderer=metal\npreset=2\n"
-                    "mouse_look=1\nmouse_sensitivity=2.50\nmouse_invert_y=1\nhdr=1\nhdr_highlights=0.75\nhdr_paper_white=1.25\nhdr_peak=4\n");
+                    "mouse_look=1\nmouse_sensitivity=2.50\nmouse_invert_y=1\nhdr=1\nhdr_highlights=0.75\nhdr_paper_white=1.25\nhdr_peak=4\nscreen_lighting=low\nscreen_lighting_ao=0.6\nscreen_lighting_gi=1.2\n");
     std::fclose(f);
     Load();
     assert(!Get().framegen && !Get().startup_framegen && !Get().framegen_forced);
@@ -63,6 +66,8 @@ int main() {
     assert(!NativeHdrSupported());
     unsetenv("BB_RENDER_RES");
     Get().hdr = false; Get().hdr_paper_white = 0.75f; Get().hdr_peak = 0.0f;
+    assert(Get().screen_lighting == ScreenLightingLow && Get().screen_lighting_ao == 0.6f &&
+           Get().screen_lighting_gi == 1.2f);
     Get().preset = 3;
     Save();
     std::string text = Read(path);
@@ -86,6 +91,16 @@ int main() {
     assert(Count(text, "hdr=0") == 1 && Count(text, "hdr_paper_white=0.75") == 1 && Count(text, "hdr_peak=0.00") == 1);
     assert(Count(text, "renderer=") == 0); // the removed renderer setting is dropped
     assert(Count(text, "preset=3") == 1 && Count(text, "preset=2") == 0);
+    assert(Count(text, "screen_lighting=low") == 1 && Count(text, "screen_lighting_ao=0.60") == 1 &&
+           Count(text, "screen_lighting_gi=1.20") == 1);
+    setenv("BB_SCREEN_LIGHTING", "high", 1);
+    setenv("BB_SCREEN_LIGHTING_AO", "nan", 1);
+    setenv("BB_SCREEN_LIGHTING_GI", "90", 1);
+    Load();
+    assert(Get().screen_lighting == ScreenLightingHigh && Get().screen_lighting_ao == 0.5f &&
+           Get().screen_lighting_gi == 2.0f);
+    unsetenv("BB_SCREEN_LIGHTING"); unsetenv("BB_SCREEN_LIGHTING_AO"); unsetenv("BB_SCREEN_LIGHTING_GI");
+    Load();
     assert(Count(text, "upscaler=fsr3") == 1 && Count(text, "# a comment") == 0);
     Save(); // again: still once each
     text = Read(path);

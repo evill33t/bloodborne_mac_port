@@ -33,6 +33,7 @@ bool OwnedKey(const std::string& key) {
         "upscaler", "preset", "sharpen", "sharpness", "jitter", "reactive", "object_motion",
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps", "achievement_banners",
         "frame_pacing", "framegen", "hdr", "hdr_highlights", "hdr_paper_white", "hdr_peak",
+        "screen_lighting", "screen_lighting_ao", "screen_lighting_gi",
         "model_lod", "output_res",
         "live_resolution", "shader_compile", "renderer", "fps_cap", "game_timing",
         "fullscreen", "metal_hud", "texture_compression",
@@ -54,10 +55,24 @@ float Clamp(float v, float lo, float hi) {
     return std::clamp(v, lo, hi);
 }
 
+float LightingNumber(const std::string& text, float lo, float hi, float fallback) {
+    char* end = nullptr;
+    const float value = std::strtof(text.c_str(),&end);
+    return end != text.c_str() && *end == 0 && std::isfinite(value)
+        ? Clamp(value,lo,hi) : fallback;
+}
+
 void Set(Values& v, const std::string& key, const std::string& value) {
     const float f = float(std::atof(value.c_str()));
     const int i = std::atoi(value.c_str());
-    if (key == "upscaler") {
+    if (key == "screen_lighting") {
+        for (int mode=0; mode<ScreenLightingCount; ++mode)
+            if (value == ScreenLightingNames[mode]) v.screen_lighting = mode;
+    } else if (key == "screen_lighting_ao") {
+        v.screen_lighting_ao = LightingNumber(value,0.0f,1.0f,0.5f);
+    } else if (key == "screen_lighting_gi") {
+        v.screen_lighting_gi = LightingNumber(value,0.0f,2.0f,0.7f);
+    } else if (key == "upscaler") {
         for (int u = 0; u < UpscalerCount; ++u) {
             if (value == UpscalerName(u)) {
                 v.upscaler = u;
@@ -165,6 +180,8 @@ void Load() {
     v.hdr = false;
     v.hdr_paper_white = 1.0f;
     v.hdr_peak = 0.0f;
+    v.screen_lighting = ScreenLightingOff;
+    v.screen_lighting_ao = 0.5f; v.screen_lighting_gi = 0.7f;
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -197,6 +214,9 @@ void Load() {
         {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
         {"BB_SHADER_COMPILE", "shader_compile"},
         {"BB_METAL_FRAMEGEN", "framegen"},
+        {"BB_SCREEN_LIGHTING", "screen_lighting"},
+        {"BB_SCREEN_LIGHTING_AO", "screen_lighting_ao"},
+        {"BB_SCREEN_LIGHTING_GI", "screen_lighting_gi"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -376,6 +396,9 @@ void Save() {
     // Read by patches.py at start.
     std::fprintf(file, "hdr=%d\nhdr_paper_white=%.2f\nhdr_peak=%.2f\n", int(v.hdr.load()),
                  v.hdr_paper_white.load(), v.hdr_peak.load());
+    std::fprintf(file,"screen_lighting=%s\nscreen_lighting_ao=%.2f\nscreen_lighting_gi=%.2f\n",
+                 ScreenLightingNames[std::clamp(v.screen_lighting.load(),0,ScreenLightingCount-1)],
+                 v.screen_lighting_ao.load(),v.screen_lighting_gi.load());
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }

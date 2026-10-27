@@ -832,6 +832,12 @@ FSR 3.1 or TAA; other modes explicitly retain SDR output. It uses exposed floati
 and bloom before SDR tone mapping, with separate game UI composition, live paper-white/peak
 calibration and display-range status. Unknown scenes retain SDR output. See [HDR](docs/HDR.md) for behaviour and validation limits.
 
+**Optional screen-space lighting:** Low/High add contact shading and one bounce of indirect
+light to the opaque scene before transparencies and post-processing. It is off by default;
+controls are in the launcher's effects page and the in-game Graphics tab. Uses more GPU time.
+See [screen-space lighting](docs/SCREEN_SPACE_LIGHTING.md) for the native Metal adaptation,
+source attribution and limits.
+
 - **Settings overlay:** `⌘,` (or L3 + R3 on a controller): FPS, resolution, upscaler (MetalFX,
   FSR 3.1 or off), shader compile mode. Some changes need a restart. The launcher shows the
   same settings before the game starts.
