@@ -24,7 +24,6 @@ final class LauncherModel: ObservableObject {
     private var settingsFile = IniFile()
     private var updaterChanges: AnyCancellable?
     private var benchmarkChanges: AnyCancellable?
-    private var screenChanges: AnyCancellable?
     private var gameProcess: Process?
     private let frameGenerationDeviceSupported = FrameGenerationSupport.deviceSupported
     var frameGenerationDisplay: FrameGenerationDisplay? {
