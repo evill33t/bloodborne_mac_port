@@ -40,6 +40,7 @@ app=$dist/Bloodborne.app
 contents=$app/Contents
 rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/port/scripts" "$contents/Resources/licenses"
+bash scripts/macos/build_icon.sh assets/branding/bloodborne.ico "$contents/Resources/Bloodborne.icns"
 
 # Executables: library search goes to Frameworks/ only (the build's rpaths name this checkout).
 install -m755 out/gpu-arm64/bbmap-prepare out/bb-probe out/bbgpu-host out/bbgpu-host-macos27 "$contents/MacOS/"
@@ -146,6 +147,8 @@ cp docs/NATIVE_MAC_SETTINGS.md "$lic/native-menu-provenance.txt"
 cp src/fps/LICENSE "$lic/LICENSE-adaptive-fps-GPL-3.0.txt"
 cp src/fps/PROVENANCE.md "$lic/adaptive-fps-provenance.md"
 cp gpu/art/README.md "$lic/PROVENANCE-coop-artwork.md"
+cp assets/branding/README.md "$lic/branding-provenance.md"
+cp assets/branding/LICENSE "$lic/LICENSE-branding.txt"
 cp "$stdlib/LICENSE.txt" "$lic/LICENSE-Python.txt"
 for pair in SDL:LICENSE.txt Vulkan-Headers:LICENSE.md SPIRV-Cross:LICENSE FFmpeg:COPYING.LGPLv2.1 \
             FFmpeg:LICENSE.md fmt:LICENSE magic_enum:LICENSE miniz:LICENSE robin-map:LICENSE \
@@ -221,6 +224,7 @@ cat > "$contents/Info.plist" <<EOF
     <key>CFBundleDisplayName</key><string>Bloodborne</string>
     <key>CFBundleIdentifier</key><string>io.github.wooloomooloo2.bloodborne-mac-port</string>
     <key>CFBundleExecutable</key><string>Bloodborne</string>
+    <key>CFBundleIconFile</key><string>Bloodborne</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${version%%-*}</string>
     <key>CFBundleVersion</key><string>$version</string>

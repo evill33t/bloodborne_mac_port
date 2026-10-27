@@ -228,7 +228,18 @@ void Header(const char* title,const char* subtitle) {
     ImGui::Dummy(ImVec2(0,56*scale));
     if(subtitle) {ImGui::TextDisabled("%s",subtitle);ImGui::Spacing();}
 }
-bool Begin(const char* title,bool* open,ImGuiWindowFlags flags) {
+void HeroBackdrop(ImDrawList* draw,ImVec2 at,ImVec2 end) {
+    u32 width=0,height=0;
+    void* texture=BbOverlay::MetalBackend::HeroTexture(width,height);
+    if(texture && width && height && end.x>at.x && end.y>at.y) {
+        // Fill the screen/panel without stretching the original 3:2 artwork.
+        const float scale=std::max((end.x-at.x)/width,(end.y-at.y)/height);
+        const float u=(end.x-at.x)/(width*scale),v=(end.y-at.y)/(height*scale);
+        draw->AddImage(Ref(texture),at,end,ImVec2((1-u)*.5f,(1-v)*.5f),ImVec2((1+u)*.5f,(1+v)*.5f));
+    } else Art(draw,BbCoopArt::Piece::Backdrop,at,end);
+    draw->AddRectFilled(at,end,IM_COL32(0,0,0,80));
+}
+bool Begin(const char* title,bool* open,ImGuiWindowFlags flags,bool hero) {
     const std::string translated=std::string(Text(title))+"###"+title;
     if(flags&ImGuiWindowFlags_AlwaysAutoResize) {
         const auto display=ImGui::GetIO().DisplaySize;
@@ -237,7 +248,8 @@ bool Begin(const char* title,bool* open,ImGuiWindowFlags flags) {
     const bool visible=ImGui::Begin(translated.c_str(),nullptr,flags|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoCollapse);
     if(!visible) return false;
     auto* draw=ImGui::GetWindowDrawList();const auto at=ImGui::GetWindowPos(),size=ImGui::GetWindowSize();
-    if(wall) if(void* texture=BbOverlay::MetalBackend::ArtworkTexture(2,wall->rgba.data(),wall->width,wall->height)) {
+    if(hero) HeroBackdrop(draw,at,ImVec2(at.x+size.x,at.y+size.y));
+    else if(wall) if(void* texture=BbOverlay::MetalBackend::ArtworkTexture(2,wall->rgba.data(),wall->width,wall->height)) {
         draw->AddImage(Ref(texture),at,ImVec2(at.x+size.x,at.y+size.y),ImVec2(0,0),ImVec2(1,1),Tint(.9f));
         draw->AddRectFilled(at,ImVec2(at.x+size.x,at.y+size.y),IM_COL32(0,0,0,100));
     }

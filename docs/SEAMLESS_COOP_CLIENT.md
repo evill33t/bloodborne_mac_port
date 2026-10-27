@@ -56,6 +56,11 @@ arm64 Metal host; game hooks and networking run in the x86-64 Rosetta game proce
 | Attack a downed teammate | Build revive progress; holding Circle while downed gives up |
 | Options during a cutscene | Vote to skip |
 
+The team setup and “Entering the hunt” loading screens use the Windows launcher's `hero.jpg`,
+embedded in both GPU-library slices and cropped to fill without stretching. The app bundles
+the same source's fallback icon until the player's game icon is available. [Original assets,
+authors and source hashes](../assets/branding/README.md).
+
 The co-op screens follow the Windows reference's presentation: framed hunter cards, ready and
 leader marks, medallions, silver dividers, and a shared loading screen. Live portraits appear
 in the party HUD, compass and map when received; hunter sigils fill in before a portrait is

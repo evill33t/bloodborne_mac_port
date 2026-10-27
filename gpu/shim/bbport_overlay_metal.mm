@@ -4,6 +4,15 @@
 #import <Metal/Metal.h>
 #import <ImageIO/ImageIO.h>
 
+// Supermedo/bloodborne_pc launcher/assets/hero.jpg, introduced by nick24051998.
+// Original asset, immutable source links and hashes: assets/branding/README.md.
+asm(".section __TEXT,__const\n.balign 16\n.private_extern _bb_coop_hero\n.globl _bb_coop_hero\n_bb_coop_hero:\n"
+    ".incbin \"" BB_COOP_HERO_PATH "\"\n_bb_coop_hero_end:\n"
+    ".balign 8\n.private_extern _bb_coop_hero_size\n.globl _bb_coop_hero_size\n_bb_coop_hero_size:\n"
+    ".quad _bb_coop_hero_end - _bb_coop_hero\n.text\n");
+extern "C" const unsigned char bb_coop_hero[];
+extern "C" const uint64_t bb_coop_hero_size;
+
 #include "bbport_overlay_metal.h"
 #include "bbport_achievements.h"
 #include <map>
@@ -185,6 +194,41 @@ void* ArtworkTexture(unsigned slot,const u8* rgba,u32 width,u32 height) {
         artwork[slot]=texture;
     }
     [frame_portraits addObject:artwork[slot]];return (__bridge void*)artwork[slot];
+}
+
+void* HeroTexture(u32& width,u32& height) {
+    static bool tried=false;
+    static id<MTLTexture> texture;
+    if(!tried && overlay_device) {
+        tried=true;
+        NSData* data=[NSData dataWithBytes:bb_coop_hero length:bb_coop_hero_size];
+        CGImageSourceRef source=CGImageSourceCreateWithData((__bridge CFDataRef)data,nullptr);
+        CGImageRef image=source?CGImageSourceCreateImageAtIndex(source,0,nullptr):nullptr;
+        if(source) CFRelease(source);
+        if(image) {
+            const size_t w=CGImageGetWidth(image),h=CGImageGetHeight(image);
+            if(w && h && w<=4096 && h<=4096) {
+                std::vector<u8> rgba(w*h*4);
+                CGColorSpaceRef colors=CGColorSpaceCreateDeviceRGB();
+                CGContextRef context=CGBitmapContextCreate(rgba.data(),w,h,8,w*4,colors,
+                    CGBitmapInfo(kCGImageAlphaPremultipliedLast)|CGBitmapInfo(kCGBitmapByteOrder32Big));
+                CGColorSpaceRelease(colors);
+                if(context) {
+                    CGContextDrawImage(context,CGRectMake(0,0,w,h),image);
+                    CGContextRelease(context);
+                    auto* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                        width:w height:h mipmapped:NO];
+                    desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead;
+                    texture=[overlay_device newTextureWithDescriptor:desc];
+                    [texture replaceRegion:MTLRegionMake2D(0,0,w,h) mipmapLevel:0 withBytes:rgba.data() bytesPerRow:w*4];
+                }
+            }
+            CGImageRelease(image);
+        }
+    }
+    width=texture.width;height=texture.height;
+    if(texture) [frame_portraits addObject:texture]; // unretained command buffers need frame ownership
+    return (__bridge void*)texture;
 }
 
 void* MapTexture(u64 version,const BbMapArt::Chart& chart,const u8* rgba,unsigned slot) {

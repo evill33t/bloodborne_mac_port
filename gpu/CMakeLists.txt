@@ -160,6 +160,9 @@ set_source_files_properties(shim/bbport_coop_style.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/art/coop_art.bin;${CMAKE_CURRENT_SOURCE_DIR}/art/party_icons.bin")
 set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
+set_source_files_properties(shim/bbport_overlay_metal.mm PROPERTIES
+    COMPILE_DEFINITIONS "BB_COOP_HERO_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/../assets/branding/hero.jpg\""
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../assets/branding/hero.jpg")
 target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include ..)
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)

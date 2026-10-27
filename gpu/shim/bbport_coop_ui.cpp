@@ -143,7 +143,7 @@ void Team(const BbCoopUi& s) {
     ImGui::SetNextWindowSize(ImVec2(std::min(1440*scale,display.x-60*scale),std::min(940*scale,display.y-50*scale)),ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(ImVec2(display.x*.5f,display.y*.5f),ImGuiCond_Appearing,ImVec2(.5f,.5f));
     bool open=true;
-    if(BbCoopStyle::Begin("Co-op Team",lobby.menu?&open:nullptr)) {
+    if(BbCoopStyle::Begin("Co-op Team",lobby.menu?&open:nullptr,0,true)) {
         ImGui::TextUnformatted(T(lobby.signed_in?"Connected":"Connecting to the co-op server..."));
         if(*lobby.notice) ImGui::TextWrapped(T("%s"),lobby.notice);
         if(!lobby.signed_in) ImGui::TextWrapped("%s",T("Check the server address and connection if this persists. You can return to offline play from the launcher."));
@@ -644,8 +644,7 @@ void Loading(const BbCoopUi& s) {
     ImGui::SetNextWindowPos(ImVec2(0,0));ImGui::SetNextWindowSize(display);
     if(ImGui::Begin("##hunters entering",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoNav|ImGuiWindowFlags_NoInputs)) {
         auto* draw=ImGui::GetWindowDrawList();
-        BbCoopStyle::Art(draw,BbCoopArt::Piece::Backdrop,ImVec2(0,0),display);
-        draw->AddRectFilled(ImVec2(0,0),display,IM_COL32(0,0,0,125));
+        BbCoopStyle::HeroBackdrop(draw,ImVec2(0,0),display);
         BbCoopStyle::Label(draw,ImVec2(display.x*.5f,display.y*.12f),38*scale,BbCoopStyle::Ink(),"Entering the hunt",.5f);
         BbCoopStyle::Ornament(draw,display.x*.2f,display.x*.8f,display.y*.12f+52*scale);
         const int count=std::clamp(s.load.count,0,4);const float gap=22*scale;

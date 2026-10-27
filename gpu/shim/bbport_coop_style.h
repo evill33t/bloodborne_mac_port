@@ -27,7 +27,8 @@ void Face(ImDrawList* draw,const BbCoopUi& s,const char* board,const char* name,
 void HpBar(ImDrawList* draw,ImVec2 at,float width,float height,float fill,float alpha=1);
 void Supplies(ImDrawList* draw,float right,float y,uint32_t vials,uint32_t bullets,float scale);
 void Label(ImDrawList* draw,ImVec2 at,float size,ImU32 color,const char* text,float align=0,float max_width=0);
-bool Begin(const char* title,bool* open=nullptr,ImGuiWindowFlags flags=0);
+void HeroBackdrop(ImDrawList* draw,ImVec2 at,ImVec2 end);
+bool Begin(const char* title,bool* open=nullptr,ImGuiWindowFlags flags=0,bool hero=false);
 void Header(const char* title,const char* subtitle=nullptr);
 bool Button(const char* label,const ImVec2& size=ImVec2(0,0));
 }

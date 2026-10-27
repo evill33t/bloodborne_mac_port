@@ -7,8 +7,8 @@
 # to the newest). If the game stops with an error, the launcher shows a crash report and the log.
 #
 # The game window runs from inside the bundle (a link to out/bbgpu-host), so the Dock shows
-# "Bloodborne". The icon is made from your game's sce_sys/icon0.png, so the app is built
-# locally and never committed (Bloodborne.app is in .gitignore).
+# "Bloodborne". A bundled Windows-launcher icon is used until the player's game artwork
+# is available (assets/branding/README.md). Bloodborne.app stays local and ignored.
 #
 # usage: bash scripts/macos/make_app.sh     (again after moving the repository)
 set -euo pipefail
@@ -54,22 +54,19 @@ codesign --force --sign - "$app/Contents/MacOS/Bloodborne"
 ln -s "$repo/out/bbgpu-host" "$app/Contents/MacOS/bbgpu-host"
 ln -s "$repo/out/bbgpu-host-macos27" "$app/Contents/MacOS/bbgpu-host-macos27"
 
-# Icon from the game's own artwork, when the game folder is known.
+# The bundled fallback also covers a first launch without a selected game folder.
+source_icon=$repo/assets/branding/bloodborne.ico
 game=
 if [[ -f launch.conf ]]; then game=$(set -a; source ./launch.conf; printf '%s' "${BB_GAME_DIR:-}"); fi
 [[ -z $game && -f ../CUSA03173/eboot.bin ]] && game=$(cd ../CUSA03173 && pwd)
 if [[ -n $game && -f $game/sce_sys/icon0.png ]]; then
-    set_dir=$(mktemp -d)/Bloodborne.iconset
-    mkdir -p "$set_dir"
-    for size in 16 32 128 256 512; do
-        sips -z $size $size "$game/sce_sys/icon0.png" --out "$set_dir/icon_${size}x${size}.png" >/dev/null
-        double=$((size * 2))
-        sips -z $double $double "$game/sce_sys/icon0.png" --out "$set_dir/icon_${size}x${size}@2x.png" >/dev/null
-    done
-    iconutil -c icns "$set_dir" -o "$app/Contents/Resources/Bloodborne.icns"
-    rm -rf "$(dirname "$set_dir")"
+    source_icon=$game/sce_sys/icon0.png
 else
-    echo "No game folder known yet (launch.conf): the app has no icon. Run this again after the first launch."
+    echo "Using the bundled launcher icon until game artwork is available."
 fi
+bash scripts/macos/build_icon.sh "$source_icon" "$app/Contents/Resources/Bloodborne.icns"
+mkdir -p "$app/Contents/Resources/licenses"
+cp assets/branding/README.md "$app/Contents/Resources/licenses/branding-provenance.md"
+cp assets/branding/LICENSE "$app/Contents/Resources/licenses/LICENSE-branding.txt"
 touch "$app"
 echo "Built $app"

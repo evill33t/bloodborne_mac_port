@@ -312,7 +312,10 @@ final class LauncherModel: ObservableObject {
     private func applyGameIcon(from folder: URL) {
         let iconURL = folder.appendingPathComponent("sce_sys/icon0.png")
         guard FileManager.default.fileExists(atPath: iconURL.path),
-              let iconImage = NSImage(contentsOf: iconURL) else { return }
+              let iconImage = NSImage(contentsOf: iconURL) else {
+            NSApplication.shared.applicationIconImage = nil // restore the bundled fallback
+            return
+        }
         NSApplication.shared.applicationIconImage = iconImage
     }
 

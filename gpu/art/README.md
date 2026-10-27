@@ -18,3 +18,7 @@ silver color treatment and native Metal resource ownership.
 
 The player's menu textures, HP gauge and game font are loaded separately at runtime.
 They are not part of these artwork files or the application distribution.
+
+The Mac team setup and hunt-loading screens now use the separately imported Windows launcher
+hero image instead of this atlas's backdrop. See [branding provenance](../../assets/branding/README.md)
+for Supermedo/bloodborne_pc, nick24051998, the exact source commits and file hashes.

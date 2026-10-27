@@ -31,6 +31,8 @@ void Frame(void* command_buffer, void* target, const std::function<void()>& buil
 void* PortraitTexture(unsigned slot, u32 version, const u8* rgba, u32 side);
 // Immutable co-op artwork. Like portraits, retained through GPU completion on unretained buffers.
 void* ArtworkTexture(unsigned slot, const u8* rgba, u32 width, u32 height);
+// Embedded Windows-launcher hero; dimensions describe its original aspect ratio.
+void* HeroTexture(u32& width, u32& height);
 // Current terrain image; replacements and 3D resources survive command-buffer completion.
 void* MapTexture(u64 version, const BbMapArt::Chart& chart, const u8* rgba, unsigned slot = 0);
 struct MapCamera {
