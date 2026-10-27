@@ -19,7 +19,7 @@ struct ReleaseUpdate: Equatable {
 /// Update checks against the repository's GitHub releases (launcher/App/Updater.swift does the
 /// network and the install).
 enum Updates {
-    static let repository = "Wooloomooloo2/bloodborne_mac_port"
+    static let repository = "evill33t/bloodborne_mac_port"
     static let bundleIdentifier = "io.github.wooloomooloo2.bloodborne-mac-port"
     static let releasesAPI = URL(string: "https://api.github.com/repos/\(repository)/releases?per_page=30")!
     static let repositoryPage = URL(string: "https://github.com/\(repository)")!

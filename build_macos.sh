@@ -7,6 +7,8 @@
 #   bash build_macos.sh            # libbbgpu.dylib, bb-probe, bbgpu-host (arm64 dependencies)
 #   bash build_macos.sh --test     # also build and run the runtime tests
 #   bash build_macos.sh --gpu-only # only the GPU library
+#   BB_BUILD_TYPE=Release BB_LTO=ON bash build_macos.sh # -O3, LTO, native release hosts
+#   CMAKE_GENERATOR='Unix Makefiles' bash build_macos.sh # reuse a Makefiles cache
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
 ROOT=$PWD
@@ -23,6 +25,12 @@ for tool in cmake ninja glslang pkg-config; do
 done
 mkdir -p out
 CC=${CC:-/usr/bin/clang}
+build_type=${BB_BUILD_TYPE:-RelWithDebInfo}
+opt=(-O2 -g)
+if [[ $build_type == Release ]]; then
+    opt=(-O3 -DNDEBUG)
+    [[ ${BB_LTO:-ON} == OFF ]] || opt+=(-flto)
+fi
 ARCH=(-arch x86_64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET)
 export PKG_CONFIG_LIBDIR=$PREFIX/lib/pkgconfig:$PREFIX/share/pkgconfig
 unset PKG_CONFIG_PATH
@@ -39,7 +47,7 @@ boost=$(brew --prefix boost 2>/dev/null || echo /opt/homebrew/opt/boost)
 # Online module (gpu/bbnet; BB_NET=OFF skips it): its libraries come from deps/x86_64 too, and
 # protoc from deps/host (arm64) when bootstrap_deps.sh built it.
 protoc=; [[ -x $ROOT/deps/host/bin/protoc ]] && protoc=$ROOT/deps/host/bin/protoc
-cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+cmake -S gpu -B out/gpu -G "${CMAKE_GENERATOR:-Ninja}" -DCMAKE_BUILD_TYPE="$build_type" \
     -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="${CXX:-/usr/bin/clang++}" \
     -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET \
     -DCMAKE_PREFIX_PATH="$PREFIX;$boost" -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew \
@@ -48,7 +56,7 @@ cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DBB_NET="${BB_NET:-ON}" -DBB_SEAMLESS="${BB_SEAMLESS:-ON}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
 echo "GPU library: LTO ${BB_LTO:-ON}"
 if [[ ${BB_SEAMLESS:-ON} == ON ]]; then
-    if ! ninja -C out/gpu bbseamless > out/seamless-build.log 2>&1; then
+    if ! cmake --build out/gpu --parallel "${BB_BUILD_JOBS:-6}" --target bbseamless > out/seamless-build.log 2>&1; then
         tail -35 out/seamless-build.log >&2
         echo 'Seamless client build failed (out/seamless-build.log).' >&2; exit 1
     fi
@@ -57,15 +65,15 @@ else
     rm -f out/gpu/libbbseamless.dylib
 fi
 # A failed GPU build must stop here: an older libbbgpu.dylib would otherwise be used silently.
-if ! ninja -C out/gpu bbgpu > out/gpu-build.log 2>&1; then
+if ! cmake --build out/gpu --parallel "${BB_BUILD_JOBS:-6}" --target bbgpu > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
     echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
 fi
 # The online module, when CMake found its libraries (otherwise the port plays offline). A failed
 # module build is a warning, not a stop: the offline game is whole without it, so a stale module
 # is removed and the build goes on.
-if ninja -C out/gpu -t targets all 2>/dev/null | grep '^bbnet:' >/dev/null; then # no -q: pipefail
-    if ninja -C out/gpu bbnet > out/gpu-net-build.log 2>&1; then
+if cmake --build out/gpu --target help 2>/dev/null | grep -E '(^|[ /])bbnet([: ]|$)' >/dev/null; then # no -q: pipefail
+    if cmake --build out/gpu --parallel "${BB_BUILD_JOBS:-6}" --target bbnet > out/gpu-net-build.log 2>&1; then
         echo "Online module: $PWD/out/gpu/libbbnet.dylib"
     else
         grep -v '^\[' out/gpu-net-build.log | tail -40 >&2
@@ -80,19 +88,22 @@ fi
 if [[ ${1:-} == --gpu-only ]]; then echo "Built $PWD/out/gpu/libbbgpu.dylib"; exit 0; fi
 
 # @executable_path/gpu: packaged copies keep the library next to the binary without patching it.
-gpu=(-Lout/gpu -lbbgpu -Wl,-rpath,@executable_path/gpu -Wl,-rpath,"$PWD/out/gpu"
+# The dylib resolves runtime hooks from its executable through the flat namespace. Preserve
+# those externally visible definitions when LTO cannot see their uses across that boundary.
+gpu=(-Wl,-export_dynamic -Lout/gpu -lbbgpu -Wl,-rpath,@executable_path/gpu -Wl,-rpath,"$PWD/out/gpu"
     -Wl,-rpath,"$PREFIX/lib")
 runtime=(src/runtime*.c)
 # Third-party decoders: compiled once, without this project's -Werror policy.
 atrac9=(third_party/LibAtrac9/C/src/*.c)
-if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/libatrac9.a -name '*.c') ]]; then
+if [[ ! -f out/libatrac9.a || $(cat out/atrac9-build-flags 2>/dev/null || true) != "${opt[*]}" || -n $(find third_party/LibAtrac9/C/src -newer out/libatrac9.a -name '*.c') ]]; then
     rm -rf out/atrac9 && mkdir -p out/atrac9
-    for source in "${atrac9[@]}"; do "$CC" "${ARCH[@]}" -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
+    for source in "${atrac9[@]}"; do "$CC" "${ARCH[@]}" -std=c99 "${opt[@]}" -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
     ar rcs out/libatrac9.a out/atrac9/*.o
+    printf '%s\n' "${opt[*]}" > out/atrac9-build-flags
 fi
-cflags=(-std=c11 -O2 -g -Wall -Wextra -Werror -pthread "${ARCH[@]}")
+cflags=(-std=c11 "${opt[@]}" -Wall -Wextra -Werror -pthread "${ARCH[@]}")
 # The timing hook runs beside the x86-64 game, including in split GPU mode.
-"${CXX:-/usr/bin/clang++}" "${ARCH[@]}" -std=c++20 -O2 -g -Wall -Wextra -Werror \
+"${CXX:-/usr/bin/clang++}" "${ARCH[@]}" -std=c++20 "${opt[@]}" -Wall -Wextra -Werror \
     -ffp-contract=off -fno-fast-math -c src/fps/timing.cpp -o out/fps-timing.o
 "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc src/probe.c "${runtime[@]}" src/gpu_process.c out/fps-timing.o out/libatrac9.a -lc++ -lm "${gpu[@]}" "${libraries[@]}" -framework CoreFoundation -o out/bb-probe
 echo "Built $PWD/out/bb-probe"
@@ -102,8 +113,8 @@ echo "Built $PWD/out/bb-probe"
 ARM64_PREFIX=$ROOT/deps/arm64
 if [[ -f $ARM64_PREFIX/lib/pkgconfig/sdl3.pc ]]; then
     bash scripts/macos/build_gpu_arm64.sh
-    host_cc=(/usr/bin/clang -arch arm64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -std=c11 -O2 -g -Wall -Wextra -Werror
-        -I. host/main.c host/host_runtime.c -Lout/gpu-arm64 -lbbgpu -Wl,-rpath,"$ROOT/out/gpu-arm64"
+    host_cc=(/usr/bin/clang -arch arm64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -std=c11 "${opt[@]}" -Wall -Wextra -Werror
+        -I. host/main.c host/host_runtime.c -Wl,-export_dynamic -Lout/gpu-arm64 -lbbgpu -Wl,-rpath,"$ROOT/out/gpu-arm64"
         -Wl,-rpath,"$ARM64_PREFIX/lib" -framework CoreFoundation)
     "${host_cc[@]}" -o out/bbgpu-host
     # macOS 27: libmalloc takes addresses in the guest range before main(), so a second host
@@ -117,6 +128,8 @@ else
     echo "Skipped out/bbgpu-host: no arm64 dependencies (BB_DEPS_ARCH=arm64 bash scripts/macos/bootstrap_deps.sh)"
 fi
 if [[ ${1:-} == --test ]]; then
+    # Test assertions remain active even when checking a Release build.
+    cflags+=(-UNDEBUG)
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_macos_trophies.c "${runtime[@]}" \
         out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/trophies-test
     out/trophies-test
@@ -163,7 +176,7 @@ if [[ ${1:-} == --test ]]; then
     fi
     # The online module's P2P frames match shadPS4 v0.20.0's codec (skips without the module).
     if [[ -f out/gpu/libbbnet.dylib ]]; then
-        ninja -C out/gpu bbnet-codec-test bbnet-session-test > out/gpu-net-test-build.log 2>&1 || { tail -40 out/gpu-net-test-build.log >&2; exit 1; }
+        cmake --build out/gpu --parallel "${BB_BUILD_JOBS:-6}" --target bbnet-codec-test bbnet-session-test > out/gpu-net-test-build.log 2>&1 || { tail -40 out/gpu-net-test-build.log >&2; exit 1; }
         out/gpu/bbnet-codec-test
         out/gpu/bbnet-session-test
     fi
@@ -267,58 +280,58 @@ if [[ ${1:-} == --test ]]; then
     # Metal-native M3: scene targets (scaled copies, depth resample, stencil export) through the
     # linked arm64 library; again writing stencil one bit at a time.
     if [[ -f out/gpu-arm64/libbbgpu.dylib ]]; then
-        ninja -C out/gpu-arm64 scene-resolution-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target scene-resolution-test >/dev/null
         out/gpu-arm64/scene-resolution-test 2>&1 | grep -E 'PASS|FAIL'
         BB_SCENE_STENCIL_BITS=1 out/gpu-arm64/scene-resolution-test 2>&1 | grep -E 'PASS|FAIL'
         # Metal-native M5: host kernels with combined image samplers, plain and under validation.
-        ninja -C out/gpu-arm64 host-kernel-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target host-kernel-test >/dev/null
         out/gpu-arm64/host-kernel-test
         MTL_DEBUG_LAYER=1 out/gpu-arm64/host-kernel-test 2>&1 | grep -E 'PASS|FAIL' || { echo 'FAIL: host-kernel-test (validation)'; exit 1; }
         # Metal-native M6: the presenter's FSR 1 pass (EASU + RCAS), plain and under validation.
-        ninja -C out/gpu-arm64 fsr-pass-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target fsr-pass-test >/dev/null
         out/gpu-arm64/fsr-pass-test 2>&1 | grep -E 'PASS|FAIL' || { echo 'FAIL: fsr-pass-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/fsr-pass-test 2>&1 | grep -E 'PASS|FAIL' || { echo 'FAIL: fsr-pass-test (validation)'; exit 1; }
         # Metal-native M6: every FSR 3.1 blob compiles to a Metal compute pipeline through the
         # FidelityFX Metal back end, and FSR 3 on it matches the Vulkan path's golden outputs
         # (tests/data/fsr3), plain and under validation.
-        ninja -C out/gpu-arm64 ffx-metal-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target ffx-metal-test >/dev/null
         out/gpu-arm64/ffx-metal-test || { echo 'FAIL: ffx-metal-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/ffx-metal-test 2>&1 | grep -E '^(PASS|FAIL)'
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: ffx-metal-test (validation)'; exit 1; }
         # Metal-native M5: the settings overlay (ImGui's Metal backend) into an offscreen BGRA8
         # target, plain and under validation.
-        ninja -C out/gpu-arm64 overlay-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target overlay-test >/dev/null
         out/gpu-arm64/overlay-test 2>&1 | grep -E '^(PASS|FAIL)'
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: overlay-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/overlay-test 2>&1 | grep -E '^(PASS|FAIL)'
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: overlay-test (validation)'; exit 1; }
-        ninja -C out/gpu-arm64 coop-presentation-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target coop-presentation-test >/dev/null
         MTL_DEBUG_LAYER=1 out/gpu-arm64/coop-presentation-test
         # Saved upscaler choices (unavailable providers run as a fallback, the ini keeps the
         # user's value).
-        ninja -C out/gpu-arm64 native-motion-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target native-motion-test >/dev/null
         out/gpu-arm64/native-motion-test
-        ninja -C out/gpu-arm64 upscaler-support-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target upscaler-support-test >/dev/null
         out/gpu-arm64/upscaler-support-test 2>&1 | grep -E 'PASS|FAIL' || { echo 'FAIL: upscaler-support-test'; exit 1; }
         # Metal-native M5: the motion shader variants compile to MSL; object motion on Metal
         # (history buffers by GPU address, the motion attachment), plain and under validation.
-        ninja -C out/gpu-arm64 motion-shader-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target motion-shader-test >/dev/null
         out/gpu-arm64/motion-shader-test 2>&1 | grep -E '^(FAIL|motion-shader-test)' || { echo 'FAIL: motion-shader-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/motion-shader-test 2>&1 | grep -E '^(FAIL|motion-shader-test)' || { echo 'FAIL: motion-shader-test (validation)'; exit 1; }
         # Metal-native M5: the camera motion kernel (production SPIR-V through BuildHostKernel and
         # CameraMotion::Record), plain and under validation.
-        ninja -C out/gpu-arm64 camera-motion-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target camera-motion-test >/dev/null
         out/gpu-arm64/camera-motion-test 2>&1 | grep -E 'PASS|FAIL|Assertion' || { echo 'FAIL: camera-motion-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/camera-motion-test 2>&1 | grep -E 'PASS|FAIL|Assertion' || { echo 'FAIL: camera-motion-test (validation)'; exit 1; }
         # Metal-native M5: the TAA kernel and its sharpen (Taa::Record), plain and under validation.
-        ninja -C out/gpu-arm64 taa-shader-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target taa-shader-test >/dev/null
         out/gpu-arm64/taa-shader-test 2>&1 | grep -E 'PASS|FAIL|Assertion|regression' || { echo 'FAIL: taa-shader-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/taa-shader-test 2>&1 | grep -E 'PASS|FAIL|Assertion|regression' || { echo 'FAIL: taa-shader-test (validation)'; exit 1; }
         # Metal-native M5: fragment inputs the vertex stage does not write read as zero.
-        ninja -C out/gpu-arm64 spirv-inputs-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target spirv-inputs-test >/dev/null
         out/gpu-arm64/spirv-inputs-test 2>&1 | grep -E 'PASS|FAIL|Assertion' || { echo 'FAIL: spirv-inputs-test'; exit 1; }
         # Metal-native M5: the pipeline key's depth/stencil formats follow the pass's attachment.
-        ninja -C out/gpu-arm64 depth-attachment-test >/dev/null
+        cmake --build out/gpu-arm64 --parallel "${BB_BUILD_JOBS:-6}" --target depth-attachment-test >/dev/null
         out/gpu-arm64/depth-attachment-test || { echo 'FAIL: depth-attachment-test'; exit 1; }
     fi
     # Metal-native M3: every pipeline of a stored pipeline cache built through the renderer's

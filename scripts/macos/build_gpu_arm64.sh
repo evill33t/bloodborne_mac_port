@@ -30,7 +30,7 @@ if [[ ! -f gpu/third_party/fsr-vulkan/CMakeLists.txt || ! -f gpu/third_party/img
 fi
 # Boost is header-only: the Homebrew headers are architecture-independent.
 boost=$(brew --prefix boost 2>/dev/null || echo /opt/homebrew/opt/boost)
-cmake -S gpu -B "$OUT" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+cmake -S gpu -B "$OUT" -G "${CMAKE_GENERATOR:-Ninja}" -DCMAKE_BUILD_TYPE="${BB_BUILD_TYPE:-RelWithDebInfo}" \
     -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
     -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET \
     -DCMAKE_PREFIX_PATH="$PREFIX;$boost" \
@@ -38,7 +38,7 @@ cmake -S gpu -B "$OUT" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DBoost_INCLUDE_DIR="$boost/include" \
     -DBB_PGO=off -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$ROOT/pgo" -Wno-dev >/dev/null
 echo "GPU library (arm64): LTO ${BB_LTO:-ON}"
-if ! ninja -C "$OUT" bbgpu bbmap-prepare > "$ROOT/out/gpu-arm64-build.log" 2>&1; then
+if ! cmake --build "$OUT" --parallel "${BB_BUILD_JOBS:-6}" --target bbgpu bbmap-prepare > "$ROOT/out/gpu-arm64-build.log" 2>&1; then
     grep -v '^\[' "$ROOT/out/gpu-arm64-build.log" | tail -40 >&2
     echo 'arm64 GPU library build failed (full log: out/gpu-arm64-build.log)' >&2; exit 1
 fi

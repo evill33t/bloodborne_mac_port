@@ -13,6 +13,9 @@ permissions:
 
 jobs:
   build:
+    # Fork releases are signed and notarized locally. Do not replace their assets with an
+    # ad-hoc CI build when a release tag is pushed; manual artifact builds remain available.
+    if: github.event_name == 'workflow_dispatch' || github.repository == 'Wooloomooloo2/bloodborne_mac_port'
     runs-on: macos-26
     timeout-minutes: 120
     steps:

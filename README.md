@@ -6,6 +6,8 @@ The original x86-64 game and compatibility runtime run through Rosetta 2. A sepa
 
 This is an experimental development build. Included features and draft integrations are described below; inclusion does not mean every feature has completed campaign, hardware or multiplayer compatibility testing. The isolated path-tracing prototype is excluded.
 
+Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
+
 ## Features
 
 ### Launcher, settings and controls
@@ -126,7 +128,7 @@ For Terminal launch, use `Bloodborne.command`, or:
 BB_GAME_DIR=/absolute/path/to/CUSA03173 bash run.sh
 ```
 
-For a self-contained app, use `bash scripts/macos/package_app.sh`; its bundled Python, libraries and notices are assembled separately from the local checkout app. No game data is packaged. Upstream's [release downloads](https://github.com/Wooloomooloo2/bloodborne_mac_port/releases) are upstream builds; use this branch's source build for the combined features listed here.
+For a self-contained app, use `bash scripts/macos/package_app.sh`; its bundled Python, libraries and notices are assembled separately from the local checkout app. No game data is packaged. For an optimized release, build with `BB_BUILD_TYPE=Release BB_LTO=ON`; see [release packaging and signing](docs/MACOS_RELEASE.md). This fork's packaged app checks this fork's releases for updates. Upstream's [release downloads](https://github.com/Wooloomooloo2/bloodborne_mac_port/releases) are upstream builds.
 
 Update an existing checkout with `git pull --ff-only` and `git submodule update --init --recursive`, then rebuild. Build prerequisites and submodule revisions are recorded in [`bootstrap_deps.sh`](scripts/macos/bootstrap_deps.sh), [`.gitmodules`](.gitmodules) and the corresponding source manifests.
 

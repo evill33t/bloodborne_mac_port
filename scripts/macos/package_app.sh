@@ -5,8 +5,9 @@
 # Contains the built port (x86-64 game process, arm64 GPU host), universal copies of the
 # libraries, the launch scripts and a standalone Python for them. No Vulkan loader or MoltenVK:
 # the GPU host renders with Metal, and packaging stops if a binary still imports a vk* function.
-# No game files: the player picks their own game folder on first launch. Ad-hoc signed (not
-# notarised): downloaded copies are quarantined, see the README.
+# No game files: the player picks their own game folder on first launch. Set BB_SIGN_IDENTITY
+# to a Developer ID Application identity and BB_NOTARY_PROFILE to its notarytool keychain
+# profile for a signed, notarized release. Without them, local builds stay ad-hoc signed.
 #
 # usage: bash scripts/macos/package_app.sh [version]     (build first: bash build_macos.sh)
 #
@@ -203,7 +204,7 @@ fi
 commit=$(git rev-parse --short HEAD)
 cat > "$lic/README.txt" <<EOF
 Bloodborne macOS port $version (commit $commit)
-Source code: https://github.com/Wooloomooloo2/bloodborne_mac_port/tree/$commit
+Source code: https://github.com/evill33t/bloodborne_mac_port/tree/$commit
 Existing port sources are GPL-2.0-or-later (LICENSE-bloodborne-mac-port.txt). The native menu
 adapters and combined runtime retain GPL-3.0-or-later (LICENSE-native-menu.txt).
 The original port is GPL-2.0-or-later (LICENSE-bloodborne-mac-port.txt). The compiled game
@@ -242,17 +243,26 @@ EOF
 bash scripts/macos/build_launcher.sh
 install -m755 out/launcher/Bloodborne "$contents/MacOS/Bloodborne"
 
-# Ad-hoc signature (arm64 code must be signed to run; install_name_tool invalidated the build's).
-find "$contents/MacOS" "$contents/Frameworks" "$py" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
-    while IFS= read -r -d '' file; do
-        # The main executable is signed with the bundle (after everything it contains).
-        [[ $file == "$contents/MacOS/Bloodborne" ]] && continue
-        if file -b "$file" | grep -q Mach-O; then codesign --force --sign - "$file" 2>/dev/null; fi
-    done
-codesign --force --sign - "$app"
-codesign --verify --deep --strict "$app"
+bash scripts/macos/sign_app.sh "$app"
 
 zip=$dist/Bloodborne-macOS-$version.zip
 rm -f "$zip"
 (cd "$dist" && ditto -c -k --keepParent --sequesterRsrc Bloodborne.app "$(basename "$zip")")
+if [[ -n ${BB_NOTARY_PROFILE:-} ]]; then
+    [[ -n ${BB_SIGN_IDENTITY:-} && $BB_SIGN_IDENTITY != - ]] || {
+        echo 'Notarization requires BB_SIGN_IDENTITY (Developer ID Application).' >&2; exit 1;
+    }
+    report=$dist/notarization-$version.json
+    xcrun notarytool submit "$zip" --keychain-profile "$BB_NOTARY_PROFILE" --wait --output-format json > "$report"
+    /usr/bin/plutil -extract status raw -o - "$report" | grep -x Accepted >/dev/null || {
+        echo "Notarization was not accepted; see $report" >&2; exit 1;
+    }
+    xcrun stapler staple "$app"
+    xcrun stapler validate "$app"
+    codesign --verify --deep --strict "$app"
+    spctl --assess --type execute --verbose=2 "$app"
+    rm -f "$zip"
+    (cd "$dist" && ditto -c -k --keepParent --sequesterRsrc Bloodborne.app "$(basename "$zip")")
+fi
+(cd "$dist" && shasum -a 256 "$(basename "$zip")" > "$(basename "$zip").sha256")
 echo "Built $app ($(du -sh "$app" | cut -f1)) and $zip ($(du -h "$zip" | cut -f1))"
