@@ -54,6 +54,20 @@ Experimental integrations are opt-in:
 
 The client has real Mac-to-Mac gameplay and invasion evidence in the [dated validation record](docs/SEAMLESS_COOP_VALIDATION.md). Mixed Windows/Mac invasions, the unknown retail invasion kind/sign and exhaustive campaign/DLC/chalice coverage remain unverified. See [Client setup](docs/SEAMLESS_COOP_CLIENT.md) and [Invasion rewards](docs/SEAMLESS_INVASION_REWARDS.md) for protocol, reward and recovery details.
 
+### Live co-op screenshots
+
+Captured in-game on **27 October 2026** from the signed `dev` build at [`5d16f66`](https://github.com/evill33t/bloodborne_mac_port/commit/5d16f66f38c929bad30f878df2ed13853151a37f), with two independent clients on one Apple Silicon Mac connected to **bloodborne.phobos.services**.
+
+**Team setup:** the city image fills the background behind the setup window; the window retains the game's menu styling.
+
+![Live co-op team setup with two ready hunters and the city backdrop behind the setup window](docs/images/seamless-team-setup.png)
+
+**Entering the hunt:** both clients joining the same server-hosted world.
+
+![Live Entering the hunt screen showing two hunters joining over the city backdrop](docs/images/seamless-entering-hunt.png)
+
+Both clients continued into Central Yharnam with two session/map members. Original saves and checked game files remained unchanged. See the [dated validation record](docs/SEAMLESS_COOP_VALIDATION.md#dev-branch-live-screenshots---2026-10-27) and [capture provenance](docs/images/README.md).
+
 ### Multiplayer maps
 
 Maps are generated locally from **your own level geometry, collision and textures**. Available views are **Rendered terrain, Prerendered 3D, Live 3D and Coordinates**. The launcher offers **Prepare maps…**, progress and cancellation; generated maps are cached for later sessions.

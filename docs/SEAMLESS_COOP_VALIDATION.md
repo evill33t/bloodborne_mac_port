@@ -433,3 +433,41 @@ and separate startup/native logs. These are launch/title/server-connection check
 world, duel or multiplayer-session coverage is claimed. Test copies isolated all save writes;
 the source save hashes and 56 checked original executable/event assets matched afterward.
 The normal save copy also remained unchanged during the co-op run. All test processes stopped.
+
+
+## dev branch live screenshots - 2026-10-27
+
+Tested packaged source: [`5d16f66f38c929bad30f878df2ed13853151a37f`](https://github.com/evill33t/bloodborne_mac_port/commit/5d16f66f38c929bad30f878df2ed13853151a37f).
+The signed self-contained app ran two independent x86-64/Rosetta game processes with native
+arm64 Metal GPU hosts on one Apple Silicon Mac running macOS 27. Both connected to
+`bloodborne.phobos.services:31314`, using fresh test identities and isolated copies of the
+existing test save. Metal validation was enabled for both clients.
+
+- Both clients received the real server's authenticated welcome and signed in. The module
+  enabled 62/62 co-op feature groups; this is admission evidence, not individual feature coverage.
+- The host created a team, invited the guest and waited for both ready states. The live team
+  screenshot shows the hero behind the setup window, filling the former gray surround;
+  the setup window uses the player's original menu artwork.
+- Starting the hunt displayed the live two-hunter progress screen. Both clients then entered
+  Central Yharnam (`0x18010000`); each game's snapshot reported two session members, two map
+  members and an active party session. Both reached `DEV_LIVE_PASS` in the control script.
+- No Metal validation assertion or GPU crash was observed during the successful smoke.
+- Source save and selected-save copies remained byte-identical. All 56 checked original
+  executable/event/menu files matched their pre-run hashes. Only isolated online profiles
+  and their test worlds were used. Both test clients were stopped after capture.
+
+The README publishes the new, unedited 3456×2104 presenter captures under
+[`docs/images/`](images/README.md): `seamless-team-setup.png` and
+`seamless-entering-hunt.png`. They were recaptured after the background-placement correction.
+The earlier images with the hero inside the setup panel are kept only in local test evidence.
+Image hashes, source revision and original UI/artwork credits are in the capture provenance.
+
+Local evidence: `out/ingame-dev-background-2026-10-27/validation.json`, `live.py`, per-client
+`game.log`, `data/user-seamless/*/log/seamless.log`, `run.json`, `result.json`, `autoplay.txt`,
+`shots/` and the host's `transition/` sequence. The preceding placement run remains in
+`out/ingame-dev-2026-10-27/`. Menu navigation used the reference developer autoplay controls;
+these runs used no fixture images or inventory/combat modifications.
+
+This is a bounded Mac/Mac connection, team, loading and shared-world-entry smoke on one
+physical machine. It does not add fresh combat, invasion, payout, full-campaign or mixed
+Windows/Mac coverage to the earlier feature-specific tests.
