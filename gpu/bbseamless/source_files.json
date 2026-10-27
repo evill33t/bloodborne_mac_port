@@ -1,0 +1,1761 @@
+{
+  "repository": "https://github.com/lKaniel/bloodborne-server",
+  "commit": "8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1",
+  "files": [
+    {
+      "path": "../../scripts/seamless/party_boss_events.py",
+      "source": "tools/re/party_boss_events.py",
+      "sha256": "7e7ed43665455b4aef8df50f7c7d7e3602727b9b8de4a8e99936b8356f84e6fe",
+      "adapted_sha256": "92b4c1a7abcc9e210914bb696563792791eb56d483e49aea379e9c08aacfb83b"
+    },
+    {
+      "path": "bbcoop.h",
+      "source": "bbport/gpu/bbcoop.h",
+      "sha256": "97fb1a8395784df89dc7a117fcf36793a106063a88325549299113035f8c09fb",
+      "adapted_sha256": "e1de1ba70c44ab2007010e5698231f7c4fea190ccbbaa6622f5dbcbb08382de9"
+    },
+    {
+      "path": "bbcoop/bbcoop_internal.h",
+      "source": "bbport/gpu/bbcoop/bbcoop_internal.h",
+      "sha256": "06a8e167ac4965aba24cddb8ffc05029ce768f23ebf93307f4b687eb2fd91dc1"
+    },
+    {
+      "path": "bbcoop/coop.cpp",
+      "source": "bbport/gpu/bbcoop/coop.cpp",
+      "sha256": "c7d1347e63a19aca82d9b0b809a1ef4074255a545d69adf718998ab2d788fc5e",
+      "adapted_sha256": "eac04a293ed1ed171efbed0a3197f412fd2101a9ee1df514ee7f2c20d5d28928"
+    },
+    {
+      "path": "bbcoop/duel.cpp",
+      "source": "bbport/gpu/bbcoop/duel.cpp",
+      "sha256": "b48013dee95f3a16e933756d413df031ad386f41b0d4490c0c7160ff3a50d5fc"
+    },
+    {
+      "path": "bbcoop/guest_hooks.cpp",
+      "source": "bbport/gpu/bbcoop/guest_hooks.cpp",
+      "sha256": "60dea3ac906fc7469ccfff81de3ab3d609374cb8bad4b963c3aeccde92602973",
+      "adapted_sha256": "c2647af6090e41f967a36641e959d12e481c23294a6e07995ff056e56f28c4b6"
+    },
+    {
+      "path": "bbcoop/memory.cpp",
+      "source": "bbport/gpu/bbcoop/memory.cpp",
+      "sha256": "e4908e4dff18df5270f04e373ca04f8ee2cff8fdc5876e9a21ec81b58cb24a5e",
+      "adapted_sha256": "070dc6f8cc8ab5545c891689a1f966d407eb5ef11d765c757bfc8638701de502"
+    },
+    {
+      "path": "bbcoop/revision.cmake",
+      "source": "bbport/gpu/bbcoop/revision.cmake",
+      "sha256": "11045bf408716b9cf60c671d48f53e781998748c7b4006a4b497bd50ad33ec01"
+    },
+    {
+      "path": "bbcoop/trade.cpp",
+      "source": "bbport/gpu/bbcoop/trade.cpp",
+      "sha256": "60dd1d7d8838ee503f8a4b63037766dc46dbfa42a1cf2806065e3298b59e184c"
+    },
+    {
+      "path": "include/common/assert.cpp",
+      "source": "bbport/gpu/shim/common/assert.cpp",
+      "sha256": "df0010543fc23c51afcc41574b85d2188d46e5e96c17dac8916185a4acb5593e",
+      "adapted_sha256": "afbfa53ee758ecb1d84068055839fcfe22581611f1c90fbd559ad8f1a81bf6b7"
+    },
+    {
+      "path": "include/common/debug.h",
+      "source": "bbport/gpu/shim/common/debug.h",
+      "sha256": "0280e6b10ca362795058c16fddc949e9db1dba8cc4f35c6bbfc48bbbf3bb1df1"
+    },
+    {
+      "path": "include/common/logging/log.cpp",
+      "source": "bbport/gpu/shim/common/logging/log.cpp",
+      "sha256": "087d8b5afc5f9295829a29a27fe60832dece0ac72b399d98fd9642d29f974893"
+    },
+    {
+      "path": "include/common/logging/log.h",
+      "source": "bbport/gpu/shim/common/logging/log.h",
+      "sha256": "a2ce6667c37f2f70ee8501af0428d0272918c70c41b9c96f261646ba07f00b84"
+    },
+    {
+      "path": "include/core/address_space.h",
+      "source": "bbport/gpu/shim/core/address_space.h",
+      "sha256": "d780698994cc352d6a4861f29bc54eb186b7bd6ca41ac0785a574ec0a08ee285"
+    },
+    {
+      "path": "include/core/debug_state.h",
+      "source": "bbport/gpu/shim/core/debug_state.h",
+      "sha256": "e5944216e52071c90babc10e5e7c3161659f9f5f8ab77095afb5954e3d876b6c"
+    },
+    {
+      "path": "include/core/debugger.h",
+      "source": "bbport/gpu/shim/core/debugger.h",
+      "sha256": "8561073ab56103561176bc57471e3ca11d594e3967aa834e5234a3334158a663"
+    },
+    {
+      "path": "include/core/devtools/widget/gpu_memory.h",
+      "source": "bbport/gpu/shim/core/devtools/widget/gpu_memory.h",
+      "sha256": "a214ad23b74ceae16a8db6eacaa9be07d0dba1e6372c935658b1717c7d70589b"
+    },
+    {
+      "path": "include/core/emulator_settings.h",
+      "source": "bbport/gpu/shim/core/emulator_settings.h",
+      "sha256": "694fda06b98034b1a3ad0aba61dfb37b5c399e97d037358a810f5294d33b1ad2",
+      "adapted_sha256": "61f8271f4ecf2134dadd34539717a910ce6cf31d7feafd8441e6b50b1923dfca"
+    },
+    {
+      "path": "include/core/file_sys/fs.h",
+      "source": "bbport/gpu/shim/core/file_sys/fs.h",
+      "sha256": "ebc889b08353693f4302b9b6bffe012b1c6a0a005ab1651e1dcdb5a408906080"
+    },
+    {
+      "path": "include/core/libraries/invitation_dialog/invitation_dialog.h",
+      "source": "bbport/gpu/shim/core/libraries/invitation_dialog/invitation_dialog.h",
+      "sha256": "ac582947f2e1ec4aad9ce519eb8ea5bf3243571cfdf9e22c13da9173ff7b13c0"
+    },
+    {
+      "path": "include/core/libraries/kernel/file_system.h",
+      "source": "bbport/gpu/shim/core/libraries/kernel/file_system.h",
+      "sha256": "88bfcf4e01aa96f84252519ec5eee73862ea6b14bff414417fb180d8a4c63108"
+    },
+    {
+      "path": "include/core/libraries/kernel/kernel.h",
+      "source": "bbport/gpu/shim/core/libraries/kernel/kernel.h",
+      "sha256": "97b3beb0904c99ad2d29199ea3c9655b6d1faee85519cc5b1e8d4fab1e4e1ff3"
+    },
+    {
+      "path": "include/core/libraries/kernel/memory.h",
+      "source": "bbport/gpu/shim/core/libraries/kernel/memory.h",
+      "sha256": "b8ec6064350c494e10937e7388539b69be34700229ad0d991f968237f29408ec"
+    },
+    {
+      "path": "include/core/libraries/kernel/threads.h",
+      "source": "bbport/gpu/shim/core/libraries/kernel/threads.h",
+      "sha256": "72d6ae79df87a7491d11319084fa27852d389a0c2b83f522cebcd99cf7bd1487"
+    },
+    {
+      "path": "include/core/libraries/kernel/threads/pthread.h",
+      "source": "bbport/gpu/shim/core/libraries/kernel/threads/pthread.h",
+      "sha256": "515cd0c1bf72e8826a1591c1d436f407b8c73ae9cec8737bb5f91647eec0a1fc"
+    },
+    {
+      "path": "include/core/libraries/libs.h",
+      "source": "bbport/gpu/shim/core/libraries/libs.h",
+      "sha256": "cc4c90d4b9bfae0f4c0ff997a8013e7ac66d694bad99f79987ff50f3e5a5fc8e"
+    },
+    {
+      "path": "include/core/libraries/rtc/rtc.h",
+      "source": "bbport/gpu/shim/core/libraries/rtc/rtc.h",
+      "sha256": "d92cf7d1ac1c757f8c3f1ab959f3ad6ed0040a2abe676b965e85236b75fa3952"
+    },
+    {
+      "path": "include/core/memory.h",
+      "source": "bbport/gpu/shim/core/memory.h",
+      "sha256": "87afe7b819c214082f91ebcb0ae92ed66bf142394af7575de3b77d339a53160d"
+    },
+    {
+      "path": "include/core/signals.h",
+      "source": "bbport/gpu/shim/core/signals.h",
+      "sha256": "0c9edb9eb7783afd723061de0324d0641899b8f828677288a31526e3533b4232"
+    },
+    {
+      "path": "include/core/tls.h",
+      "source": "bbport/gpu/shim/core/tls.h",
+      "sha256": "926d675ead46db1148183ad1f709c532a716fa9cfc824eda26cf6e0a420faddc"
+    },
+    {
+      "path": "include/core/user_manager.h",
+      "source": "bbport/gpu/shim/core/user_manager.h",
+      "sha256": "dfb1dc3d252b4bc88159c83c371c1f555584129cba2b066f3225bd174018ee05"
+    },
+    {
+      "path": "include/core/user_settings.h",
+      "source": "bbport/gpu/shim/core/user_settings.h",
+      "sha256": "56be08cbf66720d9b0e07f42c1a5eaef27219bf8cb05479f9ef6546992c67441"
+    },
+    {
+      "path": "include/imgui/invitation_prompt_layer.h",
+      "source": "bbport/gpu/shim/imgui/invitation_prompt_layer.h",
+      "sha256": "b6377e0d44064a099c80f19e7eecd4236f68ac192ed79b39d00958220410541f"
+    },
+    {
+      "path": "include/imgui/renderer/imgui_core.h",
+      "source": "bbport/gpu/shim/imgui/renderer/imgui_core.h",
+      "sha256": "98b478ae6ba588cd04e537adbcaed9781c486d8b1f7947190356f5a4b706689a"
+    },
+    {
+      "path": "include/imgui/renderer/texture_manager.h",
+      "source": "bbport/gpu/shim/imgui/renderer/texture_manager.h",
+      "sha256": "98b478ae6ba588cd04e537adbcaed9781c486d8b1f7947190356f5a4b706689a"
+    },
+    {
+      "path": "include/imgui/shadnet_notifications_layer.h",
+      "source": "bbport/gpu/shim/imgui/shadnet_notifications_layer.h",
+      "sha256": "eb9a1bed37af57d9b71217c5b77e19d6ce3264c29fae1eb110835eaf1019a28d"
+    },
+    {
+      "path": "network_glue.cpp",
+      "source": "bbport/gpu/bbnet/bbnet_glue.cpp",
+      "sha256": "807df775c746925b02872cf62b735cfa21155787c71232f99b6128b242c84db3",
+      "adapted_sha256": "3082307b1aae1c9ca693660af3cf3d5066cb14925f53bdb5a054b3042b489ee0"
+    },
+    {
+      "path": "text/bbport_game_art.cpp",
+      "source": "bbport/gpu/shim/bbport_game_art.cpp",
+      "sha256": "319300a122a98956be169dfad423b21c127fea3a7dfc9e30e8e89bc0e9d30a24"
+    },
+    {
+      "path": "text/bbport_game_art.h",
+      "source": "bbport/gpu/shim/bbport_game_art.h",
+      "sha256": "29349bb0500c5566919dbca85b68a15fea9183a59531c2ec42e882321409e85f"
+    },
+    {
+      "path": "text/bbport_save_editor.h",
+      "source": "bbport/gpu/shim/bbport_save_editor.h",
+      "sha256": "a16153c712e085060c3b0abf68c999bb3235ca3c3afae31b0b9f3d99e62c3d82"
+    },
+    {
+      "path": "text/bbport_save_editor_items.cpp",
+      "source": "bbport/gpu/shim/bbport_save_editor_items.cpp",
+      "sha256": "890ec7b6949b8678c822abfe5be89139b67e5bccb657d8d1fd32213a6d08ed55"
+    },
+    {
+      "path": "touch.h",
+      "source": "bbport/src/runtime_pad.c",
+      "sha256": "f872f8856ef760ce1607582b872f6f1a75f303b4e21560c7686311c31c6598bb",
+      "note": "Adapted MapHold touch gesture state only; the original hash covers the complete source file.",
+      "adapted_sha256": "5cb3ec97ae371c73f7988a5742a5bd105e240c24ff061b4e6b4f89fe631a85bb"
+    },
+    {
+      "path": "vendor/common/adaptive_mutex.h",
+      "source": "emulator/src/common/adaptive_mutex.h",
+      "sha256": "922ae9defd9da0cfb09deb9c5b918c31d895fab57deb9b29cab57a537e2db576"
+    },
+    {
+      "path": "vendor/common/aes.h",
+      "source": "emulator/src/common/aes.h",
+      "sha256": "bb02cf8e8ad9628fa922da5d90730a9be46b4f833dbf06627adf54d5164f46e1"
+    },
+    {
+      "path": "vendor/common/alignment.h",
+      "source": "emulator/src/common/alignment.h",
+      "sha256": "f5822c8e3df7f6a7ca987b31141083a6ae6a4c0c8e9d813bd80d0678ff38f318"
+    },
+    {
+      "path": "vendor/common/arch.h",
+      "source": "emulator/src/common/arch.h",
+      "sha256": "423677ca594bc3b53f6f058ea206bc3f77f0f4e5836520b722a107d7f5e07cc0"
+    },
+    {
+      "path": "vendor/common/assert.h",
+      "source": "emulator/src/common/assert.h",
+      "sha256": "5c2572bc096333d47dbee49cf8fe42a29d0bf791e4e48414d5500713fbdc3b81"
+    },
+    {
+      "path": "vendor/common/bit_array.h",
+      "source": "emulator/src/common/bit_array.h",
+      "sha256": "cc5a488045758339d05a6e6496cca9ec7e2b3261cf2afa613c2b9e8da67245ca"
+    },
+    {
+      "path": "vendor/common/bit_field.h",
+      "source": "emulator/src/common/bit_field.h",
+      "sha256": "71661c7f40a8439733a42b8a6a1621afb537c7f50e658a5dd1033e71ea35308b"
+    },
+    {
+      "path": "vendor/common/bounded_threadsafe_queue.h",
+      "source": "emulator/src/common/bounded_threadsafe_queue.h",
+      "sha256": "cabaf2b6d57ec95333275a7aef1e1512201114d37ab42eac06b84b7ddf853add"
+    },
+    {
+      "path": "vendor/common/concepts.h",
+      "source": "emulator/src/common/concepts.h",
+      "sha256": "8e6a0f09760daec98922726f2406eddfca0f7807553c80e359b3edeba79e6f2b"
+    },
+    {
+      "path": "vendor/common/cstring.h",
+      "source": "emulator/src/common/cstring.h",
+      "sha256": "28c833a4fcd37d9b0e6658fd8088a959b474cd8801527356affd0b06c5007e26"
+    },
+    {
+      "path": "vendor/common/debug.h",
+      "source": "emulator/src/common/debug.h",
+      "sha256": "74ce8daf286f5e5cc55bffccc6f51ca3a8f3ea2c8db958867560395c3db1623c"
+    },
+    {
+      "path": "vendor/common/decoder.cpp",
+      "source": "emulator/src/common/decoder.cpp",
+      "sha256": "2819ba61f3fec971f1f7cea7439799f20557e60ea8e40f1d19e867301246cf10"
+    },
+    {
+      "path": "vendor/common/decoder.h",
+      "source": "emulator/src/common/decoder.h",
+      "sha256": "d1037c1719d102e8a92f1700f696ece9877f9fd5ead4e35887ed8d8b43bd0d23"
+    },
+    {
+      "path": "vendor/common/discord_rpc_handler.h",
+      "source": "emulator/src/common/discord_rpc_handler.h",
+      "sha256": "b0625c6fbd6bc2e7a1c14a2e6688df36080c296ed90dbc11942492f26e494822"
+    },
+    {
+      "path": "vendor/common/div_ceil.h",
+      "source": "emulator/src/common/div_ceil.h",
+      "sha256": "f85599dec2eead00d74bed7603e1772ffa5ff15f3e5e5fc0a438156dc4fb1e29"
+    },
+    {
+      "path": "vendor/common/elf_info.h",
+      "source": "emulator/src/common/elf_info.h",
+      "sha256": "3bf03d9b4c472a32484073eb5006be0062cfca5bf56f8c7b202b8c08b22dbe4d"
+    },
+    {
+      "path": "vendor/common/endian.h",
+      "source": "emulator/src/common/endian.h",
+      "sha256": "a793cfb31a2039498c2f95c59c4188566ed77a57fce3b359a3f6cdbd0c842275"
+    },
+    {
+      "path": "vendor/common/enum.h",
+      "source": "emulator/src/common/enum.h",
+      "sha256": "2e2c6a568e49c02769b9ad55dde408000458cc8f3fddbc9910d5efb4404f61d2"
+    },
+    {
+      "path": "vendor/common/error.cpp",
+      "source": "emulator/src/common/error.cpp",
+      "sha256": "951e36e3cd184319c828aa678e60c26a094ec6b9691e4d9fc31a360089032a33"
+    },
+    {
+      "path": "vendor/common/error.h",
+      "source": "emulator/src/common/error.h",
+      "sha256": "e16954d28df7b8a4bf7766c169a230f0247930df74c7ca09dbee7cb51aed728c"
+    },
+    {
+      "path": "vendor/common/fixed_value.h",
+      "source": "emulator/src/common/fixed_value.h",
+      "sha256": "434550ecaa54277f043d3266f14cb9b3f4729e9e6a6476edc7f47676d85e2c9c"
+    },
+    {
+      "path": "vendor/common/func_traits.h",
+      "source": "emulator/src/common/func_traits.h",
+      "sha256": "21d1bcece04bc62fac927d235fef2beb0abffcfceb98633728cdc15f875b3024"
+    },
+    {
+      "path": "vendor/common/hash.h",
+      "source": "emulator/src/common/hash.h",
+      "sha256": "b25b2801744eb48fcc793974535eafdc824fbff200db5c123308c63cb73debf7"
+    },
+    {
+      "path": "vendor/common/incremental_id.h",
+      "source": "emulator/src/common/incremental_id.h",
+      "sha256": "e01446a9ea4b6f5b2f2b2cd5b52e32c27e1b4301ed632e30ca170a3919ce8612"
+    },
+    {
+      "path": "vendor/common/io_file.cpp",
+      "source": "emulator/src/common/io_file.cpp",
+      "sha256": "5c9ea0b56259b7f78f65980d1cc608c0fd1c8fa392a4efb2ed282cb6a16d2468"
+    },
+    {
+      "path": "vendor/common/io_file.h",
+      "source": "emulator/src/common/io_file.h",
+      "sha256": "7793900cf05f10df361e5f3d646da4bd033647111d25f9304ff44311a471ea29"
+    },
+    {
+      "path": "vendor/common/key_manager.h",
+      "source": "emulator/src/common/key_manager.h",
+      "sha256": "a0a0c159fc367172ee925b3f0a05af53e491aafd6b0b247b57e92d6f60dd9d07"
+    },
+    {
+      "path": "vendor/common/logging/classes.h",
+      "source": "emulator/src/common/logging/classes.h",
+      "sha256": "546aa094541d2285c6c3d6531013a7cff535a8e7f462caf080c1258443142dbc"
+    },
+    {
+      "path": "vendor/common/logging/formatter.h",
+      "source": "emulator/src/common/logging/formatter.h",
+      "sha256": "84722ebd17bca543f92a9133f03ba0d16d1c519abb4c0e77830efc7eb8bd8e0b"
+    },
+    {
+      "path": "vendor/common/logging/log.h",
+      "source": "emulator/src/common/logging/log.h",
+      "sha256": "50e42407d4a39a7b176f98155aba462ad01e48eb0a68bb9921c19782506b28c8"
+    },
+    {
+      "path": "vendor/common/logging/log_file_sink.h",
+      "source": "emulator/src/common/logging/log_file_sink.h",
+      "sha256": "4e72290e68a8a74eddc608b978c01853ba6ebd96205f89608d8a202b410e8a55"
+    },
+    {
+      "path": "vendor/common/lru_cache.h",
+      "source": "emulator/src/common/lru_cache.h",
+      "sha256": "487e9f8f4c6708e346f2393023382ddb19d75219b87fdd56c9c9170b33e19a57"
+    },
+    {
+      "path": "vendor/common/memory_patcher.h",
+      "source": "emulator/src/common/memory_patcher.h",
+      "sha256": "3cd7af6f957cba06705fa0e248190364dd4b1d8884a3d0468ed432a7fdedc3ce"
+    },
+    {
+      "path": "vendor/common/native_clock.h",
+      "source": "emulator/src/common/native_clock.h",
+      "sha256": "b236627d1907cd7b99ef2cbfe42f76cb57528a4a2273412b1381bb39dbb440b7"
+    },
+    {
+      "path": "vendor/common/ntapi.h",
+      "source": "emulator/src/common/ntapi.h",
+      "sha256": "66c26c83743ec84a87baa1d5fc11a7e117a5ff9aa8d12d2e3bc60663ed158e8d"
+    },
+    {
+      "path": "vendor/common/number_utils.cpp",
+      "source": "emulator/src/common/number_utils.cpp",
+      "sha256": "1461acd73f872803e88615d4a9a5c7783aba25e0dacfa91199d93a8981a41b7a"
+    },
+    {
+      "path": "vendor/common/number_utils.h",
+      "source": "emulator/src/common/number_utils.h",
+      "sha256": "824929082dc192fa267de74c0f9d98ba16d47adc5cd1061ee5b78f63f76eedb2"
+    },
+    {
+      "path": "vendor/common/object_pool.h",
+      "source": "emulator/src/common/object_pool.h",
+      "sha256": "6455ad53fc22b1fbaa9091df0af1374739c65388c40be69348331a6cc75b0734"
+    },
+    {
+      "path": "vendor/common/path_util.h",
+      "source": "emulator/src/common/path_util.h",
+      "sha256": "aea0828b7b0fdad82cd8975ef8b833b00dc9da4962b1cbce884d0a00bfae3a9e"
+    },
+    {
+      "path": "vendor/common/polyfill_thread.h",
+      "source": "emulator/src/common/polyfill_thread.h",
+      "sha256": "3d56b11dee8505dc30ab1f9024c68686f6ef76d1cc193f85bcfc875aa6fcae06"
+    },
+    {
+      "path": "vendor/common/range_lock.h",
+      "source": "emulator/src/common/range_lock.h",
+      "sha256": "e0e7e7b6a7b43c70bf10c0485674bf68d0874e50fd92539270dc7b68b3613fed"
+    },
+    {
+      "path": "vendor/common/rdtsc.h",
+      "source": "emulator/src/common/rdtsc.h",
+      "sha256": "688515f14f9f226c6cd12b9fa47220c27d3e5e25a3ff3cdc4c79dee43ad053fa"
+    },
+    {
+      "path": "vendor/common/recursive_lock.h",
+      "source": "emulator/src/common/recursive_lock.h",
+      "sha256": "775fa8527491228f02a03274375ad27d5207e496682701aea130d2ec9486576c"
+    },
+    {
+      "path": "vendor/common/ring_buffer_queue.h",
+      "source": "emulator/src/common/ring_buffer_queue.h",
+      "sha256": "19145282c09ef0da20a8945281c4d6b209fa34f467651bcf6fbfb4f92c74e7c7"
+    },
+    {
+      "path": "vendor/common/scm_rev.h",
+      "source": "emulator/src/common/scm_rev.h",
+      "sha256": "fd1944e06b0995a12a02689d29e7a7705c85e6470adc2bb63a2792631f9fe48d"
+    },
+    {
+      "path": "vendor/common/scope_exit.h",
+      "source": "emulator/src/common/scope_exit.h",
+      "sha256": "268ee463a3511bd4f8dcc8d6428f059d17737b5f0b28e3ac13cda73369c14fa3"
+    },
+    {
+      "path": "vendor/common/serdes.h",
+      "source": "emulator/src/common/serdes.h",
+      "sha256": "ad2d278535117d7734d563b26a6693259637abf2890b43182501f2abddaa8011"
+    },
+    {
+      "path": "vendor/common/sha1.h",
+      "source": "emulator/src/common/sha1.h",
+      "sha256": "579842ba9e14dc6efd60a08b57a7e698df8f65b48adab2c39b3c83f3fb37a683"
+    },
+    {
+      "path": "vendor/common/shared_first_mutex.h",
+      "source": "emulator/src/common/shared_first_mutex.h",
+      "sha256": "475bb548174622949f59b1b9a3af334e44261799b49e718d8b51a00e48190be0"
+    },
+    {
+      "path": "vendor/common/signal_context.h",
+      "source": "emulator/src/common/signal_context.h",
+      "sha256": "84deacd79a1c88cf80231084b863525431a94462a138bc72fa1381541d581baa"
+    },
+    {
+      "path": "vendor/common/singleton.h",
+      "source": "emulator/src/common/singleton.h",
+      "sha256": "b59ba7c4ac6e4ab3442affd6d49c5c8ea5da8a8ff2f00f745732cc4b9e23dc7c"
+    },
+    {
+      "path": "vendor/common/slab_heap.h",
+      "source": "emulator/src/common/slab_heap.h",
+      "sha256": "f65a042a38897f10400e906c25cb7474f2cb4b2fab29551f8f501ae036ca79df"
+    },
+    {
+      "path": "vendor/common/slot_array.h",
+      "source": "emulator/src/common/slot_array.h",
+      "sha256": "6f531eb1376ed61cd1d99e3873b0ec27a114400570157ed9e853e02df2a4e4ed"
+    },
+    {
+      "path": "vendor/common/slot_vector.h",
+      "source": "emulator/src/common/slot_vector.h",
+      "sha256": "42f48c2061a1be895173b742876a2bdcf1a40a86c00a329e48079dc7f60a3553"
+    },
+    {
+      "path": "vendor/common/spin_lock.h",
+      "source": "emulator/src/common/spin_lock.h",
+      "sha256": "aca600825d94411af190b1464b01ab99b772dabd27ac68420cdb23a600b31402"
+    },
+    {
+      "path": "vendor/common/stb.h",
+      "source": "emulator/src/common/stb.h",
+      "sha256": "1ccddf07b9fe1945556505d4fd99f946814eb187d4e679a2b6b71aded58c9866"
+    },
+    {
+      "path": "vendor/common/string_literal.h",
+      "source": "emulator/src/common/string_literal.h",
+      "sha256": "cdfd5035a3f18f7fe4d2e9b9783d1a3fa6bac30e96ec3c27eb62d389df94d62a"
+    },
+    {
+      "path": "vendor/common/string_util.cpp",
+      "source": "emulator/src/common/string_util.cpp",
+      "sha256": "c067a05e2bc3ab67a9ef483bbeddab4dcfae0139799b74f37d48da39caaed9dc"
+    },
+    {
+      "path": "vendor/common/string_util.h",
+      "source": "emulator/src/common/string_util.h",
+      "sha256": "9e0af99d6a710f01453bd4862c8ab7d5d7f25f3e83e1cd38268723cf95e15bfb"
+    },
+    {
+      "path": "vendor/common/support/avdec.h",
+      "source": "emulator/src/common/support/avdec.h",
+      "sha256": "7445d2f69cf91be839f9bba125ae39b59a65d15a938bf5ec93061ddee784a4ca"
+    },
+    {
+      "path": "vendor/common/thread.cpp",
+      "source": "emulator/src/common/thread.cpp",
+      "sha256": "5d644d9e674b7bc8e954555ef94a75d5b9a4e3a4f0e85e4b6c5f6e95ec8b2f44",
+      "adapted_sha256": "7fd7dc5cfe534aa9adfcea95c7eec2e8110e76d99c5f1765b943506c9d52a804"
+    },
+    {
+      "path": "vendor/common/thread.h",
+      "source": "emulator/src/common/thread.h",
+      "sha256": "7679d4d3d21ef2eaafc55677d3af1148d9320ab86ec7e68596f10f328e45c29b"
+    },
+    {
+      "path": "vendor/common/types.h",
+      "source": "emulator/src/common/types.h",
+      "sha256": "d3f683316c81841456578d5faa3796ffda157c693dba7b558e18220a3b12a4bc"
+    },
+    {
+      "path": "vendor/common/uint128.h",
+      "source": "emulator/src/common/uint128.h",
+      "sha256": "c9c9db2b0b619da394e9f9f3c5c8f30607c9fc455d88a5258498a773b3d1f44b"
+    },
+    {
+      "path": "vendor/common/unique_function.h",
+      "source": "emulator/src/common/unique_function.h",
+      "sha256": "09ced869d94edf9d87309570c9934c789e3c600072251cb443993eced6f8486c"
+    },
+    {
+      "path": "vendor/common/va_ctx.h",
+      "source": "emulator/src/common/va_ctx.h",
+      "sha256": "25e2b6b3fed818c9b5e4026f5e002e4c27e624d84ef7340b5276654e9fdc7f62"
+    },
+    {
+      "path": "vendor/coop/build_fingerprint.h",
+      "source": "server/coop/build_fingerprint.h",
+      "sha256": "298a8d9a1d3e8e4109e3d4e1aa90927927878dff2b6ad4576ba9c08d35eca857"
+    },
+    {
+      "path": "vendor/coop/coop.proto",
+      "source": "server/coop/coop.proto",
+      "sha256": "745b677b9103c6f43e2763cef6f9f6ae426733640ed79021d4475c2f03060a5b",
+      "adapted_sha256": "e18ff1fccc0fadb9d819c5981b7193b68f7057ed38e74dd3344310218a3faadc"
+    },
+    {
+      "path": "vendor/coop/coop_messages.cpp",
+      "source": "server/coop/coop_messages.cpp",
+      "sha256": "c96580bcb583d0d843ec4dde25464b5dd4c1ca3a6dd9587854f9075974a1056c"
+    },
+    {
+      "path": "vendor/coop/coop_messages.h",
+      "source": "server/coop/coop_messages.h",
+      "sha256": "acefc97a91c02911cb762905fff0f541495ad8ccf3cd6fe45d36cde6e3c95b9c"
+    },
+    {
+      "path": "vendor/coop/coop_stream.h",
+      "source": "server/coop/coop_stream.h",
+      "sha256": "9ddec75988abd4ea54817c3ccd303d58d8b08f8422ee98a919bb08c06a0e8ed8"
+    },
+    {
+      "path": "vendor/coop/coop_types.h",
+      "source": "server/coop/coop_types.h",
+      "sha256": "3103374366fe312c30afbf088c57f0d6ad51148b5915bc9103ed5e6239e9cb82"
+    },
+    {
+      "path": "vendor/coop/duel.cpp",
+      "source": "server/coop/duel.cpp",
+      "sha256": "1a65492dde31d5ac3383e47440df8b7180715ae4f25e7e4a8ae4c88eab6bc7a4"
+    },
+    {
+      "path": "vendor/coop/duel.h",
+      "source": "server/coop/duel.h",
+      "sha256": "66f6c1a1edf5c7c4c0e51a5ccebca3e6e93306d3b7dcb0f94e7a3082f4f29f84"
+    },
+    {
+      "path": "vendor/coop/game_link.h",
+      "source": "server/coop/game_link.h",
+      "sha256": "8c291d56e3889f12a60864fb6f546a4860718b71887edba060e946e04ff16cca"
+    },
+    {
+      "path": "vendor/coop/invasions.h",
+      "source": "server/coop/invasions.h",
+      "sha256": "09d4f4d7d3125a550c4d9f53daf8292ea53cd68b399053dd344574ca5687f7e8"
+    },
+    {
+      "path": "vendor/coop/link_auth.h",
+      "source": "server/coop/link_auth.h",
+      "sha256": "499920f4c78104d748ca0307ff50df49764819759bd94f8a317a7ca8d76447b9"
+    },
+    {
+      "path": "vendor/coop/link_crypto.cpp",
+      "source": "server/coop/link_crypto.cpp",
+      "sha256": "594bf8173bff4b0e0436f4d2e9aa9750393ad02145cb457f7ecb0886409fc37f"
+    },
+    {
+      "path": "vendor/coop/monocypher/.clang-format",
+      "source": "server/coop/monocypher/.clang-format",
+      "sha256": "b31f421733899646b1bafbeb8ab3dda7391a50169ecac50f16ce7f6abd80409a"
+    },
+    {
+      "path": "vendor/coop/monocypher/LICENCE.md",
+      "source": "server/coop/monocypher/LICENCE.md",
+      "sha256": "d3a6d889033e22c8ee30bb2891f0787a3288fc594994cd04c885761c4475e30f"
+    },
+    {
+      "path": "vendor/coop/monocypher/monocypher.c",
+      "source": "server/coop/monocypher/monocypher.c",
+      "sha256": "57eb914fc88136119bd41655cccb8c250048bf54d470540625186f8ab16f64be"
+    },
+    {
+      "path": "vendor/coop/monocypher/monocypher.h",
+      "source": "server/coop/monocypher/monocypher.h",
+      "sha256": "c494da712122da7ff679fdcf318a5317e84972b6c950fe9d896212947797facd"
+    },
+    {
+      "path": "vendor/coop/packet_routes.h",
+      "source": "server/coop/packet_routes.h",
+      "sha256": "de007f6a6c5640bf61cb8642a9e37fd618296e3551deb5d807eb0a1ed26bdbc1"
+    },
+    {
+      "path": "vendor/coop/rpc_tunnel.h",
+      "source": "server/coop/rpc_tunnel.h",
+      "sha256": "f25843eedf929e8d3a1aebf19c11b58ca97760011afd072d3655457b79d4aef3"
+    },
+    {
+      "path": "vendor/coop/team_code.h",
+      "source": "server/coop/team_code.h",
+      "sha256": "26f35cc14ccffa091ab4b09d3d81fd9003c3896545e315b9bea33b48b19adbed"
+    },
+    {
+      "path": "vendor/coop/trade.cpp",
+      "source": "server/coop/trade.cpp",
+      "sha256": "3dbd8b15c9a3d66f29f68ea570151a2aab583898968453c780b45355c8eda874",
+      "adapted_sha256": "fd2dd0fd9eb2895eacf7671f911fb2ece943f3cbb8ef2290061cef2e36b5d71e"
+    },
+    {
+      "path": "vendor/coop/trade.h",
+      "source": "server/coop/trade.h",
+      "sha256": "9b19d9bec023fa765feba4c296877d39901d0a9d18a928e5000a43a7e22117cd",
+      "adapted_sha256": "5ff1fbc94b13e4a5f81d1c3898b4fceed50ed918e2db096803232df49b20bc50"
+    },
+    {
+      "path": "vendor/coop/world_log.cpp",
+      "source": "server/coop/world_log.cpp",
+      "sha256": "37c42f32990a062bf0fd4078225bf60a197efffc28bf7895726725d6f6a88ec0"
+    },
+    {
+      "path": "vendor/coop/world_log.h",
+      "source": "server/coop/world_log.h",
+      "sha256": "0525af7b62403cd621d2ee7ef201cc83edf6a9850a8a88e9e1e4b5d30b4b95f0"
+    },
+    {
+      "path": "vendor/core/bloodborne_altar.cpp",
+      "source": "emulator/src/core/bloodborne_altar.cpp",
+      "sha256": "e6bc586912da36872fd6d79684c53f5b38ac156a2be1118ae30503dcf25b5a35"
+    },
+    {
+      "path": "vendor/core/bloodborne_altar.h",
+      "source": "emulator/src/core/bloodborne_altar.h",
+      "sha256": "8f345aacc5c2b1de40f91bc7d060eba1e83429d706c32f4d3f8342930cf883a4"
+    },
+    {
+      "path": "vendor/core/bloodborne_autoplay.cpp",
+      "source": "emulator/src/core/bloodborne_autoplay.cpp",
+      "sha256": "c498ac6d67886503bdd399b8a68dd90df035872ad73e53d9080a29c296100243",
+      "adapted_sha256": "de26a5755a114774d2ab7b347b87e0017cddcf9c87bff4e7bede64a130226bf1"
+    },
+    {
+      "path": "vendor/core/bloodborne_boards.cpp",
+      "source": "emulator/src/core/bloodborne_boards.cpp",
+      "sha256": "c37b13d07a0e02127007aeefbf4e04f20cdb4b3b74475f9381f0181cad637589"
+    },
+    {
+      "path": "vendor/core/bloodborne_camera.cpp",
+      "source": "emulator/src/core/bloodborne_camera.cpp",
+      "sha256": "a7339ae0510723993f783e3a4a7ccbb44835b6adfef32fec26abd58b0e9166dc"
+    },
+    {
+      "path": "vendor/core/bloodborne_compass.cpp",
+      "source": "emulator/src/core/bloodborne_compass.cpp",
+      "sha256": "9734f203179d5af5bb7fff77f1382b9113660f0bfd5c8435f4ac1eb11b2ea20e"
+    },
+    {
+      "path": "vendor/core/bloodborne_compass.h",
+      "source": "emulator/src/core/bloodborne_compass.h",
+      "sha256": "451a20f00f46feafccc01df1b91fea198c76e953753261ea521caa2a5cb85f2d"
+    },
+    {
+      "path": "vendor/core/bloodborne_crash_dump.cpp",
+      "source": "emulator/src/core/bloodborne_crash_dump.cpp",
+      "sha256": "feecded9ce2b5854b1b943dbb906464b85086a22f7c0bcac27a3fe155dff7755"
+    },
+    {
+      "path": "vendor/core/bloodborne_crash_dump.h",
+      "source": "emulator/src/core/bloodborne_crash_dump.h",
+      "sha256": "70081a68eba195339c30585ad1f2cc5086a7931d27428d4b06778fc789762407"
+    },
+    {
+      "path": "vendor/core/bloodborne_duel.cpp",
+      "source": "emulator/src/core/bloodborne_duel.cpp",
+      "sha256": "e9c0955d6298f305ffdbb8f480302ffff660d5633e6341e661b477d91ebdcc53"
+    },
+    {
+      "path": "vendor/core/bloodborne_duel.h",
+      "source": "emulator/src/core/bloodborne_duel.h",
+      "sha256": "53e79d491d3096f7ba67704b07495eb1c2fed102b2a49975eb4abc6ea2aa2346"
+    },
+    {
+      "path": "vendor/core/bloodborne_duel_game.cpp",
+      "source": "emulator/src/core/bloodborne_duel_game.cpp",
+      "sha256": "91818ff85d5c0b4908e627ffa056b82b79248bfc2451977cfe7d6e64ea08d6a8"
+    },
+    {
+      "path": "vendor/core/bloodborne_flags.h",
+      "source": "emulator/src/core/bloodborne_flags.h",
+      "sha256": "8c94c19db955d8a21a24d3202397075c8da3039ef4479c0f86ef378d25313656"
+    },
+    {
+      "path": "vendor/core/bloodborne_flags_store.cpp",
+      "source": "emulator/src/core/bloodborne_flags_store.cpp",
+      "sha256": "b26366fde912f37787e29a018af170a08ce2aec228cb43dfaa799914361977ad"
+    },
+    {
+      "path": "vendor/core/bloodborne_game_link.h",
+      "source": "emulator/src/core/bloodborne_game_link.h",
+      "sha256": "75f326f6c0457784b23f80ca6f45e23acac4554486e5fb17c1a6b80695387edd"
+    },
+    {
+      "path": "vendor/core/bloodborne_host_rules.cpp",
+      "source": "emulator/src/core/bloodborne_host_rules.cpp",
+      "sha256": "44b5acafe89f0d970c64a2a029e0f6a39441c7747ade832bdcebec23ff1f55fb"
+    },
+    {
+      "path": "vendor/core/bloodborne_host_rules.h",
+      "source": "emulator/src/core/bloodborne_host_rules.h",
+      "sha256": "abb3b27276f91a5b46fb6e643db14f5fdde986393496011c8fcbc8a72791cf24"
+    },
+    {
+      "path": "vendor/core/bloodborne_host_rules_game.cpp",
+      "source": "emulator/src/core/bloodborne_host_rules_game.cpp",
+      "sha256": "0fe8edc754d0b8feaa3782d48c4146b5bd5a39896872719e081b8ec5dea41d00"
+    },
+    {
+      "path": "vendor/core/bloodborne_invasion.cpp",
+      "source": "emulator/src/core/bloodborne_invasion.cpp",
+      "sha256": "0d8dd43acbb2df91826ae3b7a0d5e1cccf5478042fcdcfd2daf1d35b62eab010"
+    },
+    {
+      "path": "vendor/core/bloodborne_invasion.h",
+      "source": "emulator/src/core/bloodborne_invasion.h",
+      "sha256": "0de2dd5f043238119988763d0add764fc00c875d8ca0f7c82781d762f84d55a1",
+      "adapted_sha256": "301ccefcace609e086467154d68de9a0b27f411b2eaf19c574086eec495a3205"
+    },
+    {
+      "path": "vendor/core/bloodborne_join.cpp",
+      "source": "emulator/src/core/bloodborne_join.cpp",
+      "sha256": "984891d58020db35f3da335f87ee45628329dcf8043e2d772f85c75d0f3e8b4f"
+    },
+    {
+      "path": "vendor/core/bloodborne_kills_hp.cpp",
+      "source": "emulator/src/core/bloodborne_kills_hp.cpp",
+      "sha256": "b6ea0874a0136495b510e98b43feac79c0bf206ee0c96d5795f13f2253173723"
+    },
+    {
+      "path": "vendor/core/bloodborne_lamp_points.h",
+      "source": "emulator/src/core/bloodborne_lamp_points.h",
+      "sha256": "7a88ba93a05897156a970a5d40369057a012731693eb37d46036cbe76fc43fc6"
+    },
+    {
+      "path": "vendor/core/bloodborne_map.cpp",
+      "source": "emulator/src/core/bloodborne_map.cpp",
+      "sha256": "9bb13ec9facc470e9894b65e357aca12dab2425a35a84d7f5904936def8c2034"
+    },
+    {
+      "path": "vendor/core/bloodborne_map.h",
+      "source": "emulator/src/core/bloodborne_map.h",
+      "sha256": "4fa9c486a3546892ae2ca88bddb9590ce54118108436de904388108884833604"
+    },
+    {
+      "path": "vendor/core/bloodborne_map_screen.cpp",
+      "source": "emulator/src/core/bloodborne_map_screen.cpp",
+      "sha256": "d46222dcbac3cc30cdc848b93bd6d6bc937f9d713b360f174f4997ada88c1125"
+    },
+    {
+      "path": "vendor/core/bloodborne_party.cpp",
+      "source": "emulator/src/core/bloodborne_party.cpp",
+      "sha256": "b6709e63c784320478a52063dd36c87525681894e9b793080c475bf05aba4c74",
+      "adapted_sha256": "40cfed816b2cd64fcf1c24ad87a4956c37238bf54b6c56e70183a57b421fdf89"
+    },
+    {
+      "path": "vendor/core/bloodborne_party.h",
+      "source": "emulator/src/core/bloodborne_party.h",
+      "sha256": "bf7baac63840b08312a68a77afa51a1213fee05c7dce78b066bf6ffe193f17b7"
+    },
+    {
+      "path": "vendor/core/bloodborne_party_death.cpp",
+      "source": "emulator/src/core/bloodborne_party_death.cpp",
+      "sha256": "41bd83cc8d4361dde63923155f7fd430fed9d888fd7581c184bb69abb02f7bc9",
+      "adapted_sha256": "58163337779e46908a3f255773480bf357515f9c710482b47f5c3b06a9ce99e4"
+    },
+    {
+      "path": "vendor/core/bloodborne_party_rules.cpp",
+      "source": "emulator/src/core/bloodborne_party_rules.cpp",
+      "sha256": "5206cc3e0859b8657afd8fed8387b52cbfd3e2c8a6d5fd67b98b9807a155417e",
+      "adapted_sha256": "6d26b8301aa16693e8864553f4b5cbb76e7aaec6f6ee0fcd0fb432bbad7e2ffc"
+    },
+    {
+      "path": "vendor/core/bloodborne_patch_sites.h",
+      "source": "emulator/src/core/bloodborne_patch_sites.h",
+      "sha256": "12ce6a21fd0de5b043f09edc05944879a910ea8845529046a486c45afab9fbf5",
+      "adapted_sha256": "3abcc117681b9ab995057efa91f647e5558e204e60eecc45b86ffa0207f950b6"
+    },
+    {
+      "path": "vendor/core/bloodborne_patches.cpp",
+      "source": "emulator/src/core/bloodborne_patches.cpp",
+      "sha256": "cdf6d27a8f780c049a9612e4efc803e554734b34e56fe86f07b229af051e9474",
+      "adapted_sha256": "a8545b9d48f175fcf9bdbbaa982511f8438ca1d01c28c47d47700b83627b5bce"
+    },
+    {
+      "path": "vendor/core/bloodborne_pings.cpp",
+      "source": "emulator/src/core/bloodborne_pings.cpp",
+      "sha256": "ef3257b73f4a8238917af2e727fa327ae018d7180698732ff18339d05aa893ab"
+    },
+    {
+      "path": "vendor/core/bloodborne_pings.h",
+      "source": "emulator/src/core/bloodborne_pings.h",
+      "sha256": "d7b595e03dcfc1e14e29a3d1bba0b20d5ebc94c346a0924aac85f81cea97ec68"
+    },
+    {
+      "path": "vendor/core/bloodborne_pings_game.cpp",
+      "source": "emulator/src/core/bloodborne_pings_game.cpp",
+      "sha256": "b41f0cb21bcc9c1f1c05b8ceb753d3cf09f1f9290262affd0e0181c345d9a2f5"
+    },
+    {
+      "path": "vendor/core/bloodborne_portrait.cpp",
+      "source": "emulator/src/core/bloodborne_portrait.cpp",
+      "sha256": "fc45d4c896b9d1ade4e1fb751ca8ffe2ce6e8647b1992df09c57cd69e964ae84"
+    },
+    {
+      "path": "vendor/core/bloodborne_portrait.h",
+      "source": "emulator/src/core/bloodborne_portrait.h",
+      "sha256": "c236bf162dbf58c7233ba385df0c841989e880709d9dd8e1063cdab0a03bca35"
+    },
+    {
+      "path": "vendor/core/bloodborne_re.cpp",
+      "source": "emulator/src/core/bloodborne_re.cpp",
+      "sha256": "b6cbe64f326973d8c7a18472ef9d6df64feca3420d0b386c5774459832e0cad8",
+      "adapted_sha256": "4e9e7dfc56703ed9f5221415b4cc364cda25a1fcbf3c9b88f87e5555691a2938"
+    },
+    {
+      "path": "vendor/core/bloodborne_re.h",
+      "source": "emulator/src/core/bloodborne_re.h",
+      "sha256": "74f15df1c6212a1a02868f617904ff47fb77b6658eb4451750d755566e357f84"
+    },
+    {
+      "path": "vendor/core/bloodborne_re_internal.h",
+      "source": "emulator/src/core/bloodborne_re_internal.h",
+      "sha256": "cfd810ad9f928d4404f74b29fa1948db6f2268b51b55411a84aaf61bfa97d6df",
+      "adapted_sha256": "a2fef866d4d30b76ffc57096acd4bf3ef0570a4de43ad7cabfd1b482d264f7c5"
+    },
+    {
+      "path": "vendor/core/bloodborne_re_sites.h",
+      "source": "emulator/src/core/bloodborne_re_sites.h",
+      "sha256": "ff562186df2b48c8f59368630797abdbba272b7d22c276a6922316cf8199afa6",
+      "adapted_sha256": "47efbc8678f5fac8cd05d5598c7dafe9f3183ed85fe9973072be8576a10d0ac5"
+    },
+    {
+      "path": "vendor/core/bloodborne_re_tracer.cpp",
+      "source": "emulator/src/core/bloodborne_re_tracer.cpp",
+      "sha256": "d2e38ab42da4fa2666afa354bf27d31399a025549207e795e4c48b9ad24a4394"
+    },
+    {
+      "path": "vendor/core/bloodborne_region_url.h",
+      "source": "emulator/src/core/bloodborne_region_url.h",
+      "sha256": "0e2565b2485603a984360266b392bafb1842b89271635a40d139c1993c732818"
+    },
+    {
+      "path": "vendor/core/bloodborne_send_pace.h",
+      "source": "emulator/src/core/bloodborne_send_pace.h",
+      "sha256": "79a0ca38eb2517247a09da7cf5811b7ead63da060e7125c18353c89e4ac723a8"
+    },
+    {
+      "path": "vendor/core/bloodborne_server_world.cpp",
+      "source": "emulator/src/core/bloodborne_server_world.cpp",
+      "sha256": "65f115aca84d42cf82107eb9b4def126e542daf44e3d7f10eaaf9fcfb72da99d",
+      "adapted_sha256": "47559b5aa42693ecb5b7558da6d29c3209063f5687d8ddd3154eaa7f2dbf3a83"
+    },
+    {
+      "path": "vendor/core/bloodborne_spectate.cpp",
+      "source": "emulator/src/core/bloodborne_spectate.cpp",
+      "sha256": "81b3c2ec2e3d49ff37d808495b02b178d5e1719b341c918aede76d2f7fa11434"
+    },
+    {
+      "path": "vendor/core/bloodborne_spectate.h",
+      "source": "emulator/src/core/bloodborne_spectate.h",
+      "sha256": "f772cc8b7cc58055082970cbf3a0e8131b1e557543c9e87eb00cc2e3f0a1ce5b"
+    },
+    {
+      "path": "vendor/core/bloodborne_team.cpp",
+      "source": "emulator/src/core/bloodborne_team.cpp",
+      "sha256": "46e5bb1b1f44a36da58341583fe2121be4ae9468d31b781eab72b0b98ae4cf73"
+    },
+    {
+      "path": "vendor/core/bloodborne_team.h",
+      "source": "emulator/src/core/bloodborne_team.h",
+      "sha256": "15f7f770307fd0988527ffe5afcdb6ec47d4a83cb1a72034761626da286d134a"
+    },
+    {
+      "path": "vendor/core/bloodborne_trace_diag.cpp",
+      "source": "emulator/src/core/bloodborne_trace_diag.cpp",
+      "sha256": "b9417479b4e9c67dd9f749eeb588956d6b2aef25ac0c69e282d7f4920eedf473"
+    },
+    {
+      "path": "vendor/core/bloodborne_trade.cpp",
+      "source": "emulator/src/core/bloodborne_trade.cpp",
+      "sha256": "f11abcfa8cd9184edb616b9eefab7b1c71a39bf14e808f46fb5251cb509b4248",
+      "adapted_sha256": "fa91bff281bd5af3a9048b09f92ff32da0ec32481a579fbe90c4dd50226f1d7d"
+    },
+    {
+      "path": "vendor/core/bloodborne_trade.h",
+      "source": "emulator/src/core/bloodborne_trade.h",
+      "sha256": "2eb305abb87063dcaf45ffef238f01081d243b77fd4113988d33db8be1cab411",
+      "adapted_sha256": "d399ae0ec677e2741da2352f7e856030049e9c4434979594cd9f05fb552262ae"
+    },
+    {
+      "path": "vendor/core/bloodborne_travel.cpp",
+      "source": "emulator/src/core/bloodborne_travel.cpp",
+      "sha256": "9cc81f91e5bffad42a70c5274309c2084d216d5ef14130f10b334c8fe0c17292"
+    },
+    {
+      "path": "vendor/core/bloodborne_world_log.cpp",
+      "source": "emulator/src/core/bloodborne_world_log.cpp",
+      "sha256": "56f83ebeef546ceaba213f7fa8ccd21ed7760d21065113370efdf73a05339bdb"
+    },
+    {
+      "path": "vendor/core/bloodborne_write_watch.cpp",
+      "source": "emulator/src/core/bloodborne_write_watch.cpp",
+      "sha256": "24e7212741fbcd4c7e677ebb93bbfe9b1f41f3eea3bfff7bdfc4f9d4c28436cb"
+    },
+    {
+      "path": "vendor/core/bloodborne_write_watch.h",
+      "source": "emulator/src/core/bloodborne_write_watch.h",
+      "sha256": "d34d93e3807c52eed4f29151c4ada3fe2e16e964193ae6b01f2a8f526879be89"
+    },
+    {
+      "path": "vendor/core/cpu_patches.h",
+      "source": "emulator/src/core/cpu_patches.h",
+      "sha256": "ab3ceb71e889ac270f0b6028dfbf976ad20de31488facb62f0be680aeec8ef6f"
+    },
+    {
+      "path": "vendor/core/file_format/psf.cpp",
+      "source": "emulator/src/core/file_format/psf.cpp",
+      "sha256": "661ff6e2f75b2cfc064f02c87a605eb15ebd0b4a49f2f5e63cace0e4493082ac"
+    },
+    {
+      "path": "vendor/core/file_format/psf.h",
+      "source": "emulator/src/core/file_format/psf.h",
+      "sha256": "dd88587b092fa6d14285a0793ca7e4fdd73ecfa288eee0a732d7c620a2cf2cae"
+    },
+    {
+      "path": "vendor/core/guest_hook.cpp",
+      "source": "emulator/src/core/guest_hook.cpp",
+      "sha256": "8ab791ee3fedc116542e601aac86fa49613f3d44209521bb7343ff8e7a0ade76"
+    },
+    {
+      "path": "vendor/core/guest_hook.h",
+      "source": "emulator/src/core/guest_hook.h",
+      "sha256": "d1f5ea954a0d080f7ed0aadbddfea50616d4f3d7358e58db99be018aa47150a3"
+    },
+    {
+      "path": "vendor/core/libraries/error_codes.h",
+      "source": "emulator/src/core/libraries/error_codes.h",
+      "sha256": "30025f71b0cd3f1f23a1cfb8fffb445218f70fe8f84254cc54370b22ee5a9e95"
+    },
+    {
+      "path": "vendor/core/libraries/kernel/orbis_error.h",
+      "source": "emulator/src/core/libraries/kernel/orbis_error.h",
+      "sha256": "726040d59a93275877fb6f032d22336904eb1efdbbc2dadc5b4ba4d03bfe8af1"
+    },
+    {
+      "path": "vendor/core/libraries/kernel/time.h",
+      "source": "emulator/src/core/libraries/kernel/time.h",
+      "sha256": "65726f2787dbb6d3f697e280ace08f4569e7ceab1b109ecbfe9775128e747479"
+    },
+    {
+      "path": "vendor/core/libraries/network/http.cpp",
+      "source": "emulator/src/core/libraries/network/http.cpp",
+      "sha256": "e145e663306f83b5468faa532344b53bd85aff17b647b2ad0c82ca5271c8c5b7"
+    },
+    {
+      "path": "vendor/core/libraries/network/http.h",
+      "source": "emulator/src/core/libraries/network/http.h",
+      "sha256": "f1a754b202937c3aea075d1a26a4f747c520a6b6a26cde8f491ece1fe7928c9d"
+    },
+    {
+      "path": "vendor/core/libraries/network/http2.cpp",
+      "source": "emulator/src/core/libraries/network/http2.cpp",
+      "sha256": "e92dce53508f89744319841f98a6178434403ba8aa26e97d471cbae76aed6d3e"
+    },
+    {
+      "path": "vendor/core/libraries/network/http2.h",
+      "source": "emulator/src/core/libraries/network/http2.h",
+      "sha256": "a9fc111face49443badcf8fe4e99ac35f3ef965ed692b5a2821d85c75f6e6752"
+    },
+    {
+      "path": "vendor/core/libraries/network/http_error.h",
+      "source": "emulator/src/core/libraries/network/http_error.h",
+      "sha256": "b0431ba6fe8b7e12967cd9ea0c8530e7af95fb5580fee6cc73fe50ec16d05939"
+    },
+    {
+      "path": "vendor/core/libraries/network/net.cpp",
+      "source": "emulator/src/core/libraries/network/net.cpp",
+      "sha256": "0e8b4c71a2f697227df62a81aa341bc6446a852c622e7366c568822203a9944e"
+    },
+    {
+      "path": "vendor/core/libraries/network/net.h",
+      "source": "emulator/src/core/libraries/network/net.h",
+      "sha256": "ec74899849cef6f27496b75c44235d475a2ec01343b9cbd15f76c1dd470cc160"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_ctl_codes.h",
+      "source": "emulator/src/core/libraries/network/net_ctl_codes.h",
+      "sha256": "673445fc498111a7bb94300cf85e93a365341c459f10c1e3a0ad8c32447bb7d1"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_ctl_obj.cpp",
+      "source": "emulator/src/core/libraries/network/net_ctl_obj.cpp",
+      "sha256": "ae89729c3689c6c271abdefd1ed6d5232acd080ee88b0427afcf038b9e08582a"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_ctl_obj.h",
+      "source": "emulator/src/core/libraries/network/net_ctl_obj.h",
+      "sha256": "0d3d2c96bbbf4978a73854bfdbe8496a15ad2bc424da44380752f75a102beb9f"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_delay.h",
+      "source": "emulator/src/core/libraries/network/net_delay.h",
+      "sha256": "433b779b9777c5d571f72d0aa9dde3a88dd16ad575841962e0d1bf09baf79768"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_epoll.cpp",
+      "source": "emulator/src/core/libraries/network/net_epoll.cpp",
+      "sha256": "5f31f901b2f0c6b69f61822c10002d37e6dc3e0bb71bc0921f237b7b04446672"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_epoll.h",
+      "source": "emulator/src/core/libraries/network/net_epoll.h",
+      "sha256": "26ada715ab26eb5a891fb3104182ad8c203a200351c7818aac8ba4053505ac6e",
+      "adapted_sha256": "3f7361ab6886cf1697ea1588e059dfa1cf31e4d6679aeaa10972048cb93ab9d6"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_error.h",
+      "source": "emulator/src/core/libraries/network/net_error.h",
+      "sha256": "a23de1ad5e2cf68d88d812663d7f1a59cf7adedd2489b38060aef94c7e75c433"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_firewall.h",
+      "source": "emulator/src/core/libraries/network/net_firewall.h",
+      "sha256": "7dc3707604ececc27428396b60b0065b367f30f2508e9e5ebedae1ee63ec871a"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_link.h",
+      "source": "emulator/src/core/libraries/network/net_link.h",
+      "sha256": "fb9e85f2db727949581c686ce1db362a809704cc25df537a71cee4fa74aee084"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_obj.cpp",
+      "source": "emulator/src/core/libraries/network/net_obj.cpp",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_obj.h",
+      "source": "emulator/src/core/libraries/network/net_obj.h",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_resolver.cpp",
+      "source": "emulator/src/core/libraries/network/net_resolver.cpp",
+      "sha256": "e9d70c9cf35958a35d0cfe68cb6c951ad774e9582a20ffcd348f67992b8f28ac"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_resolver.h",
+      "source": "emulator/src/core/libraries/network/net_resolver.h",
+      "sha256": "7cd8d55176e4668a67e5886bb5dbc83bea55c36813b9913bc3f39acda2779d3d"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_silence.h",
+      "source": "emulator/src/core/libraries/network/net_silence.h",
+      "sha256": "a1e236621470cb09509f970fb4d54b6ecf589d906cc280448a982bf55c6093eb"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_util.cpp",
+      "source": "emulator/src/core/libraries/network/net_util.cpp",
+      "sha256": "5c5ad667801d35b72a87b5f70cdf24a3208102ce5d5003096980380160c5b2b9"
+    },
+    {
+      "path": "vendor/core/libraries/network/net_util.h",
+      "source": "emulator/src/core/libraries/network/net_util.h",
+      "sha256": "4ed81487c4a47f5c0867ec7fe542da7fdcc460d93ffa5d202cc51a9a93d4c181"
+    },
+    {
+      "path": "vendor/core/libraries/network/netctl.cpp",
+      "source": "emulator/src/core/libraries/network/netctl.cpp",
+      "sha256": "5c441c28f587b0ee69b05dcd7e100b7d38aee3462407e6e4a5a7b35e715ab0f1"
+    },
+    {
+      "path": "vendor/core/libraries/network/netctl.h",
+      "source": "emulator/src/core/libraries/network/netctl.h",
+      "sha256": "181f9055e0080433efb6b328f9468f2e22a2fc7626e4d44c29fa7a78d2c28f32"
+    },
+    {
+      "path": "vendor/core/libraries/network/p2p_sockets.cpp",
+      "source": "emulator/src/core/libraries/network/p2p_sockets.cpp",
+      "sha256": "d2c1c52b157831d49252163b63c6c5892a96faa4b0a7d3749883d5b62781c80d",
+      "adapted_sha256": "ac4ac378e789515f62c8399af0a6cc30e7cc4d23071650263802dca2469872ae"
+    },
+    {
+      "path": "vendor/core/libraries/network/posix_sockets.cpp",
+      "source": "emulator/src/core/libraries/network/posix_sockets.cpp",
+      "sha256": "54f45fb13f6a0ac39bb471dcb31b8b9ad046d5313d779428c8e5ab568e26671a"
+    },
+    {
+      "path": "vendor/core/libraries/network/rpc_bridge.cpp",
+      "source": "emulator/src/core/libraries/network/rpc_bridge.cpp",
+      "sha256": "f2dddd19687ac779722c967be088e946f04160ca42e3760ec193c7961fa84a48"
+    },
+    {
+      "path": "vendor/core/libraries/network/rpc_bridge.h",
+      "source": "emulator/src/core/libraries/network/rpc_bridge.h",
+      "sha256": "d5b61801f14d084f14a71bba46ae5afa86368e43e22b44971cdb862d984960a1"
+    },
+    {
+      "path": "vendor/core/libraries/network/server_link.h",
+      "source": "emulator/src/core/libraries/network/server_link.h",
+      "sha256": "0254d8ff022e2766308e71daaf3a7ebf290d27a038a44eaab46e1213f6478037"
+    },
+    {
+      "path": "vendor/core/libraries/network/sockets.h",
+      "source": "emulator/src/core/libraries/network/sockets.h",
+      "sha256": "4498498dbb138bc05e95dc9fa98fab45b03fdcc36b67cc91c603ad228134aeac",
+      "adapted_sha256": "23f9b322ba33b1ad275f09241afe1195ef14c0c6f3c7803c8812967953fb56a7"
+    },
+    {
+      "path": "vendor/core/libraries/network/ssl.cpp",
+      "source": "emulator/src/core/libraries/network/ssl.cpp",
+      "sha256": "f5f6e3616a8d628df476d4b7ba73c4fadd96dd7276fcbe6f51cfc6eb63f8feb0"
+    },
+    {
+      "path": "vendor/core/libraries/network/ssl.h",
+      "source": "emulator/src/core/libraries/network/ssl.h",
+      "sha256": "74644f651d4fd07b62e32279047494ab35bfefdd1ab3a718a5fc085fe18d3c25"
+    },
+    {
+      "path": "vendor/core/libraries/network/ssl2.cpp",
+      "source": "emulator/src/core/libraries/network/ssl2.cpp",
+      "sha256": "c43d27114ce2f2d849b506775749f508afecb3624b3ad25c6b698456ebb6f974"
+    },
+    {
+      "path": "vendor/core/libraries/network/ssl2.h",
+      "source": "emulator/src/core/libraries/network/ssl2.h",
+      "sha256": "a12e014dac8dafd6af7e0eb19e627b9ef6d002b2bbcec89c5e121b14cc9301c1"
+    },
+    {
+      "path": "vendor/core/libraries/network/ssl2_error.h",
+      "source": "emulator/src/core/libraries/network/ssl2_error.h",
+      "sha256": "23a8c082a272a87cf65e0e96b9ecd216c272006c522e79f43685820d998ee4f8"
+    },
+    {
+      "path": "vendor/core/libraries/network/sys_net.cpp",
+      "source": "emulator/src/core/libraries/network/sys_net.cpp",
+      "sha256": "f978155a9f266163ac3898a70822bfa42aa23a9ab5dc4c0d904224b12acfdb09"
+    },
+    {
+      "path": "vendor/core/libraries/network/sys_net.h",
+      "source": "emulator/src/core/libraries/network/sys_net.h",
+      "sha256": "617449608f35d4960d81c9b466ffc0a7c6dd3cd7c20fb029b43277409d1e5fdb"
+    },
+    {
+      "path": "vendor/core/libraries/network/unix_sockets.cpp",
+      "source": "emulator/src/core/libraries/network/unix_sockets.cpp",
+      "sha256": "3423a31183f6a04f420b9819894236b258857194c571b377022c27a5500bd5c8"
+    },
+    {
+      "path": "vendor/core/libraries/network/windows_trust.h",
+      "source": "emulator/src/core/libraries/network/windows_trust.h",
+      "sha256": "a7e6fc0b1c29e938c535237490c13d068022ba1f09f52cd74dcbf5461b3ee788"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_auth.cpp",
+      "source": "emulator/src/core/libraries/np/np_auth.cpp",
+      "sha256": "d9c508020b1977c2b3c4cf904e3b23529d3dba23a21deffc985eed11b742bce2"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_auth.h",
+      "source": "emulator/src/core/libraries/np/np_auth.h",
+      "sha256": "3a68f204a1932d95c98094dce3bcb53ea98c1ed78a1996884d509a6ac0dc2dcd"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_commerce/np_commerce.cpp",
+      "source": "emulator/src/core/libraries/np/np_commerce/np_commerce.cpp",
+      "sha256": "07e86c21f827b44ac24bf8d86effe7bc04b94365513168097c3aff7a61f087c5"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_commerce/np_commerce.h",
+      "source": "emulator/src/core/libraries/np/np_commerce/np_commerce.h",
+      "sha256": "83e89e4c324aa7999a6041a6e4d1e4ed33868e75c59bddda0b80a3870322f4b3"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_commerce/np_commerce_ui.cpp",
+      "source": "emulator/src/core/libraries/np/np_commerce/np_commerce_ui.cpp",
+      "sha256": "4ad80867d048163be44cd5ae85f3514267507df3ecadef476a3cfb837938527b"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_commerce/np_commerce_ui.h",
+      "source": "emulator/src/core/libraries/np/np_commerce/np_commerce_ui.h",
+      "sha256": "13cc41c091bfa8daef2a6fcddc81ac914a4f8ae455a516e48001174b8b40561d"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_common.cpp",
+      "source": "emulator/src/core/libraries/np/np_common.cpp",
+      "sha256": "11274286d958f9723e84c6a3d37e1afb7d272e9fd53b235617cc61185f4f84a0"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_common.h",
+      "source": "emulator/src/core/libraries/np/np_common.h",
+      "sha256": "1837b6476ab5bb71b13de079828f83f197939a1509caf102aaee5624fc48b178"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_error.h",
+      "source": "emulator/src/core/libraries/np/np_error.h",
+      "sha256": "f1696c2fff3c952d85f7c44f8e427a019241ca884c6c81b89244f324478b8203"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_handler.cpp",
+      "source": "emulator/src/core/libraries/np/np_handler.cpp",
+      "sha256": "a1de9d8b96506f29ef7777ae20dbc3bc0ad31b1c16f56aff69e6016768f6da97"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_handler.h",
+      "source": "emulator/src/core/libraries/np/np_handler.h",
+      "sha256": "4c553a8a897a31de4ac059b1dd6fdab87eaaee034a4b6d9012444d7f04f807d3"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_manager.cpp",
+      "source": "emulator/src/core/libraries/np/np_manager.cpp",
+      "sha256": "aefb455a6b19e486459862760688c64745614affd60a3788662b526968aa40c3",
+      "adapted_sha256": "12229517ddd91a6b9f7d3c116af85324eb2184a28fe74156655b9dd78bf84b99"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_manager.h",
+      "source": "emulator/src/core/libraries/np/np_manager.h",
+      "sha256": "31ab1d52d28ec860e32e72f032ae3bba8702640130593df37f8d5cbc4532850e"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2.cpp",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2.cpp",
+      "sha256": "e34aac7626439f7d004dfc2e7d611f960f85ec13d586b8d4c4e717e65c6d1735"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2.h",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2.h",
+      "sha256": "dccc03585ee73d0b595a150de74e575c34039ef1df02db07d1556137a2a270d8"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2_internal.cpp",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2_internal.cpp",
+      "sha256": "b799be57ead311397d70975673f3b3879373a7f6b1b346de4705a42cd24d9565"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2_internal.h",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2_internal.h",
+      "sha256": "0993e33e7eab4d3f053a4f48d4ff7ca2a31927d412786f27cd7b3dbe9c37de26"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2_mm.cpp",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2_mm.cpp",
+      "sha256": "93f0815f0e1f48659ad6490d9da57cfd4fa6dbfcc8d1571c9e29eac0cd074218"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2_mm.h",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2_mm.h",
+      "sha256": "01ffd67f6ff364c9679b86f5cc58317ca608c6cbc256938c4b221aef49ddcfc6"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2_signaling.cpp",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2_signaling.cpp",
+      "sha256": "f4c278af179c5ac508927f83e9cde06e09ef4fc2db4cd70bb4980903dee1a8ae"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_matching2/np_matching2_signaling.h",
+      "source": "emulator/src/core/libraries/np/np_matching2/np_matching2_signaling.h",
+      "sha256": "f311019c74e846a6f393145eca1c014beff8c50b924d32ed4c1ead4b45c6e94a"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_partner.cpp",
+      "source": "emulator/src/core/libraries/np/np_partner.cpp",
+      "sha256": "39169e472f80def90a440ce03adcac98d3fbcfd14d16769dde3f490d42d8e3d2"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_partner.h",
+      "source": "emulator/src/core/libraries/np/np_partner.h",
+      "sha256": "9731656128f9e093f24c0c4cc5f09c4bfb6d99d80f6b10d818be6b4b21036791"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_partner_error.h",
+      "source": "emulator/src/core/libraries/np/np_partner_error.h",
+      "sha256": "2e36e677eb593ea3658cb9c22ff5e0185ea73abcadfa621f7bd9a5ed01f9c0e4"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_party.cpp",
+      "source": "emulator/src/core/libraries/np/np_party.cpp",
+      "sha256": "b99eb82563708fab664ce8f8d29bd7d498076c8d5108829d7f21852842c7f5f6"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_party.h",
+      "source": "emulator/src/core/libraries/np/np_party.h",
+      "sha256": "caead2c7ea53e08b1c2e2f1fc8f7538f06f14b12374ed2020f1c7e31dc8a8f6d"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_profile_dialog/np_profile_dialog.cpp",
+      "source": "emulator/src/core/libraries/np/np_profile_dialog/np_profile_dialog.cpp",
+      "sha256": "57f138bdb1d3c9e37fab81fb6775554cf79d71b26d4371ddc718c918a126aa11"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_profile_dialog/np_profile_dialog.h",
+      "source": "emulator/src/core/libraries/np/np_profile_dialog/np_profile_dialog.h",
+      "sha256": "00c7319354190398f644a1fa0d810d9c89816dcb374907bdf47f533b44b3fcb4"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_profile_dialog/np_profile_dialog_ui.cpp",
+      "source": "emulator/src/core/libraries/np/np_profile_dialog/np_profile_dialog_ui.cpp",
+      "sha256": "8b5b3d90e90e6f2670b0fad7cbf7ef2ecfbfc4d317f54f2d9f8622c3ccafb697"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_profile_dialog/np_profile_dialog_ui.h",
+      "source": "emulator/src/core/libraries/np/np_profile_dialog/np_profile_dialog_ui.h",
+      "sha256": "067e9b1a27ccaf7edb1ee26783708e5cf6155c7270918be75b3c09cec74f337e"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_score/np_score.cpp",
+      "source": "emulator/src/core/libraries/np/np_score/np_score.cpp",
+      "sha256": "cc6f20e568f6862de316a15e781c40374d6b74a88863698da25e417d753f6659"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_score/np_score.h",
+      "source": "emulator/src/core/libraries/np/np_score/np_score.h",
+      "sha256": "9519bd52e683836d63831128b2be3f17e2a229ff199636b8d70c66c9a52f0af8"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_score/np_score_ctx.h",
+      "source": "emulator/src/core/libraries/np/np_score/np_score_ctx.h",
+      "sha256": "d9387d2f55dc892f7da06229465aa5a653c783c40b5f87e237a63abe53e19271"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling.cpp",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling.cpp",
+      "sha256": "3271c265da5804a4adeccdd76122980a202ad5dbe91e9b417a0cf9abf519931e"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling.h",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling.h",
+      "sha256": "46ac0e240e8a650048ddc96ab3dcdfc26cdac295c09998eb031371d373f74fd7"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_helpers.cpp",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_helpers.cpp",
+      "sha256": "33a3993800dcd6bf4913ba677ad483d124636130a7dc70daab2def2c594b3d46"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_helpers.h",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_helpers.h",
+      "sha256": "ba1864c5d578ac1826e6ad52f375947615a70fc5d3c98beddb08a2a83a3b02d9"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_reuse.h",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_reuse.h",
+      "sha256": "8ad55310a5123d52cde439ee58a49fe9ffb7a1407c4b0449e0863e47439ff355"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_state.cpp",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_state.cpp",
+      "sha256": "b5139ffdc12f899fc1cbef496e0b5a3e404c4d96cd41886e067f94b83cd77b0c"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_state.h",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_state.h",
+      "sha256": "d8fd8746471d1d09a1372656f6e6c15463c4505e331cce5290796a8862eba629"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_stubs.cpp",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_stubs.cpp",
+      "sha256": "5d50f5bc5a9550201f2f5a6afd462db8175fc3da61dbcbce0ba6de5d325468ca"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_signaling/np_signaling_stubs.h",
+      "source": "emulator/src/core/libraries/np/np_signaling/np_signaling_stubs.h",
+      "sha256": "4505ebf1664d839c26aeb66aa6357621184cd043930800095d1847f1da19656e"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_sns_facebook_dialog.cpp",
+      "source": "emulator/src/core/libraries/np/np_sns_facebook_dialog.cpp",
+      "sha256": "c002d8e90180abf22f974febc72081744a1efb439c32352dc0699eb24b1d1c5a"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_sns_facebook_dialog.h",
+      "source": "emulator/src/core/libraries/np/np_sns_facebook_dialog.h",
+      "sha256": "fc497e346119e3c8dac4112fb21e628444fc36989b6879fff7617c313a6a2977"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_trophy.cpp",
+      "source": "emulator/src/core/libraries/np/np_trophy.cpp",
+      "sha256": "bf5c9c4fc43cf287e7aeb43063bc1937b5e52ad3d38b88b8940c7009ddb347d1"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_trophy.h",
+      "source": "emulator/src/core/libraries/np/np_trophy.h",
+      "sha256": "5835110e288ded9e2ededc180ae000b718d9395a2d06b5a16c7a4f8945df5716"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_tus.cpp",
+      "source": "emulator/src/core/libraries/np/np_tus.cpp",
+      "sha256": "bfd83b818fbacb4d4ecad66a9d49d84f3e361d1382102c3cfa924f8b052f6697"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_tus.h",
+      "source": "emulator/src/core/libraries/np/np_tus.h",
+      "sha256": "a5bafc1bcd3903d847edcf4249ee4d036c58060c925f2cb2992914e4be4d2fcd"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_types.h",
+      "source": "emulator/src/core/libraries/np/np_types.h",
+      "sha256": "36e5dec0a324a9dfb8b8fab46f6df948b82c01e94f1a00b3175f21c587f748dc"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_types2.h",
+      "source": "emulator/src/core/libraries/np/np_types2.h",
+      "sha256": "66ddbd54f5713968163ae796a0fd83449ab5e85260cbe4c35bb08f11d026d125"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api/np_web_api.cpp",
+      "source": "emulator/src/core/libraries/np/np_web_api/np_web_api.cpp",
+      "sha256": "5e8f8f410b5d16aefaca3e81d5eea54958fc0e55926b9d2768a7277a94a2fcbe"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api/np_web_api.h",
+      "source": "emulator/src/core/libraries/np/np_web_api/np_web_api.h",
+      "sha256": "9fe7a8787202103af4416f097154d4f9662ea96c97ed4f077b2231a08a318990"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api/np_web_api_internal.cpp",
+      "source": "emulator/src/core/libraries/np/np_web_api/np_web_api_internal.cpp",
+      "sha256": "98a01ad6027aa05f038c68c104416b900313c067257bcc591469bb5080b0440b"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api/np_web_api_internal.h",
+      "source": "emulator/src/core/libraries/np/np_web_api/np_web_api_internal.h",
+      "sha256": "6d9fd49fdf558034742cbc74aa2301ddd69f010db284de04610b25dacbd4bd33"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2.cpp",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2.cpp",
+      "sha256": "532b89b508f093fe4f9d67050c8d57a0d8ecc4363f84ea86a257f2964704d24b"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2.h",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2.h",
+      "sha256": "dfb3af6dd82f33769481ad30964cb96f79f0a0aa15c5fa9c7a76eb0ab149a936"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2_context.cpp",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2_context.cpp",
+      "sha256": "5b5e931ce159b67e29d2649cee90e7759e7677433d9fd3428ee559d6d72acff7"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2_context.h",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2_context.h",
+      "sha256": "d276ee9c0f3e4a79dd158307315c6f37ed031cb67af104e38f0a9dabaa46719e"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2_internal.cpp",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2_internal.cpp",
+      "sha256": "d6b78f15ffcb65a8b793e21c806505c2bb257802807383903e3712b6e586b22d"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2_internal.h",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2_internal.h",
+      "sha256": "c0a458f95480643de2fb126783801a1971c40a0eb9072ba39f1924892a4ca181"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2_push_event.cpp",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2_push_event.cpp",
+      "sha256": "dcfd207dfca7315346bd16f31d8535ec1fe52c92484ceae93a604a3dc98a3114"
+    },
+    {
+      "path": "vendor/core/libraries/np/np_web_api2/np_web_api2_push_event.h",
+      "source": "emulator/src/core/libraries/np/np_web_api2/np_web_api2_push_event.h",
+      "sha256": "dfe046c3f59df623acc7f9c3efc65db49dbbf96e9998d4e4333d78a8ef43f249"
+    },
+    {
+      "path": "vendor/core/libraries/np/object_manager.h",
+      "source": "emulator/src/core/libraries/np/object_manager.h",
+      "sha256": "10be9be6b42c4fb18ed949a5bae6bcc2db8d810316f8bbcce443c215ceb12581"
+    },
+    {
+      "path": "vendor/core/libraries/np/trophy_ui.cpp",
+      "source": "emulator/src/core/libraries/np/trophy_ui.cpp",
+      "sha256": "1be58f81fb05d78e87b270945a3c3c79a95466377198d3b23a5bac2e3260032c"
+    },
+    {
+      "path": "vendor/core/libraries/np/trophy_ui.h",
+      "source": "emulator/src/core/libraries/np/trophy_ui.h",
+      "sha256": "9fe75af35605283dea1ae39b1b35109dfb16ab28851d1db0ed89b82127246c0b"
+    },
+    {
+      "path": "vendor/shadnet/client.cpp",
+      "source": "emulator/src/shadnet/client.cpp",
+      "sha256": "05b095c7b65aebaf7472510655247b74254f7275f647211489f021aa5717fa20"
+    },
+    {
+      "path": "vendor/shadnet/client.h",
+      "source": "emulator/src/shadnet/client.h",
+      "sha256": "217857b45e61067b153b313c2467be91344b56ca710ed757a25609078e67defa"
+    },
+    {
+      "path": "vendor/shadnet/server_probe.cpp",
+      "source": "emulator/src/shadnet/server_probe.cpp",
+      "sha256": "e9cd59ecb22230f274726e30cff9eb70b6fd699c194fc4b71ae5cd55571fa41b"
+    },
+    {
+      "path": "vendor/shadnet/server_probe.h",
+      "source": "emulator/src/shadnet/server_probe.h",
+      "sha256": "8158f9c1df20fb0c30c407506a6cfe06c6efc688eded113f92bbf63bb7e8dbe6"
+    },
+    {
+      "path": "vendor/shadnet/shadnet.proto",
+      "source": "server/src/shadnet.proto",
+      "sha256": "a6a1879daf244c6a0578d64b9ef96d40b8a9c8054d751e7bd840f79f8e7502fc"
+    },
+    {
+      "path": "../shim/bbport_map_art.cpp",
+      "source": "bbport/gpu/shim/bbport_map_art.cpp",
+      "sha256": "692467a3982b7525db0b090d1dc9972ff41af4da88f4026a2ea99127cfe7c65a"
+    },
+    {
+      "path": "../shim/bbport_map_art.h",
+      "source": "bbport/gpu/shim/bbport_map_art.h",
+      "sha256": "3c39ce6609f165684a686135acc86ccd0626c7bfe29d9992d98d4ebefb572147"
+    },
+    {
+      "path": "../shim/bbport_map_collision.cpp",
+      "source": "bbport/gpu/shim/bbport_map_collision.cpp",
+      "sha256": "b96c33b95620d3a87f682979a6570958a043a4826137bada5604a20797793af9"
+    },
+    {
+      "path": "../../tests/test_map_art.cpp",
+      "source": "bbport/tests/test_map_art.cpp",
+      "sha256": "52ea7fddd8186d862d7aa18228cdce216ff468c052a54034e9a8e959d8155dad"
+    },
+    {
+      "path": "../../gpu/shim/bbport_coop_art.h",
+      "source": "bbport/gpu/shim/bbport_coop_art.h",
+      "sha256": "be96a27af214e886dae00733fa7ee16281f82b685ff408c19c5c6f91976099b5"
+    },
+    {
+      "path": "../../gpu/shim/bbport_coop_art.cpp",
+      "source": "bbport/gpu/shim/bbport_coop_art.cpp",
+      "sha256": "917a3f716c1f5b671519d81d27b59d7e590ae5c30428d74ecd3ba38aa5792ad4"
+    },
+    {
+      "path": "../../gpu/shim/bbport_party_icons.h",
+      "source": "bbport/gpu/shim/bbport_party_icons.h",
+      "sha256": "2a6097011037ed3206bed8d0d3634a0bf24c5b187cede9c87804a978f6e54684"
+    },
+    {
+      "path": "../../gpu/shim/bbport_party_icons.cpp",
+      "source": "bbport/gpu/shim/bbport_party_icons.cpp",
+      "sha256": "f47c7e7d80042ff40784b500c9ddae56d4149bc101380a314497293aed3fa3a7"
+    },
+    {
+      "path": "../../gpu/shim/bbport_party_layout.h",
+      "source": "bbport/gpu/shim/bbport_party_layout.h",
+      "sha256": "d0463fa5c10f67568d2e268df85eb7e27204b28c15d20a68efe08c1baeb11241"
+    },
+    {
+      "path": "../../gpu/art/coop_art.bin",
+      "source": "bbport/gpu/art/coop_art.bin",
+      "sha256": "818f974aaa3f3b54a0a082e1f582af19d3e9bfb1187cf0e28e8632edf1e1b735"
+    },
+    {
+      "path": "../../gpu/art/party_icons.bin",
+      "source": "bbport/gpu/art/party_icons.bin",
+      "sha256": "570e2170316bd7dbe9a0dee918b7e40b94e4bccb1385c4f19dbf3e0ca24e1885"
+    },
+    {
+      "path": "../../gpu/art/party_icons.svg",
+      "source": "bbport/gpu/art/party_icons.svg",
+      "sha256": "0ba7ae9770fc81cf35277f0d57aef5e139cde969bf3e9102855a9e683909182c"
+    },
+    {
+      "path": "../../gpu/art/coop/backdrop.png",
+      "source": "bbport/gpu/art/coop/backdrop.png",
+      "sha256": "6fa1acafe1f6aef5dbf36b3e66dd6dc47b07f389f5bed203b8192f9255ccbac3"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-downed.png",
+      "source": "bbport/gpu/art/coop/badge-downed.png",
+      "sha256": "183dcd45981e320a37afd688c790dd973793e9d39be902de20e3cdd9c75cbf32"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-elsewhere.png",
+      "source": "bbport/gpu/art/coop/badge-elsewhere.png",
+      "sha256": "14838bf96d8ddfdc7b72df9c680d3358101201187cc0c056501b4e0c09ba9da1"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-fallen.png",
+      "source": "bbport/gpu/art/coop/badge-fallen.png",
+      "sha256": "0e827af81f899c32a355a70e723e93cda8d513f1b722412a260ea068f50a9459"
+    },
+    {
+      "path": "../../gpu/art/coop/badge-hunter.png",
+      "source": "bbport/gpu/art/coop/badge-hunter.png",
+      "sha256": "05c138c8108b3d8d24786fa01d0b1dff2115706140713613656a1eef3c78271c"
+    },
+    {
+      "path": "../../gpu/art/coop/card.png",
+      "source": "bbport/gpu/art/coop/card.png",
+      "sha256": "784ec6bc9fd5331467afcabb9f0cc5ef737ff9f9795c2d8f5fe69f9f2d2f3d79"
+    },
+    {
+      "path": "../../gpu/art/coop/divider.png",
+      "source": "bbport/gpu/art/coop/divider.png",
+      "sha256": "c040b656f6407cb9fade9c46f149fddaa0761329d0a0f49bdb7d6218cf9c5874"
+    },
+    {
+      "path": "../../gpu/art/coop/mark-invite.png",
+      "source": "bbport/gpu/art/coop/mark-invite.png",
+      "sha256": "906da3b5ad72ef98299c69e363cda404e20ad7e0bb6ca89db846bb1d1c0a6303"
+    },
+    {
+      "path": "../../gpu/art/coop/mark-leader.png",
+      "source": "bbport/gpu/art/coop/mark-leader.png",
+      "sha256": "c645a773c38f853362e479940875b579b9ba5b6da6f4728d531d8aec1ef0d229"
+    },
+    {
+      "path": "../../gpu/art/coop/mark-ready.png",
+      "source": "bbport/gpu/art/coop/mark-ready.png",
+      "sha256": "25ceee8af3b032ef9b94d714d2ef272bd94f64b05613af6ce45bb5f3c412aa25"
+    },
+    {
+      "path": "../../gpu/art/coop/medallion-ready.png",
+      "source": "bbport/gpu/art/coop/medallion-ready.png",
+      "sha256": "d3dc2dce84e0efdee58815ed56c003071a996855d4b5c22f47a093f24c891fb2"
+    },
+    {
+      "path": "../../gpu/art/coop/medallion.png",
+      "source": "bbport/gpu/art/coop/medallion.png",
+      "sha256": "3cf0bd3b3c95eadbd33896d38a4158c49616d12743f11efca8a5a3625949798a"
+    },
+    {
+      "path": "../../gpu/art/coop/portrait-frame.png",
+      "source": "bbport/gpu/art/coop/portrait-frame.png",
+      "sha256": "db9660538285948c5d2ebb25a4317b9e4a3bbc914632983baa62ec67547a77a7"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil0.png",
+      "source": "bbport/gpu/art/coop/sigil0.png",
+      "sha256": "6f6509863b8281462999d66e4f27447f9ea84edfbdcbdfba97a0395aff75b6c4"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil1.png",
+      "source": "bbport/gpu/art/coop/sigil1.png",
+      "sha256": "a0f918de51d484077c77d1e0d73f9a09d1d2ead33bd5af4095d2da3a350a4779"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil2.png",
+      "source": "bbport/gpu/art/coop/sigil2.png",
+      "sha256": "fb5a6b8b210304324bd1ef31a44acb7e63bce01ec83e1cec192824e3704388dc"
+    },
+    {
+      "path": "../../gpu/art/coop/sigil3.png",
+      "source": "bbport/gpu/art/coop/sigil3.png",
+      "sha256": "e35444793f2fc5da5c253307e8d1d5c47d28e6d8d185422e4fefa2673e925e79"
+    },
+    {
+      "path": "../../gpu/art/coop/title-ornament.png",
+      "source": "bbport/gpu/art/coop/title-ornament.png",
+      "sha256": "418216c74e3db26218dda28626e230b94f31f129c063b2e8f90a225a63c6a3f3"
+    },
+    {
+      "path": "../../scripts/coop_art.py",
+      "source": "bbport/scripts/coop_art.py",
+      "sha256": "b3cab184d11dd94c4dccfb9fa3dd25878b51eab9b9505782a332d9f77b022b02"
+    },
+    {
+      "path": "../../scripts/party_icons_atlas.py",
+      "source": "bbport/scripts/party_icons_atlas.py",
+      "sha256": "8096c2046954909bdf1a8c5fb4e994ae00cb88e45fecf51ca9ce73a71e368edd"
+    },
+    {
+      "path": "../../tests/test_coop_art.cpp",
+      "source": "bbport/tests/test_coop_art.cpp",
+      "sha256": "d068b5cc142b81b313ceb3df6cfb2daa6a7d94ba9888e21efed701f588f17517"
+    },
+    {
+      "path": "../../tests/test_party_icons.cpp",
+      "source": "bbport/tests/test_party_icons.cpp",
+      "sha256": "714f3b1b2ae2f2a4b18af295efd536e745b91e81378f6c7245470e7655f502c9"
+    },
+    {
+      "path": "../shim/bbport_menu_texts.inc",
+      "source": "bbport/gpu/shim/bbport_menu_texts.inc",
+      "sha256": "7f1d2660fa6c2fca45208303d0050971fb0e50ddd4a6edbe0cb730433fb0687c"
+    },
+    {
+      "path": "../shim/bbport_key_guide.h",
+      "source": "bbport/gpu/shim/bbport_key_guide.h",
+      "sha256": "016956a4ecf4113ffc03ec293aa9b44db74e102cba61c548b9a7f3492ef8d528"
+    },
+    {
+      "path": "../shim/bbport_coop_russian.inc",
+      "source": "bbport/gpu/shim/bbport_overlay.cpp",
+      "sha256": "ed4b16220dfa888d98e82e3f51323452fca23b8c01f914133248d21d9a6f7df9",
+      "adapted_sha256": "7be6022557a152b062127ba293fd4676e69d250befc71046e0a5bfea0f7e6c27"
+    },
+    {
+      "path": "../shim/bbport_map_atlas.h",
+      "source": "bbport/gpu/shim/bbport_overlay.cpp",
+      "sha256": "ed4b16220dfa888d98e82e3f51323452fca23b8c01f914133248d21d9a6f7df9",
+      "adapted_sha256": "177271d092ca13e1c14a76965dc11de82a21408ba2d2f5c3fdd39919a95d5190"
+    },
+    {
+      "path": "../shim/bbport_language.h",
+      "source": "bbport/gpu/shim/bbport_settings.cpp",
+      "sha256": "b99341f0023200d76c83ef3a033933de4ff472cdd668ed065b39408444b62be6",
+      "adapted_sha256": "e84ca431177800964221be835da656ddc52acc3b7f3209b64ced2aa410ef8f08"
+    }
+  ],
+  "path_base": "gpu/bbseamless; ../../ paths refer to repository scripts"
+}

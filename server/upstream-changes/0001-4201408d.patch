@@ -1,0 +1,989 @@
+From 4201408d919f9787af43a075068947a44e95a231 Mon Sep 17 00:00:00 2001
+From: Ronny Stiftel <ronny.stiftel@tomcom.de>
+Date: Tue, 27 Oct 2026 16:31:59 +0100
+Subject: [PATCH] Persist opt-in invasion victory rewards outside the invaded
+ world
+
+Reward joined victories through server-owned TradeDesk grants: one Insight plus
+policy Echoes for the defending host, or the solo invader when the victim reports
+killed_by_invader. Retire the invasion before paying, freeze defeated levels and
+exclude cancellations, environmental deaths, boss/timeout/disconnect and wipes.
+
+Use a durable per-authenticated-player reward mailbox, because solo invaders send
+no party Hello. High-bit grant IDs route acknowledgements separately from party
+trades; pending payments, counters and acknowledgements survive server restart.
+LobbyHello capability negotiation preserves compatibility with original clients.
+
+Reject unknown/server-only item kinds in ordinary refunds and malformed grants
+before application. Add service tests covering true solo winners, duplicate ends,
+legacy reconnects, stolen acknowledgements, pending grants and durable counters.
+
+The Echoes polynomial is an explicit bounded server policy, not a retail-exact
+claim for all levels/covenants. Native game reward validation is separate work.
+
+Validation: isolated opc ARM64 Docker image build and 10/10 focused CTest suites
+passed, including bloodborne_world, bloodborne_trade and world_writer. The live
+Bloodborne service, its data/config/identity and unrelated containers were not
+replaced or restarted by this commit.
+
+Original-author: Kaniel / lKaniel (original invasion and co-op design/source)
+Original-author: Vitalii Shevchuk (original source history)
+Original-author: shadNet Project contributors (original SPDX copyright holders)
+Original-source: https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/coop/trade.cpp
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/src/bloodborne_world.cpp
+---
+ docs/INVASIONS.md                      |  57 +++++++++++-
+ docs/INVASION_REWARDS_DEPLOYMENT.md    |  56 +++++++++++
+ docs/TRADING.md                        |  10 +-
+ server/coop/coop.proto                 |   7 +-
+ server/coop/invasions.cpp              |  10 ++
+ server/coop/invasions.h                |   6 ++
+ server/coop/trade.cpp                  |  77 ++++++++++++++--
+ server/coop/trade.h                    |  10 ++
+ server/src/bloodborne_world.cpp        |  94 ++++++++++++++++++-
+ server/src/bloodborne_world.h          |  13 ++-
+ server/tests/test_bloodborne_trade.cpp |  83 ++++++++++++++++-
+ server/tests/test_bloodborne_world.cpp | 123 ++++++++++++++++++++++++-
+ 12 files changed, 526 insertions(+), 20 deletions(-)
+ create mode 100644 docs/INVASION_REWARDS_DEPLOYMENT.md
+
+diff --git a/docs/INVASIONS.md b/docs/INVASIONS.md
+index 4ffe3fd2..79c6b93e 100644
+--- a/docs/INVASIONS.md
++++ b/docs/INVASIONS.md
+@@ -96,8 +96,8 @@ An end during the notice works the same way: the invader never joins.
+ - `Vitals.level`, `Vitals.boss` and `Vitals.killed_by_invader`: new optional fields. A game that
+   leaves them out means "unknown, no band", "no boss" and "not by the invader".
+ 
+-`PROTOCOL_CURRENT` stays 7: the new fields are optional and the new messages go only to games
+-that ask.
++`PROTOCOL_CURRENT` stays 8: the optional reward capability is append-only, and victory grants
++are sent only to games that advertise it.
+ 
+ ## Settings (`shadnet.cfg`)
+ 
+@@ -156,4 +156,55 @@ all but the Sinister bell, with the native kind/sign (the fallback behind
+    in the invader's save, and that the team's games do not treat the invader as a session guest in
+    `TeamGate` / `LoadProgress`.
+ 
+-Phase 3 (rewards through `TradeDesk` grants, covenants, the Bell-Ringing Woman) is not started.
++## Opt-in victory rewards (2026-10-27)
++
++The server issues a reward only for a **joined** invasion that it ends as `INVADER_DIED`
++(the defending session host wins), or `TARGET_KILLED` with the victim's
++`Vitals.killed_by_invader=true` (the invader wins). The record is removed before issuing the
++payment, so duplicate death/end reports cannot issue another reward. A notice cancelled before
++joining, environmental host death, party wipe, boss, timeout, disconnect, cancelled search, or
++turning invasions off never pays. Guests do not get the host's defending reward.
++
++The payment is one Insight, plus Blood Echoes according to the explicit server policy in
++`InvasionVictoryEchoes`: 10% for an invading winner, 30% for a defending host, of
++`max(0, floor(0.02 L^3 + 3.06 L^2 + 105.6 L - 895))`. The defeated hunter's level is frozen at
++match (invader) or join (host); a death report cannot increase it. Unknown/out-of-range levels
++(outside 4..544) pay no Echoes. The polynomial is a **server policy**, not a claim that every
++low-level or covenant-specific retail reward has been verified. Native game validation and
++low-level curve verification are recorded separately by the consuming Mac client.
++
++The protocol remains 8. `LobbyHello.invasion_rewards=5` opts in to these grants. Original
++clients omit it and can still invade, defend and reconnect without receiving the unknown item
++kind. Opting in requires implementing all of the following:
++
++- `TradeItemKind::Insight=4`, id 0, count 1, empty name/data; it is server-issued and cannot be
++  offered, requested, answered, refunded, or otherwise supplied by a client.
++- `TradeGrantReason::InvasionReward=2`; its exact item shape is one Insight plus at most one
++  ordinary Echoes item (kind 1, id 0, positive count). Other items/reasons are rejected.
++- Reward grant IDs have bit 63 set. Ordinary party trade IDs do not. The client applies a valid
++  grant once per run and sends `TradeGranted{id}` only after applying it.
++
++Solo invaders send no party Hello. Their rewards therefore live in a separate **per-player
++mailbox**, reusing `WorldStore` and `TradeDesk`: the store key is the hash of
++`invasion-rewards:<authenticated online-id bytes as hex>`. It is calculated by the server;
++clients supply no mailbox key. It is never the invaded team's world. A party-free winner can
++receive and acknowledge a reward; its high-bit ACK is intercepted before hostile/party routing.
++An ACK from another authenticated identity cannot clear that mailbox. Pending grants and the
++next grant counter survive restart in `trades.pb`. A successful capable lobby hello resends
++pending grants; a legacy hello preserves them without sending them. The existing grant safety
++boundary remains: replay is once per **game run**, not an atomic transaction across a game crash
++between saving its inventory and acknowledging the grant.
++
++Both refused offers and late/mismatched answers now refund only valid ordinary items. The old
++"return whatever the client claimed" behavior could launder an unknown kind into an application
++grant; server-only Insight and unknown/invalid items are dropped instead. Legitimate ordinary
++trade/refund behavior remains covered by the existing trade suite.
++
++Original sources and authors: Kaniel / [lKaniel](https://github.com/lKaniel), Vitalii Shevchuk
++(as recorded by the source history), and the shadNet
++Project contributors, [pinned server source](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server),
++[`TradeDesk` / `TradeClient`](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/coop/trade.cpp),
++and [invasion lifecycle](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/src/bloodborne_world.cpp).
++The durable reward mailbox, capability, validation and tests here extend those original
++GPL-2.0-or-later sources; they do not change their attribution or claim original authorship.
++Covenant-specific rewards and the Bell-Ringing Woman remain outside this change.
+diff --git a/docs/INVASION_REWARDS_DEPLOYMENT.md b/docs/INVASION_REWARDS_DEPLOYMENT.md
+new file mode 100644
+index 00000000..1323502c
+--- /dev/null
++++ b/docs/INVASION_REWARDS_DEPLOYMENT.md
+@@ -0,0 +1,56 @@
++# Invasion reward deployment on opc
++
++This recipe extends the owner's existing ARM64 deployment. It changes the Bloodborne service
++only and leaves `/data`, account identities, saves, configuration and unrelated containers in
++place. Do not overwrite the original rollback image `bloodborne-server:8d5e54f-arm64`.
++
++## Source and build
++
++The review branch is `codex/invasion-victory-rewards`, based on
++`8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1` in the original
++[lKaniel/bloodborne-server](https://github.com/lKaniel/bloodborne-server) repository.
++Original authors: Kaniel / lKaniel, Vitalii Shevchuk (source history), and the shadNet Project
++contributors (original SPDX holders). Their existing server, trade, stream and world-store code
++is retained under GPL-2.0-or-later.
++
++Use a separate worktree, for example `/docker/bloodborne-server/invasion-rewards-source`.
++Initialize `server/externals/protobuf` from the pinned submodule. Retain the local ARM64 build
++recipe from the existing `source/server/hosting/Dockerfile.opc` and its dockerignore in this
++worktree as `server/hosting/Dockerfile.rewards` and `.dockerignore`. The original hosting files
++are local deployment configuration and are not part of this source commit.
++
++Add `test_bloodborne_world test_world_writer` to that recipe's test build targets, and
++`bloodborne_world|world_writer` to its focused ctest expression, alongside the existing
++server_link/build_fingerprint/packet_routes/rpc_tunnel/admission/http_gate/team_lobby/trade tests.
++
++```sh
++docker build --build-arg BUILD_JOBS=4 \
++  --build-arg SOURCE_REVISION=8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1 \
++  -f server/hosting/Dockerfile.rewards \
++  -t bloodborne-server:invasion-rewards-test-arm64 .
++```
++
++Keep the native protocol admission revision pinned for compatibility with the matching original
++client/core source; the append-only reward capability gates the extension. Record this source
++patch commit separately in the deployment log/image tag. There is no global protocol increment
++and no configuration change to the invasion enable/kind/sign settings in this server patch.
++
++The Docker build executes the focused tests before producing the image. The new checks cover
++both winners, non-reward endings, repeated death reports, frozen levels, real solo players with
++no party Hello, pending mailbox restart, legacy reconnect, ACK persistence, another authenticated
++identity's forged ACK, server-only item/refund rejection and malformed grant validation.
++
++## Service replacement and validation
++
++Before replacing the service, record its current compose service name, image reference and
++health status. Save an exact copy of `/docker/docker-compose.yaml`. Update only the Bloodborne
++image value to the new image, then recreate only that service with its existing volumes and
++configuration; no volume removal or account reset is required. Preserve the previous image and
++compose copy for rollback. Test capable and original clients, then verify the service is healthy.
++
++The client must set `LobbyHello.invasion_rewards=true`, implement the exact reward shape in
++`docs/INVASIONS.md`, and acknowledge the high-bit grant only after applying it. The original
++client does not advertise this capability and receives no reward extension. No new firewall
++ports are needed. A meaningful in-game test must show one Insight and the expected Echoes for
++both defending and invading victories, no double native payment, and no reward for cancellation
++or an environmental host death. Unit tests alone do not establish those in-game results.
+diff --git a/docs/TRADING.md b/docs/TRADING.md
+index ab0bbc82..cf368865 100644
+--- a/docs/TRADING.md
++++ b/docs/TRADING.md
+@@ -20,8 +20,8 @@ the port with the server world (Kaniel 2026-10-14); shadPS4 has none.
+    to keep every row), with the game's own Use and Discard too.
+ 2. The giver's game takes the items out of its inventory at once, then sends `TradeOffer`.
+ 3. shadNet checks it (both members online in the party, tradeable items, counts within limits, at
+-   most 4 open offers per member) and asks the other member (`TradeAsk`), or gives the items
+-   straight back (refused).
++   most 4 open offers per member) and asks the other member (`TradeAsk`), or gives valid ordinary
++   items straight back (refused). Invalid or unknown item claims are never turned into grants.
+ 4. The other member's game shows the game's yes/no box: "Ada offers you 4 Blood Vials. Accept?"
+    (the cursor starts on No). To accept a swap its game takes out what was asked of it first.
+ 5. shadNet hands each side its part (`TradeGrant`); declined, unanswered for 60 s, or withdrawn,
+@@ -92,3 +92,9 @@ The giver writes the item into `data` before taking it out; the receiver makes a
+ Goods: Blood Vial 1000, Quicksilver Bullets 900 (max held 20, storage 600). Other consumables that
+ could follow: Molotov 1200, Throwing Knife 1240, Pebble 1230, Antidote 1100, Sedative 1101,
+ Numbing Mist 1270, Blood Stone Shard 3000, Twin Shards 3010, Chunk 3020, Blood Rock 3030.
++
++## Server-issued invasion grants
++
++Opt-in invasion victory grants reuse the durable grant/ack path with reason 2, high-bit grant
++IDs and server-only Insight kind 4. They are never ordinary trades or refunds. Their per-player
++authenticated mailboxes, compatibility gate and safety limits are described in [INVASIONS.md](INVASIONS.md#opt-in-victory-rewards-2026-10-27).
+diff --git a/server/coop/coop.proto b/server/coop/coop.proto
+index cd6147f9..06900703 100644
+--- a/server/coop/coop.proto
++++ b/server/coop/coop.proto
+@@ -256,7 +256,7 @@ message Portrait {
+ // before it accepts. Every hand-over is a grant, kept on the server (and on disk) until the
+ // member's game says it added it.
+ message TradeItem {
+-    uint32 kind = 1;  // TradeItemKind: 1 Blood Echoes, 2 goods, 3 an item of its own
++    uint32 kind = 1;  // TradeItemKind: 1 Blood Echoes, 2 goods, 3 an item of its own, 4 reward Insight
+     uint32 id = 2;    // goods: the EquipParamGoods id; an item: category | id; echoes: 0
+     uint32 count = 3;
+     string name = 4;  // the item's name in the giver's game (the words of the boxes)
+@@ -316,7 +316,7 @@ message TradeGrant {
+     string from = 3;
+     string from_name = 4;
+     repeated TradeItem items = 5;
+-    uint32 reason = 6; // TradeGrantReason: 0 received, 1 returned
++    uint32 reason = 6; // TradeGrantReason: 0 received, 1 returned, 2 invasion victory
+ }
+ message TradeGranted {
+     uint64 id = 1;
+@@ -628,6 +628,9 @@ message LobbyHello {
+     string member = 2; // its board name (the online id in hex)
+     string name = 3;   // the online id, as players see it
+     bool playing = 4;  // in a world (a save loaded), not at the title
++    // Opt-in extension: server-issued invasion victory grants (Insight kind 4, reason 2).
++    // False for original clients, which must never receive these grants. Wire-compatible with 8.
++    bool invasion_rewards = 5;
+ }
+ 
+ // game -> server: what the player did in the lobby. The answer is the LobbyState (with a notice
+diff --git a/server/coop/invasions.cpp b/server/coop/invasions.cpp
+index ab2c9ffb..003f9666 100644
+--- a/server/coop/invasions.cpp
++++ b/server/coop/invasions.cpp
+@@ -7,6 +7,16 @@
+ 
+ namespace BloodborneCoop {
+ 
++u32 InvasionVictoryEchoes(u32 level, bool invader_won) {
++    if (level < 4 || level > 544) {
++        return 0;
++    }
++    const s64 l = level;
++    const s64 previous_cost = std::max<s64>(0,
++        (2 * l * l * l + 306 * l * l + 10'560 * l - 89'500) / 100);
++    return static_cast<u32>(previous_cost * (invader_won ? 10 : 30) / 100);
++}
++
+ void InvasionCooldowns::Ended(const std::string& world, const std::string& invader, s64 now_ms) {
+     team_until[world] = now_ms + InvasionTeamCooldownMs;
+     pair_until[{world, invader}] = now_ms + InvasionPairCooldownMs;
+diff --git a/server/coop/invasions.h b/server/coop/invasions.h
+index 4c3441df..649d3341 100644
+--- a/server/coop/invasions.h
++++ b/server/coop/invasions.h
+@@ -51,6 +51,12 @@ constexpr bool InLevelBand(u32 invader, u32 member) {
+     return gap <= 20 + member / 5;
+ }
+ 
++// Victory Echoes policy: 10% (invader wins) / 30% (host defends) of the defeated
++// hunter's previous-level cost. Integer arithmetic avoids platform rounding drift. Invalid
++// levels pay no Echoes; the separate one-Insight award still applies. See docs/INVASIONS.md
++// for provenance and the boundary between this explicit server policy and retail verification.
++u32 InvasionVictoryEchoes(u32 defeated_level, bool invader_won);
++
+ // A team world as the matcher sees it.
+ struct InvasionTarget {
+     struct Member {
+diff --git a/server/coop/trade.cpp b/server/coop/trade.cpp
+index 568bbd6b..a140812f 100644
+--- a/server/coop/trade.cpp
++++ b/server/coop/trade.cpp
+@@ -56,6 +56,21 @@ std::optional<std::string> ItemProblem(const TradeItem& item) {
+     return std::nullopt;
+ }
+ 
++// A malformed client claim is not an inventory we may safely recreate. Return only valid,
++// distinct ordinary items, including on late answers and refused offers; never mint Insight
++// or an unknown kind by calling it a refund.
++TradeItems RefundableItems(std::span<const TradeItem> items) {
++    TradeItems safe;
++    for (const TradeItem& item : items) {
++        if (!ItemProblem(item) && !std::ranges::any_of(safe, [&](const TradeItem& other) {
++                return item.kind == other.kind && item.id == other.id && item.data == other.data;
++            })) {
++            safe.push_back(item);
++        }
++    }
++    return safe;
++}
++
+ } // namespace
+ 
+ std::optional<std::string> TradeItemsProblem(std::span<const TradeItem> items, bool allow_empty) {
+@@ -77,6 +92,37 @@ std::optional<std::string> TradeItemsProblem(std::span<const TradeItem> items, b
+     return std::nullopt;
+ }
+ 
++std::optional<std::string> TradeGrantItemsProblem(const bbcoop::TradeGrant& grant) {
++    const TradeItems items = TradeItemsOf(grant.items());
++    const auto reason = static_cast<TradeGrantReason>(grant.reason());
++    if (reason == TradeGrantReason::Received || reason == TradeGrantReason::Returned) {
++        if ((grant.id() & InvasionRewardGrantBit) != 0) {
++            return "an ordinary grant with a reward id";
++        }
++        return TradeItemsProblem(items, false);
++    }
++    if (reason != TradeGrantReason::InvasionReward ||
++        (grant.id() & InvasionRewardGrantBit) == 0 || items.empty() || items.size() > 2) {
++        return "not a known server grant";
++    }
++    bool insight = false;
++    bool echoes = false;
++    for (const TradeItem& item : items) {
++        if (item.id != 0 || !item.name.empty() || !item.data.empty()) {
++            return "not an invasion reward";
++        }
++        if (item.kind == TradeItemKind::Insight && item.count == 1 && !insight) {
++            insight = true;
++        } else if (item.kind == TradeItemKind::Echoes && item.count > 0 &&
++                   item.count <= MaxTradeEchoes && !echoes) {
++            echoes = true;
++        } else {
++            return "not an invasion reward";
++        }
++    }
++    return insight ? std::nullopt : std::optional<std::string>{"no victory Insight"};
++}
++
+ namespace {
+ 
+ std::string Thousands(u32 value) {
+@@ -228,7 +274,8 @@ void TradeDesk::Grant(Result& result, const std::string& member, u64 trade, cons
+         return;
+     }
+     bbcoop::TradeGrant grant;
+-    grant.set_id(next_id++);
++    const u64 id = next_id++;
++    grant.set_id(id | (reason == TradeGrantReason::InvasionReward ? InvasionRewardGrantBit : 0));
+     grant.set_trade(trade);
+     grant.set_from(from);
+     grant.set_from_name(from_name);
+@@ -324,8 +371,9 @@ TradeDesk::Result TradeDesk::Offer(const std::string& from, const bbcoop::TradeO
+         Status(result, trade, id, TradeState::Refused, *problem);
+         result.log.push_back("trade " + std::to_string(id) + " from " + from +
+                              " refused: " + *problem);
+-        // What was taken out comes back, whatever it was (the giver's game took it already).
+-        Grant(result, from, id, trade.to, trade.to_name, trade.give, TradeGrantReason::Returned);
++        // Return only ordinary, valid items; malformed claims cannot become grants.
++        Grant(result, from, id, trade.to, trade.to_name, RefundableItems(trade.give),
++              TradeGrantReason::Returned);
+         result.changed = true;
+         return result;
+     }
+@@ -346,7 +394,8 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
+     if (found == open.end() || found->second.to != member) {
+         // Over already (expired, withdrawn) or not this member's: what it took comes back.
+         if (answer.accept()) {
+-            Grant(result, member, answer.id(), {}, {}, taken, TradeGrantReason::Returned);
++            Grant(result, member, answer.id(), {}, {}, RefundableItems(taken),
++                  TradeGrantReason::Returned);
+         }
+         bbcoop::Envelope closed;
+         closed.mutable_trade_closed()->set_id(answer.id());
+@@ -360,7 +409,8 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
+     const Open trade = found->second;
+     if (taken != trade.want) {
+         // It took something else than what was asked: no exchange, both sides get theirs back.
+-        Grant(result, member, answer.id(), {}, {}, taken, TradeGrantReason::Returned);
++        Grant(result, member, answer.id(), {}, {}, RefundableItems(taken),
++              TradeGrantReason::Returned);
+         Close(result, answer.id(), TradeState::Declined);
+         return result;
+     }
+@@ -376,6 +426,18 @@ TradeDesk::Result TradeDesk::Answer(const std::string& member, const bbcoop::Tra
+     return result;
+ }
+ 
++TradeDesk::Result TradeDesk::InvasionVictory(const std::string& member, u64 invasion,
++                                            const std::string& defeated, u32 echoes) {
++    Result result;
++    TradeItems items{{TradeItemKind::Insight, 0, 1}};
++    if (echoes > 0 && echoes <= MaxTradeEchoes) {
++        items.push_back({TradeItemKind::Echoes, 0, echoes});
++    }
++    Grant(result, member, invasion, defeated, "Invasion victory", std::move(items),
++          TradeGrantReason::InvasionReward);
++    return result;
++}
++
+ TradeDesk::Result TradeDesk::Cancel(const std::string& member, u64 id) {
+     Result result;
+     const auto found = open.find(id);
+@@ -478,7 +540,7 @@ void TradeDesk::Restore(const bbcoop::StoredTrades& stored, s64 now_ms) {
+     }
+     for (const bbcoop::StoredGrant& grant : stored.grants()) {
+         grants[grant.member()][grant.grant().id()] = grant.grant();
+-        next_id = std::max(next_id, grant.grant().id() + 1);
++        next_id = std::max(next_id, (grant.grant().id() & ~InvasionRewardGrantBit) + 1);
+     }
+ }
+ 
+@@ -572,6 +634,9 @@ TradeClient::Taken TradeClient::Take(const bbcoop::Envelope& envelope) {
+         break;
+     case bbcoop::Envelope::kTradeGrant: {
+         const bbcoop::TradeGrant& grant = envelope.trade_grant();
++        if (TradeGrantItemsProblem(grant)) {
++            break; // no application and no ack for an invalid or server-only forged grant
++        }
+         if (granted.insert(grant.id()).second) {
+             TradeItems items = TradeItemsOf(grant.items());
+             const auto reason = static_cast<TradeGrantReason>(grant.reason());
+diff --git a/server/coop/trade.h b/server/coop/trade.h
+index df6a0802..09d67228 100644
+--- a/server/coop/trade.h
++++ b/server/coop/trade.h
+@@ -35,6 +35,7 @@ enum class TradeItemKind : u32 {
+     Echoes = 1, // Blood Echoes (id 0)
+     Goods = 2,  // goods (consumables, materials, key items), by EquipParamGoods id
+     Item = 3,   // an item of its own (weapon, armor, gem): category | id, one each, with its data
++    Insight = 4, // server-issued invasion reward only (id 0); never tradeable
+ };
+ enum class TradeState : u32 {
+     Open = 1,
+@@ -47,6 +48,7 @@ enum class TradeState : u32 {
+ enum class TradeGrantReason : u32 {
+     Received = 0, // the other member's part of a trade
+     Returned = 1, // the member's own items back
++    InvasionReward = 2, // server-issued victory: one Insight and optional Blood Echoes
+ };
+ 
+ struct TradeItem {
+@@ -64,6 +66,8 @@ using TradeItems = std::vector<TradeItem>;
+ // carry them (the top 4 bits).
+ constexpr u32 BloodVialGoods = 1000;
+ constexpr u32 QuicksilverBulletGoods = 900;
++// Reward mailboxes use the high bit, so their acknowledgements cannot consume a party's trade.
++constexpr u64 InvasionRewardGrantBit = u64{1} << 63;
+ constexpr u32 MaxTradeEchoes = 999'999'999;
+ constexpr u32 MaxTradeGoods = 99;
+ constexpr u32 MaxTradeGoodsId = 0x7FFFFF; // the game's goods handles keep 23 bits
+@@ -82,6 +86,7 @@ struct TradeGood {
+ };
+ inline constexpr TradeGood TradeGoods[]{
+     {TradeItemKind::Echoes, 0, "Blood Echoes", "Blood Echoes"},
++    {TradeItemKind::Insight, 0, "Insight", "Insight"},
+     {TradeItemKind::Goods, BloodVialGoods, "Blood Vial", "Blood Vials"},
+     {TradeItemKind::Goods, QuicksilverBulletGoods, "Quicksilver Bullet", "Quicksilver Bullets"},
+ };
+@@ -91,6 +96,8 @@ const TradeGood* FindTradeGood(TradeItemKind kind, u32 id);
+ // of 0 or over the limit (one of an item of its own), a name or data too long, an item twice.
+ // `allow_empty`: the asked-for side may be empty, the offered one not.
+ std::optional<std::string> TradeItemsProblem(std::span<const TradeItem> items, bool allow_empty);
++// Checks a server grant separately: Insight is valid only in the exact invasion-reward shape.
++std::optional<std::string> TradeGrantItemsProblem(const bbcoop::TradeGrant& grant);
+ // "5 Blood Vials, 1,000 Blood Echoes, Saw Cleaver +5, Molotov Cocktail x3": how the game words a
+ // trade's items (others than the known goods by their names, "an item" without one).
+ std::string TradeItemsText(std::span<const TradeItem> items);
+@@ -147,6 +154,9 @@ public:
+     Result Answer(const std::string& member, const bbcoop::TradeAnswer& answer);
+     Result Cancel(const std::string& member, u64 id);
+     Result Granted(const std::string& member, u64 grant);
++    // Server-only victory payment, persisted and replayed by the normal grant/ack machinery.
++    Result InvasionVictory(const std::string& member, u64 invasion,
++                           const std::string& defeated, u32 echoes);
+     // Offers past their time, back to their givers.
+     Result Expire(s64 now_ms);
+     // A member's game said hello (a new run): what it is owed again, its grants and the offers
+diff --git a/server/src/bloodborne_world.cpp b/server/src/bloodborne_world.cpp
+index eca8c30d..70e45774 100644
+--- a/server/src/bloodborne_world.cpp
++++ b/server/src/bloodborne_world.cpp
+@@ -1048,6 +1048,21 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
+         OnInvadeRequest(member, envelope.invade_request(), now_ms, result);
+         return;
+     }
++    // Reward mailboxes are keyed by the authenticated link, never a party or client key.
++    // Handle their disjoint grant IDs even for a solo invader with no party Hello.
++    if (envelope.has_trade_granted() &&
++        (envelope.trade_granted().id() & InvasionRewardGrantBit) != 0) {
++        if (member.invasion_rewards && !member.lobby.empty()) {
++            const QString name = RewardFolder(member);
++            if (worlds.contains(name) || (!folder.isEmpty() && LoadWorld(name, now_ms, result))) {
++                PartyWorld& mailbox = worlds.at(name);
++                DeliverRewards(member, mailbox,
++                               mailbox.trades.Granted(member.lobby, envelope.trade_granted().id()),
++                               now_ms, result);
++            }
++        }
++        return;
++    }
+     // An invader in a world, or one on its way with no world of its own: in no world here.
+     if (member.hostile || (member.party.isEmpty() &&
+                            (searches.contains(member.key) || !InvadedBy(member.key).isEmpty()))) {
+@@ -1624,6 +1639,7 @@ Service::Result Service::Receive(const ServerLink::Endpoint& from, const QByteAr
+                                          "hello")
+                               .arg(QString::fromStdString(Who(member))));
+         member.party.clear();
++        member.invasion_rewards = false; // renegotiate before sending an extension to a new game
+         // An invader's game that started over is home: its invasion is over.
+         searches.erase(member.key);
+         if (const QString invaded = InvadedBy(member.key); !invaded.isEmpty()) {
+@@ -2165,6 +2181,10 @@ void Service::OnLobbyHello(Member& member, const bbcoop::LobbyHello& hello, qint
+     const bool arrived = member.lobby.empty() || std::exchange(member.lobby_again, false);
+     member.lobby = hello.member();
+     member.display = hello.name();
++    const bool rewards_before = std::exchange(member.invasion_rewards, hello.invasion_rewards());
++    if (member.invasion_rewards && (arrived || !rewards_before)) {
++        ResumeRewards(member, now_ms, result);
++    }
+     if (arrived) {
+         result.log.append(
+             QStringLiteral("team lobby: %1 (%2) signed in")
+@@ -2937,6 +2957,7 @@ void Service::Match(qint64 now_ms, Result& result) {
+         invasion.invader = invader.key;
+         invasion.invader_name = invader.lobby;
+         invasion.target = world.session->host();
++        invasion.invader_level = search->second.level;
+         invasion.matched_ms = now_ms;
+         bbcoop::Envelope notice;
+         notice.mutable_invasion_notice()->set_id(invasion.id);
+@@ -3004,6 +3025,7 @@ void Service::JoinInvasion(PartyWorld& world, Invasion& invasion, qint64 now_ms,
+         if (member.party == world.name && !member.hostile) {
+             if (member.name == invasion.target) {
+                 message.set_map(member.map);
++                invasion.target_level = member.level;
+             }
+             SendTo(member, joined, now_ms);
+         }
+@@ -3015,13 +3037,29 @@ void Service::JoinInvasion(PartyWorld& world, Invasion& invasion, qint64 now_ms,
+ }
+ 
+ void Service::EndInvasion(const QString& world, bbcoop::InvasionEnd::Reason reason, qint64 now_ms,
+-                          Result& result) {
++                          Result& result, bool killed_by_invader) {
+     const auto found = invasions.find(world);
+     if (found == invasions.end()) {
+         return;
+     }
+     const Invasion invasion = std::move(found->second);
+-    invasions.erase(found);
++    invasions.erase(found); // retire first: a repeated end/death report cannot mint another grant
++    if (invasion.joined) {
++        for (auto& [key, member] : members) {
++            if (reason == bbcoop::InvasionEnd::INVADER_DIED && member.party == world &&
++                member.name == invasion.target && !member.hostile) {
++                RewardInvasion(member, invasion.id, invasion.invader_name,
++                               InvasionVictoryEchoes(invasion.invader_level, false), now_ms, result);
++                break;
++            }
++            if (reason == bbcoop::InvasionEnd::TARGET_KILLED && killed_by_invader &&
++                member.key == invasion.invader) {
++                RewardInvasion(member, invasion.id, invasion.target,
++                               InvasionVictoryEchoes(invasion.target_level, true), now_ms, result);
++                break;
++            }
++        }
++    }
+     bbcoop::Envelope envelope;
+     envelope.mutable_invasion_end()->set_id(invasion.id);
+     envelope.mutable_invasion_end()->set_reason(reason);
+@@ -3063,7 +3101,8 @@ void Service::CheckInvasion(const PartyWorld& world, const Member& member,
+             QStringLiteral("invasions: %1 died%2")
+                 .arg(QString::fromStdString(member.name),
+                      vitals.killed_by_invader() ? " by the invader's hand" : QString{}));
+-        EndInvasion(world.name, bbcoop::InvasionEnd::TARGET_KILLED, now_ms, result);
++        EndInvasion(world.name, bbcoop::InvasionEnd::TARGET_KILLED, now_ms, result,
++                    vitals.killed_by_invader());
+         return;
+     }
+     const bbcoop::VitalsBoard board = world.boards.VitalsMessage();
+@@ -3075,6 +3114,55 @@ void Service::CheckInvasion(const PartyWorld& world, const Member& member,
+     }
+ }
+ 
++QString Service::RewardFolder(const Member& member) const {
++    return FolderOf(QByteArray{"invasion-rewards:"} + member.online_id.toHex());
++}
++
++void Service::DeliverRewards(Member& member, PartyWorld& mailbox, TradeDesk::Result grants,
++                             qint64 now_ms, Result& result) {
++    for (const TradeDesk::Send& send : grants.sends) {
++        if (send.to == member.lobby && member.invasion_rewards) {
++            SendTo(member, send.envelope, now_ms);
++        }
++    }
++    for (const std::string& line : grants.log) {
++        result.log.append(QStringLiteral("invasion rewards %1: %2")
++                              .arg(QString::fromStdString(member.lobby), QString::fromStdString(line)));
++    }
++    if (grants.changed && mailbox.store) {
++        writer->SaveTrades(mailbox.store->Folder(), mailbox.trades.Stored());
++    }
++}
++
++void Service::ResumeRewards(Member& member, qint64 now_ms, Result& result) {
++    const QString name = RewardFolder(member);
++    // A login never creates an empty mailbox. The first completed victory creates it.
++    if (!worlds.contains(name) && (folder.isEmpty() || !LoadWorld(name, now_ms, result))) {
++        return;
++    }
++    PartyWorld& mailbox = worlds.at(name);
++    DeliverRewards(member, mailbox, mailbox.trades.Resume(member.lobby, now_ms), now_ms, result);
++}
++
++void Service::RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
++                             std::uint32_t echoes, qint64 now_ms, Result& result) {
++    if (!winner.invasion_rewards || winner.lobby.empty()) {
++        result.log.append(QStringLiteral("invasions: victory %1 has no reward-capable winner")
++                              .arg(invasion));
++        return;
++    }
++    const QString name = RewardFolder(winner);
++    if (!RoomFor(name, now_ms, result)) {
++        result.log.append(QStringLiteral("invasions: no room for victory %1's reward mailbox")
++                              .arg(invasion));
++        return;
++    }
++    PartyWorld& mailbox = WorldFor(name, now_ms, result);
++    DeliverRewards(winner, mailbox,
++                   mailbox.trades.InvasionVictory(winner.lobby, invasion, defeated, echoes),
++                   now_ms, result);
++}
++
+ QString Service::InvadedBy(quint64 link) const {
+     for (const auto& [world, invasion] : invasions) {
+         if (invasion.invader == link) {
+diff --git a/server/src/bloodborne_world.h b/server/src/bloodborne_world.h
+index dfdbd49a..476f89e7 100644
+--- a/server/src/bloodborne_world.h
++++ b/server/src/bloodborne_world.h
+@@ -379,6 +379,7 @@ private:
+         std::uint32_t level = 0;
+         bool boss = false;
+         std::string display; // its lobby hello's name (as players see it)
++        bool invasion_rewards = false; // LobbyHello's explicit extension capability
+     };
+     // Invasions: one invader on its way to (or in) a team world.
+     struct Invasion {
+@@ -386,6 +387,8 @@ private:
+         quint64 invader = 0;      // its link (Endpoint::Key)
+         std::string invader_name; // its lobby name
+         std::string target;       // the member it hunts: the session's host
++        std::uint32_t invader_level = 0; // frozen at match; never the death report's level
++        std::uint32_t target_level = 0;  // frozen at join
+         qint64 matched_ms = 0;
+         bool joined = false;
+         qint64 joined_ms = 0;
+@@ -518,11 +521,19 @@ private:
+     // The invasion of a world over: InvasionEnd to everyone in it, the invader out of its
+     // routing, the cooldowns started.
+     void EndInvasion(const QString& world, bbcoop::InvasionEnd::Reason reason, qint64 now_ms,
+-                     Result& result);
++                     Result& result, bool killed_by_invader = false);
+     // What a team member's vitals end (its target killed, a boss, a wipe).
+     void CheckInvasion(const PartyWorld& world, const Member& member, const bbcoop::Vitals& vitals,
+                        std::uint32_t wipe_before, qint64 now_ms, Result& result);
+     // The world whose invasion `link` is the invader of, empty when none.
++    // A deterministic mailbox of the authenticated link identity, independent of party/team:
++    // solo invaders have no party Hello. Its grants use InvasionRewardGrantBit for safe ACKs.
++    QString RewardFolder(const Member& member) const;
++    void ResumeRewards(Member& member, qint64 now_ms, Result& result);
++    void DeliverRewards(Member& member, PartyWorld& mailbox,
++                        BloodborneCoop::TradeDesk::Result grants, qint64 now_ms, Result& result);
++    void RewardInvasion(Member& winner, quint64 invasion, const std::string& defeated,
++                        std::uint32_t echoes, qint64 now_ms, Result& result);
+     QString InvadedBy(quint64 link) const;
+     // An invasion's link gone: its own (the invader's) or its target's host's.
+     void InvasionLinkGone(quint64 link, qint64 now_ms, Result& result);
+diff --git a/server/tests/test_bloodborne_trade.cpp b/server/tests/test_bloodborne_trade.cpp
+index 9c56da6c..84749e46 100644
+--- a/server/tests/test_bloodborne_trade.cpp
++++ b/server/tests/test_bloodborne_trade.cpp
+@@ -399,9 +399,9 @@ int TestRefused() {
+   CHECK(HasNotice(ada, TradeClient::Notice::Kind::Refused));
+   party.online.insert("b2");
+ 
+-  // Not an item the game has (no such category): back too.
++  // An invalid item claim is refused and cannot become an application grant.
+   party.Offer(ada, bo, {{TradeItemKind::Item, 0x30000000 | 4242, 1}});
+-  CHECK(ada.Held({TradeItemKind::Item, 0x30000000 | 4242, 0}) == 1);
++  CHECK(ada.Held({TradeItemKind::Item, 0x30000000 | 4242, 0}) == 0);
+   CHECK(bo.client.Asked().empty());
+   // Nor to itself.
+   ada.Take({Vials(1)});
+@@ -528,6 +528,84 @@ int TestTexts() {
+   return 0;
+ }
+ 
++int TestServerOnlyRewardsAndRefundSafety() {
++  const TradeItem insight{TradeItemKind::Insight, 0, 1};
++  const TradeItem unknown{static_cast<TradeItemKind>(99), 1000, 1};
++  CHECK(TradeItemsProblem(TradeItems{insight}, false).has_value());
++  TradeDesk desk;
++  bbcoop::TradeOffer offer;
++  offer.set_to("b");
++  PutTradeItems(TradeItems{insight, unknown, Vials(2)}, offer.mutable_give());
++  auto refused = desk.Offer("a", offer, {"a", "b"}, 10);
++  CHECK(desk.OpenTrades() == 0);
++  CHECK(desk.PendingGrants() == 1);
++  const auto& refund = refused.sends.back().envelope.trade_grant();
++  CHECK(TradeItemsOf(refund.items()) == TradeItems{Vials(2)});
++  CHECK(!TradeGrantItemsProblem(refund));
++  CHECK((refund.id() & InvasionRewardGrantBit) == 0);
++
++  // A forged late answer and a mismatched answer cannot launder server-only kinds.
++  bbcoop::TradeAnswer answer;
++  answer.set_id(9999);
++  answer.set_accept(true);
++  PutTradeItems(TradeItems{insight, unknown}, answer.mutable_taken());
++  auto late = desk.Answer("b", answer);
++  CHECK(desk.PendingGrants() == 1);
++  CHECK(std::ranges::none_of(late.sends, [](const auto& send) {
++    return send.envelope.has_trade_grant();
++  }));
++  PutTradeItems(TradeItems{Vials(1)}, offer.mutable_give());
++  auto opened = desk.Offer("a", offer, {"a", "b"}, 20);
++  answer.set_id(opened.sends.front().envelope.trade_status().id());
++  auto mismatch = desk.Answer("b", answer);
++  CHECK(desk.OpenTrades() == 0);
++  for (const auto& send : mismatch.sends) {
++    if (send.envelope.has_trade_grant()) {
++      CHECK(!TradeGrantItemsProblem(send.envelope.trade_grant()));
++      CHECK(TradeItemsOf(send.envelope.trade_grant().items()) == TradeItems{Vials(1)});
++    }
++  }
++
++  auto paid = desk.InvasionVictory("red", 7, "host", 556);
++  CHECK(paid.sends.size() == 1);
++  const auto reward = paid.sends.front().envelope.trade_grant();
++  CHECK((reward.id() & InvasionRewardGrantBit) != 0);
++  CHECK(reward.reason() == static_cast<u32>(TradeGrantReason::InvasionReward));
++  CHECK(!TradeGrantItemsProblem(reward));
++  CHECK((TradeItemsOf(reward.items()) == TradeItems{insight, Echoes(556)}));
++  TradeClient client;
++  auto got = client.Take(paid.sends.front().envelope);
++  CHECK(got.add.size() == 1 && got.replies.size() == 1);
++  CHECK(client.Take(paid.sends.front().envelope).add.empty());
++  CHECK(client.Take(paid.sends.front().envelope).replies.size() == 1);
++  bbcoop::Envelope forged = paid.sends.front().envelope;
++  forged.mutable_trade_grant()->set_reason(static_cast<u32>(TradeGrantReason::Returned));
++  CHECK(TradeGrantItemsProblem(forged.trade_grant()).has_value());
++  CHECK(client.Take(forged).add.empty() && client.Take(forged).replies.empty());
++  forged = paid.sends.front().envelope;
++  forged.mutable_trade_grant()->mutable_items(0)->set_count(2);
++  CHECK(TradeGrantItemsProblem(forged.trade_grant()).has_value());
++  forged = paid.sends.front().envelope;
++  forged.mutable_trade_grant()->mutable_items(0)->set_kind(99);
++  CHECK(TradeGrantItemsProblem(forged.trade_grant()).has_value());
++
++  TradeDesk restored;
++  restored.Restore(desk.Stored(), 100);
++  auto again = restored.Resume("red", 101);
++  CHECK(again.sends.size() == 1);
++  CHECK(again.sends.front().envelope.trade_grant().SerializeAsString() == reward.SerializeAsString());
++  CHECK(!restored.Granted("thief", reward.id()).changed);
++  CHECK(restored.Resume("red", 102).sends.size() == 1);
++  CHECK(restored.Granted("red", reward.id()).changed);
++  CHECK(restored.Resume("red", 103).sends.empty());
++  auto next = restored.InvasionVictory("red", 8, "host", 0);
++  CHECK(next.sends.front().envelope.trade_grant().id() > reward.id());
++  auto no_echoes = TradeItemsOf(next.sends.front().envelope.trade_grant().items());
++  CHECK(no_echoes == TradeItems{insight});
++  CHECK(!TradeGrantItemsProblem(next.sends.front().envelope.trade_grant()));
++  return 0;
++}
++
+ int TestEchoesPicker() {
+   // Blood Echoes go in round steps that fit what the player holds: under a
+   // hundred presses to any of them, all of them past the last (Kaniel
+@@ -558,6 +636,7 @@ int main() {
+   int failed = 0;
+   failed += TestItems();
+   failed += TestEchoesPicker();
++  failed += TestServerOnlyRewardsAndRefundSafety();
+   failed += TestAnyItemGiven();
+   failed += TestGiveAccepted();
+   failed += TestSwap();
+diff --git a/server/tests/test_bloodborne_world.cpp b/server/tests/test_bloodborne_world.cpp
+index 2ec55d02..89477c04 100644
+--- a/server/tests/test_bloodborne_world.cpp
++++ b/server/tests/test_bloodborne_world.cpp
+@@ -144,6 +144,7 @@ struct Game {
+     envelope.mutable_lobby_hello()->set_member(name);
+     envelope.mutable_lobby_hello()->set_name("Player " + name);
+     envelope.mutable_lobby_hello()->set_playing(playing);
++    envelope.mutable_lobby_hello()->set_invasion_rewards(invasion_rewards);
+     Send(envelope, now_ms);
+   }
+   void Team(bbcoop::TeamRequest::Action action, qint64 now_ms,
+@@ -165,7 +166,7 @@ struct Game {
+     Send(envelope, now_ms);
+   }
+   void Vitals(u32 map, u32 vital, qint64 now_ms, u32 level = 0,
+-              bool boss = false) {
++              bool boss = false, bool killed_by_invader = false) {
+     bbcoop::Envelope envelope;
+     envelope.mutable_vitals()->set_map(map);
+     envelope.mutable_vitals()->set_vital(vital);
+@@ -173,6 +174,7 @@ struct Game {
+     envelope.mutable_vitals()->set_max(100);
+     envelope.mutable_vitals()->set_level(level);
+     envelope.mutable_vitals()->set_boss(boss);
++    envelope.mutable_vitals()->set_killed_by_invader(killed_by_invader);
+     envelope.mutable_vitals()->mutable_at()->set_x(1);
+     Send(envelope, now_ms);
+   }
+@@ -228,6 +230,9 @@ struct Game {
+       owners = envelope.enemy_owners();
+       ++owner_messages;
+     } else if (IsTradeMessage(envelope)) {
++      if (envelope.has_trade_grant()) {
++        grants.push_back(envelope.trade_grant());
++      }
+       TradeClient::Taken taken = trades.Take(envelope);
+       for (TradeItems &items : taken.add) {
+         added.push_back(std::move(items));
+@@ -290,6 +295,8 @@ struct Game {
+     Send(envelope, now_ms);
+   }
+   bool enemy_owner = true; // runs phase 4's owners (its hello says)
++  bool invasion_rewards = false;
++  std::vector<bbcoop::TradeGrant> grants;
+   TradeClient trades;
+   std::vector<TradeItems> added; // what its trades added
+   u32 run = 0x1001;
+@@ -2748,6 +2755,13 @@ struct InvasionRig {
+       Allow(true);
+     }
+   }
++  void EnableRewards() {
++    for (Game* game : games) {
++      game->invasion_rewards = true;
++      game->LobbyHello(true, now);
++    }
++    Step();
++  }
+   void Allow(bool allow) {
+     bbcoop::Envelope envelope;
+     envelope.mutable_team_request()->set_action(bbcoop::TeamRequest::INVADERS);
+@@ -2985,6 +2999,7 @@ int EachEndTellsEveryoneAndRestoresTheRouting() {
+       };
+   for (const auto &[reason, end] : ends) {
+     InvasionRig rig;
++    rig.EnableRewards();
+     CHECK(rig.Invade());
+     CHECK(rig.Routes(rig.red, rig.a, 0x06));
+     end(rig);
+@@ -2992,6 +3007,8 @@ int EachEndTellsEveryoneAndRestoresTheRouting() {
+     CHECK(EndedFor(rig.red, reason));
+     CHECK(EndedFor(rig.a, reason) && EndedFor(rig.b, reason));
+     CHECK(rig.red.ends.size() == 1 && rig.a.ends.size() == 1);
++    CHECK(rig.red.grants.empty() && rig.b.grants.empty());
++    CHECK(rig.a.grants.size() == (reason == Reason::INVADER_DIED ? 1 : 0));
+     CHECK(rig.service.VisitingOf(rig.red.endpoint).isEmpty());
+     CHECK(!rig.Routes(rig.red, rig.a, 0x06) &&
+           !rig.Routes(rig.a, rig.red, 0x14));
+@@ -3354,6 +3371,108 @@ int HostedTradesAreWithinAStartedTeam() {
+ // invader whose stream breaks its limit is dropped like any game, and its
+ // invasion ends; a world with an invasion is never put out of memory, and the
+ // invader keeps no world loaded.
++int VictoryRewardsUseSoloMailboxesAndSurviveRestart() {
++  CHECK(InvasionVictoryEchoes(30, true) == 556);
++  CHECK(InvasionVictoryEchoes(30, false) == 1670);
++  CHECK(InvasionVictoryEchoes(0, true) == 0);
++  CHECK(InvasionVictoryEchoes(545, false) == 0);
++  CHECK(InvasionVictoryEchoes(4, false) == 0);
++  // Freeze the defeated level at join/match, not an arbitrary death report.
++  {
++    InvasionRig rig;
++    rig.EnableRewards();
++    CHECK(rig.Invade());
++    rig.red.Vitals(InvadedMap, 3, rig.now, 544);
++    rig.Step();
++    CHECK(rig.a.grants.size() == 1 && rig.red.grants.empty() && rig.b.grants.empty());
++    CHECK((TradeItemsOf(rig.a.grants[0].items()) == TradeItems{
++        {TradeItemKind::Insight, 0, 1}, {TradeItemKind::Echoes, 0, 6233}}));
++    rig.red.Vitals(InvadedMap, 3, rig.now, 544);
++    rig.Step();
++    CHECK(rig.a.grants.size() == 1); // duplicate death cannot pay twice
++  }
++  {
++    InvasionRig early;
++    early.EnableRewards();
++    early.red.Invade(60, early.now);
++    early.red.Map(InvadedMap, early.now);
++    early.Step();
++    CHECK(early.red.notices.size() == 1 && !early.red.invasion);
++    early.red.Vitals(InvadedMap, 3, early.now, 60);
++    early.Step();
++    CHECK(EndedFor(early.red, bbcoop::InvasionEnd::INVADER_DIED));
++    CHECK(early.a.grants.empty() && early.b.grants.empty() && early.red.grants.empty());
++  }
++  {
++    InvasionRig legacy;
++    CHECK(legacy.Invade());
++    legacy.a.Vitals(InvadedMap, 3, legacy.now, 50, false, true);
++    legacy.Step();
++    CHECK(EndedFor(legacy.red, bbcoop::InvasionEnd::TARGET_KILLED));
++    CHECK(legacy.red.grants.empty()); // legacy client never receives Insight kind 4
++  }
++  QTemporaryDir folder;
++  CHECK(folder.isValid());
++  qint64 now = 0;
++  {
++    InvasionRig rig{true, true, folder.path()};
++    rig.EnableRewards();
++    CHECK(rig.Invade());
++    CHECK(rig.service.PartyOf(rig.red.endpoint).isEmpty()); // real solo: no party Hello
++    rig.red.deaf = true; // reward cannot reach it, so it remains owed on disk
++    rig.a.Vitals(InvadedMap, 3, rig.now, 99, false, true);
++    rig.Step();
++    CHECK(rig.a.grants.empty() && rig.b.grants.empty() && rig.red.grants.empty());
++    rig.service.Drain();
++    now = rig.now + 100;
++  }
++  Service service{folder.path()};
++  service.Load(now);
++  Game old{1002, "rr", 100};
++  old.LobbyHello(true, now);
++  Pump(service, {&old}, now);
++  CHECK(old.grants.empty()); // reconnect by an old client preserves but does not send the grant
++  // A different authenticated ID cannot acknowledge another identity's mailbox.
++  Game thief{1009, "thief", 101};
++  thief.invasion_rewards = true;
++  thief.LobbyHello(true, now);
++  bbcoop::Envelope stolen_ack;
++  stolen_ack.mutable_trade_granted()->set_id(InvasionRewardGrantBit | 1);
++  thief.Send(stolen_ack, now);
++  Pump(service, {&old, &thief}, now);
++  CHECK(thief.grants.empty());
++  old.invasion_rewards = true;
++  old.LobbyHello(true, now + 10);
++  Pump(service, {&old, &thief}, now + 10);
++  CHECK(old.grants.size() == 1);
++  const auto& grant = old.grants.front();
++  CHECK(grant.reason() == static_cast<u32>(TradeGrantReason::InvasionReward));
++  CHECK(grant.id() == (InvasionRewardGrantBit | 1));
++  CHECK((TradeItemsOf(grant.items()) == TradeItems{
++      {TradeItemKind::Insight, 0, 1}, {TradeItemKind::Echoes, 0, 1453}}));
++  CHECK(old.added.size() == 1);
++  CHECK(service.PartyOf(old.endpoint).isEmpty()); // ACK worked without ever joining a team/world
++  service.Drain();
++  // ACK survives restart too: another process with the same identity receives nothing.
++  Service after_ack{folder.path()};
++  after_ack.Load(now + 20);
++  Game newer{1002, "rr", 102};
++  newer.invasion_rewards = true;
++  newer.LobbyHello(true, now + 20);
++  Pump(after_ack, {&newer}, now + 20);
++  CHECK(newer.grants.empty() && newer.added.empty());
++  {
++    InvasionRig next{true, true, folder.path()};
++    next.EnableRewards();
++    CHECK(next.Invade());
++    next.a.Vitals(InvadedMap, 3, next.now, 50, false, true);
++    next.Step();
++    CHECK(next.red.grants.size() == 1);
++    CHECK(next.red.grants.front().id() == (InvasionRewardGrantBit | 2));
++  }
++  return 0;
++}
++
+ int AnInvasionLivesWithTheCapsAndTheCollector() {
+   {
+     BloodborneWorld::Limits limits;
+@@ -3663,6 +3782,8 @@ int main() {
+        AnInvaderNeverChangesTheTeamsWorld},
+       {"EachEndTellsEveryoneAndRestoresTheRouting",
+        EachEndTellsEveryoneAndRestoresTheRouting},
++      {"VictoryRewardsUseSoloMailboxesAndSurviveRestart",
++       VictoryRewardsUseSoloMailboxesAndSurviveRestart},
+       {"AnInvasionLivesWithTheCapsAndTheCollector",
+        AnInvasionLivesWithTheCapsAndTheCollector},
+       {"AForgottenHostedWorldIsRestoredToItsPlayer",
+-- 
+2.54.0 (Apple Git-157)
+

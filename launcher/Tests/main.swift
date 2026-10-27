@@ -430,11 +430,61 @@ final class FakeSecrets: SecretStore {
     func remove(service: String, account: String) { items["\(service)/\(account)"] = nil }
 }
 
+// The visible mode survives restart, preserves account settings and drives the real shell route.
+do {
+    var online = OnlineSettings(ini: IniFile(text: "online=1\nonline_pool=shadnet\nshadnet_npid=hunter\nshadnet_password=keychain\nthd_online_id=dreamer\nthd_token=keychain\nseamless_server=bloodborne.phobos.services:31314\n"))
+    check(online.playMode == .regular, "legacy online pools are regular play")
+    online.playMode = .regular
+    check(online.online && online.pool == .shadnet, "regular keeps an existing regular online pool")
+    online.playMode = .seamless
+    check(online.online && online.pool == .seamless, "seamless enables its backend with one choice")
+    var ini = IniFile(text: "# keep\noutput_res=2560x1440\n")
+    online.apply(to: &ini)
+    check(OnlineSettings(ini: ini).playMode == .seamless, "seamless choice survives reload")
+    online.playMode = .regular
+    online.apply(to: &ini)
+    check(!online.online && OnlineSettings(ini: ini).playMode == .regular, "regular disables seamless and survives reload")
+    check(online.shadnetNpid == "hunter" && online.shadnetPassword == .keychain
+          && online.thdOnlineId == "dreamer" && online.thdToken == .keychain
+          && online.seamlessServer == "bloodborne.phobos.services:31314", "switching modes preserves accounts and server")
+    check(ini["output_res"] == "2560x1440" && ini.text.hasPrefix("# keep\n"), "mode changes preserve unrelated settings")
+
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("launcher-mode-\(getpid()).ini")
+    defer { try? FileManager.default.removeItem(at: url) }
+    for mode in PlayMode.allCases {
+        online.playMode = mode
+        online.apply(to: &ini)
+        try? ini.write(to: url)
+        let inherited = ["BB_ONLINE": mode == .regular ? "1" : "0", "BB_NET_BACKEND": "thd",
+                         "BB_CONFIG": url.path, "BB_FPS": "30", "BB_SAVE_DIR": "/chosen saves"]
+        var environment = online.launchEnvironment(adding: inherited)
+        check(environment["BB_FPS"] == "30" && environment["BB_SAVE_DIR"] == "/chosen saves", "mode keeps other launch overrides")
+        environment["BB_KEYCHAIN_TOOL"] = "/usr/bin/false"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-c", "source scripts/launch_settings.sh && bb_launch_settings \"$BB_CONFIG\" && printf '%s %s' \"$BB_ONLINE\" \"$BB_NET_BACKEND\""]
+        process.environment = environment
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do { try process.run() } catch { check(false, "mode shell launch: \(error)"); continue }
+        process.waitUntilExit()
+        let actual = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        check(process.terminationStatus == 0 && actual == (mode == .regular ? "0 seamless" : "1 seamless"), "visible mode wins over contradictory inherited flags: \(actual)")
+    }
+    for pool in [OnlinePool.huntersdream, .shadnet] {
+        online.pool = pool
+        online.online = true
+        online.playMode = .regular
+        let environment = online.launchEnvironment(adding: ["BB_NET_BACKEND": "seamless"])
+        check(environment["BB_ONLINE"] == "1" && environment["BB_NET_BACKEND"] == (pool == .huntersdream ? "thd" : "shadnet"), "regular online keeps the selected legacy backend")
+    }
+}
+
 // OnlineSettings: the keys scripts/launch_settings.sh reads, round trip, secrets.
 do {
     let defaults = OnlineSettings(ini: IniFile())
     check(defaults == OnlineSettings(), "empty ini = defaults")
-    check(!defaults.online && defaults.pool == .huntersdream && defaults.upnp && defaults.p2pPort == 3658, "default online settings")
+    check(!defaults.online && defaults.pool == .seamless && defaults.upnp && defaults.p2pPort == 3658, "default online settings")
     check(defaults.shadnetServer == "" && defaults.shadnetNpid == "" && defaults.shadnetPassword == .none, "default shadNet: nothing")
     check(defaults.thdOnlineId == "" && defaults.thdToken == .none && !defaults.hasSecretInFile, "default Hunter's Dream: nothing")
 
@@ -444,7 +494,7 @@ do {
     check(!read.upnp && read.p2pPort == 0 && read.hasSecretInFile, "read upnp, port, a token in the file")
     // The shell's rules: flags are exactly 0 or 1; a bad port or pool is ignored.
     let odd = OnlineSettings(ini: IniFile(text: "online=yes\nupnp=2\np2p_port=70000\nonline_pool=psn\nshadnet_password=\n"))
-    check(!odd.online && odd.upnp && odd.p2pPort == 3658 && odd.pool == .huntersdream && odd.shadnetPassword == .none, "invalid values -> defaults")
+    check(!odd.online && odd.upnp && odd.p2pPort == 3658 && odd.pool == .seamless && odd.shadnetPassword == .none, "invalid values -> defaults")
     check(OnlineSettings.port(from: "3658") == 3658 && OnlineSettings.port(from: "0") == 0 && OnlineSettings.port(from: "65535") == 65535, "ports")
     check(OnlineSettings.port(from: "65536") == nil && OnlineSettings.port(from: "") == nil && OnlineSettings.port(from: "12a") == nil, "bad ports")
     check(OnlineSettings.port(from: "-1") == nil && OnlineSettings.port(from: "123456") == nil && OnlineSettings.port(from: "٣") == nil, "digits only, five at most")
@@ -452,7 +502,7 @@ do {
     // only a shadNet account.
     check(OnlineSettings(ini: IniFile(text: "online=1\nshadnet_npid=hunter\n")).pool == .shadnet, "only a shadNet account: shadNet")
     check(OnlineSettings(ini: IniFile(text: "shadnet_npid=hunter\nthd_online_id=dreamer\n")).pool == .huntersdream, "both accounts: The Hunter's Dream")
-    check(OnlineSettings(ini: IniFile(text: "online=1\n")).pool == .huntersdream, "no account: The Hunter's Dream")
+    check(OnlineSettings(ini: IniFile(text: "online=1\n")).pool == .seamless, "no account: The Hunter's Dream")
 
     // Round trip: every key written as the shell reads it; other keys and the order kept.
     var file = IniFile(text: "# header\nupscaler=metalfx\ncommunity_server=https://example.org\nshadnet_webapi=http://example.org:31315\n")

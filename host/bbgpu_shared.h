@@ -36,7 +36,7 @@
 #define BBGPU_GUEST_MAX UINT64_C(0xfc00000000)
 
 #define BBGPU_SHARED_MAGIC 0x31424742u /* "BGB1" */
-#define BBGPU_SHARED_VERSION 10u /* Combined achievements, native Mac Settings and mouse wheel. */
+#define BBGPU_SHARED_VERSION 11u /* Combined trophies, native Mac Settings, mouse wheel and co-op records. */
 #define BBGPU_CONTROL_SIZE (UINT64_C(4) << 20) /* control block and rings */
 /* Command buffer copies (game side, at submit; the host parses these): the game may rewrite its
  * command buffers once the submit returns, before the host has parsed them. */
@@ -73,6 +73,7 @@ enum {
     BBGPU_REC_START,               /* BbGpuStart (request): start the renderer with the configuration */
     BBGPU_REC_TEXT_BEGIN,          /* BbGpuTextBegin (request): open the window's text entry (IME) */
     BBGPU_REC_MAC_SETTING,         /* BbGpuMacSetting: async native menu edit, no reply */
+    BBGPU_REC_COOP_UI,             /* fixed-width co-op UI snapshot */
     BBGPU_REC_COUNT,
 };
 
@@ -84,6 +85,8 @@ enum {
     BBGPU_EV_EOP_FLIP_QUEUED,  /* BbGpuFlipEvent: an end-of-pipe flip entered the queue */
     BBGPU_EV_VBLANK,           /* BbGpuVblank */
     BBGPU_EV_RESTART,          /* no payload: the settings menu asked to restart the game */
+    BBGPU_EV_COOP_COMMAND,     /* fixed-width co-op command, consumed in the game process */
+    BBGPU_EV_COOP_MODEL,       /* bounded portrait model pixel chunk */
 };
 
 /* ---- M4 page tracking: protect ring (host -> game), fault ring (game -> host) ---- */

@@ -31,7 +31,7 @@ py_release=20260924
 py_name=cpython-3.12.14+20260924-aarch64-apple-darwin-install_only_stripped.tar.gz
 py_sha256=c2edb321cd32ec2b170df208db0446dccc4398db602ca27cf2079098fb1f7d9d
 
-for f in out/bb-probe out/gpu/libbbgpu.dylib out/bbgpu-host out/bbgpu-host-macos27 out/gpu-arm64/libbbgpu.dylib; do
+for f in out/bb-probe out/gpu/libbbgpu.dylib out/bbgpu-host out/bbgpu-host-macos27 out/gpu-arm64/libbbgpu.dylib out/gpu-arm64/bbmap-prepare; do
     [[ -f $f ]] || { echo "Missing $f: build first (bash build_macos.sh)." >&2; exit 1; }
 done
 
@@ -42,7 +42,7 @@ rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/port/scripts" "$contents/Resources/licenses"
 
 # Executables: library search goes to Frameworks/ only (the build's rpaths name this checkout).
-install -m755 out/bb-probe out/bbgpu-host out/bbgpu-host-macos27 "$contents/MacOS/"
+install -m755 out/gpu-arm64/bbmap-prepare out/bb-probe out/bbgpu-host out/bbgpu-host-macos27 "$contents/MacOS/"
 set_rpath() { # file new-rpath
     local file=$1 path
     while read -r path; do
@@ -50,7 +50,7 @@ set_rpath() { # file new-rpath
     done < <(otool -l "$file" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }')
     install_name_tool -add_rpath "$2" "$file"
 }
-for exe in bb-probe bbgpu-host bbgpu-host-macos27; do
+for exe in bb-probe bbgpu-host bbgpu-host-macos27 bbmap-prepare; do
     set_rpath "$contents/MacOS/$exe" @executable_path/../Frameworks
 done
 
@@ -70,7 +70,14 @@ if [[ -f out/gpu/libbbnet.dylib ]]; then
     set_rpath "$contents/Frameworks/libbbnet.dylib" @loader_path
     online_module=1
 else
-    echo 'No libbbnet.dylib: packaging an offline-only app.'
+    echo 'No legacy libbbnet.dylib.'
+fi
+seamless_module=0
+if [[ -f out/gpu/libbbseamless.dylib ]]; then
+    lipo out/gpu/libbbseamless.dylib -verify_arch x86_64
+    install -m755 out/gpu/libbbseamless.dylib "$contents/Frameworks/"
+    set_rpath "$contents/Frameworks/libbbseamless.dylib" @loader_path
+    seamless_module=1
 fi
 for lib in libSDL3.0 libavformat.61 libavcodec.61 libswscale.8 libswresample.5 libavutil.59; do
     universal "$lib.dylib" "deps/x86_64/lib/$lib.dylib" "deps/arm64/lib/$lib.dylib"
@@ -99,6 +106,8 @@ printf '%s\n' "$version" > "$contents/Resources/port/bbport-version"
 install -m644 scripts/*.py "$contents/Resources/port/scripts/"
 install -m644 scripts/mac_menu_messages.json "$contents/Resources/port/scripts/"
 install -m644 scripts/launch_settings.sh "$contents/Resources/port/scripts/"
+mkdir -p "$contents/Resources/port/scripts/seamless"
+install -m644 scripts/seamless/*.py "$contents/Resources/port/scripts/seamless/"
 cp -R patches "$contents/Resources/port/patches"
 if [[ -f benchmark/route.pad && -d benchmark/savedata ]]; then
     mkdir -p "$contents/Resources/benchmark"
@@ -136,6 +145,7 @@ cp LICENSES/GPL-3.0-or-later.txt "$lic/LICENSE-native-menu.txt"
 cp docs/NATIVE_MAC_SETTINGS.md "$lic/native-menu-provenance.txt"
 cp src/fps/LICENSE "$lic/LICENSE-adaptive-fps-GPL-3.0.txt"
 cp src/fps/PROVENANCE.md "$lic/adaptive-fps-provenance.md"
+cp gpu/art/README.md "$lic/PROVENANCE-coop-artwork.md"
 cp "$stdlib/LICENSE.txt" "$lic/LICENSE-Python.txt"
 for pair in SDL:LICENSE.txt Vulkan-Headers:LICENSE.md SPIRV-Cross:LICENSE FFmpeg:COPYING.LGPLv2.1 \
             FFmpeg:LICENSE.md fmt:LICENSE magic_enum:LICENSE miniz:LICENSE robin-map:LICENSE \
@@ -171,13 +181,21 @@ FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 EOF
-if (( online_module )); then
+if (( online_module || seamless_module )); then
     cp LICENSES/GPL-3.0-or-later.txt "$lic/LICENSE-online-backend.txt"
     cp docs/ONLINE_PROVENANCE.md "$lic/online-provenance.txt"
     cp gpu/third_party/httplib/LICENSE "$lic/LICENSE-cpp-httplib.txt"
     for pair in protobuf:LICENSE openssl:LICENSE.txt miniupnp:miniupnpc/LICENSE json:LICENSE.MIT; do
         cp "deps/src/${pair%%:*}/${pair#*:}" "$lic/LICENSE-online-${pair%%:*}.txt"
     done
+fi
+if (( seamless_module )); then
+    cp gpu/bbseamless/PROVENANCE.md "$lic/seamless-provenance.txt"
+    cp gpu/bbseamless/source_files.json "$lic/seamless-source-files.json"
+    cp deps/src/Zydis/LICENSE "$lic/LICENSE-Zydis.txt"
+    cp deps/src/Zydis/dependencies/zycore/LICENSE "$lic/LICENSE-Zycore.txt"
+    cp deps/src/xbyak/COPYRIGHT "$lic/LICENSE-Xbyak.txt"
+    cp gpu/bbseamless/vendor/coop/monocypher/LICENCE.md "$lic/LICENSE-Monocypher.md"
 fi
 commit=$(git rev-parse --short HEAD)
 cat > "$lic/README.txt" <<EOF
@@ -190,6 +208,7 @@ runtime includes GPL-3.0-or-later adaptive timing (LICENSE-adaptive-fps-GPL-3.0.
 adaptive-fps-provenance.md), so the combined runtime is distributed under GPL-3.0-or-later.
 Online module bundled: $online_module (1 = yes). When present, it includes GPL-3.0-or-later
 code; see online-provenance.txt and LICENSE-online-backend.txt.
+Seamless client bundled: $seamless_module (1 = yes); see seamless-provenance.txt and seamless-source-files.json.
 The other files are the notices for bundled libraries. No game files are included.
 EOF
 

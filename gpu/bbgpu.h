@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "bbmac_settings.h"
+#include "bbseamless/ui.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,6 +41,9 @@ int bbgpu_msl_check(const char *spv_dir, const char *msl_cache_dir);
 /* GPU host: runs one GnmDriver/VideoOut record from the submit ring (answers requests itself).
  * 0 when the record type is not the GPU library's. */
 int bbgpu_host_dispatch(const void *record);
+void bbgpu_coop_publish(const BbCoopUi *view);
+int bbgpu_coop_next_command(BbCoopCommand *command);
+int bbgpu_coop_take_portrait(uint8_t *rgba, uint32_t capacity);
 /* Game side: attaches the shared control block (before any push) and pushes one record onto
  * its submit ring. The runtime's view mirror and the GPU library share this one ordered
  * producer, so memory is mapped in the host before work that uses it. */

@@ -25,8 +25,10 @@
 #   upnp=0                   no UPnP port mapping (BB_UPNP=0; on by default)
 #   p2p_port=3658            the UDP port for co-op traffic (BB_P2P_PORT; 3658, the PS4's, by
 #                            default; 0 = any free port; a busy port falls back to a free one)
-#   online_pool=huntersdream bells and summons through The Hunter's Dream (BB_NET_BACKEND=thd), the
-#                            default; online_pool=shadnet picks a shadNet server instead (also the
+#   online_pool=seamless     hosted seamless co-op; the default for new configurations
+#   seamless_server=host:port  defaults to bloodborne.phobos.services:31314
+#   online_pool=huntersdream bells and summons through The Hunter's Dream (BB_NET_BACKEND=thd);
+#                            online_pool=shadnet picks a shadNet server instead (also the
 #                            choice when no pool is named but only a shadNet account is) ...
 #   thd_online_id=name       ... with the Discord-linked account (BB_THD_ONLINE_ID) ...
 #   thd_token=secret         ... and its token (BB_THD_TOKEN; `scripts/online.py signin` writes both),
@@ -38,7 +40,7 @@
 # Values already in the environment win. Bash 3.2 (macOS /bin/bash) compatible.
 bb_launch_settings() { # ini file
     local line cap='' full='' hud='' compress='' online='' server='' webapi='' npid='' password='' community='' upnp='' p2p=''
-    local pool='' thd_id='' thd_token='' timing=''
+    local pool='' thd_id='' thd_token='' timing='' seamless_server=''
     # Clear values exported from the previous config, keeping explicit caller overrides.
     if [[ ${BB_LAUNCH_AUTO_LIMIT:-} == "${BB_FPS_LIMIT:-unset}" ]]; then unset BB_FPS_LIMIT; fi
     if [[ ${BB_LAUNCH_AUTO_FULLSCREEN:-} == "${BB_FULLSCREEN:-unset}" ]]; then unset BB_FULLSCREEN; fi
@@ -55,6 +57,7 @@ bb_launch_settings() { # ini file
         if [[ $line =~ ^fullscreen=([01])$ ]]; then full=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^metal_hud=([01])$ ]]; then hud=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^online=([01])$ ]]; then online=${BASH_REMATCH[1]}; fi
+        if [[ $line =~ ^seamless_server=(.+)$ ]]; then seamless_server=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^shadnet_server=(.+)$ ]]; then server=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^shadnet_webapi=(.+)$ ]]; then webapi=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^shadnet_npid=(.+)$ ]]; then npid=${BASH_REMATCH[1]}; fi
@@ -62,12 +65,20 @@ bb_launch_settings() { # ini file
         if [[ $line =~ ^community_server=(.+)$ ]]; then community=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^upnp=([01])$ ]]; then upnp=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^p2p_port=([0-9]{1,5})$ ]]; then p2p=${BASH_REMATCH[1]}; fi
-        if [[ $line =~ ^online_pool=(shadnet|huntersdream)$ ]]; then pool=${BASH_REMATCH[1]}; fi
+        if [[ $line =~ ^online_pool=(seamless|shadnet|huntersdream)$ ]]; then pool=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^thd_online_id=(.+)$ ]]; then thd_id=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^thd_token=(.+)$ ]]; then thd_token=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^texture_compression=([01])$ ]]; then compress=${BASH_REMATCH[1]}; fi
         if [[ $line =~ ^game_timing=(fixed|variable|adaptive)$ ]]; then timing=${BASH_REMATCH[1]}; fi
     done < "$1"
+    if [[ -z $pool ]]; then
+        if [[ -n $npid && -z $thd_id ]]; then pool=shadnet
+        elif [[ -n $thd_id ]]; then pool=huntersdream
+        else pool=seamless; fi
+    fi
+    if [[ ${BB_NET_BACKEND:-$pool} == seamless ]]; then
+        server=$seamless_server; webapi=''; npid=''; password=''; thd_id=''; thd_token=''
+    fi
     # The password and the token are looked up and exported only for online play (online=1, or
     # BB_ONLINE=1 from the environment, which wins): offline, no secret enters the environment.
     if [[ ${BB_ONLINE:-$online} != 1 ]]; then password='' thd_token=''; fi
@@ -115,6 +126,7 @@ bb_launch_settings() { # ini file
         if [[ -n $npid && -z $thd_id ]]; then pool=shadnet; else pool=huntersdream; fi
     fi
     if [[ $pool == huntersdream && -z ${BB_NET_BACKEND:-} ]]; then export BB_NET_BACKEND=thd; fi
+    if [[ $pool == seamless && -z ${BB_NET_BACKEND:-} ]]; then export BB_NET_BACKEND=seamless; fi
     if [[ -n $thd_id && -z ${BB_THD_ONLINE_ID:-} ]]; then export BB_THD_ONLINE_ID=$thd_id; fi
     if [[ -n $thd_token && -z ${BB_THD_TOKEN:-} ]]; then export BB_THD_TOKEN=$thd_token; fi
     return 0

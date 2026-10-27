@@ -105,6 +105,12 @@ enum Layout: Equatable {
         }
     }
 
+    var mapPrepareExecutable: URL {
+        switch self {
+        case let .packaged(contents): contents.appendingPathComponent("MacOS/bbmap-prepare")
+        case let .checkout(repo, _): repo.appendingPathComponent("out/gpu-arm64/bbmap-prepare")
+        }
+    }
     var gameCheckCommand: [String] { pythonCommand(script: "game_check.py") }
 
     /// The environment the earlier bash launchers set (release app, checkout app), plus the save

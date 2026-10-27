@@ -255,6 +255,11 @@ static void add_mouse(PadData *d) {
     if (!s || !__atomic_load_n(&s->mouse_captured,__ATOMIC_ACQUIRE) || bbgpu_overlay_captures_input()) return;
     const double vx=__atomic_load_n(&s->mouse_vx,__ATOMIC_RELAXED);
     const double vy=__atomic_load_n(&s->mouse_vy,__ATOMIC_RELAXED);
+    static uint64_t camera_at;
+    const uint64_t camera_now=now_us();
+    const double camera_dt=camera_at ? fmin((camera_now-camera_at)/1e6,0.05) : 1.0/60.0;
+    camera_at=camera_now;
+    if (runtime_coop_camera_mouse((float)(vx*camera_dt),(float)(vy*camera_dt))) return;
     const double speed=sqrt(vx*vx+vy*vy);
     if (speed<1.0) return;
     const double fraction=speed>=MOUSE_FULL_SPEED ? 1.0 : speed/MOUSE_FULL_SPEED;
@@ -480,9 +485,18 @@ static void bench_sample(PadData *d) {
     default: break;
     }
 }
+static void coop_filter(PadData *d) {
+    uint8_t sticks[4]={d->left_x,d->left_y,d->right_x,d->right_y};
+    int32_t side=d->touch_count && d->touches[0].x>=960;
+    runtime_coop_frame(&d->buttons,sticks,&d->l2,&d->r2,&side);
+    d->left_x=sticks[0];d->left_y=sticks[1];d->right_x=sticks[2];d->right_y=sticks[3];
+    if (!(d->buttons&BTN_TOUCHPAD)) d->touch_count=0;
+    else if (!d->touch_count) touch_click(d,side);
+    touch_ids(d);
+}
 static void sample(PadData *d) {
     sample_host(d);
-    if (bbgpu_overlay_captures_input()) return;
+    if (bbgpu_overlay_captures_input()) {coop_filter(d);return;}
     bench_sample(d);
     record_sample(d);
     read_inject();
@@ -494,7 +508,7 @@ static void sample(PadData *d) {
     if (injected.buttons & BTN_R2) d->r2=255;
     uint8_t *axes[4]={&d->left_x,&d->left_y,&d->right_x,&d->right_y};
     for (int i=0;i<4;++i) if (injected.stick[i]>=0) *axes[i]=(uint8_t)injected.stick[i];
-    touch_ids(d);
+    coop_filter(d);
     runtime_mac_settings_pad(&d->buttons);
 }
 

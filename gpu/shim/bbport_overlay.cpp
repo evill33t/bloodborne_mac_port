@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #define IMGUI_DEFINE_MATH_OPERATORS // ImVec2 arithmetic for the custom-drawn controls
 #include "bbport_overlay.h"
+#include "bbport_coop_ui.h"
+#include "bbport_coop_style.h"
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +37,7 @@ asm(".section __TEXT,__const\n"
     ".private_extern _bb_font_ttf_end\n"
     ".globl _bb_font_ttf_end\n"
     "_bb_font_ttf_end:\n"
+    ".balign 8\n.private_extern _bb_font_ttf_size\n.globl _bb_font_ttf_size\n_bb_font_ttf_size:\n.quad _bb_font_ttf_end - _bb_font_ttf\n"
     ".text\n");
 #else
 asm(".section .rodata\n"
@@ -46,10 +49,12 @@ asm(".section .rodata\n"
     ".hidden bb_font_ttf_end\n"
     ".global bb_font_ttf_end\n"
     "bb_font_ttf_end:\n"
+    ".balign 8\n.hidden bb_font_ttf_size\n.global bb_font_ttf_size\nbb_font_ttf_size:\n.quad bb_font_ttf_end - bb_font_ttf\n"
     ".previous\n");
 #endif
 extern "C" const unsigned char bb_font_ttf[];
 extern "C" const unsigned char bb_font_ttf_end[];
+extern "C" const uint64_t bb_font_ttf_size;
 
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
 
@@ -121,6 +126,8 @@ void SetOpen(bool value) {
 ImGuiKey KeyFromSdl(SDL_Keycode key) {
     if (key >= SDLK_A && key <= SDLK_Z) return ImGuiKey(ImGuiKey_A + key - SDLK_A);
     switch (key) {
+    case SDLK_EQUALS: return ImGuiKey_Equal;
+    case SDLK_MINUS: return ImGuiKey_Minus;
     case SDLK_TAB: return ImGuiKey_Tab;
     case SDLK_LEFT: return ImGuiKey_LeftArrow;
     case SDLK_RIGHT: return ImGuiKey_RightArrow;
@@ -160,6 +167,9 @@ ImGuiKey KeyFromGamepad(u8 button) {
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return ImGuiKey_GamepadDpadRight;
     case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return ImGuiKey_GamepadL1;
     case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return ImGuiKey_GamepadR1;
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK: return ImGuiKey_GamepadL3;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: return ImGuiKey_GamepadR3;
+    case SDL_GAMEPAD_BUTTON_TOUCHPAD: return ImGuiKey_GamepadBack;
     case SDL_GAMEPAD_BUTTON_START: return ImGuiKey_GamepadStart;
     case SDL_GAMEPAD_BUTTON_BACK: return ImGuiKey_GamepadBack;
     default: return ImGuiKey_None;
@@ -1130,6 +1140,7 @@ void Menu() {
         ImGui::Dummy(ImVec2(0.0f, 6.0f * base_scale));
     }
 
+    if (BbCoopOverlay::MenuButtons()) SetOpen(false);
     // Tabs: a centred segmented control. Gamepad L1/R1 switch tabs as in console menus.
     {
         static const char* tabs[TabCount] = {"Display", "Graphics", "Advanced", "Achievements"};
@@ -1486,7 +1497,7 @@ void SetupFonts(ImGuiIO& io) {
     fallback.MergeMode = font != nullptr; // only the glyphs the system font lacks
     std::snprintf(fallback.Name, sizeof(fallback.Name), "DejaVu Sans");
     io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_ttf),
-                                   int(bb_font_ttf_end - bb_font_ttf), kBaseFontSize, &fallback);
+                                   int(bb_font_ttf_size), kBaseFontSize, &fallback);
 }
 
 /// UI scale follows the display height (1080p = 1).
@@ -1542,7 +1553,7 @@ void UpdateTextInput(SDL_Window* window) {
     bool want = false;
     {
         std::scoped_lock lock{imgui_mutex};
-        want = initialized && menu_open && ImGui::GetIO().WantTextInput;
+        want = initialized && (menu_open || BbCoopOverlay::CapturesInput()) && ImGui::GetIO().WantTextInput;
     }
     if (want != SDL_TextInputActive(window)) {
         if (want) {
@@ -1559,7 +1570,10 @@ bool HandleEvent(const SDL_Event& event) {
         return false;
     }
     ImGuiIO& io = ImGui::GetIO();
-    const bool is_open = menu_open;
+    if(event.type==SDL_EVENT_KEY_DOWN || event.type==SDL_EVENT_MOUSE_BUTTON_DOWN) BbCoopStyle::Input(false);
+    if(event.type==SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type==SDL_EVENT_GAMEPAD_AXIS_MOTION) BbCoopStyle::Input(true);
+    if (BbCoopOverlay::Shortcut(event)) return true;
+    const bool is_open = menu_open || BbCoopOverlay::CapturesInput();
     switch (event.type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
@@ -1583,8 +1597,8 @@ bool HandleEvent(const SDL_Event& event) {
         if (toggle && event.key.repeat) {
             return true; // auto-repeat of the shortcut: never reaches the game
         }
-        if (down && (toggle || (is_open && event.key.key == SDLK_ESCAPE))) {
-            SetOpen(toggle ? !is_open : false);
+        if (down && (toggle || (menu_open && event.key.key == SDLK_ESCAPE))) {
+            SetOpen(toggle ? !menu_open : false);
             held_scancode = event.key.scancode;
             return true;
         }
@@ -1636,7 +1650,21 @@ bool HandleEvent(const SDL_Event& event) {
         }
         return true;
     }
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+        if(!is_open) return false;
+        const int axis=event.gaxis.axis;const float value=float(event.gaxis.value)/32767.f;
+        const auto positive=[](float v) {return std::clamp((v-.18f)/.82f,0.f,1.f);};
+        const ImGuiKey negative[]={ImGuiKey_GamepadLStickLeft,ImGuiKey_GamepadLStickUp,ImGuiKey_GamepadRStickLeft,ImGuiKey_GamepadRStickUp};
+        const ImGuiKey plus[]={ImGuiKey_GamepadLStickRight,ImGuiKey_GamepadLStickDown,ImGuiKey_GamepadRStickRight,ImGuiKey_GamepadRStickDown};
+        if(axis>=SDL_GAMEPAD_AXIS_LEFTX && axis<=SDL_GAMEPAD_AXIS_RIGHTY) {
+            const float a=positive(-value),b=positive(value);io.AddKeyAnalogEvent(negative[axis],a>0,a);io.AddKeyAnalogEvent(plus[axis],b>0,b);
+        } else if(axis==SDL_GAMEPAD_AXIS_LEFT_TRIGGER || axis==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+            const float v=positive(value);io.AddKeyAnalogEvent(axis==SDL_GAMEPAD_AXIS_LEFT_TRIGGER?ImGuiKey_GamepadL2:ImGuiKey_GamepadR2,v>0,v);
+        }
+        return true;
+    }
     case SDL_EVENT_GAMEPAD_REMOVED:
+        for(auto key:{ImGuiKey_GamepadLStickLeft,ImGuiKey_GamepadLStickRight,ImGuiKey_GamepadLStickUp,ImGuiKey_GamepadLStickDown,ImGuiKey_GamepadRStickLeft,ImGuiKey_GamepadRStickRight,ImGuiKey_GamepadRStickUp,ImGuiKey_GamepadRStickDown,ImGuiKey_GamepadL2,ImGuiKey_GamepadR2}) io.AddKeyAnalogEvent(key,false,0);
         // No button-up events follow a disconnect: forget held sticks (the game sees it too).
         l3_down = r3_down = false;
         held_sticks = false;
@@ -1697,7 +1725,7 @@ bool HandleEvent(const SDL_Event& event) {
 }
 
 bool Visible() {
-    return initialized && (menu_open || prompt_active || BbSettings::Get().show_fps || BbAchievements::BannerVisible());
+    return initialized && (menu_open || prompt_active || BbSettings::Get().show_fps || BbAchievements::BannerVisible() || BbCoopOverlay::Visible());
 }
 
 void SetTextPrompt(bool active, const std::string& prompt, const std::string& text) {
@@ -1711,7 +1739,7 @@ void SetTextPrompt(bool active, const std::string& prompt, const std::string& te
 
 bool CapturesInput() {
     // The text dialog too: keys typed into it (Backspace is the touchpad) stay out of the game.
-    if (menu_open || prompt_active) {
+    if (menu_open || prompt_active || BbCoopOverlay::CapturesInput()) {
         return true;
     }
     // Shortcut still held after the menu closed. Checked against the live keyboard state too,
@@ -1765,9 +1793,20 @@ void ScriptedInput() {
     };
     for (const std::string& t : tokens) {
         std::printf("menu: scripted %s\n", t.c_str());
-        if (t == "cmd-comma") {
+        if (t == "cmd-comma" || t == "toggle") {
             key(SDLK_COMMA, SDL_KMOD_GUI, SDL_SCANCODE_COMMA);
-        } else if (t == "esc") {
+        } else if (t == "f6" || t == "f7" || t == "f8" || t == "map" || t == "ping") {
+            key(t=="f6"?SDLK_F6:t=="f7"?SDLK_F7:(t=="f8" || t=="map")?SDLK_F8:SDLK_G,SDL_KMOD_NONE,
+                t=="f6"?SDL_SCANCODE_F6:t=="f7"?SDL_SCANCODE_F7:(t=="f8" || t=="map")?SDL_SCANCODE_F8:SDL_SCANCODE_G);
+        } else if(t.rfind("axis:",0)==0) {
+            int axis=0,value=0;if(std::sscanf(t.c_str(),"axis:%d,%d",&axis,&value)==2) {
+                SDL_Event event{};event.type=SDL_EVENT_GAMEPAD_AXIS_MOTION;event.gaxis.axis=axis;event.gaxis.value=std::clamp(value,-32768,32767);HandleEvent(event);
+            }
+        } else if(t.rfind("pad:",0)==0) {
+            int button=0;if(std::sscanf(t.c_str(),"pad:%d",&button)==1) for(bool down:{true,false}) {SDL_Event event{};event.type=down?SDL_EVENT_GAMEPAD_BUTTON_DOWN:SDL_EVENT_GAMEPAD_BUTTON_UP;event.gbutton.button=button;event.gbutton.down=down;HandleEvent(event);}
+        } else if(t.rfind("key-down:",0)==0 || t.rfind("key-up:",0)==0) {
+            const bool down=t.rfind("key-down:",0)==0;const auto name=t.substr(down?9:7);SDL_Event event{};event.type=down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;event.key.key=SDL_GetKeyFromName(name.c_str());event.key.scancode=SDL_GetScancodeFromKey(event.key.key,nullptr);event.key.down=down;HandleEvent(event);
+        } else if (t == "esc" || t == "back") {
             key(SDLK_ESCAPE, SDL_KMOD_NONE, SDL_SCANCODE_ESCAPE);
         } else if (t == "tab") {
             key(SDLK_TAB, SDL_KMOD_NONE, SDL_SCANCODE_TAB);
@@ -1795,7 +1834,8 @@ void ScriptedInput() {
             const std::string chars = t.substr(5);
             event.text.text = chars.c_str();
             HandleEvent(event);
-        } else if (float x = 0, y = 0; std::sscanf(t.c_str(), "click:%f,%f", &x, &y) == 2) {
+        } else if (float x = 0, y = 0; std::sscanf(t.c_str(), "click:%f,%f", &x, &y) == 2 ||
+                   std::sscanf(t.c_str(), "right-click:%f,%f", &x, &y) == 2) {
             // Window id 0: no window, density 1, so the coordinates are drawable pixels.
             SDL_Event event{};
             event.type = SDL_EVENT_MOUSE_MOTION;
@@ -1805,7 +1845,7 @@ void ScriptedInput() {
             for (const bool down : {true, false}) {
                 event = {};
                 event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
-                event.button.button = SDL_BUTTON_LEFT;
+                event.button.button = t.starts_with("right-click:") ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
                 event.button.down = down;
                 event.button.x = x;
                 event.button.y = y;
@@ -1862,9 +1902,11 @@ void Render(void* command_buffer, void* target, u32 width, u32 height,
     }
     io.DeltaTime = ms > 0.0f && ms < 1000.0f ? ms / 1000.0f : 1.0f / 60.0f;
     ApplyScale(float(height));
+    if(BbCoopOverlay::Visible()) BbCoopStyle::Prepare();
 
     MetalBackend::Frame(command_buffer, target, [&] {
         ImGui::NewFrame();
+        if (!menu_open) BbCoopOverlay::Render();
         if (menu_open) {
             Menu();
         }

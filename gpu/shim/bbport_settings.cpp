@@ -34,7 +34,8 @@ bool OwnedKey(const std::string& key) {
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps", "achievement_banners",
         "frame_pacing", "framegen", "hdr", "hdr_highlights", "hdr_paper_white", "hdr_peak",
         "screen_lighting", "screen_lighting_ao", "screen_lighting_gi",
-        "model_lod", "output_res",
+        "model_lod", "output_res", "map_view", "map_fog",
+        "menu_language", "compass", "compass_position", "bloodstains", "team_pings", "ping_key", "free_camera",
         "live_resolution", "shader_compile", "renderer", "fps_cap", "game_timing",
         "fullscreen", "metal_hud", "texture_compression",
         "mouse_look", "mouse_sensitivity", "mouse_vertical", "mouse_invert_y"};
@@ -72,6 +73,17 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.screen_lighting_ao = LightingNumber(value,0.0f,1.0f,0.5f);
     } else if (key == "screen_lighting_gi") {
         v.screen_lighting_gi = LightingNumber(value,0.0f,2.0f,0.7f);
+    } else if (key == "menu_language") {
+        v.menu_language_auto=value=="auto";
+        v.menu_language=value=="auto"?BbLanguage::GameLanguage():BbLanguage::LanguageFromCode(value).value_or(MenuLanguage::English);
+    } else if (key == "compass") { v.compass=i!=0;
+    } else if (key == "compass_position") {
+        v.compass_position=value=="bottom"?1:value=="reticle"?2:std::clamp(i,0,2);
+    } else if (key == "bloodstains") { v.bloodstains=i!=0;
+    } else if (key == "team_pings") { v.team_pings=i!=0;
+    } else if (key == "free_camera") { v.free_camera=i!=0;
+    } else if (key == "ping_key") {
+        for(int n=0;n<PingKeyCount;++n) if(value==PingKeyNames[n]) v.ping_key=n;
     } else if (key == "upscaler") {
         for (int u = 0; u < UpscalerCount; ++u) {
             if (value == UpscalerName(u)) {
@@ -134,6 +146,10 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.mouse_invert_y = i != 0;
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
+    } else if (key == "map_view") {
+        v.map_view = std::clamp(i, 0, 3);
+    } else if (key == "map_fog") {
+        v.map_fog = i != 0;
     } else if (key == "live_resolution") {
         v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
     } else if (key == "shader_compile") {
@@ -184,6 +200,7 @@ void Load() {
     v.hdr_peak = 0.0f;
     v.screen_lighting = ScreenLightingOff;
     v.screen_lighting_ao = 0.5f; v.screen_lighting_gi = 0.7f;
+    v.menu_language=BbLanguage::GameLanguage();
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -404,6 +421,10 @@ void Save() {
     for (int e = 0; e < EffectCount; ++e) {
         std::fprintf(file, "%s=%d\n", Effects[e].key, int(v.effects[e].load()));
     }
+    std::fprintf(file,"menu_language=%s\n",v.menu_language_auto?"auto":BbLanguage::LanguageCode(v.menu_language));
+    std::fprintf(file,"compass=%d\ncompass_position=%d\nbloodstains=%d\nteam_pings=%d\nping_key=%s\nfree_camera=%d\n",int(v.compass),int(v.compass_position),int(v.bloodstains),int(v.team_pings),PingKeyNames[v.ping_key],int(v.free_camera));
+    std::fprintf(file, "map_view=%d\n",v.map_view.load());
+    std::fprintf(file, "map_fog=%d\n",int(v.map_fog.load()));
     std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
                  OutputWidths[v.output_res], OutputHeights[v.output_res]);
     // Read by run.sh at start.

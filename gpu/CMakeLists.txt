@@ -54,6 +54,10 @@ else()
     set(BB_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 message(STATUS "bbgpu target architecture: ${BB_TARGET_ARCH}")
+option(BB_SEAMLESS "Build the x86-64 seamless co-op client module" ON)
+if(APPLE AND BB_TARGET_ARCH STREQUAL "x86_64" AND BB_SEAMLESS)
+    add_subdirectory(bbseamless)
+endif()
 
 # Vulkan-Hpp's types only (the Metal renderer keeps shadPS4's Vulkan-named classes): headers, no
 # loader. Elsewhere the reference Linux path links the loader.
@@ -151,6 +155,9 @@ target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui
 target_include_directories(bbgpu PRIVATE third_party/imgui third_party/imgui/backends)
 target_compile_definitions(bbgpu PRIVATE
     BB_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+set_source_files_properties(shim/bbport_coop_style.cpp PROPERTIES
+    COMPILE_DEFINITIONS "BB_COOP_ART_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/art/coop_art.bin\";BB_PARTY_ICONS_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/art/party_icons.bin\""
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/art/coop_art.bin;${CMAKE_CURRENT_SOURCE_DIR}/art/party_icons.bin")
 set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf)
 target_include_directories(bbgpu PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include ..)
@@ -378,6 +385,12 @@ if (APPLE)
     target_link_libraries(overlay-test PRIVATE bbgpu "-framework Metal" "-framework Foundation"
         "-framework CoreGraphics" "-framework ImageIO")
     target_link_options(overlay-test PRIVATE -Wl,-export_dynamic)
+    add_executable(coop-presentation-test EXCLUDE_FROM_ALL ../tests/test_coop_presentation.mm ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(coop-presentation-test PRIVATE shim shadps4 third_party/imgui ..)
+    target_compile_options(coop-presentation-test PRIVATE -UNDEBUG)
+    set_source_files_properties(../tests/test_coop_presentation.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(coop-presentation-test PRIVATE bbgpu "-framework Metal" "-framework AppKit")
+    target_link_options(coop-presentation-test PRIVATE -Wl,-export_dynamic)
     # Metal-native M6: every FSR 3.1 blob through the FidelityFX Metal back end to a compute
     # pipeline.
     add_executable(ffx-metal-test EXCLUDE_FROM_ALL ../tests/test_ffx_metal.mm ../tests/test_gpu_runtime_stubs.cpp)
@@ -493,3 +506,9 @@ endif()
 add_executable(native-motion-test EXCLUDE_FROM_ALL ../tests/test_native_motion.cpp)
 target_include_directories(native-motion-test PRIVATE shim)
 target_compile_options(native-motion-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+# Native map preparation uses Kaniel's read-only parsers and the same cache as the game.
+add_executable(bbmap-prepare ../host/map_prepare.cpp shim/bbport_map_charts.cpp
+    shim/bbport_map_art.cpp shim/bbport_map_collision.cpp shim/bbport_game_art.cpp)
+target_include_directories(bbmap-prepare PRIVATE shim)
+target_compile_features(bbmap-prepare PRIVATE cxx_std_20)
+target_link_libraries(bbmap-prepare PRIVATE miniz::miniz)

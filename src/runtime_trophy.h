@@ -25,6 +25,9 @@ int runtime_trophy_take_event(RuntimeTrophyEvent *out);
 /* Log failures return success to the game; the snapshot carries the UI error. */
 int32_t runtime_trophy_unlock(int id,int32_t *platinum);
 
+/* Publish an unlock already durably recorded by the co-op recipient; no network echo. */
+void runtime_trophy_recorded(int id,int64_t timestamp);
+
 /* PS4 ABI used by the local trophy service. */
 typedef struct {
     uint64_t size; int32_t trophy_id,grade,group_id;

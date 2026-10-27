@@ -8,6 +8,7 @@
  * Metadata lives beside the directory so the guest's own files are untouched. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_save_txn.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,7 +65,7 @@ _Static_assert(sizeof(SearchCond)==64 && sizeof(SearchResult)==56,"dir name sear
 static HostMutex lock = HOST_MUTEX_INIT;
 static int initialized;
 static char title_id[16]="UNKNOWN";
-static struct { int used; char host[700], meta[700]; } slots[SLOTS];
+static struct { int used; char host[700], mounted[1024], meta[700]; } slots[SLOTS];
 static char memory_path[720];
 static uint64_t memory_size;
 static size_t mounts_done, memory_writes;
@@ -111,6 +112,8 @@ static void bloodborne_sound_hack(void) {
 
 void runtime_savedata_configure(const char *title) {
     if (title && *title) snprintf(title_id,sizeof(title_id),"%s",title);
+    char saves[700]; runtime_savedata_dir(saves,sizeof(saves));
+    runtime_save_txn_configure(runtime_coop_enabled(),saves,title_id);
     bloodborne_sound_hack();
 }
 
@@ -167,6 +170,8 @@ static ABI int32_t save_terminate(void) {
     host_lock(&lock);
     for (int i=0;i<SLOTS;++i) if (slots[i].used) {
         char point[16]; snprintf(point,sizeof(point),"/savedata%d",i);
+        /* Termination abandons an incomplete save; it never manufactures a reward receipt. */
+        runtime_save_txn_umount(slots[i].mounted,0);
         runtime_file_unmount(point);
         slots[i].used=0;
     }
@@ -193,13 +198,23 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     if (slot<0) { host_unlock(&lock); return ERR_MOUNT_FULL; }
     if (!exists && (make_dirs(host) || make_dirs(meta))) { host_unlock(&lock); return ERR_INTERNAL; }
     if (!exists) { Param empty={0}; write_param(meta,&empty); }
+    char mounted[1024];
+    int txn_result=runtime_save_txn_mount(host,!(mode & MODE_RDONLY),mounted,sizeof(mounted));
+    if(getenv("BB_SAVE_TRACE")) printf("Runtime: native save mount mode=%u transaction=%d\n",mode,txn_result);
+    if (txn_result) {
+        host_unlock(&lock); return ERR_INTERNAL;
+    }
     slots[slot].used=1;
     snprintf(slots[slot].host,sizeof(slots[slot].host),"%s",host);
+    snprintf(slots[slot].mounted,sizeof(slots[slot].mounted),"%s",mounted);
     snprintf(slots[slot].meta,sizeof(slots[slot].meta),"%s",meta);
     snprintf(result->point.data,sizeof(result->point.data),"/savedata%d",slot);
     result->required_blocks=0;
     result->status=exists ? 0 : 1; /* CREATED */
-    runtime_file_mount(result->point.data,host);
+    if (runtime_file_mount(result->point.data,mounted)) {
+        runtime_save_txn_umount(mounted,0); slots[slot].used=0;
+        host_unlock(&lock); return ERR_INTERNAL;
+    }
     ++mounts_done;
     host_unlock(&lock);
 
@@ -229,9 +244,15 @@ static ABI int32_t save_umount(const MountPoint *point) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     host_lock(&lock);
     int slot=slot_of(point);
-    if (slot>=0) { runtime_file_unmount(point->data); slots[slot].used=0; }
+    int committed=0;
+    if (slot>=0) {
+        committed=runtime_save_txn_umount(slots[slot].mounted,1);
+        if(getenv("BB_SAVE_TRACE")) printf("Runtime: native save umount transaction=%d\n",committed);
+        if (committed==-EBUSY) { host_unlock(&lock); return ERR_BAD_MOUNTED; }
+        runtime_file_unmount(point->data); slots[slot].used=0;
+    }
     host_unlock(&lock);
-    return slot>=0 ? 0 : ERR_NOT_FOUND;
+    return slot<0 ? ERR_NOT_FOUND : committed ? ERR_INTERNAL : 0;
 }
 
 static ABI int32_t save_set_param(const MountPoint *point, uint32_t type, const void *buffer, uint64_t size) {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: the two-process split of the GPU library (bbport_split.h).
 #include "bbport_split.h"
+#include "bbport_coop_ui.h"
 
 #include <atomic>
 #include <chrono>
@@ -191,6 +192,12 @@ void StartEventDispatcher() {
                 break;
             case BBGPU_EV_RESTART:
                 runtime_restart(); // execs run.sh; the host follows bb-probe's exec and exits
+                break;
+            case BBGPU_EV_COOP_COMMAND:
+                BbCoopOverlay::Receive(r);
+                break;
+            case BBGPU_EV_COOP_MODEL:
+                BbCoopOverlay::ReceiveModel(r);
                 break;
             default:
                 std::printf("GPU split: unknown event %u\n", r->type);

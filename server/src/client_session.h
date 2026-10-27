@@ -1,0 +1,309 @@
+// SPDX-FileCopyrightText: Copyright 2019-2026 rpcsn Project
+// SPDX-FileCopyrightText: Copyright 2026 shadNet Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+#pragma once
+#include <functional>
+#include <memory>
+#include <QAtomicInt>
+#include <QByteArray>
+#include <QHash>
+#include <QList>
+#include <QObject>
+#include <QPair>
+#include <QReadWriteLock>
+#include <QSet>
+#include <QSslSocket>
+#include <QStringList>
+#include <QTcpSocket>
+#include <database.h>
+#include "config.h"
+#include "http_gate.h"
+#include "matching_types.h"
+#include "protocol.h"
+#include "score_cache.h"
+#include "score_db.h"
+#include "score_files.h"
+#include "stream_extractor.h"
+
+// Shared state visible to all sessions (thread-safe with locks)
+struct SharedState {
+    ConfigManager* config;
+    ScoreCache* scoreCache = nullptr;
+    ScoreFiles* scoreFiles = nullptr;
+    // Connected clients: userId to (npid, channel write function)
+    mutable QReadWriteLock clientsLock;
+    struct ClientEntry {
+        QString npid;
+        std::function<void(QByteArray)> send;
+        std::function<void(uint64_t)> resetMatchingRoomState;
+        uint32_t matchingContextId = 0;
+        // Online friends for this session
+        // Protected by clientsLock (same lock as the outer clients map).
+        QHash<int64_t, QString> friends;
+        // Presence detail published via the WebAPI presence PUTs (gameStatus /
+        // inGamePresence)
+        QString gameStatus;                          // default gameStatus
+        QString gameData;                            // base64 free-form data
+        QHash<QString, QString> localizedGameStatus; // npLanguage
+        QString npTitleId;                           // title context
+        QString titleName;                           // title context
+        QString platform = QStringLiteral("PS4");
+        qint64 presenceUpdatedAt = 0;
+        bool appearOffline = false;
+        // Sticky notificationWithData: once a presence PUT sets notificationWithData=true,
+        // game-status/game-data update events carry the current status/data until the user
+        // ends the game, goes offline, or DELETEs game data.
+        bool notifyWithData = false;
+    };
+    QHash<int64_t, ClientEntry> clients;
+    QHash<QString, int64_t> npidToUserId; // reverse lookup, protected by clientsLock
+
+    // Matchmaking shared state
+    MatchingSharedState matching;
+
+    // The players of each address's signed-in links, for the HTTP ports (http_gate.h).
+    HttpGate::Gate httpGate;
+
+    // Live usage stats for the read-only stats HTTP server
+    mutable QReadWriteLock usageLock;
+    int usageTotalOnline = 0;                // authenticated sessions currently online
+    QHash<QString, int> usageGameUsers;      // comId -> active session count
+    QHash<int64_t, QString> usageClientGame; // userId -> last-seen comId
+
+    void UsageOnLogin() {
+        QWriteLocker lk(&usageLock);
+        ++usageTotalOnline;
+    }
+    void UsageOnLogout(int64_t userId) {
+        QWriteLocker lk(&usageLock);
+        if (usageTotalOnline > 0)
+            --usageTotalOnline;
+        auto it = usageClientGame.find(userId);
+        if (it != usageClientGame.end()) {
+            auto g = usageGameUsers.find(it.value());
+            if (g != usageGameUsers.end() && --g.value() <= 0)
+                usageGameUsers.erase(g);
+            usageClientGame.erase(it);
+        }
+    }
+    // Returns true when the user's comId was newly set or changed (false if unchanged /
+    // empty), so callers can react to the transition (e.g. emit a gameTitleInfo presence
+    // update once same-comId grouping becomes possible).
+    bool UsageTouchGame(int64_t userId, const QString& comId) {
+        if (comId.isEmpty())
+            return false;
+        QWriteLocker lk(&usageLock);
+        auto it = usageClientGame.find(userId);
+        if (it != usageClientGame.end()) {
+            if (it.value() == comId)
+                return false;
+            auto old = usageGameUsers.find(it.value());
+            if (old != usageGameUsers.end() && --old.value() <= 0)
+                usageGameUsers.erase(old);
+            it.value() = comId;
+        } else {
+            usageClientGame.insert(userId, comId);
+        }
+        ++usageGameUsers[comId];
+        return true;
+    }
+    // Session Manager (Session/Invitation Web API). Sessions are created+joined via
+    // POST /v1/sessions and live here keyed by sessionId ("001-<uuid>").
+    mutable QReadWriteLock sessionsLock;
+    struct SessionMember {
+        int64_t userId = 0;
+        QString npid;
+        QString platform;
+        int index = 0; // which of the member's 64 session slots this occupies
+        int priority = 0;
+        qint64 joinedAt = 0;
+    };
+    struct Session {
+        QString sessionId;
+        int64_t ownerUserId = 0;
+        QString ownerNpid;
+        QString sessionName;
+        QString sessionStatus;
+        QHash<QString, QString> localizedSessionNames;  // npLanguage -> name
+        QHash<QString, QString> localizedSessionStatus; // npLanguage -> status
+        QString sessionType;                            // "owner-bind" | "owner-migration"
+        QString sessionPrivacy;                         // "private" | "public"
+        int sessionMaxUser = 0;
+        QStringList availablePlatforms;
+        QString npTitleId;
+        bool sessionLockFlag = false;
+        bool sendNotificationFlag = false;
+        QByteArray sessionImage;          // JPEG (<=160 KiB)
+        QByteArray sessionData;           // <=1 MiB
+        QByteArray changeableSessionData; // <=1 KiB
+        QList<SessionMember> members;
+        qint64 createdAt = 0;
+    };
+    QHash<QString, Session> sessions;
+
+    // Invitations linked to a session (POST /v1/sessions/<id>/invitations). One record per
+    // recipient, keyed by a server-generated invitationId ("002-<uuid>"); the sender gets no id
+    // back (POST returns 204), so ids are delivered to recipients out of band. Guarded by the
+    // same sessionsLock as `sessions` (invitations and sessions are one consistency domain, so the
+    // private-session disclosure gate can consult both without a second lock).
+    struct Invitation {
+        QString invitationId;
+        QString sessionId; // the session this invites to (must exist when sent)
+        int64_t fromUserId = 0;
+        QString fromNpid;
+        int64_t toUserId = 0; // single recipient (one record per invitee)
+        QString toNpid;
+        QString message;
+        QStringList availablePlatforms; // snapshot of the session's platforms at send time
+        QByteArray invitationData;      // optional, <=1 MiB; if absent, GET returns session data
+        bool hasInvitationData = false;
+        qint64 createdAt = 0;
+        qint64 updatedAt = 0;  // bumped when the invitation is modified (e.g., marked used)
+        qint64 validUntil = 0; // 0 = no expiry policy yet
+        bool used = false;
+    };
+    QHash<QString, Invitation> invitations;
+};
+
+// Per-connection session info
+struct ClientInfo {
+    int64_t userId = 0;
+    QString npid;
+    QString avatarUrl;
+    QString token;
+    bool admin = false;
+    bool statAgent = false;
+    bool banned = false;
+};
+
+class ClientSession : public QObject {
+    Q_OBJECT
+public:
+    explicit ClientSession(QTcpSocket* socket, SharedState* shared, const QString& dbPath,
+                           bool isSsl = true, QObject* parent = nullptr);
+    ~ClientSession();
+
+    void Start();
+    void CleanupOnDisconnect();
+    void SendPacket(const QByteArray& pkt);
+    static bool IsValidNpid(const QString& npid);
+    Database& db() {
+        return *m_db;
+    }
+
+    // commands cmd_account.cpp
+    ErrorType CmdCreate(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdLogin(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdDelete(StreamExtractor& data);
+
+    // commands cmd_friend.cpp
+    ErrorType CmdAddFriend(StreamExtractor& data);
+    ErrorType CmdRemoveFriend(StreamExtractor& data);
+    ErrorType CmdAddBlock(StreamExtractor& data);
+    ErrorType CmdRemoveBlock(StreamExtractor& data);
+    ErrorType CmdSetAppearOffline(StreamExtractor& data);
+
+    // commands cmd_score.cpp
+    ErrorType CmdGetBoardInfos(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdRecordScore(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdRecordScoreData(StreamExtractor& data);
+    ErrorType CmdGetScoreData(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetScoreRange(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetScoreFriends(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetScoreNpid(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetScoreAccountId(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetScoreGameDataByAccId(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetToken(QByteArray& reply);
+    ErrorType CmdGetServerFeatures(QByteArray& reply);
+
+    // commands cmd_matching.cpp
+    ErrorType CmdContextStart(StreamExtractor& data);
+    ErrorType CmdContextStop(StreamExtractor& data);
+    ErrorType CmdCreateRoom(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdJoinRoom(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdLeaveRoom(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdSearchRoom(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetRoomDataExternalList(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetRoomMemberDataExternalList(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetUserInfoList(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdSetUserInfo(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdSendRoomMessage(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdRequestSignalingInfos(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdSetRoomDataInternal(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdSetRoomDataExternal(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdKickoutRoomMember(StreamExtractor& data, QByteArray& reply);
+    ErrorType CmdGetWorldInfoList(StreamExtractor& data, QByteArray& reply);
+
+signals:
+    void Disconnected();
+
+private slots:
+    void OnReadyRead();
+    void OnDisconnected();
+
+private:
+    // The fuzz tests (tests/fuzz) feed bytes and sign in without a socket.
+    friend struct ClientSessionFuzz;
+    // Bytes the socket read: every whole packet in them, and the rest kept for the next.
+    void Take(const QByteArray& bytes);
+    void ProcessPacket(uint16_t command, uint64_t packetId, const QByteArray& payload);
+    ErrorType DispatchCommand(CommandType cmd, StreamExtractor& se, QByteArray& reply);
+
+    // Notification helpers
+    void SendNotification(NotificationType type, const QByteArray& payload, int64_t targetUserId);
+    void SendSelfNotification(NotificationType type, const QByteArray& payload);
+
+public:
+    // Static packet builders (no instance state). Public so WebAPI fan-out sites can build
+    // notification / push packets without a ClientSession instance.
+    static QByteArray BuildNotification(NotificationType type, const QByteArray& payload);
+    static QByteArray BuildWebApiPushPayload(const QString& npServiceName, quint32 npServiceLabel,
+                                             const QString& dataType, const QByteArray& data,
+                                             const QString& fromNpid, const QString& toNpid,
+                                             const QList<QPair<QString, QString>>& extdData = {});
+
+private:
+    // Push a generic NP WebApi push event to one online user
+    void EmitPresenceGameTitleInfo();
+    void PushWebApiEvent(const QString& npServiceName, quint32 npServiceLabel,
+                         const QString& dataType, const QByteArray& data, const QString& fromNpid,
+                         const QString& toNpid, int64_t targetUserId,
+                         const QList<QPair<QString, QString>>& extdData = {});
+
+    // Matching helpers (cmd_matching.cpp)
+    using MatchingNotificationBuilder = std::function<QByteArray(uint32_t)>;
+    void SendMatchingNotification(const MatchingNotificationBuilder& buildPacket,
+                                  const QString& targetNpid);
+    void NotifyRoomMembers(const MatchingNotificationBuilder& buildPacket,
+                           const QString& matchingKey, uint64_t roomId,
+                           const QString& excludeNpid = {});
+    void SendRoomMemberEvent(uint64_t roomId, uint32_t event, uint32_t cause,
+                             const RoomMember& member, const QString& excludeNpid = {});
+    void SendRoomEventToTarget(uint64_t roomId, uint32_t event, uint32_t cause, int32_t errorCode,
+                               const QString& targetNpid);
+    void DoLeaveRoom(uint64_t roomId);
+    void CleanupMatchingOnDisconnect();
+    void ResetMatchingRoomState(uint64_t roomId);
+    void SendRoomOwnerChanged(uint64_t roomId, uint16_t previousOwner, const RoomMember& newOwner);
+    void GetSelfSignalingAddr(QString& addr, uint16_t& port) const;
+
+    QTcpSocket* m_socket;
+    bool m_isSsl = true;
+    SharedState* m_shared;
+    bool m_authenticated = false;
+    QByteArray m_readBuf;
+    std::unique_ptr<Database> m_db;
+    ClientInfo m_info;
+    MatchingSessionState m_matching;
+};
+
+inline bool ClientSession::IsValidNpid(const QString& npid) {
+    if (npid.size() < 3 || npid.size() > 16)
+        return false;
+    for (const QChar& c : npid)
+        if (!c.isLetterOrNumber() && c != '-' && c != '_')
+            return false;
+    if (npid == "DeletedUser")
+        return false;
+    return true;
+}

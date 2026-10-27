@@ -101,6 +101,21 @@ fetch_plain() { # name url tag commit: without submodules (OpenSSL's fuzz corpor
         pinned "$dir" "$1" "$4"
     fi
 }
+fetch_commit() { # name url commit: used by the co-op hook generator
+    local dir=$SRC/$1
+    if [[ ! -d $dir ]]; then
+        mkdir -p "$dir"
+        git -C "$dir" init -q
+        git -C "$dir" fetch -q --depth=1 "$2" "$3"
+        git -C "$dir" checkout -q --detach FETCH_HEAD
+        git -C "$dir" submodule update --init --recursive --depth=1
+    fi
+    local got; got=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo none)
+    if [[ $got != "$3" ]]; then
+        echo "$1: existing checkout is $got, expected $3; preserve it and choose a clean dependency directory." >&2
+        return 1
+    fi
+}
 stamp() { [[ -f $PREFIX/.built-$1 ]]; }
 done_stamp() { touch "$PREFIX/.built-$1"; }
 cmake_dep() { # name srcsubdir args...
@@ -140,6 +155,17 @@ cmake_dep SPIRV-Cross . -DSPIRV_CROSS_SHARED=OFF -DSPIRV_CROSS_STATIC=ON \
 # system's. protoc runs under Rosetta; deps/host/bin/protoc is the same protoc built arm64,
 # which gpu/bbnet uses when it is there.
 if [[ $ARCH == x86_64 ]]; then
+    fetch_commit Zydis https://github.com/zyantific/zydis.git "$ZYDIS_COMMIT"
+    fetch_commit xbyak https://github.com/herumi/xbyak.git "$XBYAK_COMMIT"
+    # Zydis' installed CMake package requires Zycore's package and archive as well.
+    cmake_dep Zycore ../Zydis/dependencies/zycore -DZYCORE_BUILD_SHARED_LIB=OFF \
+        -DZYCORE_BUILD_EXAMPLES=OFF -DZYCORE_BUILD_TESTS=OFF
+    cmake_dep Zydis . -DZYDIS_BUILD_SHARED_LIB=OFF -DZYDIS_BUILD_TOOLS=OFF -DZYDIS_BUILD_EXAMPLES=OFF
+    if ! stamp xbyak; then
+        mkdir -p "$PREFIX/include/xbyak"
+        cp "$SRC/xbyak/xbyak/"*.h "$PREFIX/include/xbyak/"
+        done_stamp xbyak
+    fi
     fetch_plain protobuf https://github.com/protocolbuffers/protobuf.git $PROTOBUF_TAG $PROTOBUF_COMMIT
     fetch_plain openssl https://github.com/openssl/openssl.git $OPENSSL_TAG $OPENSSL_COMMIT
     fetch_plain miniupnp https://github.com/miniupnp/miniupnp.git $MINIUPNP_TAG $MINIUPNP_COMMIT

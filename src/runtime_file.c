@@ -6,6 +6,7 @@
  * Paths containing ".." components are rejected rather than normalized. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_save_txn.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -173,6 +174,7 @@ static int game_path(const char *p) {
 volatile int runtime_bench_map_opened;
 /* All operations return >=0 or -(host errno); wrappers adapt the convention. */
 static int64_t do_open(const char *guest,int flags,int mode) {
+    runtime_coop_file_opened(guest);
     if (game_path(guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
     if (!runtime_bench_map_opened && strstr(guest,"/map/m")) runtime_bench_map_opened=1;
     char path[1024];
@@ -180,6 +182,8 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     int host=-1;
     Listing *dir=NULL;
     struct stat s;
+    if(e) return -e;
+    if((flags&(3|0x8|0x200|0x400|0x800)) && (e=runtime_save_txn_write_allowed(path))) return e;
     if (host < 0) {
         host=open(path,host_flags(flags),mode ? mode : 0644);
         if (host<0) {
@@ -199,6 +203,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     files[fd]=(File){.used=1,.host=host,.dir=dir};
     snprintf(files[fd].path,sizeof(files[fd].path),"%s",guest);
     ++opens;
+    runtime_save_txn_file_opened(host,path,(flags&3)!=0);
     pthread_mutex_unlock(&lock);
     CHECK_LOW_ADDR((uintptr_t)fd);
     if (audio_trace() && strstr(guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",guest,fd,(long long)s.st_size);
@@ -220,7 +225,10 @@ static int64_t do_close(int fd) {
     pthread_mutex_lock(&lock);
     File *f=get(fd);
     if (!f) { pthread_mutex_unlock(&lock); return -EBADF; }
-    close(f->host); free_listing(f->dir);
+    const int host=f->host;
+    const int error=close(host) ? errno : 0;
+    runtime_save_txn_file_closed(host,error);
+    free_listing(f->dir);
     *f=(File){0};
     pthread_mutex_unlock(&lock);
     return 0;
@@ -318,8 +326,11 @@ static int64_t do_pread(int fd,void *buffer,uint64_t size,int64_t offset) {
 static int64_t do_write(int fd,const void *buffer,uint64_t size) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
+    const int64_t offset=lseek(h,0,SEEK_CUR);
     ssize_t n=write(h,buffer,size);
-    if (n<0) return -errno;
+    const int error=errno;
+    runtime_save_txn_file_written(h,offset,size,n<0 ? -error : n);
+    if (n<0) return -error;
     __atomic_add_fetch(&writes,1,__ATOMIC_RELAXED);
     return n;
 }
@@ -327,7 +338,9 @@ static int64_t do_pwrite(int fd,const void *buffer,uint64_t size,int64_t offset)
     int h=host_fd(fd);
     if (h<0) return -EBADF;
     ssize_t n=pwrite(h,buffer,size,offset);
-    return n<0 ? -errno : n;
+    const int error=errno;
+    runtime_save_txn_file_written(h,offset,size,n<0 ? -error : n);
+    return n<0 ? -error : n;
 }
 static int64_t do_lseek(int fd,int64_t offset,int whence) {
     File *f=get(fd);
@@ -392,7 +405,9 @@ static int64_t path_op(const char *guest,int op,int mode) {
     char path[1024];
     int e=translate(guest,path,sizeof(path));
     if (e) return -e;
+    if((e=runtime_save_txn_write_allowed(path))) return e;
     int r= op==0 ? mkdir(path,mode ? mode : 0755) : op==1 ? rmdir(path) : unlink(path);
+    if(!r && op==2) runtime_save_txn_path_mutated(path);
     return r ? -errno : 0;
 }
 static int64_t do_rename(const char *from,const char *to) {
@@ -401,19 +416,27 @@ static int64_t do_rename(const char *from,const char *to) {
     int e=translate(from,a,sizeof(a));
     if (!e) e=translate(to,b,sizeof(b));
     if (e) return -e;
-    return rename(a,b) ? -errno : 0;
+    if((e=runtime_save_txn_write_allowed(a)) || (e=runtime_save_txn_write_allowed(b))) return e;
+    if(rename(a,b)) return -errno;
+    runtime_save_txn_path_mutated(a);runtime_save_txn_path_mutated(b);
+    return 0;
 }
 static int64_t do_ftruncate(int fd,int64_t length) {
     int h=host_fd(fd);
     if (h<0) return -EBADF;
-    return ftruncate(h,length) ? -errno : 0;
+    const int result=ftruncate(h,length) ? -errno : 0;
+    runtime_save_txn_file_truncated(h,length,result);
+    return result;
 }
 static int64_t do_truncate(const char *guest,int64_t length) {
     if (game_path(guest)) return -EROFS;
     char path[1024];
     int e=translate(guest,path,sizeof(path));
     if (e) return -e;
-    return truncate(path,length) ? -errno : 0;
+    if((e=runtime_save_txn_write_allowed(path))) return e;
+    if(truncate(path,length)) return -errno;
+    runtime_save_txn_path_mutated(path);
+    return 0;
 }
 static int64_t do_fsync(int fd) { int h=host_fd(fd); if (h<0) return -EBADF; return fsync(h) ? -errno : 0; }
 static int64_t do_access(const char *guest,int mode) {

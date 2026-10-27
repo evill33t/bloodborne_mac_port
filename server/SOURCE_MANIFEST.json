@@ -1,0 +1,1145 @@
+{
+  "repository": "https://github.com/lKaniel/bloodborne-server",
+  "upstream_base": "8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1",
+  "deployed_source_commit": "9e60cec70e589a199cf86771de4844fe556562d4",
+  "files": [
+    {
+      "path": "backend/README.txt",
+      "source": "backend/README.txt",
+      "sha256": "91f187a123c92e8e506c3d7af8d043bb54f55978b615d4c29dafe3114cd6482c"
+    },
+    {
+      "path": "backend/bb_dummy_server.py",
+      "source": "backend/bb_dummy_server.py",
+      "sha256": "bf56aa8965214b4957cc27c72a1522f8718c63ae5ba8d8c39329fe113f7a759b"
+    },
+    {
+      "path": "backend/show_content.py",
+      "source": "backend/show_content.py",
+      "sha256": "589ba937993831c63ef783e23eb78e2e63d01d8faf6b0b03f8096a4a502350d3"
+    },
+    {
+      "path": "backend/ss_info_template.xml",
+      "source": "backend/ss_info_template.xml",
+      "sha256": "cafc560be0cb47738acb3cd4becbb45a6518bb55e135df9e22b2f1efd6b75e5d"
+    },
+    {
+      "path": "backend/tests/test_parity.py",
+      "source": "backend/tests/test_parity.py",
+      "sha256": "65835eb41f811fd81101f886cfe6b60cd75cf153c5617e763b5b134b9096a444"
+    },
+    {
+      "path": "backend/tests/test_services.py",
+      "source": "backend/tests/test_services.py",
+      "sha256": "66c72a0e2daa34fe36e7ec7cc5fc620c3dafac75a1791c6442cae04e1f8eb011"
+    },
+    {
+      "path": "docs/DEPLOY.md",
+      "source": "docs/DEPLOY.md",
+      "sha256": "fcb62874dc7cc130c12a4fa59d94c5a1ab455397a8c420ede6a3e9022809d474"
+    },
+    {
+      "path": "docs/HOSTED_SERVER.md",
+      "source": "docs/HOSTED_SERVER.md",
+      "sha256": "cd108f51c0f6c049732fed2f8229b037c5207f1af9d07089e01f27ccfb4d6c24"
+    },
+    {
+      "path": "docs/SCALING.md",
+      "source": "docs/SCALING.md",
+      "sha256": "20295ff692ddc6f27242fffd3d31e188a63395bc0e8ee462641ebd5c96d4eff5"
+    },
+    {
+      "path": "docs/invasions/COVENANT_REWARDS_EVIDENCE.json",
+      "source": "docs/invasions/COVENANT_REWARDS_EVIDENCE.json",
+      "sha256": "447a542bebe289b8ec69fbd7061d01432af4a59909384aa7d66585e1f8fba1ba"
+    },
+    {
+      "path": "docs/invasions/GAME_SIDE_PLAN.md",
+      "source": "docs/invasions/GAME_SIDE_PLAN.md",
+      "sha256": "07c5e517fdb9e309e3e00970f0acb3484df5f3e5ff10095fc7899c656b60bbe2"
+    },
+    {
+      "path": "docs/invasions/PHASE0_CAPTURE.md",
+      "source": "docs/invasions/PHASE0_CAPTURE.md",
+      "sha256": "a9edb34bb443b0900ab4bd9f987b431a21ac9dd494124e0ac89254378b0a8e96"
+    },
+    {
+      "path": "server/.github/workflows/build.yml",
+      "source": "server/.github/workflows/build.yml",
+      "sha256": "129f874785203bd60ee800fd394d144f228e9c19582d9e8973975dd53b6868b6"
+    },
+    {
+      "path": "server/.gitignore",
+      "source": "server/.gitignore",
+      "sha256": "0689442f27b6c618af13c1970b35c17e7dbde88c3259692dff47da1498e741a8",
+      "adapted_sha256": "9036addcaa84222d4aad7da463739befcf7cb2bd574c1573553642c7de1664be"
+    },
+    {
+      "path": "server/CMakeLists.txt",
+      "source": "server/CMakeLists.txt",
+      "sha256": "bf8ada7ee76d819cd11b983dd8793286ad68c737a671e61cc9242ee70772332c"
+    },
+    {
+      "path": "server/CMakePresets.json",
+      "source": "server/CMakePresets.json",
+      "sha256": "bdc5969a3b784bc0e583d65facda0aabf91918ce58b4778af3af67b61a30a5d3"
+    },
+    {
+      "path": "server/CMakeUserPresets.json",
+      "source": "server/CMakeUserPresets.json",
+      "sha256": "cdb242a86a98b8033703902e7ad85c7e01d7643864d3de80ec1a8763f35daaee"
+    },
+    {
+      "path": "server/LICENSES/BSD-2-Clause.txt",
+      "source": "server/LICENSES/BSD-2-Clause.txt",
+      "sha256": "017b5ee48f680e82cba79141c7895a1f02b856df2512225f5c427fe36765ef0b"
+    },
+    {
+      "path": "server/LICENSES/CC0-1.0.txt",
+      "source": "server/LICENSES/CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    },
+    {
+      "path": "server/LICENSES/GPL-2.0-or-later.txt",
+      "source": "server/LICENSES/GPL-2.0-or-later.txt",
+      "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+    },
+    {
+      "path": "server/README.md",
+      "source": "server/README.md",
+      "sha256": "db0c564e7befd38a6c582455b3ecd6534e3e11fbac44ca0d5438663310efc819",
+      "adapted_sha256": "c3fe93a9159911406a3e700dbea2a9525808f5215a9beef01480e673a2ae6369"
+    },
+    {
+      "path": "server/REUSE.toml",
+      "source": "server/REUSE.toml",
+      "sha256": "87d590fb941a67b0b218e3fc6bb12810ca81a263639f716ba9fc164adfbb856f"
+    },
+    {
+      "path": "server/clientsample/.clang-format",
+      "source": "server/clientsample/.clang-format",
+      "sha256": "023dc6039b9bebabaa9703aff3e390cddf39ce456faf820b40dcb17b31e21f82"
+    },
+    {
+      "path": "server/clientsample/CMakeLists.txt",
+      "source": "server/clientsample/CMakeLists.txt",
+      "sha256": "6750cb214cf90a02f7fcd39b5d552f677eab398b0a5c1fcaac913e4ab42e73a3"
+    },
+    {
+      "path": "server/clientsample/CMakeSettings.json",
+      "source": "server/clientsample/CMakeSettings.json",
+      "sha256": "4a20fe6c8731583cf58cf5f99729d345296e57b23e90d7192011161a3c1dfa35"
+    },
+    {
+      "path": "server/clientsample/client.cpp",
+      "source": "server/clientsample/client.cpp",
+      "sha256": "ef03858dc5adb864e7c10d0318b52ba9611722a58246b5f900644744f6ad3c87"
+    },
+    {
+      "path": "server/clientsample/client.h",
+      "source": "server/clientsample/client.h",
+      "sha256": "3ed4f7d6dd68715001714d3fe488e9b3b37bcb457968d1a69d846cc181201011"
+    },
+    {
+      "path": "server/clientsample/connection.cpp",
+      "source": "server/clientsample/connection.cpp",
+      "sha256": "e899798f22fb250bce34f5cdb6aca0f331e467b0958e08d93f0d2ecedafa1a9c"
+    },
+    {
+      "path": "server/clientsample/connection.h",
+      "source": "server/clientsample/connection.h",
+      "sha256": "2e80cb67de79b8aae79738ad9b3f24eefecc70df1f27ac5ca617d5401c5eb576"
+    },
+    {
+      "path": "server/clientsample/main.cpp",
+      "source": "server/clientsample/main.cpp",
+      "sha256": "a851558c2ea929473b8e1381fe949c5c5f5518480c45ab5ee46122c9605d6409"
+    },
+    {
+      "path": "server/clientsample/packet.h",
+      "source": "server/clientsample/packet.h",
+      "sha256": "7866fb5414a93162afebb120f775d365ebca2ed2ab51a145e675695b9e3df7dd"
+    },
+    {
+      "path": "server/clientsample/samples/block-add.bat",
+      "source": "server/clientsample/samples/block-add.bat",
+      "sha256": "a88d8ef0acbf63e355cc85022d1ad2beb1df0829b0ffe0ae6dc62372008d67c6"
+    },
+    {
+      "path": "server/clientsample/samples/block-remove.bat",
+      "source": "server/clientsample/samples/block-remove.bat",
+      "sha256": "a07d3e554baa2ccbd500a48142e7867fcb70264724a1c4f4070d3fed69f44b54"
+    },
+    {
+      "path": "server/clientsample/samples/friend-add.bat",
+      "source": "server/clientsample/samples/friend-add.bat",
+      "sha256": "1fd98e3f16e626ef4421354c3c6bdb6be5edb5fd865628e57f8eb7d1e4b61e53"
+    },
+    {
+      "path": "server/clientsample/samples/friend-remove.bat",
+      "source": "server/clientsample/samples/friend-remove.bat",
+      "sha256": "60bfa654d2cbec1bd2918d5cc960d8400db4019e0a2000919b9808492be5bc5f"
+    },
+    {
+      "path": "server/clientsample/samples/login.bat",
+      "source": "server/clientsample/samples/login.bat",
+      "sha256": "262a32458264f09b8eb721d4c89ef7c0e4fd6b6a6453cf4874c0d331fdbc4150"
+    },
+    {
+      "path": "server/clientsample/samples/register.bat",
+      "source": "server/clientsample/samples/register.bat",
+      "sha256": "401a3360922034568bfe4514cb10823317375558126290ebb2ac491fcce95b6c"
+    },
+    {
+      "path": "server/clientsample/samples/score-board.bat",
+      "source": "server/clientsample/samples/score-board.bat",
+      "sha256": "b67dc1f635fdcb982dd3e26c99bf603f46f21b5f0e9275c210ca3b8026fb2471"
+    },
+    {
+      "path": "server/clientsample/samples/score-get-accountid.bat",
+      "source": "server/clientsample/samples/score-get-accountid.bat",
+      "sha256": "cd2c0f01885adfaec20125de56794da10cabc35e13f319021b2717645ca8bb7e"
+    },
+    {
+      "path": "server/clientsample/samples/score-get-data-accountid.bat",
+      "source": "server/clientsample/samples/score-get-data-accountid.bat",
+      "sha256": "0acaa016de5f54e610501131593c1b032e4b4740a75e8f37ca3cd27b2c7c760d"
+    },
+    {
+      "path": "server/clientsample/samples/score-get-npid.bat",
+      "source": "server/clientsample/samples/score-get-npid.bat",
+      "sha256": "5d1954b16a4a759c2ad92a6b2da5879939f270cb06a303349dfd5265a53bf612"
+    },
+    {
+      "path": "server/clientsample/samples/score-range.bat",
+      "source": "server/clientsample/samples/score-range.bat",
+      "sha256": "d7264ce41adb291e991ad7c0fb2a2220239f7608de08144a62c98c37a8565951"
+    },
+    {
+      "path": "server/clientsample/samples/score-record.bat",
+      "source": "server/clientsample/samples/score-record.bat",
+      "sha256": "f6ae6f3c10b0c7971d5193c80aa56c7476a5bcc7ef597ff64a4aa2cad7e095ef"
+    },
+    {
+      "path": "server/clientsample/samples/setup-test-accounts.bat",
+      "source": "server/clientsample/samples/setup-test-accounts.bat",
+      "sha256": "8a1a3f3c18cfc1847e1e56c9162c39abd90b0e0e240695e62534c7820e22ae1d"
+    },
+    {
+      "path": "server/clientsample/samples/walkthrough-block.bat",
+      "source": "server/clientsample/samples/walkthrough-block.bat",
+      "sha256": "9898a3d2111beecb4c4682325c2a6d1f5c932d351ffa77bd81a3b2391644281d"
+    },
+    {
+      "path": "server/clientsample/samples/walkthrough-friends.bat",
+      "source": "server/clientsample/samples/walkthrough-friends.bat",
+      "sha256": "2808b72584bfe9cc5706bce9fd1895c26ac0f1a95e3c82a91202f3ff7fb349e7"
+    },
+    {
+      "path": "server/clientsample/samples/walkthrough-scores-accountid.bat",
+      "source": "server/clientsample/samples/walkthrough-scores-accountid.bat",
+      "sha256": "14a6477aa6538a88c9cb3bc4b55c5f6241e731dc9efe59784f63d1ca0c4fa3b2"
+    },
+    {
+      "path": "server/clientsample/samples/walkthrough-scores.bat",
+      "source": "server/clientsample/samples/walkthrough-scores.bat",
+      "sha256": "74cd6922ef845feab81582125aa9647286f2d8c77cb86db85e5dae001beeb8c8"
+    },
+    {
+      "path": "server/clientsample/shadnet.proto",
+      "source": "server/clientsample/shadnet.proto",
+      "sha256": "a983bf20f0da510d9c4e4ecb8aa9598dada7d6b14a349cb527a3665f7fd14d01"
+    },
+    {
+      "path": "server/clientsample/types.h",
+      "source": "server/clientsample/types.h",
+      "sha256": "1ab1f0c5d0a8b9b1ebf268a1cbaba63e92c339ba6fb629d5fc9ec836b7dfc201"
+    },
+    {
+      "path": "server/coop/.clang-format",
+      "source": "server/coop/.clang-format",
+      "sha256": "023dc6039b9bebabaa9703aff3e390cddf39ce456faf820b40dcb17b31e21f82"
+    },
+    {
+      "path": "server/coop/build_fingerprint.h",
+      "source": "server/coop/build_fingerprint.h",
+      "sha256": "298a8d9a1d3e8e4109e3d4e1aa90927927878dff2b6ad4576ba9c08d35eca857"
+    },
+    {
+      "path": "server/coop/coop.proto",
+      "source": "server/coop/coop.proto",
+      "sha256": "e18ff1fccc0fadb9d819c5981b7193b68f7057ed38e74dd3344310218a3faadc"
+    },
+    {
+      "path": "server/coop/coop_messages.cpp",
+      "source": "server/coop/coop_messages.cpp",
+      "sha256": "c96580bcb583d0d843ec4dde25464b5dd4c1ca3a6dd9587854f9075974a1056c"
+    },
+    {
+      "path": "server/coop/coop_messages.h",
+      "source": "server/coop/coop_messages.h",
+      "sha256": "acefc97a91c02911cb762905fff0f541495ad8ccf3cd6fe45d36cde6e3c95b9c"
+    },
+    {
+      "path": "server/coop/coop_stream.h",
+      "source": "server/coop/coop_stream.h",
+      "sha256": "9ddec75988abd4ea54817c3ccd303d58d8b08f8422ee98a919bb08c06a0e8ed8"
+    },
+    {
+      "path": "server/coop/coop_types.h",
+      "source": "server/coop/coop_types.h",
+      "sha256": "3103374366fe312c30afbf088c57f0d6ad51148b5915bc9103ed5e6239e9cb82"
+    },
+    {
+      "path": "server/coop/duel.cpp",
+      "source": "server/coop/duel.cpp",
+      "sha256": "1a65492dde31d5ac3383e47440df8b7180715ae4f25e7e4a8ae4c88eab6bc7a4"
+    },
+    {
+      "path": "server/coop/duel.h",
+      "source": "server/coop/duel.h",
+      "sha256": "66f6c1a1edf5c7c4c0e51a5ccebca3e6e93306d3b7dcb0f94e7a3082f4f29f84"
+    },
+    {
+      "path": "server/coop/game_link.h",
+      "source": "server/coop/game_link.h",
+      "sha256": "8c291d56e3889f12a60864fb6f546a4860718b71887edba060e946e04ff16cca"
+    },
+    {
+      "path": "server/coop/invasions.cpp",
+      "source": "server/coop/invasions.cpp",
+      "sha256": "1c651029962c90ef930a50c8399ef50225d8d63bde0d14bb6d91aace0bb5de3c"
+    },
+    {
+      "path": "server/coop/invasions.h",
+      "source": "server/coop/invasions.h",
+      "sha256": "abe013b566fbfb5093b772395e7391c752bf60cbcf2c2b14797c3f540d09d779"
+    },
+    {
+      "path": "server/coop/link_auth.h",
+      "source": "server/coop/link_auth.h",
+      "sha256": "499920f4c78104d748ca0307ff50df49764819759bd94f8a317a7ca8d76447b9"
+    },
+    {
+      "path": "server/coop/link_crypto.cpp",
+      "source": "server/coop/link_crypto.cpp",
+      "sha256": "594bf8173bff4b0e0436f4d2e9aa9750393ad02145cb457f7ecb0886409fc37f"
+    },
+    {
+      "path": "server/coop/monocypher/.clang-format",
+      "source": "server/coop/monocypher/.clang-format",
+      "sha256": "b31f421733899646b1bafbeb8ab3dda7391a50169ecac50f16ce7f6abd80409a"
+    },
+    {
+      "path": "server/coop/monocypher/LICENCE.md",
+      "source": "server/coop/monocypher/LICENCE.md",
+      "sha256": "d3a6d889033e22c8ee30bb2891f0787a3288fc594994cd04c885761c4475e30f"
+    },
+    {
+      "path": "server/coop/monocypher/monocypher.c",
+      "source": "server/coop/monocypher/monocypher.c",
+      "sha256": "57eb914fc88136119bd41655cccb8c250048bf54d470540625186f8ab16f64be"
+    },
+    {
+      "path": "server/coop/monocypher/monocypher.h",
+      "source": "server/coop/monocypher/monocypher.h",
+      "sha256": "c494da712122da7ff679fdcf318a5317e84972b6c950fe9d896212947797facd"
+    },
+    {
+      "path": "server/coop/packet_routes.h",
+      "source": "server/coop/packet_routes.h",
+      "sha256": "de007f6a6c5640bf61cb8642a9e37fd618296e3551deb5d807eb0a1ed26bdbc1"
+    },
+    {
+      "path": "server/coop/rpc_tunnel.h",
+      "source": "server/coop/rpc_tunnel.h",
+      "sha256": "f25843eedf929e8d3a1aebf19c11b58ca97760011afd072d3655457b79d4aef3"
+    },
+    {
+      "path": "server/coop/team_code.h",
+      "source": "server/coop/team_code.h",
+      "sha256": "26f35cc14ccffa091ab4b09d3d81fd9003c3896545e315b9bea33b48b19adbed"
+    },
+    {
+      "path": "server/coop/team_lobby.cpp",
+      "source": "server/coop/team_lobby.cpp",
+      "sha256": "26e1a2c5a02741c7a40c4907b36946eb8c9f4e14480a2e95f4d36d397712847a"
+    },
+    {
+      "path": "server/coop/team_lobby.h",
+      "source": "server/coop/team_lobby.h",
+      "sha256": "f9892ed9e65232ef2035f3556ddf79871224b4106126994606a87b20e6cf377f"
+    },
+    {
+      "path": "server/coop/trade.cpp",
+      "source": "server/coop/trade.cpp",
+      "sha256": "fd2dd0fd9eb2895eacf7671f911fb2ece943f3cbb8ef2290061cef2e36b5d71e"
+    },
+    {
+      "path": "server/coop/trade.h",
+      "source": "server/coop/trade.h",
+      "sha256": "897bd810b8358bfdf4914cc39315fa28b0673b72bbb70b322baaaf200ecc1e74"
+    },
+    {
+      "path": "server/coop/world_log.cpp",
+      "source": "server/coop/world_log.cpp",
+      "sha256": "37c42f32990a062bf0fd4078225bf60a197efffc28bf7895726725d6f6a88ec0"
+    },
+    {
+      "path": "server/coop/world_log.h",
+      "source": "server/coop/world_log.h",
+      "sha256": "0525af7b62403cd621d2ee7ef201cc83edf6a9850a8a88e9e1e4b5d30b4b95f0"
+    },
+    {
+      "path": "server/directory/Dockerfile",
+      "source": "server/directory/Dockerfile",
+      "sha256": "df5c0716b378914b63d4bb865dc358f88709117bb0c1189f9554ab497b7e43e2"
+    },
+    {
+      "path": "server/directory/directory.py",
+      "source": "server/directory/directory.py",
+      "sha256": "783333b8af92ad738a29c14122d50953f41e75817c5a2c008b8bd6da5e6534a5"
+    },
+    {
+      "path": "server/directory/requirements.txt",
+      "source": "server/directory/requirements.txt",
+      "sha256": "0948e47ebb1d342e2545dc4025d7c82470d3c9a898147c2fe62bb3365537d6a6"
+    },
+    {
+      "path": "server/directory/test_directory.py",
+      "source": "server/directory/test_directory.py",
+      "sha256": "d52bc8ad08a367d50b70024213d104bad6a1bdb479932e13bec6494fff03a822"
+    },
+    {
+      "path": "server/documentation/database.md",
+      "source": "server/documentation/database.md",
+      "sha256": "a9d94abc86ceaead16dd122c6cfe000b28dc87fb10eebc2eac9cf9fe408af32d"
+    },
+    {
+      "path": "server/documentation/matching.md",
+      "source": "server/documentation/matching.md",
+      "sha256": "1db77429459a7caf242ad18aa31e5400493ddbcf30e501daa5f2550cd4d881ed"
+    },
+    {
+      "path": "server/documentation/protocol.md",
+      "source": "server/documentation/protocol.md",
+      "sha256": "91240c707e91abf0478df192fa7ae7fa7ff7d846e8078d62f63f020d1cb5ef4d"
+    },
+    {
+      "path": "server/documentation/signaling.md",
+      "source": "server/documentation/signaling.md",
+      "sha256": "7f644f87e615c20cc606ca2db2e65f91b36d9373f87e0f0387d80f34403195e4"
+    },
+    {
+      "path": "server/externals/CMakeLists.txt",
+      "source": "server/externals/CMakeLists.txt",
+      "sha256": "dbf27795a313b01a513fa341e1c6209f01aae835616049e193121b647251ff1d"
+    },
+    {
+      "path": "server/hosting/Dockerfile",
+      "source": "server/hosting/Dockerfile",
+      "sha256": "cbaa8f02eacde2bce586fb077fcf085cebc7ea9602ada14b16c08a67d420cf47",
+      "adapted_sha256": "576e81b1d29fed999767fe05462c6bf57d7db1c28c66a4da628d1f95ec32f749"
+    },
+    {
+      "path": "server/hosting/Dockerfile.backup",
+      "source": "server/hosting/Dockerfile.backup",
+      "sha256": "9fea0c64950b381e748ab914afc2dd78293427b947a2bee99290b7656f0b9f22"
+    },
+    {
+      "path": "server/hosting/Dockerfile.dockerignore",
+      "source": "server/hosting/Dockerfile.dockerignore",
+      "sha256": "c9dc64c29d287f383d388eb50aa86939902d1408e4011dc3c9eda6b32679c777"
+    },
+    {
+      "path": "server/hosting/README.md",
+      "source": "server/hosting/README.md",
+      "sha256": "00118f402a632155933dc00cfb31b373d1812b0fe3fd9985c4308b6804ab2dd7"
+    },
+    {
+      "path": "server/hosting/admin.sh",
+      "source": "server/hosting/admin.sh",
+      "sha256": "f68187d36f429e3262dcbb5e1af6e0cc1c0f1c342050cf7f32e6e25e7c60db91"
+    },
+    {
+      "path": "server/hosting/backup.sh",
+      "source": "server/hosting/backup.sh",
+      "sha256": "3c84a9682fc46487d2b03c9ad5e4fab2d41b9051be1173bdc6fb1939d56bd689"
+    },
+    {
+      "path": "server/hosting/collect-runtime.sh",
+      "source": "server/hosting/collect-runtime.sh",
+      "sha256": "dae2acbc2dc26c59cce2f2e8de945046f74f2c66308b259172a844289935a3bb"
+    },
+    {
+      "path": "server/hosting/docker-compose.yml",
+      "source": "server/hosting/docker-compose.yml",
+      "sha256": "9e6eacc485c19fd854c3a4ae25e9e3d3e7a8821374c1f3096501db1538b6951a"
+    },
+    {
+      "path": "server/hosting/entrypoint.sh",
+      "source": "server/hosting/entrypoint.sh",
+      "sha256": "a65546f45815a73e77024e925f68d24b2132199de669e5c78aa3e2a1d1107fa0",
+      "adapted_sha256": "9f3705cb8bc35ff5d5757a2503348c381d915009a46b5cd3be9e2a1dc2509e8e"
+    },
+    {
+      "path": "server/hosting/env.example",
+      "source": "server/hosting/env.example",
+      "sha256": "aeceb6eb60928f363b05d5756522980b24b87d9e2ec9f8362cb09e6445eba868"
+    },
+    {
+      "path": "server/hosting/healthcheck.sh",
+      "source": "server/hosting/healthcheck.sh",
+      "sha256": "dba127d0bc74b56e77a0150e4afcb73e4d98ad0ab60f652816d63cfbe48e31c8"
+    },
+    {
+      "path": "server/hosting/restore.sh",
+      "source": "server/hosting/restore.sh",
+      "sha256": "e18844d7fd501fdb4bbc9a97c025f9220de0ec4c081815f8a9464d370c22ee2b"
+    },
+    {
+      "path": "server/hosting/schema.sql",
+      "source": "server/hosting/schema.sql",
+      "sha256": "7a0affed1696ed2f64b94084406395316220480669c6c6472c62058e900b27d3"
+    },
+    {
+      "path": "server/hosting/shadnet.service",
+      "source": "server/hosting/shadnet.service",
+      "sha256": "0aa4347a651cc269c9c77fbb893e33fba416148a7378b2fe6a96b4a64d0a433c"
+    },
+    {
+      "path": "server/loadtest/attack.py",
+      "source": "server/loadtest/attack.py",
+      "sha256": "f2f94e18f9e58bad3b565307f1a0e7c3e1a24fe4548b79d622fc724c01628578"
+    },
+    {
+      "path": "server/loadtest/bbload.cpp",
+      "source": "server/loadtest/bbload.cpp",
+      "sha256": "88957c57dfc520d4ab8f19fd18e35217f2d38e481bb846d3967c3b9427d58125"
+    },
+    {
+      "path": "server/loadtest/noise_link.py",
+      "source": "server/loadtest/noise_link.py",
+      "sha256": "3b2e4cdd72c7a186dfe67a4788e287e902cb202150a9ff87c4cd46c940a5d926"
+    },
+    {
+      "path": "server/loadtest/run_load.py",
+      "source": "server/loadtest/run_load.py",
+      "sha256": "3c08943f7418eae420df42d0a7c16c62afbb94f2ed9801379838e64337fcfe60"
+    },
+    {
+      "path": "server/loadtest/run_shards.py",
+      "source": "server/loadtest/run_shards.py",
+      "sha256": "bd19afa1ae482562ba833792f95f292f5ea82a94bf7360a9df6eefe4c818d3a9"
+    },
+    {
+      "path": "server/scoreboards.cfg",
+      "source": "server/scoreboards.cfg",
+      "sha256": "a215f591ca56192caac71612d6d97625f446f5ca9f695b874159335f179c2711"
+    },
+    {
+      "path": "server/scripts/create_test_user.sh",
+      "source": "server/scripts/create_test_user.sh",
+      "sha256": "fa0a39d46955f7ec3d1d08ea847b065193c48e01c3af1d61192e2749ebf9148a"
+    },
+    {
+      "path": "server/src/.clang-format",
+      "source": "server/src/.clang-format",
+      "sha256": "023dc6039b9bebabaa9703aff3e390cddf39ce456faf820b40dcb17b31e21f82"
+    },
+    {
+      "path": "server/src/admin.cpp",
+      "source": "server/src/admin.cpp",
+      "sha256": "baf55d7906edd5b19ec9469dd2feb7e1ff30be9eb7cc8c114e45db0e66e81316"
+    },
+    {
+      "path": "server/src/admin.h",
+      "source": "server/src/admin.h",
+      "sha256": "eecc5e340ff436a156666fce3cef56d062f6d12698a014fe116b0d6bb84466ae"
+    },
+    {
+      "path": "server/src/admission.cpp",
+      "source": "server/src/admission.cpp",
+      "sha256": "3d25bf6409a55a95c802a534c1ae381955093ffccd7d0f7cd3d41caa59f6e838"
+    },
+    {
+      "path": "server/src/admission.h",
+      "source": "server/src/admission.h",
+      "sha256": "71fdd0a398d4d1b8c90f0d01e083cbd411c9fed25f1b099a7313716f1041f7ed"
+    },
+    {
+      "path": "server/src/bloodborne_backend.cpp",
+      "source": "server/src/bloodborne_backend.cpp",
+      "sha256": "7acd551d01d141cbeeae72df96cd44de41b3955a260f28a516c7efd38d69ba04"
+    },
+    {
+      "path": "server/src/bloodborne_backend.h",
+      "source": "server/src/bloodborne_backend.h",
+      "sha256": "d68c4f2317bb0534feba8b0bac92867c19c67fe8e0a0d8f5ee66957bc1b6306a"
+    },
+    {
+      "path": "server/src/bloodborne_backend_json.cpp",
+      "source": "server/src/bloodborne_backend_json.cpp",
+      "sha256": "aba9df4c563192a3fb583ab305f184161994f2abef84270386687eb4e03fdc2d"
+    },
+    {
+      "path": "server/src/bloodborne_backend_json.h",
+      "source": "server/src/bloodborne_backend_json.h",
+      "sha256": "78165a43a62a90964e0a9eed308a2c7f6832a417617c953fac98a672e4c2d6fd"
+    },
+    {
+      "path": "server/src/bloodborne_backend_server.cpp",
+      "source": "server/src/bloodborne_backend_server.cpp",
+      "sha256": "259caf35568e04b7ddc9c4cedec4b3690edcfe71ee72091ad6ad817bd9aa756f"
+    },
+    {
+      "path": "server/src/bloodborne_backend_server.h",
+      "source": "server/src/bloodborne_backend_server.h",
+      "sha256": "04d1785af55ab2629e3dc12b40d06a3ab32132c01ace6e931b243bd5fde3c92f"
+    },
+    {
+      "path": "server/src/bloodborne_party_boards.cpp",
+      "source": "server/src/bloodborne_party_boards.cpp",
+      "sha256": "a653e72eb9ab292dd0a07f1ffb1eb807cb46c9b2d20ae766423ebf184dca62f5"
+    },
+    {
+      "path": "server/src/bloodborne_party_boards.h",
+      "source": "server/src/bloodborne_party_boards.h",
+      "sha256": "12914a3a370c22c564e3cb69cda68ae948e0782ba6b050f25e882a93494dedb9"
+    },
+    {
+      "path": "server/src/bloodborne_reports.cpp",
+      "source": "server/src/bloodborne_reports.cpp",
+      "sha256": "c6dd52b7b29041da172b61369960699a2858ee385828376c70a251813c0af992"
+    },
+    {
+      "path": "server/src/bloodborne_reports.h",
+      "source": "server/src/bloodborne_reports.h",
+      "sha256": "baf34b6a29ca6be055d83a6cd6ba2a71b3139cec991bff63cdf5b9dbbdbcce43"
+    },
+    {
+      "path": "server/src/bloodborne_summon_broker.cpp",
+      "source": "server/src/bloodborne_summon_broker.cpp",
+      "sha256": "3609cef83b4f49a59e464d575c4ffc22c7e3223fa31426851728449064d3a6f8"
+    },
+    {
+      "path": "server/src/bloodborne_summon_broker.h",
+      "source": "server/src/bloodborne_summon_broker.h",
+      "sha256": "59f12acb72d3872f47b26bb6c55fced5d6d9be89a3be35c014b96b7aa63b22b5"
+    },
+    {
+      "path": "server/src/bloodborne_world.cpp",
+      "source": "server/src/bloodborne_world.cpp",
+      "sha256": "274b1f849ca3de79182a89353b5ba5baaede112181a86ab9c371dcc0855d95aa"
+    },
+    {
+      "path": "server/src/bloodborne_world.h",
+      "source": "server/src/bloodborne_world.h",
+      "sha256": "6a2687df220692aef058918595684433b48122bc52e8fad396ede5fe2cb9a19d"
+    },
+    {
+      "path": "server/src/client_session.cpp",
+      "source": "server/src/client_session.cpp",
+      "sha256": "798fb226f7b850a33d605334796ac22a458f4ad90d31419705cb2a37b5bc5f82"
+    },
+    {
+      "path": "server/src/client_session.h",
+      "source": "server/src/client_session.h",
+      "sha256": "7254d00d1098617fbdf4bb838092944bc481ce1e1a24a216ffa4ea790b990dbd"
+    },
+    {
+      "path": "server/src/cmd_account.cpp",
+      "source": "server/src/cmd_account.cpp",
+      "sha256": "8c1f5f99035e706f0c694efbea63731a61877c2921c99147875e1ef97aa364f0"
+    },
+    {
+      "path": "server/src/cmd_friend.cpp",
+      "source": "server/src/cmd_friend.cpp",
+      "sha256": "2e6d5388ceb2acda3d45d9fb578f766c9bfb9654b6d18b39a9695b46566b4a01"
+    },
+    {
+      "path": "server/src/cmd_matching.cpp",
+      "source": "server/src/cmd_matching.cpp",
+      "sha256": "2e424af324d97837558a59fba96c58e118ed30b7a9159689124b00b6b6c7fe91"
+    },
+    {
+      "path": "server/src/cmd_score.cpp",
+      "source": "server/src/cmd_score.cpp",
+      "sha256": "0006e7a8d936862daac63ed905df6d7463358290e6d4d1f1f40f667c412e84a1"
+    },
+    {
+      "path": "server/src/config.cpp",
+      "source": "server/src/config.cpp",
+      "sha256": "73704611558541eec7f4841fb33ca5f5b1ad3bf85056b28cb564f881d55970bd"
+    },
+    {
+      "path": "server/src/config.h",
+      "source": "server/src/config.h",
+      "sha256": "8a896c318cf1a2697d2f63fa36120b5adc00e49ab2b9bfb21402070615b41592"
+    },
+    {
+      "path": "server/src/database.cpp",
+      "source": "server/src/database.cpp",
+      "sha256": "32e3fa392f8a331a23306803dc274748489206e88bff978a19a040c0a5863d83"
+    },
+    {
+      "path": "server/src/database.h",
+      "source": "server/src/database.h",
+      "sha256": "6642bb785a97e9c60b7cacfb8f7babd58005845f97f6153151c70f83977aa1a8"
+    },
+    {
+      "path": "server/src/directory_client.cpp",
+      "source": "server/src/directory_client.cpp",
+      "sha256": "91515e3566bc85378e7134e43ea852b4a8585eae24fea226d37cecf1675399c6"
+    },
+    {
+      "path": "server/src/directory_client.h",
+      "source": "server/src/directory_client.h",
+      "sha256": "780a2407d5d51e79f11e6470ceacabcacd49bce33affa31a65a88fff22744d98"
+    },
+    {
+      "path": "server/src/http_gate.cpp",
+      "source": "server/src/http_gate.cpp",
+      "sha256": "cd0041531f6cd228ca14af3063f1008ce94ca1e2ed3a424253fb8c64ff713110"
+    },
+    {
+      "path": "server/src/http_gate.h",
+      "source": "server/src/http_gate.h",
+      "sha256": "de245380fe65225553fe8ec4a5ddfb0c1132f7dad09d77d0f35df15cff51089b"
+    },
+    {
+      "path": "server/src/link_server.cpp",
+      "source": "server/src/link_server.cpp",
+      "sha256": "01725f1ee668e820f1b8a0e973fa6134268e58f58683069245473b463e897115"
+    },
+    {
+      "path": "server/src/link_server.h",
+      "source": "server/src/link_server.h",
+      "sha256": "0cc9786016a84492513b3b482929e82e574958e12b0224f8cd27606394ccecda"
+    },
+    {
+      "path": "server/src/main.cpp",
+      "source": "server/src/main.cpp",
+      "sha256": "a9f82285634da461c7f21198045aef556b54a15e4694e8beea8f9607c71f1814"
+    },
+    {
+      "path": "server/src/matching.h",
+      "source": "server/src/matching.h",
+      "sha256": "5caed20c61d9a30e7be22a256ea66fb7dea40d59cc93d25d4a957c7d83c133be"
+    },
+    {
+      "path": "server/src/matching_types.h",
+      "source": "server/src/matching_types.h",
+      "sha256": "c63b1cc5e2bfaf8d009e7264ced8b5132d2cf7fbf52e4b5c120591a3687ac91e"
+    },
+    {
+      "path": "server/src/proto_utils.h",
+      "source": "server/src/proto_utils.h",
+      "sha256": "6f49c39a690b9328d31853dd014c5abcc3dfd0229a4005576539b448cd7a205c"
+    },
+    {
+      "path": "server/src/protocol.h",
+      "source": "server/src/protocol.h",
+      "sha256": "d7066c0e4124cf2d2828c9b1349250c99f8b8263ff51b3f222ba33ecfe7724ed"
+    },
+    {
+      "path": "server/src/region.cpp",
+      "source": "server/src/region.cpp",
+      "sha256": "a4b0e71856bdc77d8d881818ae0cb29d34e292c6c09a35b2638a60241de48741"
+    },
+    {
+      "path": "server/src/region.h",
+      "source": "server/src/region.h",
+      "sha256": "05b5993728a01d703fdaba1b4d5ee0829ff1fdd9cb4318ccb903ef82e5735583"
+    },
+    {
+      "path": "server/src/request_address.h",
+      "source": "server/src/request_address.h",
+      "sha256": "3f55f6e1f47cb65583decf707a7fac1121842df5cff054e76ae3a2320eb78191"
+    },
+    {
+      "path": "server/src/score_cache.cpp",
+      "source": "server/src/score_cache.cpp",
+      "sha256": "0b6ffcf486d93889e008ac8601456f42b634039bae2d6fb2a6219b671db92256"
+    },
+    {
+      "path": "server/src/score_cache.h",
+      "source": "server/src/score_cache.h",
+      "sha256": "75bb392076102c477ede2df376ed1a942a01d2f3e62aaeb475664e6617c65782"
+    },
+    {
+      "path": "server/src/score_db.cpp",
+      "source": "server/src/score_db.cpp",
+      "sha256": "d9cd1f60081f1d0cb66fb673b87d5b215bac64f455f0a037cbbe03e5fc531b71"
+    },
+    {
+      "path": "server/src/score_db.h",
+      "source": "server/src/score_db.h",
+      "sha256": "5494eb3385f5d20ae7b5e6ce4703bbebd129f246b561208caea069d13e4ca062"
+    },
+    {
+      "path": "server/src/score_files.h",
+      "source": "server/src/score_files.h",
+      "sha256": "8e1c853dde85e313faf22a0c19690b2e8b6570e3947e154fe3499192b5447d14"
+    },
+    {
+      "path": "server/src/score_types.h",
+      "source": "server/src/score_types.h",
+      "sha256": "8fdd54f4dc5f060e2d747489571f1d76ecd1773c229494a2bcbdfe5e122b6e44"
+    },
+    {
+      "path": "server/src/server.cpp",
+      "source": "server/src/server.cpp",
+      "sha256": "e81238c7d694cce6bdbcfe5d69475e9660f817a338f87600914ac7db748f3c68"
+    },
+    {
+      "path": "server/src/server.h",
+      "source": "server/src/server.h",
+      "sha256": "39c41d4d188ca332a8ac2b6bb3441c99dec0e6f457b2ff03b1931c741b9d17db"
+    },
+    {
+      "path": "server/src/server_link.cpp",
+      "source": "server/src/server_link.cpp",
+      "sha256": "3d9b10b0e0c4babb06773bdc6e9677aa00f7ab5784c69722eb941f7dd2168b28"
+    },
+    {
+      "path": "server/src/server_link.h",
+      "source": "server/src/server_link.h",
+      "sha256": "17b1c66b4b9a0af7f6df5da68393b80b27a97e63cf63b1e63fd8b7b884ff6b16"
+    },
+    {
+      "path": "server/src/shadnet.proto",
+      "source": "server/src/shadnet.proto",
+      "sha256": "a6a1879daf244c6a0578d64b9ef96d40b8a9c8054d751e7bd840f79f8e7502fc"
+    },
+    {
+      "path": "server/src/ss_info_path.h",
+      "source": "server/src/ss_info_path.h",
+      "sha256": "27e8a303cad3965523682d672e1f75d55749c3023b1fe5bce4a8df0d45c12359"
+    },
+    {
+      "path": "server/src/stats_server.cpp",
+      "source": "server/src/stats_server.cpp",
+      "sha256": "143c8bc226d156788b5d2e305ab1a7d8b9e60406adccbe06ad3af3b189f988bc"
+    },
+    {
+      "path": "server/src/stats_server.h",
+      "source": "server/src/stats_server.h",
+      "sha256": "d9c1565e5179b344738dd7241199464c6635f3b80bf5aec96b4c99625fa49546"
+    },
+    {
+      "path": "server/src/stream_extractor.h",
+      "source": "server/src/stream_extractor.h",
+      "sha256": "bb045b901127a197c553aa0111ce81e9c56a876bb06eed853ae1db1eb64cf833"
+    },
+    {
+      "path": "server/src/virtual_address.h",
+      "source": "server/src/virtual_address.h",
+      "sha256": "cff41ce4594b59288877d3da5fffce82585f2fd9fcb80b8dc6daa4b78319d8ef"
+    },
+    {
+      "path": "server/src/watchdog.cpp",
+      "source": "server/src/watchdog.cpp",
+      "sha256": "63786d70ae3a8cd31e12ffa337201bcfe1ee5a926fd431bb40c2dc3f57c23675"
+    },
+    {
+      "path": "server/src/watchdog.h",
+      "source": "server/src/watchdog.h",
+      "sha256": "862e586b11b153c290b3da727f13b3edb63516eab65b0283047de7f446c2b4ba"
+    },
+    {
+      "path": "server/src/webapi_auth.cpp",
+      "source": "server/src/webapi_auth.cpp",
+      "sha256": "154ead30d50da99c7a15504bfd9ddbda6909a354824510351e7f90a7449ddcf7"
+    },
+    {
+      "path": "server/src/webapi_auth.h",
+      "source": "server/src/webapi_auth.h",
+      "sha256": "a7688e0a1d06cf941bd641cf449925ba9fbb2b27f433e3ea31415aa0d8431701"
+    },
+    {
+      "path": "server/src/webapi_routes_bloodborne.cpp",
+      "source": "server/src/webapi_routes_bloodborne.cpp",
+      "sha256": "0623cb368e4ca61c9e091410e583e1e7d3f758ed6a0a3bfb7949316913d393a9"
+    },
+    {
+      "path": "server/src/webapi_routes_bloodborne.h",
+      "source": "server/src/webapi_routes_bloodborne.h",
+      "sha256": "99d896973dde0b8f1357b03bf8d983ad751d38b89933a42f0fb29514b1a8851a"
+    },
+    {
+      "path": "server/src/webapi_routes_common.h",
+      "source": "server/src/webapi_routes_common.h",
+      "sha256": "902985f6021e95375ab0d7e134cd9dc8ce42e862bf7d42575323e490e2dadf01"
+    },
+    {
+      "path": "server/src/webapi_routes_presence.cpp",
+      "source": "server/src/webapi_routes_presence.cpp",
+      "sha256": "c1fa982a5dc8e08318c63be1f85668408d40e32319d7ce1f564b85942a939bb4"
+    },
+    {
+      "path": "server/src/webapi_routes_presence.h",
+      "source": "server/src/webapi_routes_presence.h",
+      "sha256": "c3bd6d511812184e78f9c4d3eb8bd6b0756c413e181565759817f1cac25ace47"
+    },
+    {
+      "path": "server/src/webapi_routes_profile.cpp",
+      "source": "server/src/webapi_routes_profile.cpp",
+      "sha256": "6ce7df5a6cc1cd8a4f7dd6d2dd76e3146c0a0003dc17693085dd62b5847fa04a"
+    },
+    {
+      "path": "server/src/webapi_routes_profile.h",
+      "source": "server/src/webapi_routes_profile.h",
+      "sha256": "efc0cafd44bbda979409d2120b138a1aa894cadd7120557e34330d069b314563"
+    },
+    {
+      "path": "server/src/webapi_routes_reports.cpp",
+      "source": "server/src/webapi_routes_reports.cpp",
+      "sha256": "e379bca1f556e3ca0247391627cec429ddd69f39247794e04651b0755c6ee3aa"
+    },
+    {
+      "path": "server/src/webapi_routes_session.cpp",
+      "source": "server/src/webapi_routes_session.cpp",
+      "sha256": "39f4014a0ba8d978ea87fda406ac0cdac31e625698659b4e464ee3e69f2a57e9"
+    },
+    {
+      "path": "server/src/webapi_routes_session.h",
+      "source": "server/src/webapi_routes_session.h",
+      "sha256": "cce4a97c2168a696f58da2435bdfb639dbf85c9bfdfddc020d428d1b7d64b358"
+    },
+    {
+      "path": "server/src/webapi_routes_users.cpp",
+      "source": "server/src/webapi_routes_users.cpp",
+      "sha256": "496662a1d6a8dcdcd9a292bef6934b30df685b4c4c35195a077b77cf19c18b07"
+    },
+    {
+      "path": "server/src/webapi_routes_users.h",
+      "source": "server/src/webapi_routes_users.h",
+      "sha256": "f374dbc501fe47bdd439d71077c19f1e992187a3e4b7858226a3cec750444cdd"
+    },
+    {
+      "path": "server/src/webapi_server.cpp",
+      "source": "server/src/webapi_server.cpp",
+      "sha256": "84c455feb4b700239b4bc94e3fa01bd6f960a327b3b958d261a6588ea40cc235"
+    },
+    {
+      "path": "server/src/webapi_server.h",
+      "source": "server/src/webapi_server.h",
+      "sha256": "6df000f44bb63030c3a200d1e9975beac2ef8d478990bee957e72cff510174b8"
+    },
+    {
+      "path": "server/tests/contracts/server_link_frames.txt",
+      "source": "server/tests/contracts/server_link_frames.txt",
+      "sha256": "aa7bebd63717560d98a20273356836f60f62694288a99ecffb43e021b3863734"
+    },
+    {
+      "path": "server/tests/contracts/server_link_frames.txt.license",
+      "source": "server/tests/contracts/server_link_frames.txt.license",
+      "sha256": "5390ab3a0fcd06f6170752f3ce3b2bd16781c29bb36074820c4c2831304ea664"
+    },
+    {
+      "path": "server/tests/fuzz/fuzz_link.cpp",
+      "source": "server/tests/fuzz/fuzz_link.cpp",
+      "sha256": "fbed85edd6933b914dae3e344d278f4d76c66fc27f432a41a4a1d60409e0cd7e"
+    },
+    {
+      "path": "server/tests/fuzz/fuzz_session.cpp",
+      "source": "server/tests/fuzz/fuzz_session.cpp",
+      "sha256": "589a21bb8e01f42dbd6b87ea5c43b2c56d63b7e58520241b94ceb6ec0ce561c7"
+    },
+    {
+      "path": "server/tests/fuzz/fuzz_targets.h",
+      "source": "server/tests/fuzz/fuzz_targets.h",
+      "sha256": "059f7b67bca439d7808a84fb132cec209268ba1e5be5ad69b91e2ff2caef336f"
+    },
+    {
+      "path": "server/tests/fuzz/fuzz_world.cpp",
+      "source": "server/tests/fuzz/fuzz_world.cpp",
+      "sha256": "09deae4f8abe5b59de02c2845b4f605043c1338a200c5e7e74f7a3fbd3c145a5"
+    },
+    {
+      "path": "server/tests/fuzz/libfuzzer_main.cpp",
+      "source": "server/tests/fuzz/libfuzzer_main.cpp",
+      "sha256": "898872f3c06f6a5b1d92f742b3ea0bec6f0384e3fa8b35f261b3cd931cd136e4"
+    },
+    {
+      "path": "server/tests/fuzz/regressions/session/login-blob-size-past-int",
+      "source": "server/tests/fuzz/regressions/session/login-blob-size-past-int",
+      "sha256": "7f4e88f13079560a38de638f8d234eb812f47f7e67c7cb8f4e7f3fb3356ee10e"
+    },
+    {
+      "path": "server/tests/test_accounts.cpp",
+      "source": "server/tests/test_accounts.cpp",
+      "sha256": "d322b1d913814a3abb30b64969358baef7be909ffdb4d053ce6020b72d8e5cd1"
+    },
+    {
+      "path": "server/tests/test_admin.cpp",
+      "source": "server/tests/test_admin.cpp",
+      "sha256": "4887aad656cbe586ef34acb28c0e9f43818d7f6b2afd50dfa3caa3aa3f2d520f"
+    },
+    {
+      "path": "server/tests/test_admission.cpp",
+      "source": "server/tests/test_admission.cpp",
+      "sha256": "d36a713fdd2dd26fd9cd81ee0572c30b3d7dd1c637191a650b808fe67319e475"
+    },
+    {
+      "path": "server/tests/test_bloodborne_backend_json.cpp",
+      "source": "server/tests/test_bloodborne_backend_json.cpp",
+      "sha256": "715da14b000227548aa727a53fd17e8f383ec52ca25a392fd9225c0a76bb9dd3"
+    },
+    {
+      "path": "server/tests/test_bloodborne_duel.cpp",
+      "source": "server/tests/test_bloodborne_duel.cpp",
+      "sha256": "cff6f6bb41c741224292be287ea878db4079af729003e3eaea84d5a1552cdb4b"
+    },
+    {
+      "path": "server/tests/test_bloodborne_summon_broker.cpp",
+      "source": "server/tests/test_bloodborne_summon_broker.cpp",
+      "sha256": "2c2ecbc36a10baf2cd9abce7e38facb247de116d8b0107933d470371f0b84057"
+    },
+    {
+      "path": "server/tests/test_bloodborne_summon_party.cpp",
+      "source": "server/tests/test_bloodborne_summon_party.cpp",
+      "sha256": "386906cc84ff37cfd476b40f5231259d6455a40dbcf59469ffe5a763c80844d6"
+    },
+    {
+      "path": "server/tests/test_bloodborne_trade.cpp",
+      "source": "server/tests/test_bloodborne_trade.cpp",
+      "sha256": "5cc65561e4ea667acf61f61b3653bc1679338ae100f0ca797fcd4a5092887d9a"
+    },
+    {
+      "path": "server/tests/test_bloodborne_world.cpp",
+      "source": "server/tests/test_bloodborne_world.cpp",
+      "sha256": "c645fab8ca7da99c0ccdaa2a36eadce1d8313ccd924871a2248011da8707de57"
+    },
+    {
+      "path": "server/tests/test_build_fingerprint.cpp",
+      "source": "server/tests/test_build_fingerprint.cpp",
+      "sha256": "29db8ea9e4503d5486cf937b8e5bb9803b192715f34286a3fdeeb12193ae18a7"
+    },
+    {
+      "path": "server/tests/test_fuzz_decoders.cpp",
+      "source": "server/tests/test_fuzz_decoders.cpp",
+      "sha256": "392964d25891c034739fa0e69a134fa0e308fd1921d5db38745984538fcbc0a4"
+    },
+    {
+      "path": "server/tests/test_http_gate.cpp",
+      "source": "server/tests/test_http_gate.cpp",
+      "sha256": "6d2a3a293aa4ba90d2f1f4d0157d876a277b5c79cc27307ea672f6837bfb18bf"
+    },
+    {
+      "path": "server/tests/test_http_gate_routes.py",
+      "source": "server/tests/test_http_gate_routes.py",
+      "sha256": "af1a918f26187d47ffda597bcea02baeacae05b02525d9f6996826c1cd8497f6"
+    },
+    {
+      "path": "server/tests/test_invasions.cpp",
+      "source": "server/tests/test_invasions.cpp",
+      "sha256": "918fa8a34d3a1e1f3bdaa0be442352106e02ff3f4d2681375d202915461f77e8"
+    },
+    {
+      "path": "server/tests/test_packet_routes.cpp",
+      "source": "server/tests/test_packet_routes.cpp",
+      "sha256": "7933d8de14e74a1ff3a49c91092475e49dca9da39779f05c6801306d54ba506c"
+    },
+    {
+      "path": "server/tests/test_region.cpp",
+      "source": "server/tests/test_region.cpp",
+      "sha256": "8ab7461ab768fab677b664d31bf59fee29d670d5280124aa6923a66b0ffab493"
+    },
+    {
+      "path": "server/tests/test_reports.cpp",
+      "source": "server/tests/test_reports.cpp",
+      "sha256": "2902714328c585119b55fd63c4534a201aface04e7ed20bb098de3368edcbc10"
+    },
+    {
+      "path": "server/tests/test_request_address.cpp",
+      "source": "server/tests/test_request_address.cpp",
+      "sha256": "f10cd36261da153f06c148aa4502ec0611eb178ca54fb453c67b468747ec8742"
+    },
+    {
+      "path": "server/tests/test_room_owner.cpp",
+      "source": "server/tests/test_room_owner.cpp",
+      "sha256": "6496e9e7b913c5e10d28d9a5b8aad580bee9142c948b6d8b55c61712dd751639"
+    },
+    {
+      "path": "server/tests/test_rpc_tunnel.cpp",
+      "source": "server/tests/test_rpc_tunnel.cpp",
+      "sha256": "0ecdbbbcdf74abe39787aad25e67984629939f6c80ef108e63ce2a2779e185ca"
+    },
+    {
+      "path": "server/tests/test_server_link.cpp",
+      "source": "server/tests/test_server_link.cpp",
+      "sha256": "41c7b9d2333c488e330ea7fdf7f4847ded8e3fbffc24583eac41c31aeee06142"
+    },
+    {
+      "path": "server/tests/test_ss_info_path.cpp",
+      "source": "server/tests/test_ss_info_path.cpp",
+      "sha256": "4dbf1ad72e12bf8d0c09e63d719f978c376aded5604be91a8e600eaa8827e279"
+    },
+    {
+      "path": "server/tests/test_stream_extractor.cpp",
+      "source": "server/tests/test_stream_extractor.cpp",
+      "sha256": "ff135ec925d2cbf4ebfb4f01514001c1d7f2b93abc0e287f995aee1b80f49dc0"
+    },
+    {
+      "path": "server/tests/test_team_lobby.cpp",
+      "source": "server/tests/test_team_lobby.cpp",
+      "sha256": "3727b178c7d2ae1f4fadd783716ddcfe6c312618d6e853e5ed3bc95054aeedae"
+    },
+    {
+      "path": "server/tests/test_watchdog.cpp",
+      "source": "server/tests/test_watchdog.cpp",
+      "sha256": "9a0b801c9feda62427c41f1601a41875246585b80dff432d8a2a836555fb183c"
+    },
+    {
+      "path": "server/tests/test_world_writer.cpp",
+      "source": "server/tests/test_world_writer.cpp",
+      "sha256": "9d8f0b6be8043c9f4ea25c29bb28e5f38461d962b2587aba767603f17a346808"
+    },
+    {
+      "path": "server/worlds.cfg",
+      "source": "server/worlds.cfg",
+      "sha256": "eeb56a0687480ee263f2e77b6379863ef3029f2c70ee82d6893896c8c349562b"
+    },
+    {
+      "path": "server/LICENSE",
+      "source": "LICENSE",
+      "sha256": "edaef632cbb643e4e7a221717a6c441a4c1a7c918e6e4d56debc3d8739b233f6"
+    },
+    {
+      "path": "docs/INVASIONS.md",
+      "source": "docs/INVASIONS.md",
+      "sha256": "ac0740c92af26fb9e03b4f6285c687baa1a5b610fe2ce69dd899d16dc9058a5b"
+    }
+  ],
+  "submodules": [
+    {
+      "path": "server/externals/protobuf",
+      "commit": "5917ee224a7e47383a78acc129628511fe210dff",
+      "url": "https://github.com/shadexternals/protobuf.git"
+    }
+  ],
+  "local_history": [
+    {
+      "commit": "4201408d919f9787af43a075068947a44e95a231",
+      "patch": "server/upstream-changes/0001-4201408d.patch",
+      "sha256": "1e18c99092aacd59258358316a060214bb0bafc186133624dcf30da54872c276"
+    },
+    {
+      "commit": "fceb97debb950b94df220c9963ccced4ad31fa2a",
+      "patch": "server/upstream-changes/0002-fceb97de.patch",
+      "sha256": "ad0088a9cad76e5c533cd247b70590ec113d82ac4c9199caee493b9ba36c01f5"
+    },
+    {
+      "commit": "ebbef91358246c860bee80f03393fa56de2810a6",
+      "patch": "server/upstream-changes/0003-ebbef913.patch",
+      "sha256": "8fa7fbe5a957bc8772dc4741eca52041eb7b261784a9ddf790985d0ff9cf7e0b"
+    },
+    {
+      "commit": "9e60cec70e589a199cf86771de4844fe556562d4",
+      "patch": "server/upstream-changes/0004-9e60cec7.patch",
+      "sha256": "de2382047fbdda5308ae448f4d17f163fc85b6a5d809f40c2c6d2edbfa7addbc"
+    }
+  ]
+}

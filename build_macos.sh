@@ -45,8 +45,17 @@ cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_PREFIX_PATH="$PREFIX;$boost" -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew \
     -DBoost_INCLUDE_DIR="$boost/include" \
     -DBB_PGO=off -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" \
-    -DBB_NET="${BB_NET:-ON}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
+    -DBB_NET="${BB_NET:-ON}" -DBB_SEAMLESS="${BB_SEAMLESS:-ON}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
 echo "GPU library: LTO ${BB_LTO:-ON}"
+if [[ ${BB_SEAMLESS:-ON} == ON ]]; then
+    if ! ninja -C out/gpu bbseamless > out/seamless-build.log 2>&1; then
+        tail -35 out/seamless-build.log >&2
+        echo 'Seamless client build failed (out/seamless-build.log).' >&2; exit 1
+    fi
+    echo "Seamless client: $PWD/out/gpu/libbbseamless.dylib"
+else
+    rm -f out/gpu/libbbseamless.dylib
+fi
 # A failed GPU build must stop here: an older libbbgpu.dylib would otherwise be used silently.
 if ! ninja -C out/gpu bbgpu > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
@@ -124,6 +133,8 @@ if [[ ${1:-} == --test ]]; then
     out/runtime-test
     "$CC" "${cflags[@]}" -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
+    "$CC" "${cflags[@]}" -DBB_SAVE_TXN_TESTING -Isrc tests/test_save_txn.c src/runtime_save_txn.c -o out/save-txn-test
+    out/save-txn-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
     out/sema-test
     "$CC" "${cflags[@]}" -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
@@ -131,6 +142,25 @@ if [[ ${1:-} == --test ]]; then
     # Online imports go to the online module when it is there (skips without it).
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_online.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -framework CoreFoundation -o out/online-test
     out/online-test
+    "$CC" "${cflags[@]}" -I. -Isrc tests/test_coop_trophy.c src/runtime_coop_trophy.c src/runtime_trophy.c -o out/coop-trophy-test
+    out/coop-trophy-test
+    PYTHONPYCACHEPREFIX="$ROOT/out/pycache" python3 tests/test_seamless_launch.py
+    /usr/bin/clang++ -std=c++23 "${ARCH[@]}" -Igpu/bbseamless/include -Igpu/bbseamless \
+        tests/test_seamless_mac.cpp gpu/bbseamless/mac_epoll.cpp -o out/seamless-mac-test
+    out/seamless-mac-test
+    bash tests/test_map.sh arm64
+    bash tests/test_map.sh x86_64
+    for art in coop_art party_icons; do
+        /usr/bin/clang++ -std=c++20 -O2 -I. -Igpu/shim -I"$ROOT/deps/arm64/include/miniz" \
+            -DBB_COOP_ART_PATH="\"$ROOT/gpu/art/coop_art.bin\"" -DBB_PARTY_ICONS_PATH="\"$ROOT/gpu/art/party_icons.bin\"" \
+            "tests/test_$art.cpp" "gpu/shim/bbport_$art.cpp" "$ROOT/deps/arm64/lib/libminiz.a" -o "out/$art-test"
+        "out/$art-test"
+    done
+    if [[ -f out/gpu/libbbseamless.dylib ]]; then
+        /usr/bin/clang++ -std=c++20 "${ARCH[@]}" -I. tests/test_seamless_module.cpp -o out/seamless-module-test
+        out/seamless-module-test "$ROOT/out/gpu/libbbseamless.dylib" default
+        out/seamless-module-test "$ROOT/out/gpu/libbbseamless.dylib" custom
+    fi
     # The online module's P2P frames match shadPS4 v0.20.0's codec (skips without the module).
     if [[ -f out/gpu/libbbnet.dylib ]]; then
         ninja -C out/gpu bbnet-codec-test bbnet-session-test > out/gpu-net-test-build.log 2>&1 || { tail -40 out/gpu-net-test-build.log >&2; exit 1; }
@@ -259,6 +289,8 @@ if [[ ${1:-} == --test ]]; then
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: overlay-test'; exit 1; }
         MTL_DEBUG_LAYER=1 out/gpu-arm64/overlay-test 2>&1 | grep -E '^(PASS|FAIL)'
         [[ ${PIPESTATUS[0]} == 0 ]] || { echo 'FAIL: overlay-test (validation)'; exit 1; }
+        ninja -C out/gpu-arm64 coop-presentation-test >/dev/null
+        MTL_DEBUG_LAYER=1 out/gpu-arm64/coop-presentation-test
         # Saved upscaler choices (unavailable providers run as a fallback, the ini keeps the
         # user's value).
         ninja -C out/gpu-arm64 native-motion-test >/dev/null

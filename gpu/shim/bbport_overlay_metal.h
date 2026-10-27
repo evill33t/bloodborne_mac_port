@@ -9,6 +9,7 @@
 
 #include <functional>
 #include "common/types.h"
+#include "bbport_map_art.h"
 
 namespace Metal {
 class Device;
@@ -26,5 +27,17 @@ bool TrophyImage(int id, float size);
 /// (ImGui::NewFrame .. ImGui::Render), then the draw data in a render encoder of its own. Font
 /// atlas uploads happen in there (the backend has RendererHasTextures).
 void Frame(void* command_buffer, void* target, const std::function<void()>& build);
+// A cached co-op portrait, kept alive through completion of the frame that draws it.
+void* PortraitTexture(unsigned slot, u32 version, const u8* rgba, u32 side);
+// Immutable co-op artwork. Like portraits, retained through GPU completion on unretained buffers.
+void* ArtworkTexture(unsigned slot, const u8* rgba, u32 width, u32 height);
+// Current terrain image; replacements and 3D resources survive command-buffer completion.
+void* MapTexture(u64 version, const BbMapArt::Chart& chart, const u8* rgba, unsigned slot = 0);
+struct MapCamera {
+    float cx, cy, cz, zoom, yaw, pitch, width, height;
+};
+void* Map3d(u32 map, const std::shared_ptr<const BbMapArt::AreaMesh>& mesh,
+            const BbMapArt::Chart& chart, const MapCamera& camera, bool append = false);
+void ClearMap3d();
 
 } // namespace BbOverlay::MetalBackend

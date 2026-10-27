@@ -1,12 +1,19 @@
 # Online play on the Mac: basic setup
 
-Bloodborne's online features on this port: messages, bloodstains and wandering ghosts come from
+The default online pool is **Seamless Co-op**, connecting to `bloodborne.phobos.services`.
+Enable **Play online**, choose **Seamless Co-op**, then use **F6** in the game to create or join
+a team. Registration is automatic, saves are separated by server, and game timing is fixed at
+60 FPS. **F8** opens the map, **G** pings and **F7** toggles free camera. See
+[Seamless co-op setup, features and gameplay evidence](SEAMLESS_COOP_CLIENT.md).
+
+The legacy pools remain selectable, with existing credentials and pool choices preserved.
+The rest of this guide describes their setup: messages, bloodstains and wandering ghosts come from
 the community game server (The Hunter's Dream), and bells, summons and invasions go through a
 co-op pool. Two pools exist:
 
 | Pool | Who is on it | Account | Needs |
 |---|---|---|---|
-| **The Hunter's Dream** (`online_pool=huntersdream`, the default) | bbhost players and the Windows port (Supermedo/bloodborne_pc) | Discord-linked, free | nothing on the router: the pool's server relays and punches through NATs |
+| **The Hunter's Dream** (`online_pool=huntersdream`) | bbhost players and the Windows port (Supermedo/bloodborne_pc) | Discord-linked, free | nothing on the router: the pool's server relays and punches through NATs |
 | **shadNet** (`online_pool=shadnet`) | shadPS4 players and the Windows port's shadNet setting | shadNet account from shadnet.shadps4.net | a router whose NAT lets UDP through (UPnP is asked for the port) |
 
 Players only meet other players on the same pool, same game version (1.09) and, for bells,
@@ -26,8 +33,9 @@ bash scripts/macos/bootstrap_deps.sh        # protobuf, OpenSSL, miniupnpc, nloh
 bash build_macos.sh                         # prints "Online module: .../libbbnet.dylib"
 ```
 
-Without those libraries the build still succeeds and the port plays offline.
-`BB_NET=OFF bash build_macos.sh` also removes an older module from the build output.
+The Seamless client additionally needs the pinned Zydis/Xbyak dependencies from bootstrap.
+Its enabled build fails if dependencies are missing. To build offline without either module,
+use `BB_NET=OFF BB_SEAMLESS=OFF bash build_macos.sh`; this also removes stale modules.
 Release packaging includes the built x86-64 module in `Contents/Frameworks`, together with
 its [source and license notices](ONLINE_PROVENANCE.md). A package built without it stays
 offline. The release version is carried into the online client identity without needing Git.
@@ -45,7 +53,7 @@ online=1
 
 ## 3. Pick a pool and sign in
 
-### The Hunter's Dream (recommended: works through any router)
+### The Hunter's Dream
 
 In the **Online** tab, with the pool set to **The Hunter's Dream**, press **Sign in with
 Discord…**. The window shows a web address and a code: open the page (**Open Page**), sign in
@@ -142,7 +150,8 @@ The launcher's **Online** tab writes the first eight rows; the rest are for `bbp
 | bbport.ini | Environment | Meaning |
 |---|---|---|
 | `online=1` | `BB_ONLINE=1` | load the online module |
-| `online_pool=huntersdream` / `shadnet` | `BB_NET_BACKEND=thd` | which co-op pool (The Hunter's Dream by default) |
+| `online_pool=seamless` / `huntersdream` / `shadnet` | `BB_NET_BACKEND=seamless` / `thd` / `shadnet` | co-op pool (Seamless for new configurations) |
+| `seamless_server=host:31314` | `BB_SHADNET_SERVER` with Seamless selected | default `bloodborne.phobos.services:31314`; automatic per-server identity |
 | `thd_online_id=`, `thd_token=` | `BB_THD_ONLINE_ID`, `BB_THD_TOKEN` | The Hunter's Dream account (`keychain` = from the login keychain) |
 | `shadnet_npid=`, `shadnet_password=` | `BB_SHADNET_NPID`, `BB_SHADNET_PASSWORD` | shadNet account (`keychain` as above) |
 | `shadnet_server=host:port` | `BB_SHADNET_SERVER` | another shadNet server (default `srv.shadps4.net:31313`) |

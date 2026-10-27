@@ -1,0 +1,99 @@
+From fceb97debb950b94df220c9963ccced4ad31fa2a Mon Sep 17 00:00:00 2001
+From: Ronny Stiftel <ronny.stiftel@tomcom.de>
+Date: Tue, 27 Oct 2026 16:34:40 +0100
+Subject: [PATCH] Bound invasion Echoes policy to supported character levels
+
+Pay Insight only below level 10 and above 544; retain the documented explicit
+Echoes policy for supported levels, including level 10's 487-cost fixture. Keep
+integer arithmetic and never substitute a guessed negative/low-level cost.
+Correct the local deployment recipe to the live /docker/docker-compose.yml path.
+
+Validation: isolated opc ARM64 Docker build and all 10 focused CTest suites pass,
+including reward grant isolation, durable solo mailbox resumes/counters and the
+new low-level policy fixtures. No service replacement or restart performed.
+
+Original-author: Kaniel / lKaniel (original invasion and co-op design/source)
+Original-author: Vitalii Shevchuk (original source history)
+Original-author: shadNet Project contributors (original SPDX copyright holders)
+Original-source: https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/coop/invasions.cpp
+Original-source: https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/server/src/bloodborne_world.cpp
+---
+ docs/INVASIONS.md                      | 4 ++--
+ docs/INVASION_REWARDS_DEPLOYMENT.md    | 2 +-
+ server/coop/invasions.cpp              | 2 +-
+ server/coop/invasions.h                | 2 +-
+ server/tests/test_bloodborne_world.cpp | 3 +++
+ 5 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/docs/INVASIONS.md b/docs/INVASIONS.md
+index 79c6b93e..1663aeab 100644
+--- a/docs/INVASIONS.md
++++ b/docs/INVASIONS.md
+@@ -168,8 +168,8 @@ turning invasions off never pays. Guests do not get the host's defending reward.
+ The payment is one Insight, plus Blood Echoes according to the explicit server policy in
+ `InvasionVictoryEchoes`: 10% for an invading winner, 30% for a defending host, of
+ `max(0, floor(0.02 L^3 + 3.06 L^2 + 105.6 L - 895))`. The defeated hunter's level is frozen at
+-match (invader) or join (host); a death report cannot increase it. Unknown/out-of-range levels
+-(outside 4..544) pay no Echoes. The polynomial is a **server policy**, not a claim that every
++match (invader) or join (host); a death report cannot increase it. Unsupported low levels and unknown/out-of-range levels
++(outside 10..544) pay no Echoes. The polynomial is a **server policy**, not a claim that every
+ low-level or covenant-specific retail reward has been verified. Native game validation and
+ low-level curve verification are recorded separately by the consuming Mac client.
+ 
+diff --git a/docs/INVASION_REWARDS_DEPLOYMENT.md b/docs/INVASION_REWARDS_DEPLOYMENT.md
+index 1323502c..64c8b8e8 100644
+--- a/docs/INVASION_REWARDS_DEPLOYMENT.md
++++ b/docs/INVASION_REWARDS_DEPLOYMENT.md
+@@ -43,7 +43,7 @@ identity's forged ACK, server-only item/refund rejection and malformed grant val
+ ## Service replacement and validation
+ 
+ Before replacing the service, record its current compose service name, image reference and
+-health status. Save an exact copy of `/docker/docker-compose.yaml`. Update only the Bloodborne
++health status. Save an exact copy of `/docker/docker-compose.yml`. Update only the Bloodborne
+ image value to the new image, then recreate only that service with its existing volumes and
+ configuration; no volume removal or account reset is required. Preserve the previous image and
+ compose copy for rollback. Test capable and original clients, then verify the service is healthy.
+diff --git a/server/coop/invasions.cpp b/server/coop/invasions.cpp
+index 003f9666..6dc8ad14 100644
+--- a/server/coop/invasions.cpp
++++ b/server/coop/invasions.cpp
+@@ -8,7 +8,7 @@
+ namespace BloodborneCoop {
+ 
+ u32 InvasionVictoryEchoes(u32 level, bool invader_won) {
+-    if (level < 4 || level > 544) {
++    if (level < 10 || level > 544) {
+         return 0;
+     }
+     const s64 l = level;
+diff --git a/server/coop/invasions.h b/server/coop/invasions.h
+index 649d3341..e0283e11 100644
+--- a/server/coop/invasions.h
++++ b/server/coop/invasions.h
+@@ -53,7 +53,7 @@ constexpr bool InLevelBand(u32 invader, u32 member) {
+ 
+ // Victory Echoes policy: 10% (invader wins) / 30% (host defends) of the defeated
+ // hunter's previous-level cost. Integer arithmetic avoids platform rounding drift. Invalid
+-// levels pay no Echoes; the separate one-Insight award still applies. See docs/INVASIONS.md
++// levels (below 10 or above 544) pay no Echoes; the separate one-Insight award still applies. See docs/INVASIONS.md
+ // for provenance and the boundary between this explicit server policy and retail verification.
+ u32 InvasionVictoryEchoes(u32 defeated_level, bool invader_won);
+ 
+diff --git a/server/tests/test_bloodborne_world.cpp b/server/tests/test_bloodborne_world.cpp
+index 89477c04..fd41155c 100644
+--- a/server/tests/test_bloodborne_world.cpp
++++ b/server/tests/test_bloodborne_world.cpp
+@@ -3377,6 +3377,9 @@ int VictoryRewardsUseSoloMailboxesAndSurviveRestart() {
+   CHECK(InvasionVictoryEchoes(0, true) == 0);
+   CHECK(InvasionVictoryEchoes(545, false) == 0);
+   CHECK(InvasionVictoryEchoes(4, false) == 0);
++  CHECK(InvasionVictoryEchoes(9, true) == 0);
++  CHECK(InvasionVictoryEchoes(10, true) == 48);
++  CHECK(InvasionVictoryEchoes(10, false) == 146);
+   // Freeze the defeated level at join/match, not an arbitrary death report.
+   {
+     InvasionRig rig;
+-- 
+2.54.0 (Apple Git-157)
+

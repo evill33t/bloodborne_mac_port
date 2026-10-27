@@ -29,6 +29,7 @@
 #endif
 #include "../bbgpu.h"
 #include "bbport_split.h"
+#include "bbport_coop_ui.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/rdtsc.h"
@@ -359,6 +360,7 @@ extern "C" int bbgpu_host_dispatch(const void* record) {
         bbgpu_mac_setting_set(setting->field, setting->value);
         return 1;
     }
+    if (BbCoopOverlay::Dispatch(r)) return 1;
     if (r->type == BBGPU_REC_TEXT_BEGIN) {
         auto* t = static_cast<const BbGpuTextBegin*>(record);
         BbGpuShared* s = BbSplit::Shared();

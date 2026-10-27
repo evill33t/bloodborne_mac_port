@@ -6,6 +6,11 @@
 static int capture, mouse_look;
 static bool keys[512];
 static int use_keys;
+void runtime_coop_frame(uint32_t *buttons,uint8_t sticks[4],uint8_t *l2,uint8_t *r2,int32_t *side) {
+    (void)buttons;(void)sticks;(void)l2;(void)r2;(void)side;
+}
+int runtime_coop_camera_mouse(float dx,float dy) { (void)dx;(void)dy;return 0; }
+
 int bbgpu_overlay_captures_input(void) { return capture; }
 void runtime_mac_settings_pad(uint32_t *buttons) { (void)buttons; }
 int bbgpu_mouse_look_enabled(void) { return mouse_look; }

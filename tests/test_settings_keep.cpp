@@ -69,6 +69,9 @@ int main() {
     assert(Get().screen_lighting == ScreenLightingLow && Get().screen_lighting_ao == 0.6f &&
            Get().screen_lighting_gi == 1.2f);
     Get().preset = 3;
+    Get().map_view = 3;Get().compass=false;Get().compass_position=2;
+    Get().bloodstains=false;Get().team_pings=false;Get().ping_key=3;Get().free_camera=true;
+    Get().menu_language_auto=false;Get().menu_language=MenuLanguage::De;
     Save();
     std::string text = Read(path);
     assert(Count(text, "hdr_highlights=0.75") == 0);
@@ -101,6 +104,15 @@ int main() {
            Get().screen_lighting_gi == 2.0f);
     unsetenv("BB_SCREEN_LIGHTING"); unsetenv("BB_SCREEN_LIGHTING_AO"); unsetenv("BB_SCREEN_LIGHTING_GI");
     Load();
+    assert(Count(text, "map_view=3") == 1);
+    Get().map_view = 0;
+    Load();
+    assert(Get().map_view == 3 && !Get().compass && Get().compass_position==2);
+    assert(!Get().bloodstains && !Get().team_pings && Get().ping_key==3 && Get().free_camera);
+    assert(Get().menu_language==MenuLanguage::De && !Get().menu_language_auto);
+    assert(std::string(BbLanguage::Text(MenuLanguage::De,"Begin the hunt"))!="Begin the hunt");
+    assert(std::string(BbLanguage::Text(MenuLanguage::Russian,"Begin the hunt"))!="Begin the hunt");
+    assert(std::string(BbLanguage::GameFolder(MenuLanguage::De))=="deude");
     assert(Count(text, "upscaler=fsr3") == 1 && Count(text, "# a comment") == 0);
     Save(); // again: still once each
     text = Read(path);

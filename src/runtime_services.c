@@ -288,7 +288,14 @@ static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_I
 static ABI int32_t trophy_register(int32_t ctx,int32_t handle,uint64_t options) { (void)ctx; (void)handle; (void)options; return 0; }
 static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
     (void)ctx; (void)handle;
-    return runtime_trophy_unlock(id,platinum);
+    if (!runtime_coop_enabled()) return runtime_trophy_unlock(id,platinum);
+    RuntimeTrophySnapshot before,after;
+    runtime_trophy_snapshot(&before);
+    const int32_t result=runtime_coop_record_trophy(id);
+    if (!result) runtime_coop_trophy_unlocked(id);
+    runtime_trophy_snapshot(&after);
+    if (platinum) *platinum=!before.unlocked[0] && after.unlocked[0] ? 0 : -1;
+    return result;
 }
 static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,RuntimeTrophyGameDetails *details,RuntimeTrophyGameData *data) {
     (void)ctx; (void)handle;

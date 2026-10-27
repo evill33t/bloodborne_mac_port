@@ -59,6 +59,22 @@ static int award_platinum(int announce) {
     }
     return append(0,latest,announce);
 }
+/* Co-op owns the fsync/duplicate check. Import its committed row into the same
+ * UI state as local unlocks, without appending it again or sending it to peers. */
+void runtime_trophy_recorded(int id,int64_t timestamp) {
+    if (id<0 || id>=BB_TROPHY_COUNT || timestamp<=0) return;
+    pthread_mutex_lock(&trophy_lock);
+    if (!state.unlocked[id]) {
+        state.unlocked[id]=timestamp; state.error[0]=0; ++state.revision;
+        if (count<BB_TROPHY_COUNT) {
+            events[(head+count)%BB_TROPHY_COUNT]=(RuntimeTrophyEvent){id,timestamp}; ++count;
+            notifications |= UINT64_C(1)<<id;
+        }
+        award_platinum(1);
+        bbgpu_trophy_update(&state,notifications);
+    }
+    pthread_mutex_unlock(&trophy_lock);
+}
 void runtime_trophy_configure(const char *user) {
     pthread_mutex_lock(&trophy_lock);
     const uint64_t revision=state.revision+1;

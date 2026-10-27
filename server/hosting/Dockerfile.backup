@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1.7
+# Backup runner: backup.sh / restore.sh with sqlite3, rsync, restic, rclone. The compose sidecar
+# runs it in a loop (CMD); the Helm chart's CronJob runs backup.sh once an hour as user 10001.
+#   docker build -f server/hosting/Dockerfile.backup -t yharnam-backup:local server/hosting
+# Behind a TLS-intercepting proxy: --network host --secret id=proxy_ca,src=<ca.crt>
+# --build-arg HTTPS_PROXY=... (see Dockerfile). Ubuntu, as the server's image, rather than
+# Alpine: one package source for both.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN --mount=type=secret,id=proxy_ca,required=false \
+    set -eu; \
+    if [ -s /run/secrets/proxy_ca ]; then \
+        install -m 0644 /run/secrets/proxy_ca /tmp/proxy_ca.crt; \
+        echo 'Acquire::https::CaInfo "/tmp/proxy_ca.crt";' > /etc/apt/apt.conf.d/99proxy-ca; \
+        sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends bash ca-certificates coreutils curl findutils \
+        util-linux procps rsync sqlite3 tar zstd restic rclone openssh-client postgresql-client; \
+    rm -rf /var/lib/apt/lists/* /etc/apt/apt.conf.d/99proxy-ca /tmp/proxy_ca.crt; \
+    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i 's|https://|http://|g' /etc/apt/sources.list.d/ubuntu.sources; fi
+COPY backup.sh restore.sh /usr/local/bin/
+ENV DATA_DIR=/data STAGE_DIR=/backup/stage
+CMD ["bash", "-c", "while true; do backup.sh || true; sleep \"${BACKUP_INTERVAL:-3600}\"; done"]

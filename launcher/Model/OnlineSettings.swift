@@ -4,9 +4,22 @@ import Foundation
 /// Which co-op pool bells and summons go through (bbport.ini `online_pool`, read by
 /// scripts/launch_settings.sh).
 enum OnlinePool: String, CaseIterable, Identifiable {
-    case huntersdream, shadnet
+    case seamless, huntersdream, shadnet
     var id: String { rawValue }
-    var label: String { self == .huntersdream ? "The Hunter's Dream" : "shadNet server" }
+    var label: String {
+        switch self {
+        case .seamless: "Seamless Co-op"
+        case .huntersdream: "The Hunter's Dream"
+        case .shadnet: "shadNet server"
+        }
+    }
+}
+
+/// The game mode shown before Play, independent of which settings page is open.
+enum PlayMode: String, CaseIterable, Identifiable {
+    case regular, seamless
+    var id: String { rawValue }
+    var label: String { self == .regular ? "Regular" : "Seamless Co-op" }
 }
 
 /// A secret the launcher never shows or logs: absent, in the login keychain (the ini says
@@ -50,12 +63,16 @@ protocol SecretStore {
 /// in the IniFile.
 struct OnlineSettings: Equatable {
     static let defaultShadnetServer = "srv.shadps4.net:31313"
+    static let defaultSeamlessServer = "bloodborne.phobos.services:31314"
     static let defaultP2PPort = 3658
     static let shadnetService = "bbport-shadnet"
     static let huntersDreamService = "bbport-huntersdream"
 
     var online = false
-    var pool = OnlinePool.huntersdream
+    var pool = OnlinePool.seamless
+    var seamlessServer = ""
+    var seamlessHostRules = "off"
+    var seamlessHarderEnemies = "off"
     /// Empty: the default server.
     var shadnetServer = ""
     var shadnetNpid = ""
@@ -64,6 +81,29 @@ struct OnlineSettings: Equatable {
     var thdToken = StoredSecret.none
     var upnp = true
     var p2pPort = OnlineSettings.defaultP2PPort
+
+    /// Uses the existing online keys so old settings and the Online tab stay in sync.
+    var playMode: PlayMode {
+        get { online && pool == .seamless ? .seamless : .regular }
+        set {
+            switch newValue {
+            case .seamless:
+                pool = .seamless
+                online = true
+            case .regular:
+                if pool == .seamless { online = false }
+            }
+        }
+    }
+
+    /// The launcher's visible choice wins over inherited online-mode flags. Other diagnostic
+    /// overrides keep their normal precedence; command-line run.sh behavior is unchanged.
+    func launchEnvironment(adding env: [String: String]) -> [String: String] {
+        var result = env
+        result["BB_ONLINE"] = online ? "1" : "0"
+        result["BB_NET_BACKEND"] = pool == .huntersdream ? "thd" : pool.rawValue
+        return result
+    }
 
     init() {}
 
@@ -75,6 +115,9 @@ struct OnlineSettings: Equatable {
         }
         if let v = flag("online") { online = v }
         shadnetServer = ini["shadnet_server"] ?? ""
+        seamlessServer = ini["seamless_server"] ?? ""
+        seamlessHostRules = ini["seamless_host_rules"] ?? "off"
+        seamlessHarderEnemies = ini["seamless_harder_enemies"] ?? "off"
         shadnetNpid = ini["shadnet_npid"] ?? ""
         shadnetPassword = StoredSecret(iniValue: ini["shadnet_password"])
         thdOnlineId = ini["thd_online_id"] ?? ""
@@ -83,7 +126,7 @@ struct OnlineSettings: Equatable {
             pool = p
         } else {
             // launch_settings.sh: a file naming only a shadNet account is from before the pool key.
-            pool = !shadnetNpid.isEmpty && thdOnlineId.isEmpty ? .shadnet : .huntersdream
+            pool = !shadnetNpid.isEmpty && thdOnlineId.isEmpty ? .shadnet : !thdOnlineId.isEmpty ? .huntersdream : .seamless
         }
         if let v = flag("upnp") { upnp = v }
         if let v = ini["p2p_port"], let port = Self.port(from: v) { p2pPort = port }
@@ -101,6 +144,10 @@ struct OnlineSettings: Equatable {
     func apply(to ini: inout IniFile) {
         ini["online"] = online ? "1" : "0"
         ini["online_pool"] = pool.rawValue
+        let seamless = seamlessServer.trimmingCharacters(in: .whitespaces)
+        ini["seamless_server"] = seamless.isEmpty ? nil : seamless
+        ini["seamless_host_rules"] = seamlessHostRules
+        ini["seamless_harder_enemies"] = seamlessHarderEnemies
         let server = shadnetServer.trimmingCharacters(in: .whitespaces)
         ini["shadnet_server"] = server.isEmpty ? nil : server
         let npid = shadnetNpid.trimmingCharacters(in: .whitespaces)

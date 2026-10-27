@@ -17,16 +17,28 @@ struct LauncherView: View {
             // Not a TabView: on macOS 26.0.1 switching back to a tab re-inserts its cached view
             // graph and SwiftUI's accessibility nodes loop on a dependency cycle, printing it
             // forever with the window frozen (#47, sampled by the reporter).
-            Picker("", selection: $model.page) {
-                Text("General").tag(Page.general)
-                Text("Advanced").tag(Page.advanced)
-                Text("Achievements").tag(Page.achievements)
-                Text("Online").tag(Page.online)
-                Text("Controls").tag(Page.controls)
+            HStack {
+                Picker("Game mode", selection: $model.online.playMode) {
+                    ForEach(PlayMode.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .disabled(model.running)
+                .accessibilityIdentifier("launchMode")
+                .help("Regular uses normal gameplay and saves. Seamless Co-op connects to your co-op server with separate saves. Regular online pools are available in the Online tab.")
+                Spacer()
+                Picker("", selection: $model.page) {
+                    Text("General").tag(Page.general)
+                    Text("Advanced").tag(Page.advanced)
+                    Text("Achievements").tag(Page.achievements)
+                    Text("Online").tag(Page.online)
+                    Text("Controls").tag(Page.controls)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+            .padding(.horizontal)
             .padding(.top, 10)
             Group {
                 switch model.page {
@@ -221,6 +233,23 @@ struct LauncherView: View {
                     FolderRow(title: "Save folder", path: model.saveDir.path, problem: model.saveProblem,
                               choose: model.chooseSaveFolder, reset: model.resetSaveFolder)
                 }
+                Section("Rendered maps") {
+                    Picker("Map view",selection: $model.settings.mapView) {
+                        Text("Rendered terrain").tag(1)
+                        Text("Prerendered 3D").tag(3)
+                        Text("Live 3D").tag(2)
+                        Text("Coordinates").tag(0)
+                    }
+                    Toggle("Fog of war",isOn: $model.settings.mapFog)
+                    if model.preparingMaps {
+                        ProgressView(value: model.mapFraction)
+                        Button("Cancel preparation",action: model.cancelMapPreparation)
+                    } else {
+                        Button("Prepare maps…",action: model.prepareMaps)
+                            .disabled(model.config.gameDir == nil)
+                    }
+                    if let progress=model.mapProgress {Text(progress).font(.caption).foregroundStyle(.secondary)}
+                }
             }
             .formStyle(.grouped)
         }
@@ -316,7 +345,7 @@ struct LauncherView: View {
         Form {
             Section("Online play") {
                 Toggle("Play online", isOn: $model.online.online)
-                Text("Messages, bloodstains and ghosts come from the community server; bells and summons go through the co-op pool below. Off, the game never touches the network. Setup and troubleshooting: docs/ONLINE.md.")
+                Text("Choose a server for messages, bloodstains, ghosts and multiplayer. Seamless Co-op adds persistent team worlds, shared progress, travel, revives and trading.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Co-op pool") {
@@ -324,13 +353,15 @@ struct LauncherView: View {
                     ForEach(OnlinePool.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                if model.online.pool == .huntersdream {
+                if model.online.pool == .seamless {
+                    seamlessRows
+                } else if model.online.pool == .huntersdream {
                     huntersDreamRows
                 } else {
                     shadnetRows
                 }
             }
-            Section("Connection") {
+            if model.online.pool != .seamless { Section("Connection") {
                 Toggle("Ask the router to forward the co-op port (UPnP)", isOn: $model.online.upnp)
                 Text("On by default: while the game runs on the shadNet pool, the router forwards the co-op UDP port to this Mac (an hour at a time, renewed; removed on exit). Off, forward the port by hand if bells are not answered.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -342,7 +373,7 @@ struct LauncherView: View {
                 Text(portValid ? "3658 is the PlayStation 4's port; 0 picks any free port. A busy port falls back to a free one."
                                : "A port is a number from 0 to 65535.")
                     .font(.caption).foregroundStyle(portValid ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
-            }
+            } }
             if let problem = model.onlineProblem {
                 Text(problem).foregroundStyle(.red)
             }
@@ -351,6 +382,32 @@ struct LauncherView: View {
     }
 
     private var portValid: Bool { OnlineSettings.port(from: model.p2pPortText) != nil }
+
+    private func seamlessRule(_ name: String) -> Binding<Bool> {
+        Binding(get: { model.online.seamlessHostRules.split(separator: ",").contains(Substring(name)) }, set: { on in
+            var selected = Set(model.online.seamlessHostRules.split(separator: ",").map(String.init))
+            selected.remove("off")
+            if on { selected.insert(name) } else { selected.remove(name) }
+            if name == "vote", on { selected.insert("travel") }
+            if name == "travel", !on { selected.remove("vote") }
+            model.online.seamlessHostRules = selected.isEmpty ? "off" : ["rot", "travel", "vote", "scale"].filter(selected.contains).joined(separator: ",")
+        })
+    }
+
+    @ViewBuilder private var seamlessRows: some View {
+        TextField("Server", text: $model.online.seamlessServer, prompt: Text(OnlineSettings.defaultSeamlessServer))
+        Text("A persistent identity is created automatically for this server. Co-op saves use a separate folder, seeded from your existing saves on first launch. Co-op runs at 60 FPS.")
+            .font(.caption).foregroundStyle(.secondary)
+        Text("In game: F6 opens your team; F8 opens the map; G places a ping. Create a team or join with a friend's code, select a world and start the hunt.")
+            .font(.caption).foregroundStyle(.secondary)
+        Toggle("Rot penalties after death", isOn: seamlessRule("rot"))
+        Toggle("Offer to travel together", isOn: seamlessRule("travel"))
+        Toggle("Vote before travelling together", isOn: seamlessRule("vote"))
+        Toggle("Scale enemies with team size", isOn: seamlessRule("scale"))
+        TextField("Enemy HP, damage, poise multipliers", text: $model.online.seamlessHarderEnemies, prompt: Text("off or 3,1.5,3"))
+        Text("Host rules apply when you lead a team. Set each enemy multiplier from 1 to 10, or use off for the original difficulty.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
 
     @ViewBuilder private var huntersDreamRows: some View {
         if model.signedIn {

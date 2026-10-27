@@ -1,0 +1,57 @@
+# The server link's datagrams (docs/SERVER_COOP_PLAN.md phase 2), between the game (the client,
+# p2p_sockets.cpp / net_link.h) and shadNet (the server, server_link.h). Both test suites read this
+# file: each side encodes these values to these bytes and decodes these bytes to these values. A
+# format change on one side that the other does not follow fails one of them.
+#
+# One datagram per line: <name><TAB><hex>. The values are:
+#   hello            link version 4, cookie 16 x 0x11, online id "Kaniel", build "92829ac4 events
+#                    1f protocol 9", secret "s3cr3t" (phase 11: the hello signs the player in):
+#                    its plain bytes, as the game writes them before sealing (and the server reads
+#                    them once opened)
+#   cookie           the server's answer to a hello without a valid cookie: 16 x 0x11, then the
+#                    bits a new account's work needs: 20 (hosted; 0 elsewhere), then the server's
+#                    public key (server.key)
+#   hello.work       the hello above with the work nonce 0x0807060504030201 (hosted: a new
+#                    account's, after the secret, only when there is one)
+#   work             hosted: a hello's answer when its id has no account and it did no work:
+#                    20 bits (plain: it goes sealed, as the hello's other answers)
+#   welcome.ok       accepted, no text
+#   welcome.refused  refused, "another build: 13ddd14d"
+#   data             address 127.0.0.1, port 0x1234 (both as sent: network byte order), and the
+#                    frame 7530 7531 07000000 02000000 abcd (vports 0x7530 -> 0x7531, a game packet)
+#   ping, pong       seq 7, sent at 1000 ms
+#   member.*         Ada at 127.0.0.1:0x1234: quiet for 3500 ms, back after 4200 ms, gone
+#                    after 60000 ms
+#   rpc              the body 0102 (phase 11: the link's second stream, the old TCP calls)
+#   redirect         server -> game (docs/SCALING.md): continue on the shard at 10.0.0.2, port
+#                    31316 (both as sent: network byte order), its key server.key, the ticket
+#                    0102030405 (u16 size first), the reason "full"; sealed as any answer
+#   hello.ticket     the hello above with a region ticket "TICKET": the work nonce's 8 bytes (0:
+#                    none done) then the ticket (u16 size first), after the secret
+# Link version 4 (server/coop/link_auth.h, Noise_NK_25519_ChaChaPoly_BLAKE2b), made by
+# server/loadtest/noise_link.py --vectors (Python's cryptography, not our C++):
+#   server.key       the server's public key, its secret 32 x 0x44 (a key, not a datagram)
+#   hello.sealed     the hello above sealed to server.key, the game's ephemeral secret 32 x 0x33
+#   welcome.sealed   the server's answer to hello.sealed carrying welcome.ok, its ephemeral secret
+#                    32 x 0x55
+#   ping.sealed      the ping above, the game's first datagram of the link those two make:
+#                    counter 1, the body encrypted, the tag last
+hello	ffffffff53484c4b010411111111111111111111111111111111064b616e69656c1d3932383239616334206576656e74732031662070726f746f636f6c203906733363723374
+welcome.ok	ffffffff53484c4b020100
+welcome.refused	ffffffff53484c4b020017616e6f74686572206275696c643a203133646464313464
+data	ffffffff53484c4b037f0000011234753075310700000002000000abcd
+ping	ffffffff53484c4b0407000000e803000000000000
+pong	ffffffff53484c4b0507000000e803000000000000
+member.quiet	ffffffff53484c4b0600ac0d00007f000001123403416461
+member.back	ffffffff53484c4b0601681000007f000001123403416461
+member.gone	ffffffff53484c4b060260ea00007f000001123403416461
+rpc	ffffffff53484c4b080102
+cookie	ffffffff53484c4b091111111111111111111111111111111114ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b
+hello.work	ffffffff53484c4b010411111111111111111111111111111111064b616e69656c1d3932383239616334206576656e74732031662070726f746f636f6c2039067333637233740102030405060708
+work	ffffffff53484c4b0a14
+server.key	ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b
+hello.sealed	ffffffff53484c4b0104111111111111111111111111111111117b0d47d93427f8311160781c7c733fd89f88970aef490d8aa0ee19a4cb8a1b14564d70bd99335d80b53158cbeb08e4a4af0bff35d991055e4985047c635be7e7d5fb931a612820ac4ccf944fcfca96b8dcd5fdd1a7c42fdd672ba0c0
+welcome.sealed	ffffffff53484c4b0238ab664bd86f77d7e66bdd9ae0792913a94fd8b33a1260027e4b46c1f4884c67578784196b5ef25604cd4d475a691c12c0099cb494ed58259b8180
+ping.sealed	ffffffff53484c4b048c9d7e11d35807d126d024e601000000000000002085ece553d80414ba13d550cf0a9f4e
+redirect	ffffffff53484c4b0b0a0000027a54ff2ee45601ec1b67310c7790404585ae697331eee1c1f8cf2419731c1fff3e6b050001020304050466756c6c
+hello.ticket	ffffffff53484c4b010411111111111111111111111111111111064b616e69656c1d3932383239616334206576656e74732031662070726f746f636f6c203906733363723374000000000000000006005449434b4554
