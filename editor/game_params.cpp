@@ -79,6 +79,23 @@ std::vector<BinderFile> ReadBinder(std::span<const std::uint8_t> packed) {
     }
     return files;
 }
+std::map<std::int32_t,std::string> ReadFmg(std::span<const std::uint8_t> b) {
+    if(b.size()<40 || b[0] || b[1] || b[2]!=2 || b[3] || b[8]!=1 || b[9] || b[10] || b[11] || Get<std::uint32_t>(b,20)!=0xff)
+        throw std::runtime_error("Unsupported Bloodborne message format");
+    const auto groups=Get<std::uint32_t>(b,12),strings=Get<std::uint32_t>(b,16);const auto offsets=Get<std::uint64_t>(b,24);
+    if(groups>(b.size()-40)/16 || offsets<40+std::uint64_t(groups)*16 || offsets>b.size() || strings>(b.size()-offsets)/8)throw std::runtime_error("Invalid message tables");
+    std::map<std::int32_t,std::string> result;
+    for(std::size_t n=0;n<groups;++n) {
+        const auto at=40+n*16;const auto index=Get<std::int32_t>(b,at),first=Get<std::int32_t>(b,at+4),last=Get<std::int32_t>(b,at+8);
+        const auto count=std::int64_t(last)-first+1;if(index<0 || count<0 || std::uint64_t(index)>strings || std::uint64_t(count)>strings-std::uint64_t(index))throw std::runtime_error("Invalid message group");
+        for(std::int64_t i=0;i<count;++i) {
+            const auto offset=Get<std::uint64_t>(b,offsets+(index+i)*8);if(!offset)continue;
+            if(offset<offsets+std::uint64_t(strings)*8 || offset>=b.size())throw std::runtime_error("Invalid message string");
+            result[std::int32_t(first+i)]=Utf16(b,offset);
+        }
+    }
+    return result;
+}
 ParamTable ParamTable::Read(std::span<const std::uint8_t> b) {
     if(b.size()<64 || b[0x2c] || b[0x2d]!=4 || b[0x2e]!=7)throw std::runtime_error("Unsupported Bloodborne parameter format");
     ParamTable result;result.bytes.assign(b.begin(),b.end());
@@ -117,7 +134,18 @@ GameParams GameParams::Read(std::span<const std::uint8_t> binder) {
     }
     return result;
 }
-GameParams GameParams::Open(const std::filesystem::path& game) {return Read(ReadFile(game/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx"));}
+GameParams GameParams::Open(const std::filesystem::path& game) {
+    auto result=Read(ReadFile(game/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx"));
+    try {
+        std::filesystem::path messages;for(const auto* language:{"enggb","engus"}){const auto p=game/"dvdroot_ps4/msg"/language/"item.msgbnd.dcx";if(std::filesystem::exists(p)){messages=p;break;}}
+        if(!messages.empty())for(const auto& file:ReadBinder(ReadFile(messages))) {
+            const char* table=file.id==10?"EquipParamGoods":file.id==11?"EquipParamWeapon":file.id==12?"EquipParamProtector":file.id==13?"EquipParamAccessory":nullptr;
+            if(!table || !result.tables.contains(table))continue;const auto names=ReadFmg(file.bytes);
+            for(auto& row:result.tables[table].rows)if(const auto found=names.find(row.id);found!=names.end())row.display_name=found->second;
+        }
+    }catch(const std::exception& e){result.text_notice=e.what();}
+    return result;
+}
 const ParamTable* GameParams::Table(const std::string& name) const {auto p=tables.find(name);return p==tables.end()?nullptr:&p->second;}
 ItemLot ReadItemLot(const ParamTable& table,std::int32_t id) {
     const auto* row=table.Find(id);

@@ -22,6 +22,11 @@ std::vector<std::uint8_t> Binder(const std::vector<std::uint8_t>& param){
     Text(b,100,u"N:\\param\\NpcParam.param");b.insert(b.end(),param.begin(),param.end());return b;
 }
 int main(int argc,char** argv){
+    {
+        std::vector<std::uint8_t> fmg(128);fmg[2]=2;fmg[8]=1;Put<std::uint32_t>(fmg,4,fmg.size());Put<std::uint32_t>(fmg,12,1);Put<std::uint32_t>(fmg,16,1);Put<std::uint32_t>(fmg,20,0xff);Put<std::uint64_t>(fmg,24,56);
+        Put<std::int32_t>(fmg,44,1000);Put<std::int32_t>(fmg,48,1000);Put<std::uint64_t>(fmg,56,64);Text(fmg,64,u"Blood Vial");assert(ReadFmg(fmg).at(1000)=="Blood Vial");
+        auto bad=fmg;Put<std::uint64_t>(bad,56,1000);Reject([&]{ReadFmg(bad);});bad=fmg;Put<std::int32_t>(bad,48,2147483647);Reject([&]{ReadFmg(bad);});
+    }
     auto raw=Param();auto table=ParamTable::Read(raw);assert(table.type=="NPC_PARAM_ST" && table.rows.size()==2);
     assert(table.Find(10)->name=="敵" && table.Find(11)->name=="NPC" && !table.Find(12));assert(table.Data(*table.Find(10)).size()==16);
     auto binder=Binder(raw);auto catalog=GameParams::Read(binder);assert(catalog.Table("NpcParam")->Find(11));assert(!catalog.Table("Absent"));
@@ -39,6 +44,7 @@ int main(int argc,char** argv){
         auto actual=GameParams::Open(argv[1]);assert(actual.Tables().size()==8);
         for(const auto& [name,t]:actual.Tables()){assert(!t.rows.empty());for(const auto& r:t.rows)assert(!t.Data(r).empty());std::cout<<name<<": "<<t.rows.size()<<" rows, "<<t.type<<"\n";}
         assert(actual.Table("NpcParam")->Find(263400));assert(actual.Table("NpcThinkParam")->Find(263400));
+        assert(actual.TextNotice().empty());assert(actual.Table("EquipParamGoods")->Find(1000)->Label()=="Blood Vial");
         assert(ReadNpcInfo(*actual.Table("NpcParam"),263400)->hp==150);assert(ReadNpcInfo(*actual.Table("NpcParam"),263000)->hp==120);
         const auto talks=GameParams::TalkScripts(argv[1],"m24_01_00_01");assert(!talks.empty());std::cout<<"Central Yharnam talk scripts: "<<talks.size()<<"\n";
         auto npc=before;npc.npc_param=263400;npc.think_param=263400;npc.chara_init=-1;npc.talk_id=talks.begin()->first;ValidateCharacterReferences(before,npc,actual,talks);

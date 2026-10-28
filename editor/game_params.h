@@ -20,10 +20,13 @@ struct BinderFile {
 std::vector<std::uint8_t> UnpackAsset(std::span<const std::uint8_t> bytes);
 std::vector<std::uint8_t> PackAsset(std::span<const std::uint8_t> envelope,std::span<const std::uint8_t> raw);
 std::vector<BinderFile> ReadBinder(std::span<const std::uint8_t> bytes);
+std::map<std::int32_t,std::string> ReadFmg(std::span<const std::uint8_t> bytes);
 struct ParamRow {
     std::int32_t id=0;
     std::string name;
     std::size_t offset=0,size=0;
+    std::string display_name{};
+    const std::string& Label() const {return display_name.empty()?name:display_name;}
 };
 struct ParamTable {
     std::string type;
@@ -61,9 +64,11 @@ public:
     void SetContents(ItemLot& lot,const ItemContents& contents) const;
     std::vector<std::uint8_t> SaveLots(const std::vector<ItemLot>& lots) const;
     std::vector<std::int32_t> UsedFlags(std::int32_t group) const;
+    const std::string& TextNotice() const {return text_notice;}
 private:
     std::map<std::string,ParamTable> tables;
     std::vector<std::uint8_t> source;
+    std::string text_notice;
 };
 struct EnemyData;
 void ValidateCharacterReferences(const EnemyData& before,const EnemyData& after,const GameParams& params,

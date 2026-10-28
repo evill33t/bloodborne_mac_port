@@ -10,6 +10,7 @@
 #include "imgui_impl_osx.h"
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <future>
@@ -38,17 +39,19 @@ void Finish() {
 void ParamChooser(const char* label,int* value,const ParamTable* table) {
     ImGui::PushID(label);ImGui::TextUnformatted(label);ImGui::SetNextItemWidth(-1);ImGui::InputInt("##id",value);
     const auto* row=table?table->Find(*value):nullptr;
-    const auto preview=row?std::to_string(row->id)+" "+row->name:*value==-1?std::string("None"):std::string("Row not found");
+    const auto preview=row?std::to_string(row->id)+" "+row->Label():*value==-1?std::string("None"):std::string("Row not found");
     ImGui::SetNextItemWidth(-1);
     if(ImGui::BeginCombo("##rows",preview.c_str())) {
         static char search[128]={};if(ImGui::IsWindowAppearing()){search[0]=0;ImGui::SetKeyboardFocusHere();}
         ImGui::InputText("Search ID or name",search,sizeof(search));
         if(ImGui::Selectable("None (-1)",*value==-1))*value=-1;
         std::vector<const ParamRow*> matches;
-        if(table)for(const auto& r:table->rows)if(std::to_string(r.id).find(search)!=std::string::npos || r.name.find(search)!=std::string::npos)matches.push_back(&r);
+        auto lower=[](std::string text){for(char& c:text)if(static_cast<unsigned char>(c)<128)c=char(std::tolower(static_cast<unsigned char>(c)));return text;};
+        const auto needle=lower(search);
+        if(table)for(const auto& r:table->rows)if(lower(std::to_string(r.id)+" "+r.name+" "+r.display_name).find(needle)!=std::string::npos)matches.push_back(&r);
         ImGuiListClipper clipper;clipper.Begin(int(matches.size()));
         while(clipper.Step())for(int n=clipper.DisplayStart;n<clipper.DisplayEnd;++n) {
-            const auto& r=*matches[n];const auto text=std::to_string(r.id)+" "+r.name;
+            const auto& r=*matches[n];const auto text=std::to_string(r.id)+" "+r.Label();
             if(ImGui::Selectable(text.c_str(),*value==r.id))*value=r.id;
         }
         ImGui::EndCombo();

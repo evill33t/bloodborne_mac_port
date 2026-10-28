@@ -71,6 +71,8 @@ object for the usual transform controls. The pickup inspector shows its item-lot
 and collection flag. **Duplicate pickup** or **Command-D** creates an independent object,
 treasure event and private item lot, and selects the copy. Move it, choose a weapon, armor
 or consumable from the installed game's parameter rows, set the count, then **Apply item contents**.
+Equipment pickers display English in-game names when the message binder is available and
+search names/IDs without ASCII case sensitivity. Original parameter row names remain intact.
 Apply replaces the lot's contents with one guaranteed stack: one equipment item or 1-99
 consumables. Existing multi-slot/random lots remain intact until explicitly replaced.
 
