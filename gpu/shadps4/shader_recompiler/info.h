@@ -231,9 +231,10 @@ struct Info : InfoPersistent {
         VAddr base;
         std::memcpy(&base, ud.data() + ptr_index, sizeof(base));
         base &= 0xFFFFFFFFFFFFULL;
-        if (base >= MinTableAddress) {
-            BbGuest::Read(&data, base + byte_offset, sizeof(data));
+        if (base < MinTableAddress) [[unlikely]] {
+            return data;
         }
+        BbGuest::Read(&data, base + byte_offset, sizeof(data));
         return data;
     }
 
@@ -267,11 +268,12 @@ struct Info : InfoPersistent {
         ASSERT(tess_consts_dword_offset >= 0); // We've already tracked the V# UD
         auto buf = ReadUdReg<AmdGpu::Buffer>(static_cast<u32>(tess_consts_ptr_base),
                                              static_cast<u32>(tess_consts_dword_offset));
-        if (buf.base_address < MinTableAddress) [[unlikely]] {
+        VAddr tess_constants_addr = buf.base_address;
+        if (tess_constants_addr < MinTableAddress) [[unlikely]] {
             tess_constants = {};
             return;
         }
-        BbGuest::Read(&tess_constants, buf.base_address, sizeof(tess_constants));
+        BbGuest::Read(&tess_constants, tess_constants_addr, sizeof(tess_constants));
     }
 
     void Serialize(Serialization::Archive& ar) const;
