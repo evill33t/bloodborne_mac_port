@@ -81,8 +81,49 @@ collision controls streaming, and game events or saved death flags can disable i
 placement. Keep the first moves local, test the exact map phase, and check behavior after
 reloading using a copied save. The editor does not validate walkability or rebuild navigation.
 
-NPC/AI parameters and patrol regions remain read only. The inspector identifies each enemy's
-MSB type; Player parts remain untouched.
+The **Character settings** section edits NPC/AI, talk, initialization and animation IDs with
+undo/redo. These are numeric references at this stage; the editor does not yet look up their
+parameter rows or establish that a different AI or animation is compatible with the model.
+The inspector identifies each enemy's MSB type; Player parts remain untouched.
+
+## Regions and patrols
+
+Choose **Regions / waypoints** to inspect existing region origins, or **New waypoint** to
+create a point at the current selection. Region markers support viewport picking, axis
+dragging and position/rotation edits. Existing region shape dimensions are preserved; the
+marker represents the origin rather than the full volume. Only newly created points can be
+removed, and referenced points must be unlinked first.
+
+Choose **Patrol routes** or **New patrol**. The active patrol panel shows its ordered points
+and behavior. Select a waypoint and use **Append selected waypoint**; **Up**, **Down** and
+**Unlink** edit the sequence. Selecting a patrol frames its points. The viewport draws numbered
+straight connections; these lines do not represent a computed navigation path.
+
+Select a character while keeping the patrol active and choose **Assign to selected character**.
+Assignment replaces its direct move points with the patrol reference and behavior; undo restores
+the previous assignment and direct points. **Show assigned patrol** opens a character's current
+route. All region, patrol and character changes participate in undo/redo and mod export.
+Only new patrols can be removed, after unlinking their characters.
+
+Routes use the game's existing navigation and loading collisions. Keep points on connected
+walkable ground within the character's loading area. Events can override a character's route.
+There is no navigation rebuild or floor snapping yet.
+
+Route validation is recorded under ignored `out/map-editor/route-validation/`. All 24 source
+MSBs pass unchanged and fully undone byte-identical round trips, plus structural exports
+with a copied character, two new regions and one patrol. The tests compare every old opaque
+record after normalizing affected reference indices. SoulsFormats independently reads and
+rewrites the native export, retaining existing named reference targets and placements.
+Native Metal replay verifies waypoint picking, an axis drag, undo/redo and route export.
+
+In `modified-patrol-return-observed`, the copied Central Yharnam enemy follows a new reverse
+route through waypoint 1, waypoint 2 and back to waypoint 1. The player stays at least
+23.88 metres away with full health; the enemy retains full health. Only the player is placed
+by the temporary test helper; the observer does not write enemy AI, health or transforms.
+An earlier observation reached both points before another enemy killed the test player;
+that run is retained separately and is not counted as full-cycle proof. The final run exits
+deliberately without a guest fault or Metal validation failure. All 68 tracked source/seed
+hashes remain unchanged. This bounded patrol test does not establish navigation across areas.
 
 ## Duplicate enemies and props
 

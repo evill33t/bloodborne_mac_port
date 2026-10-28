@@ -26,7 +26,7 @@ struct Options {
     fs::path game,output,script;
     std::string map="m24_01_00_00",select;
     std::optional<BbMapArt::Vec3> translation;
-    bool batch=false,list=false,duplicate=false;
+    bool batch=false,list=false,list_regions=false,list_routes=false,duplicate=false;
 };
 Options options;
 int exit_code=0;
@@ -82,7 +82,8 @@ public:
     }
     void Clear() {meshes.clear();}
     void Render(id<MTLCommandBuffer> command,const Scene& scene,const BbMapView::Camera& camera,
-                ImVec2 size,float dpi,int selected,const std::optional<Transform>& preview,float ceiling,bool show_objects,bool show_enemies) {
+                ImVec2 size,float dpi,int selected,int selected_region,const std::optional<Transform>& preview,float ceiling,
+                bool show_objects,bool show_enemies,bool show_regions,int active_route,bool route_only) {
         const NSUInteger width=std::clamp(int(size.x*dpi),1,8192),height=std::clamp(int(size.y*dpi),1,8192);
         if(!color || color.width!=width || color.height!=height) {
             auto d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:width height:height mipmapped:NO];
@@ -113,7 +114,7 @@ public:
             const float origin[3]={0,0,0},axes[3][3]={{1,0,0},{0,1,0},{0,0,1}};
             auto o=WorldPoint(t,origin);
             for(int r=0;r<3;++r) {c.row[r*4+3]=o[r];for(int a=0;a<3;++a)c.row[r*4+a]=WorldPoint(t,axes[a])[r]-o[r];}
-            c.options[0]=id;c.options[1]=id && int(id)==selected+1;
+            c.options[0]=id;c.options[1]=id && ((id&0x80000000u)?int((id&0x7fffffffu)-1)==selected_region:int(id)==selected+1);
             [encoder setVertexBuffer:gpu.positions offset:0 atIndex:0];[encoder setVertexBuffer:gpu.colors offset:0 atIndex:1];
             [encoder setVertexBytes:&c length:sizeof(c) atIndex:2];[encoder setFragmentBytes:&c length:sizeof(c) atIndex:2];
             [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:gpu.count indexType:MTLIndexTypeUInt32 indexBuffer:gpu.indices indexBufferOffset:0];
@@ -130,6 +131,12 @@ public:
             auto found=scene.models.find(objects[i].model);
             if(found!=scene.models.end()) draw(found->second,int(i)==selected && preview?*preview:objects[i].transform,std::uint32_t(i+1));
         }
+        if(show_regions)for(std::size_t i=0;i<scene.document.Regions().size();++i) {
+            const auto& r=scene.document.Regions()[i];
+            if(route_only && active_route>=0 && int(i)!=selected_region &&
+               std::ranges::none_of(scene.document.Routes()[active_route].data.points,[&](const auto& p){return p.index==r.key;}))continue;
+            draw(scene.region_marker,int(i)==selected_region && preview?*preview:r.transform,0x80000000u|std::uint32_t(i+1));
+        }
         [encoder endEncoding];
     }
 };
@@ -143,14 +150,18 @@ struct State {
     std::string selection_name;
     std::vector<std::string> maps,commands;
     std::size_t command=0;
-    int frames=0,selected=-1;
+    int frames=0,selected=-1,selected_region=-1,active_route=-1;
+    int region_key=-1,route_key=-1;
+    bool region_selection=false;
     bool fitted=false;
     bool cutaway=false;
     bool show_objects=true,show_enemies=true;
+    bool show_regions=false,route_only=true;
     int layer=0;
     float ceiling=10000;
     BbMapView::Camera camera{0,0,0,4,.45f,.85f};
     Transform fields;
+    EnemyData enemy_fields;
     char filter[128]={};
     std::optional<Transform> drag;
     Transform drag_start;
@@ -160,7 +171,7 @@ struct State {
     std::optional<std::array<ImVec2,2>> input_drag;
     int input_frame=0;
     fs::path capture;
-    enum class Pending { None, Duplicate, Remove } pending=Pending::None;
+    enum class Pending { None, Duplicate, Remove, Waypoint, Route, RemoveRoute } pending=Pending::None;
     std::vector<std::uint8_t> exported;
     ~State() {stop.request_stop();if(loading.valid()) loading.wait();}
     bool Unsaved() const {return scene && scene->document.Changed() && scene->document.Inflated()!=exported;}
@@ -175,7 +186,7 @@ struct State {
     }
     void Load() {
         if(loading.valid()) return;
-        scene.reset();selected=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();error.clear();progress="Opening map...";
+        scene.reset();selected=selected_region=active_route=-1;region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();error.clear();progress="Opening map...";
         const auto game=options.game;
         const auto map=options.map;
         loading=std::async(std::launch::async,[this,game,map] {
@@ -183,11 +194,62 @@ struct State {
         });
     }
     void Select(int index,bool focus) {
-        selected=index;drag.reset();drag_axis=-1;
+        selected=index;selected_region=-1;drag.reset();drag_axis=-1;
         if(!scene || index<0) return;
         const auto& object=scene->document.Parts().at(index);fields=object.transform;
-        selection_name=object.name;
+        selection_name=object.name;region_selection=false;if(object.enemy)enemy_fields=*object.enemy;
         if(focus) {camera.x=fields.position[0];camera.y=fields.position[1]+1;camera.z=fields.position[2];camera.zoom=45;cutaway=true;ceiling=fields.position[1]+4;}
+    }
+    void SelectRegion(int index,bool focus) {
+        selected=-1;selected_region=index;drag.reset();drag_axis=-1;
+        if(!scene || index<0)return;
+        const auto& region=scene->document.Regions().at(index);fields=region.transform;
+        region_key=region.key;region_selection=true;show_regions=true;
+        if(focus){camera.x=fields.position[0];camera.y=fields.position[1]+1;camera.z=fields.position[2];camera.zoom=45;cutaway=true;ceiling=fields.position[1]+4;}
+    }
+    const Transform* Current() const {
+        if(!scene)return nullptr;
+        if(selected>=0)return &scene->document.Parts()[selected].transform;
+        return selected_region>=0?&scene->document.Regions()[selected_region].transform:nullptr;
+    }
+    void SetTransform(const Transform& t) {
+        if(selected>=0)scene->document.Set(selected,t);else if(selected_region>=0)scene->document.SetRegion(selected_region,t);
+        else throw std::runtime_error("Select a placement or waypoint first");fields=t;
+    }
+    void SelectRoute(int index,bool focus) {
+        active_route=index;if(index<0)return;const auto& route=scene->document.Routes().at(index);route_key=route.key;show_regions=true;
+        BbMapArt::Vec3 low{FLT_MAX,FLT_MAX,FLT_MAX},high{-FLT_MAX,-FLT_MAX,-FLT_MAX};bool first=true;
+        if(focus)for(const auto& p:route.data.points) {
+            const auto& regions=scene->document.Regions();const auto found=std::ranges::find(regions,p.index,&Region::key);
+            if(found!=regions.end()) {
+                if(first){SelectRegion(int(found-regions.begin()),false);first=false;}
+                for(int n=0;n<3;++n){low[n]=std::min(low[n],found->transform.position[n]);high[n]=std::max(high[n],found->transform.position[n]);}
+            }
+        }
+        if(!first) {
+            camera.x=(low[0]+high[0])*.5f;camera.y=(low[1]+high[1])*.5f+1;camera.z=(low[2]+high[2])*.5f;
+            camera.zoom=std::min(45.f,BbMapView::FitZoom(camera,low[0]-1,low[2]-1,high[0]+1,high[2]+1,
+                std::max(200.f,ImGui::GetIO().DisplaySize.x-340),std::max(200.f,ImGui::GetIO().DisplaySize.y-180),low[1],high[1]));
+            cutaway=true;ceiling=high[1]+4;
+        }
+    }
+    void Waypoint() {
+        const auto position=Current()?Current()->position:BbMapArt::Vec3{camera.x,camera.y,camera.z};
+        SelectRegion(int(scene->document.AddWaypoint(position)),false);layer=3;
+        status="Created waypoint. Position it, then append it to a route.";
+    }
+    void NewRoute() {SelectRoute(int(scene->document.AddRoute()),false);layer=4;status="Created patrol. Append waypoints and assign it to a character.";}
+    void AppendWaypoint() {
+        if(active_route<0 || selected_region<0)throw std::runtime_error("Select a patrol and waypoint first");
+        auto data=scene->document.Routes()[active_route].data;
+        auto empty=std::ranges::find(data.points,-1,&Reference::index);if(empty==data.points.end())throw std::runtime_error("A patrol supports at most 32 waypoints");
+        const auto& r=scene->document.Regions()[selected_region];*empty={r.key,r.name};scene->document.SetRoute(active_route,data);
+    }
+    void AssignRoute() {
+        if(active_route<0 || selected<0 || !scene->document.Parts()[selected].enemy)throw std::runtime_error("Select a patrol and a character first");
+        auto data=*scene->document.Parts()[selected].enemy;const auto& r=scene->document.Routes()[active_route];
+        data.patrol={r.key,r.name};data.patrol_type=std::int16_t(r.data.type);data.move_points.fill({});
+        scene->document.SetEnemy(selected,data);enemy_fields=*scene->document.Parts()[selected].enemy;
     }
     void Duplicate() {
         if(!scene || selected<0)return;
@@ -195,15 +257,24 @@ struct State {
         status="Created "+scene->document.Parts()[index].name+". Move the copy to its new position.";
     }
     void Remove() {
-        if(!scene || selected<0)return;
-        scene->document.Remove(selected);Select(-1,false);status="Removed copy. Undo restores it.";
+        if(!scene)return;
+        if(selected_region>=0)scene->document.RemoveRegion(selected_region);
+        else if(selected>=0)scene->document.Remove(selected);else return;
+        Select(-1,false);status="Removed copy. Undo restores it.";
     }
     bool History(bool redo) {
         if(!scene)return false;
         const auto name=selected<0?selection_name:scene->document.Parts()[selected].name;
         const bool changed=redo?scene->document.Redo():scene->document.Undo();
-        const auto& parts=scene->document.Parts();const auto found=std::ranges::find(parts,name,&Part::name);
-        Select(found==parts.end()?-1:int(found-parts.begin()),false);
+        if(region_selection) {
+            const auto& regions=scene->document.Regions();const auto found=std::ranges::find(regions,region_key,&Region::key);
+            SelectRegion(found==regions.end()?-1:int(found-regions.begin()),false);
+        } else {
+            const auto& parts=scene->document.Parts();const auto found=std::ranges::find(parts,name,&Part::name);
+            Select(found==parts.end()?-1:int(found-parts.begin()),false);
+        }
+        const auto& routes=scene->document.Routes();const auto route=std::ranges::find(routes,route_key,&Route::key);
+        active_route=route==routes.end()?-1:int(route-routes.begin());
         if(changed)status=redo?"Redid last edit.":"Undid last edit.";
         return changed;
     }
@@ -221,7 +292,11 @@ struct State {
     }
     void Poll() {
         const auto action=pending;pending=Pending::None;
-        if(action!=Pending::None)Action([&]{if(action==Pending::Duplicate)Duplicate();else Remove();});
+        if(action!=Pending::None)Action([&]{
+            if(action==Pending::Duplicate)Duplicate();else if(action==Pending::Remove)Remove();
+            else if(action==Pending::Waypoint)Waypoint();else if(action==Pending::Route)NewRoute();
+            else if(active_route>=0){scene->document.RemoveRoute(active_route);active_route=-1;}
+        });
         if(loading.valid() && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
             try {scene=loading.get();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
             catch(const std::exception& e) {error=e.what();if(!commands.empty()) {exit_code=1;Finish();}}
@@ -240,7 +315,30 @@ struct State {
         if(verb=="select") {
             std::string name;line>>name;const auto& objects=scene->document.Parts();auto it=std::ranges::find(objects,name,&Part::name);
             if(it==objects.end()) throw std::runtime_error("Script placement not found: "+name);
-            Select(int(it-objects.begin()),true);fitted=true;
+            Select(int(it-objects.begin()),true);fitted=true;if(layer>=3)layer=0;
+        } else if(verb=="region" || verb=="route") {
+            std::string name;std::getline(line>>std::ws,name);
+            if(verb=="region") {
+                const auto& entries=scene->document.Regions();const auto found=std::ranges::find(entries,name,&Region::name);
+                if(found==entries.end())throw std::runtime_error("Region not found: "+name);SelectRegion(int(found-entries.begin()),true);layer=3;
+            } else {
+                const auto& entries=scene->document.Routes();const auto found=std::ranges::find(entries,name,&Route::name);
+                if(found==entries.end())throw std::runtime_error("Patrol not found: "+name);SelectRoute(int(found-entries.begin()),true);layer=4;
+            }
+        } else if(verb=="waypoint") {
+            BbMapArt::Vec3 p;for(auto& f:p)if(!(line>>f))throw std::runtime_error("waypoint needs x y z");
+            SelectRegion(int(scene->document.AddWaypoint(p)),true);layer=3;
+        } else if(verb=="new-route") NewRoute();
+        else if(verb=="route-add") AppendWaypoint();
+        else if(verb=="assign-route") AssignRoute();
+        else if(verb=="route-type") {
+            if(active_route<0)throw std::runtime_error("Select a patrol first");auto data=scene->document.Routes()[active_route].data;
+            if(!(line>>data.type))throw std::runtime_error("route-type needs a behavior number");scene->document.SetRoute(active_route,data);
+        } else if(verb=="assert-region-count" || verb=="assert-route-count") {
+            std::size_t n;if(!(line>>n) || n!=(verb=="assert-region-count"?scene->document.Regions().size():scene->document.Routes().size()))throw std::runtime_error("Unexpected region/patrol count");
+        } else if(verb=="assert-route-point") {
+            int slot;std::string name;if(!(line>>slot))throw std::runtime_error("Missing patrol slot");std::getline(line>>std::ws,name);
+            if(active_route<0 || slot<0 || slot>=32 || scene->document.Routes()[active_route].data.points[slot].name!=name)throw std::runtime_error("Unexpected patrol waypoint");
         } else if(verb=="deselect") Select(-1,false);
         else if(verb=="click" || verb=="drag") {
             std::array<ImVec2,2> p;
@@ -250,28 +348,29 @@ struct State {
             input_drag=p;input_frame=0;
         } else if(verb=="assert-selected") {
             std::string name;line>>name;
-            if(selected<0 || scene->document.Parts()[selected].name!=name) throw std::runtime_error("Viewport selected the wrong placement");
+            const auto actual=selected>=0?scene->document.Parts()[selected].name:selected_region>=0?scene->document.Regions()[selected_region].name:std::string();
+            if(actual!=name)throw std::runtime_error("Viewport selected the wrong placement");
         } else if(verb=="assert-position" || verb=="assert-rotation") {
-            if(selected<0) throw std::runtime_error("Nothing selected");
+            if(!Current()) throw std::runtime_error("Nothing selected");
             BbMapArt::Vec3 expected;for(float& v:expected)if(!(line>>v))throw std::runtime_error("assert-position needs x y z tolerance");
             float tolerance;if(!(line>>tolerance))throw std::runtime_error("Missing position tolerance");
-            const auto& t=scene->document.Parts()[selected].transform;
+            const auto& t=*Current();
             const auto& actual=verb=="assert-position"?t.position:t.rotation;
             for(int i=0;i<3;++i)if(std::abs(actual[i]-expected[i])>tolerance)throw std::runtime_error("Unexpected edited transform");
         } else if(verb=="move") {
-            if(selected<0) throw std::runtime_error("Select a placement before moving it");
-            auto t=scene->document.Parts()[selected].transform;
+            if(!Current()) throw std::runtime_error("Select a placement before moving it");
+            auto t=*Current();
             for(auto& v:t.position) {float delta;if(!(line>>delta)) throw std::runtime_error("move needs three numbers");v+=delta;}
-            scene->document.Set(selected,t);fields=t;
+            SetTransform(t);
         } else if(verb=="rotate") {
-            if(selected<0) throw std::runtime_error("Select a placement before rotating it");
-            auto t=scene->document.Parts()[selected].transform;
+            if(!Current()) throw std::runtime_error("Select a placement before rotating it");
+            auto t=*Current();
             for(auto& v:t.rotation) {float delta;if(!(line>>delta)) throw std::runtime_error("rotate needs three degrees");v+=delta;}
-            scene->document.Set(selected,t);fields=t;
+            SetTransform(t);
         } else if(verb=="undo" || verb=="redo") {
             if(!History(verb=="redo"))throw std::runtime_error("Empty undo/redo history");
         } else if(verb=="duplicate" || verb=="remove") {
-            if(selected<0)throw std::runtime_error("Select a placement first");
+            if(!Current() || (verb=="duplicate" && selected<0))throw std::runtime_error("Select a placement first");
             if(verb=="duplicate")Duplicate();else Remove();
         } else if(verb=="assert-count") {
             std::size_t count;if(!(line>>count) || count!=scene->document.Parts().size())throw std::runtime_error("Unexpected placement count");
@@ -315,6 +414,12 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
     auto view=[[MTKView alloc] initWithFrame:NSMakeRect(0,0,1360,850) device:_device];
     view.delegate=self;view.colorPixelFormat=MTLPixelFormatBGRA8Unorm;view.framebufferOnly=NO;view.preferredFramesPerSecond=60;self.view=view;
     ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard;
+    ImFontConfig base_font;base_font.SizePixels=16;ImGui::GetIO().Fonts->AddFontDefault(&base_font);
+    const char* japanese_font="/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc";
+    if(fs::exists(japanese_font)) {
+        ImFontConfig fallback;fallback.MergeMode=true;
+        ImGui::GetIO().Fonts->AddFontFromFileTTF(japanese_font,16,&fallback,ImGui::GetIO().Fonts->GetGlyphRangesJapanese());
+    }
     ImGui::StyleColorsDark();auto& style=ImGui::GetStyle();style.WindowRounding=0;style.FrameRounding=4;style.FontSizeBase=16;
     ImGui_ImplMetal_Init(_device);ImGui_ImplOSX_Init(view);
 }
@@ -354,6 +459,8 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             if(ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_D))s.pending=State::Pending::Duplicate;
             if(s.scene->document.Parts()[s.selected].added && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_Backspace)))s.pending=State::Pending::Remove;
         }
+        if(s.scene && s.selected_region>=0 && s.scene->document.Regions()[s.selected_region].added &&
+           (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_Backspace)))s.pending=State::Pending::Remove;
         ImGui::EndDisabled();
         if(!s.error.empty()) ImGui::TextWrapped("%s",s.error.c_str());
         if(!s.scene) {std::scoped_lock lock(s.mutex);ImGui::TextWrapped("%s",s.progress.c_str());ImGui::TextDisabled("Loading your game assets. The window remains responsive.");}
@@ -363,13 +470,24 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             ImGui::BeginChild("Objects and transform",{300,-42},ImGuiChildFlags_Borders);
             const auto enemies=std::ranges::count(objects,PartKind::Enemy,&Part::kind);
             ImGui::Text("%zu objects / %zu enemies",objects.size()-enemies,std::size_t(enemies));
-            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"All placements\0Objects\0Enemies / characters\0");
+            ImGui::Text("%zu regions / %zu patrols",scene.document.Regions().size(),scene.document.Routes().size());
+            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"Objects and characters\0Objects\0Enemies / NPCs\0Regions / waypoints\0Patrol routes\0");
+            if(ImGui::Button("New waypoint"))s.pending=State::Pending::Waypoint;
+            ImGui::SameLine();if(ImGui::Button("New patrol"))s.pending=State::Pending::Route;
             ImGui::InputTextWithHint("##filter","Filter by name or model",s.filter,sizeof(s.filter));
             ImGui::BeginChild("Placement list",{0,190},ImGuiChildFlags_Borders);
-            for(std::size_t i=0;i<objects.size();++i) {
+            if(s.layer<=2)for(std::size_t i=0;i<objects.size();++i) {
                 const auto& o=objects[i];if(s.filter[0] && o.name.find(s.filter)==std::string::npos && o.model.find(s.filter)==std::string::npos) continue;
                 if((s.layer==1 && o.kind!=PartKind::Object) || (s.layer==2 && o.kind!=PartKind::Enemy)) continue;
                 if(ImGui::Selectable(o.name.c_str(),int(i)==s.selected)) s.Select(int(i),true);
+            }
+            if(s.layer==3)for(std::size_t i=0;i<scene.document.Regions().size();++i) {
+                const auto& r=scene.document.Regions()[i];if(s.filter[0] && r.name.find(s.filter)==std::string::npos)continue;
+                ImGui::PushID(int(i));if(ImGui::Selectable(r.name.c_str(),int(i)==s.selected_region))s.SelectRegion(int(i),true);ImGui::PopID();
+            }
+            if(s.layer==4)for(std::size_t i=0;i<scene.document.Routes().size();++i) {
+                const auto& r=scene.document.Routes()[i];if(s.filter[0] && r.name.find(s.filter)==std::string::npos)continue;
+                ImGui::PushID(int(i));if(ImGui::Selectable(r.name.c_str(),int(i)==s.active_route))s.SelectRoute(int(i),true);ImGui::PopID();
             }
             ImGui::EndChild();ImGui::Separator();
             if(s.selected>=0) {
@@ -386,8 +504,26 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 if(o.enemy) {
                     const auto& e=*o.enemy;
                     ImGui::TextWrapped("Enemy proxy: capsule and facing arrow. Character models are not loaded.");
+                    if(ImGui::CollapsingHeader("Character settings")) {
+                        auto integer=[](const char* label,int* value){ImGui::TextUnformatted(label);ImGui::SetNextItemWidth(-1);const auto id="##"+std::string(label);ImGui::InputInt(id.c_str(),value);};
+                        integer("NPC param",&s.enemy_fields.npc_param);integer("AI param",&s.enemy_fields.think_param);
+                        integer("Talk script",&s.enemy_fields.talk_id);integer("Character init",&s.enemy_fields.chara_init);
+                        integer("Idle animation",&s.enemy_fields.init_anim);integer("Damage animation",&s.enemy_fields.damage_anim);
+                        if(ImGui::Button("Apply character settings"))s.Action([&]{
+                            auto data=*scene.document.Parts()[s.selected].enemy;
+                            data.npc_param=s.enemy_fields.npc_param;data.think_param=s.enemy_fields.think_param;data.talk_id=s.enemy_fields.talk_id;
+                            data.chara_init=s.enemy_fields.chara_init;data.init_anim=s.enemy_fields.init_anim;data.damage_anim=s.enemy_fields.damage_anim;
+                            scene.document.SetEnemy(s.selected,data);
+                        });
+                        ImGui::TextWrapped("Use IDs from this game's parameters and scripts. Quest events can override these settings.");
+                    }
+                    if(ImGui::Button("Show assigned patrol") && e.patrol.index>=0) {
+                        const auto& routes=scene.document.Routes();const auto found=std::ranges::find(routes,e.patrol.index,&Route::key);
+                        if(found!=routes.end())s.SelectRoute(int(found-routes.begin()),true);
+                    }
+                    if(ImGui::Button("Clear patrol assignment"))s.Action([&]{auto data=*scene.document.Parts()[s.selected].enemy;data.patrol={};scene.document.SetEnemy(s.selected,data);});
                     if(ImGui::CollapsingHeader("Enemy references",ImGuiTreeNodeFlags_DefaultOpen)) {
-                        ImGui::TextDisabled("Read only");
+                        ImGui::TextDisabled("Identifiers and resolved references");
                         ImGui::Text("MSB type: %s",e.dummy?"DummyEnemy":"Enemy");
                         ImGui::Text("Entity ID: %d",e.entity_id);ImGui::Text("Instance ID: %d",e.instance_id);
                         ImGui::Text("NPC: %d / AI: %d",e.npc_param,e.think_param);
@@ -400,18 +536,56 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                         };
                         reference("Loading collision",e.collision);reference("Patrol",e.patrol);
                         for(int i=0;i<8;++i) if(e.move_points[i].index!=-1) {const auto label="Move point "+std::to_string(i+1);reference(label.c_str(),e.move_points[i]);}
-                        ImGui::TextWrapped("Patrol points stay in place. Events may control activation or override placement. Reload to test.");
+                        ImGui::TextWrapped("Open the assigned patrol to edit its points. Events can override routes or placement. Reload to test.");
                     }
                 } else {
                     auto model=scene.models.find(o.model);
                     if(model==scene.models.end() || !model->second) ImGui::TextWrapped("Model unavailable. This object's placement can still be edited.");
                 }
-            } else ImGui::TextWrapped("Select a placement in the list or click its geometry or enemy marker.");
+            } else if(s.selected_region>=0) {
+                const auto& r=scene.document.Regions()[s.selected_region];ImGui::TextWrapped("%s",r.name.c_str());
+                ImGui::Text("Entity ID: %d / shape: %u",r.entity_id,r.shape);
+                ImGui::TextUnformatted("Position (metres)");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##region-position",s.fields.position.data(),"%.3f");
+                ImGui::TextUnformatted("Rotation (degrees)");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##region-rotation",s.fields.rotation.data(),"%.2f");
+                if(ImGui::Button("Apply waypoint transform"))s.Action([&]{s.SetTransform(s.fields);});
+                ImGui::SameLine();if(ImGui::Button("Reset"))s.Action([&]{s.SetTransform(r.original);});
+                if(r.added && ImGui::Button("Remove waypoint"))s.pending=State::Pending::Remove;
+                ImGui::TextWrapped("Marker shows the region origin. Existing volume dimensions are preserved.");
+            } else ImGui::TextWrapped("Select a placement, region or patrol in the list, or click its marker.");
+            if(s.active_route>=0 && ImGui::CollapsingHeader("Active patrol",ImGuiTreeNodeFlags_DefaultOpen)) {
+                const auto& route=scene.document.Routes()[s.active_route];ImGui::TextWrapped("%s",route.name.c_str());
+                const char* labels[]={"Loop","Reverse route","Random point","Unknown (3)","Unknown (4)","Walk once","Wander between points"};
+                const auto type=route.data.type;const auto preview=type>=0 && type<7?labels[type]:"Unknown";
+                if(ImGui::BeginCombo("Behavior",preview)) {
+                    for(int n:{0,1,2,5,6})if(ImGui::Selectable(labels[n],n==type))s.Action([&]{auto data=route.data;data.type=n;scene.document.SetRoute(s.active_route,data);});
+                    ImGui::EndCombo();
+                }
+                ImGui::BeginDisabled(s.selected_region<0);
+                if(ImGui::Button("Append selected waypoint"))s.Action([&]{s.AppendWaypoint();});ImGui::EndDisabled();
+                ImGui::BeginDisabled(s.selected<0 || !objects[s.selected].enemy);
+                if(ImGui::Button("Assign to selected character"))s.Action([&]{s.AssignRoute();});ImGui::EndDisabled();
+                ImGui::TextWrapped("Assigning a patrol replaces direct move points. Undo restores them.");
+                for(int n=0;n<32;++n) {
+                    const auto& point=route.data.points[n];if(point.index==-1)continue;ImGui::PushID(n);
+                    const auto& regions=scene.document.Regions();const auto found=std::ranges::find(regions,point.index,&Region::key);
+                    const auto label=std::to_string(n+1)+". "+(found==regions.end()?"Missing waypoint "+std::to_string(point.index):found->name);
+                    if(ImGui::Selectable(label.c_str(),found!=regions.end() && int(found-regions.begin())==s.selected_region) && found!=regions.end())s.SelectRegion(int(found-regions.begin()),true);
+                    ImGui::BeginDisabled(n==0);if(ImGui::SmallButton("Up"))s.Action([&]{auto data=route.data;std::swap(data.points[n],data.points[n-1]);scene.document.SetRoute(s.active_route,data);});ImGui::EndDisabled();
+                    ImGui::SameLine();ImGui::BeginDisabled(n==31 || route.data.points[n+1].index==-1);
+                    if(ImGui::SmallButton("Down"))s.Action([&]{auto data=route.data;std::swap(data.points[n],data.points[n+1]);scene.document.SetRoute(s.active_route,data);});ImGui::EndDisabled();
+                    ImGui::SameLine();if(ImGui::SmallButton("Unlink"))s.Action([&]{auto data=route.data;std::move(data.points.begin()+n+1,data.points.end(),data.points.begin()+n);data.points.back()={};scene.document.SetRoute(s.active_route,data);});
+                    ImGui::PopID();
+                }
+                if(route.added && ImGui::Button("Remove patrol"))s.pending=State::Pending::RemoveRoute;
+                ImGui::TextWrapped("Routes use existing navigation. Keep points on connected walkable ground in the character's loading area.");
+            }
             ImGui::Spacing();ImGui::TextWrapped("Drag the colored axis handles to move. Position is in metres; rotation is in degrees.");
             ImGui::Checkbox("Cut away roofs",&s.cutaway);
             if(s.cutaway) {ImGui::SetNextItemWidth(-1);ImGui::DragFloat("##ceiling",&s.ceiling,.25f,-1000,1000,"Ceiling: %.2f m");}
             const bool changed_objects=ImGui::Checkbox("Show objects",&s.show_objects);
             const bool changed_enemies=ImGui::Checkbox("Show enemies",&s.show_enemies);
+            if(ImGui::Checkbox("Show regions",&s.show_regions) && !s.show_regions && s.selected_region>=0)s.Select(-1,false);
+            if(s.show_regions)ImGui::Checkbox("Active patrol only",&s.route_only);
             if(changed_objects || changed_enemies) {
                 if(s.selected>=0 && ((objects[s.selected].kind==PartKind::Enemy && !s.show_enemies) || (objects[s.selected].kind==PartKind::Object && !s.show_objects))) s.Select(-1,false);
             }
@@ -428,18 +602,32 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 s.camera.zoom=BbMapView::FitZoom(s.camera,x0,z0,x1,z1,size.x,size.y,y0,y1);s.fitted=true;
             }
             const float dpi=std::max(1.f,io.DisplayFramebufferScale.x);
-            _viewport->Render(command,scene,s.camera,size,dpi,s.selected,s.drag,s.cutaway?s.ceiling:1000000.f,s.show_objects,s.show_enemies);
+            _viewport->Render(command,scene,s.camera,size,dpi,s.selected,s.selected_region,s.drag,s.cutaway?s.ceiling:1000000.f,
+                              s.show_objects,s.show_enemies,s.show_regions,s.active_route,s.route_only);
             ImGui::Image((ImTextureID)(__bridge void*)_viewport->color,size);
             const bool hovered=ImGui::IsItemHovered();
             if(hovered) {
                 s.camera.zoom=std::clamp(s.camera.zoom*std::pow(1.12f,io.MouseWheel),.05f,1000.f);
                 if(ImGui::IsMouseDragging(ImGuiMouseButton_Right)) {s.camera.yaw-=io.MouseDelta.x*.008f;s.camera.pitch=std::clamp(s.camera.pitch+io.MouseDelta.y*.008f,.08f,1.52f);}
                 if(ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {auto a=s.camera.Ground(0,0),b=s.camera.Ground(io.MouseDelta.x,io.MouseDelta.y);s.camera.x-=b[0]-a[0];s.camera.z-=b[1]-a[1];}
-                if(s.selected>=0 && ImGui::IsKeyPressed(ImGuiKey_F)) s.Select(s.selected,true);
+                if(ImGui::IsKeyPressed(ImGuiKey_F)) {if(s.selected>=0)s.Select(s.selected,true);else if(s.selected_region>=0)s.SelectRegion(s.selected_region,true);}
                 if(ImGui::IsMouseClicked(ImGuiMouseButton_Left)) pick=ImVec2(io.MousePos.x-top.x,io.MousePos.y-top.y);
             }
-            if(s.selected>=0) {
-                const auto& t=s.drag?*s.drag:objects[s.selected].transform;
+            if(s.show_regions && s.active_route>=0) {
+                const auto& route=scene.document.Routes()[s.active_route];auto* dl=ImGui::GetWindowDrawList();
+                std::optional<ImVec2> first,previous;int number=0;
+                for(const auto& point:route.data.points) {
+                    if(point.index==-1)continue;++number;
+                    const auto& regions=scene.document.Regions();const auto found=std::ranges::find(regions,point.index,&Region::key);if(found==regions.end())continue;
+                    const auto& position=s.selected_region==int(found-regions.begin()) && s.drag?s.drag->position:found->transform.position;
+                    const auto p=s.camera.Project(position[0],position[1]+.32f,position[2]);const ImVec2 at(top.x+size.x*.5f+p[0],top.y+size.y*.5f+p[1]);
+                    if(previous)dl->AddLine(*previous,at,0xff66ddaau,2);else first=at;
+                    dl->AddCircleFilled(at,4,0xff66ddaau);const auto label=std::to_string(number);dl->AddText({at.x+7,at.y-16},0xffbbffdd,label.c_str());previous=at;
+                }
+                if(route.data.type==0 && first && previous)dl->AddLine(*previous,*first,0x8866ddaau,1);
+            }
+            if(s.Current()) {
+                const auto& t=s.drag?*s.drag:*s.Current();
                 auto origin=s.camera.Project(t.position[0],t.position[1],t.position[2]);
                 ImVec2 center(top.x+size.x*.5f+origin[0],top.y+size.y*.5f+origin[1]);
                 auto* dl=ImGui::GetWindowDrawList();const ImU32 colors[]={0xff6666ff,0xff88dd66,0xffffbb66};
@@ -450,13 +638,13 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                     ImVec2 end(center.x+dx/len*65,center.y+dy/len*65);
                     dl->AddLine(center,end,colors[axis],3);dl->AddCircleFilled(end,6,colors[axis]);dl->AddText({end.x+8,end.y-8},colors[axis],axis==0?"X":axis==1?"Y":"Z");
                     const float mx=io.MousePos.x-end.x,my=io.MousePos.y-end.y;
-                    if(hovered && ImGui::IsMouseClicked(0) && mx*mx+my*my<144) {s.drag_axis=axis;s.drag_start=objects[s.selected].transform;s.drag=s.drag_start;s.drag_mouse=io.MousePos;pick.reset();}
+                    if(hovered && ImGui::IsMouseClicked(0) && mx*mx+my*my<144) {s.drag_axis=axis;s.drag_start=*s.Current();s.drag=s.drag_start;s.drag_mouse=io.MousePos;pick.reset();}
                     if(s.drag_axis==axis && s.drag) {
                         const float amount=((io.MousePos.x-s.drag_mouse.x)*dx+(io.MousePos.y-s.drag_mouse.y)*dy)/(len*len);
                         s.drag->position[axis]=s.drag_start.position[axis]+amount;
                     }
                 }
-                if(s.drag && !ImGui::IsMouseDown(0)) {s.Action([&]{scene.document.Set(s.selected,*s.drag);});s.fields=scene.document.Parts()[s.selected].transform;s.drag.reset();s.drag_axis=-1;}
+                if(s.drag && !ImGui::IsMouseDown(0)) {s.Action([&]{s.SetTransform(*s.drag);});s.drag.reset();s.drag_axis=-1;}
             }
             ImGui::EndChild();
             ImGui::TextUnformatted(s.Unsaved()?"Unexported changes":"Map ready");ImGui::SameLine();ImGui::TextDisabled("%zu terrain triangles",scene.terrain->indices.size()/3);
@@ -480,7 +668,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 std::uint32_t id=0;
                 auto x=std::clamp(int(pick->x*io.DisplayFramebufferScale.x),0,int(_viewport->ids.width)-1),y=std::clamp(int(pick->y*io.DisplayFramebufferScale.y),0,int(_viewport->ids.height)-1);
                 [_viewport->ids getBytes:&id bytesPerRow:4 fromRegion:MTLRegionMake2D(x,y,1,1) mipmapLevel:0];
-                s.Select(id?int(id)-1:-1,false);
+                if(id&0x80000000u)s.SelectRegion(int((id&0x7fffffffu)-1),false);else s.Select(id?int(id)-1:-1,false);
             }
         }
     } catch(const std::exception& e) {
@@ -532,16 +720,21 @@ int main(int argc,char** argv) {
             else if(key=="--select")options.select=value();else if(key=="--export")options.output=value();
             else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
             else if(key=="--list")options.list=true;
+            else if(key=="--list-regions")options.list_regions=true;
+            else if(key=="--list-routes")options.list_routes=true;
             else if(key=="--duplicate")options.duplicate=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
-            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list: inspect object and enemy placements without opening the editor");return 0;}
+            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes: inspect map records without opening the editor");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
-        if((options.translation || options.duplicate) && (!options.batch || options.list))throw std::runtime_error("Use --batch for command-line edits");
-        if(options.batch || options.list) {
+        const bool inspect=options.list || options.list_regions || options.list_routes;
+        if((options.translation || options.duplicate) && (!options.batch || inspect))throw std::runtime_error("Use --batch for command-line edits");
+        if(options.batch || inspect) {
             auto doc=Document::Open(options.game/"dvdroot_ps4/map/MapStudio"/(options.map+".msb.dcx"));
             if(options.list) {for(const auto& o:doc.Parts()) std::printf("%s\t%s\t%.6f %.6f %.6f\t%s\t%d\n",o.name.c_str(),o.model.c_str(),o.transform.position[0],o.transform.position[1],o.transform.position[2],o.enemy?"enemy":"object",o.entity_id);return 0;}
+            if(options.list_regions) {for(const auto& r:doc.Regions())std::printf("%s\t%.6f %.6f %.6f\t%u\t%d\n",r.name.c_str(),r.transform.position[0],r.transform.position[1],r.transform.position[2],r.shape,r.entity_id);return 0;}
+            if(options.list_routes) {for(const auto& r:doc.Routes()){std::printf("%s\t%d\t%d",r.name.c_str(),r.key,r.data.type);for(const auto& p:r.data.points)if(p.index!=-1)std::printf("\t%s [%d]",p.name.c_str(),p.index);std::puts("");}return 0;}
             if(options.output.empty())throw std::runtime_error("--batch needs --export with a new mod folder");
             if(options.translation || options.duplicate) {
                 const auto& objects=doc.Parts();auto found=std::ranges::find(objects,options.select,&Part::name);

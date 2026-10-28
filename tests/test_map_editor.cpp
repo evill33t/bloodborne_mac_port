@@ -34,15 +34,18 @@ std::vector<std::uint8_t> Fixture() {
     return b;
 }
 std::vector<std::uint8_t> EnemyFixture() {
-    auto b=Fixture();b.resize(0x1000);
+    auto b=Fixture();b.resize(0x1100);
     // Mixed records exercise full-part collision indices and subtype-only patrol indices.
     Put<std::uint32_t>(b,0x14,3);Put<std::int64_t>(b,0x28,0x380);Put<std::int64_t>(b,0x30,0x50);
     Put<std::int64_t>(b,0x380,0x40);Text(b,0x3c0,"c3030");
     Put<std::uint32_t>(b,0x54,3);Put<std::int64_t>(b,0x60,0xb00);Put<std::int64_t>(b,0x68,0xb80);Put<std::int64_t>(b,0x70,0x90);
     Put<std::int64_t>(b,0xb00,0x30);Put<std::uint32_t>(b,0xb0c,1);Text(b,0xb30,"Sound");
     Put<std::int64_t>(b,0xb80,0x30);Put<std::uint32_t>(b,0xb8c,14);Text(b,0xbb0,"Patrol");
-    Put<std::uint32_t>(b,0x94,2);Put<std::int64_t>(b,0xa0,0xc00);Put<std::int64_t>(b,0xa8,0xd0);
-    Put<std::int64_t>(b,0xc00,0x80);Text(b,0xc80,"Region");
+    Put<std::int64_t>(b,0xb98,0x40);Put<std::int64_t>(b,0xba0,0x50);
+    Put<std::int32_t>(b,0xbc0,-1);Put<std::int32_t>(b,0xbc4,-1);Put<std::int32_t>(b,0xbc8,-1);
+    for(int i=0;i<32;++i)Put<std::int16_t>(b,0xbe0+i*2,i==0?0:-1);
+    Put<std::uint32_t>(b,0x94,2);Put<std::int64_t>(b,0xa0,0xd00);Put<std::int64_t>(b,0xa8,0xd0);
+    Put<std::int64_t>(b,0xd00,0x80);Text(b,0xd80,"Region");
     Put<std::uint32_t>(b,0xd4,4);Put<std::int64_t>(b,0xe8,0x600);Put<std::int64_t>(b,0xf0,0x900);Put<std::int64_t>(b,0xf8,0);
     Put<std::int64_t>(b,0x608,0xd0);Text(b,0x6d0,"c3030_0001");
     Put<std::uint32_t>(b,0x614,2);Put<std::int32_t>(b,0x61c,1);Put<std::int32_t>(b,0x610,14);
@@ -54,7 +57,7 @@ std::vector<std::uint8_t> EnemyFixture() {
     Put<std::int32_t>(b,0x758,7000);Put<std::int32_t>(b,0x75c,-1);
     Put<std::int64_t>(b,0x908,0xd0);Put<std::uint32_t>(b,0x914,5);Text(b,0x9d0,"h0000");
     Put<std::int64_t>(b,0x9b0,0x100);Put<std::int32_t>(b,0xa00,2409000);
-    Put<std::int64_t>(b,0xc48,0xa0);Put<std::int32_t>(b,0xca0,2409001);
+    Put<std::int64_t>(b,0xd48,0xa0);Put<std::int32_t>(b,0xda0,2409001);
     Put<std::int64_t>(b,0xb18,0x48);Put<std::int32_t>(b,0xb50,2409002);
     return b;
 }
@@ -76,7 +79,7 @@ std::u16string RecordName(const std::vector<std::uint8_t>& b,std::size_t p,bool 
 }
 // Compare every opaque record byte after normalizing reference indices by target
 // name. This independently checks that type grouping never redirects old references.
-void PreservedRecords(const std::vector<std::uint8_t>& before,const std::vector<std::uint8_t>& after,std::size_t added) {
+void PreservedRecords(const std::vector<std::uint8_t>& before,const std::vector<std::uint8_t>& after,std::size_t added,std::size_t regions=0,std::size_t events=0) {
     const auto old=Tables(before),now=Tables(after);assert(old.size()==now.size());
     const auto& old_parts=*std::ranges::find(old,std::string("PARTS_PARAM_ST"),&Table::name);
     const auto& new_parts=*std::ranges::find(now,std::string("PARTS_PARAM_ST"),&Table::name);
@@ -87,10 +90,15 @@ void PreservedRecords(const std::vector<std::uint8_t>& before,const std::vector<
     for(const auto& t:old){bounds.insert(t.at);bounds.insert(t.name_at);bounds.insert(t.entries.begin(),t.entries.end());}
     for(std::size_t s=0;s<old.size();++s) {
         assert(old[s].name==now[s].name);
-        assert(now[s].entries.size()==old[s].entries.size()+(old[s].name=="PARTS_PARAM_ST"?added:0));
+        assert(now[s].entries.size()==old[s].entries.size()+(old[s].name=="PARTS_PARAM_ST"?added:old[s].name=="POINT_PARAM_ST"?regions:old[s].name=="EVENT_PARAM_ST"?events:0));
+        std::map<std::uint32_t,std::size_t> event_occurrences;
         for(std::size_t i=0;i<old[s].entries.size();++i) {
             const auto a=old[s].entries[i],length=*bounds.upper_bound(a)-a;
-            const auto b=old[s].name=="PARTS_PARAM_ST"?new_parts.entries[target_indices.at(RecordName(before,a,true))]:now[s].entries[i];
+            auto b=old[s].name=="PARTS_PARAM_ST"?new_parts.entries[target_indices.at(RecordName(before,a,true))]:now[s].entries[i];
+            if(old[s].name=="EVENT_PARAM_ST") {
+                const auto type=Get<std::uint32_t>(before,a+12);auto occurrence=event_occurrences[type]++;
+                for(const auto p:now[s].entries)if(Get<std::uint32_t>(after,p+12)==type && occurrence--==0){b=p;break;}
+            }
             std::vector<std::uint8_t> expected(before.begin()+a,before.begin()+a+length);
             auto reference=[&](std::size_t field){const auto index=Get<std::int32_t>(expected,field);if(index==-1)return;assert(index>=0 && std::size_t(index)<old_parts.entries.size());Put<std::int32_t>(expected,field,target_indices.at(RecordName(before,old_parts.entries[index],true)));};
             if(old[s].name=="PARTS_PARAM_ST") {
@@ -149,7 +157,7 @@ int main(int argc,char** argv) {
     }
     auto invalid_enemy=enemies;Put<std::int64_t>(invalid_enemy,0x6b8,0x2e0);Reject([&]{Document::Read(invalid_enemy);});
     invalid_enemy=enemies;Put<std::int64_t>(invalid_enemy,0x6b0,0x28);Reject([&]{Document::Read(invalid_enemy);});
-    auto unicode=enemies;Put<std::uint16_t>(unicode,0xc80,0x65e5);Put<std::uint16_t>(unicode,0xc82,0);assert(Document::Read(unicode).Parts()[1].enemy->move_points[0].name=="\xe6\x97\xa5");
+    auto unicode=enemies;Put<std::uint16_t>(unicode,0xd80,0x65e5);Put<std::uint16_t>(unicode,0xd82,0);assert(Document::Read(unicode).Parts()[1].enemy->move_points[0].name=="\xe6\x97\xa5");
     for(auto input:{raw,packed,enemies,Pack(enemies),dummy,Pack(dummy)}) {
         auto d=Document::Read(input);const auto before=d.Inflated();const auto original=d.Parts();
         const auto source=original.size()-1;const auto one=d.Duplicate(source);assert(one==original.size());
@@ -173,6 +181,38 @@ int main(int argc,char** argv) {
         Reject([&]{d.Remove(0);});Reject([&]{reopened.Remove(one);});
         const auto tables=Tables(inflated);const auto& model_table=*std::ranges::find(tables,std::string("MODEL_PARAM_ST"),&Table::name);
         assert(Get<std::int32_t>(inflated,model_table.entries.at(original[source].enemy?1:0)+0x18)==3);
+    }
+    {
+        const auto input=Pack(enemies);auto d=Document::Read(input);
+        assert(d.Regions().size()==1 && d.Routes().size()==1 && d.Routes()[0].data.points[0].name=="Region");
+        auto t=d.Regions()[0].transform;t.position={20,30,40};d.SetRegion(0,t);
+        const auto edited=d.Inflated();for(std::size_t n=0;n<enemies.size();++n)if(n<0xd14 || n>=0xd20)assert(edited[n]==enemies[n]);
+        assert(Document::Read(d.Save()).Regions()[0].transform==t);assert(d.Undo() && d.Save()==input);
+        auto bad=t;bad.scale[0]=2;Reject([&]{d.SetRegion(0,bad);});
+        const auto a=d.AddWaypoint({1,2,3}),b=d.AddWaypoint({4,5,6});const auto new_route=d.AddRoute();
+        assert(d.Regions()[a].key>9); // unresolved legacy move point 9 must not become a new key
+        auto route=d.Routes()[new_route].data;route.type=1;
+        route.points[0]={d.Regions()[a].key,{}};route.points[1]={d.Regions()[b].key,{}};d.SetRoute(new_route,route);
+        const auto character=d.Duplicate(1);auto npc=*d.Parts()[character].enemy;
+        npc.patrol={d.Routes()[new_route].key,{}};npc.patrol_type=1;npc.npc_param+=1;npc.think_param+=2;
+        npc.move_points[0]={d.Regions()[a].key,{}};d.SetEnemy(character,npc);
+        auto reopened=Document::Read(d.Save());const auto& saved=*std::ranges::find(reopened.Parts(),d.Parts()[character].name,&Part::name);
+        assert(saved.enemy->patrol.name==d.Routes()[new_route].name && saved.enemy->patrol_type==1);
+        assert(saved.enemy->move_points[0].name==d.Regions()[a].name && saved.enemy->npc_param==303002 && saved.enemy->think_param==303002);
+        const auto& saved_route=*std::ranges::find(reopened.Routes(),d.Routes()[new_route].name,&Route::name);
+        assert(saved_route.data.points[1].name==d.Regions()[b].name && saved_route.data.type==1);
+        assert(reopened.Regions()[a].transform.position==BbMapArt::Vec3({1,2,3}));
+        Reject([&]{d.RemoveRoute(new_route);});Reject([&]{d.RemoveRegion(a);});
+        auto invalid=npc;invalid.entity_id=123;Reject([&]{d.SetEnemy(character,invalid);});
+        invalid=*d.Parts()[character].enemy;invalid.collision.index=1;Reject([&]{d.SetEnemy(character,invalid);});
+        auto invalid_route=route;invalid_route.points[0].index=123456;Reject([&]{d.SetRoute(new_route,invalid_route);});
+        d.Remove(character);d.RemoveRoute(new_route);d.RemoveRegion(a);
+        auto original_route=d.Routes()[0].data;original_route.points[1]={d.Regions()[a].key,{}};d.SetRoute(0,original_route);
+        reopened=Document::Read(d.Save());assert(reopened.Routes()[0].data.points[1].name==d.Regions()[a].name);
+        assert(reopened.Routes()[0].data.points[1].index==1); // key survives removal of an earlier new point
+        Reject([&]{d.RemoveRegion(0);});Reject([&]{d.RemoveRoute(0);});
+        while(d.Undo()){}assert(!d.Changed() && d.Save()==input);
+        while(d.Redo()){}assert(Document::Read(d.Save()).Regions().size()==2);
     }
     auto bad=raw;Put<std::int64_t>(bad,0x28,0x10);Reject([&]{Document::Read(bad);});
     bad=raw;Put<std::uint32_t>(bad,0x14,0xffffffff);Reject([&]{Document::Read(bad);});
@@ -228,7 +268,22 @@ int main(int argc,char** argv) {
             map.Remove(copy);assert(Document::Read(map.Save()).Parts().size()==count+1);assert(map.Undo());
             assert(map.Undo());assert(map.Undo());assert(map.Save()==real);
         }
+        const auto region_count=map.Regions().size(),route_count=map.Routes().size();
+        auto character=std::ranges::find(map.Parts(),PartKind::Enemy,&Part::kind);
+        const auto character_index=std::size_t(character-map.Parts().begin());
+        const auto position=character!=map.Parts().end()?character->transform.position:BbMapArt::Vec3{1,2,3};
+        const auto copy=character_index<count?map.Duplicate(character_index):count;
+        const auto a=map.AddWaypoint(position),b=map.AddWaypoint({position[0]+1,position[1],position[2]}),r=map.AddRoute();
+        auto patrol=map.Routes()[r].data;patrol.type=1;
+        patrol.points[0]={map.Regions()[a].key,{}};patrol.points[1]={map.Regions()[b].key,{}};map.SetRoute(r,patrol);
+        if(character_index<count) {auto metadata=*map.Parts()[copy].enemy;metadata.patrol={map.Routes()[r].key,{}};metadata.patrol_type=1;for(auto& point:metadata.move_points)point={};map.SetEnemy(copy,metadata);}
+        const auto with_patrol=Document::Read(map.Save());
+        assert(with_patrol.Regions().size()==region_count+2 && with_patrol.Routes().size()==route_count+1);
+        assert(with_patrol.Routes().back().data.points[1].name==map.Regions()[b].name);
+        if(character_index<count)assert(std::ranges::find(with_patrol.Parts(),map.Parts()[copy].name,&Part::name)->enemy->patrol.name==map.Routes()[r].name);
+        PreservedRecords(before,with_patrol.Inflated(),character_index<count?1:0,2,1);
+        while(map.Undo()){}assert(!map.Changed() && map.Save()==real);
         std::cout<<"Real map round-trip: "<<argv[i]<<" ("<<map.Parts().size()<<" placements; Enemy/DummyEnemy checked: "<<enemy<<"/"<<dummy_enemy<<")\n";
     }
-    std::cout<<"PASS: unchanged bytes, transform-only writes, prop/enemy duplication, preserved references, identifier allocation, DCX, undo/remove/redo, malformed files, exclusive exports\n";
+    std::cout<<"PASS: unchanged bytes, prop/enemy duplication, region transforms, new waypoints/patrols, character settings, preserved references, identifier allocation, DCX, undo/remove/redo, malformed files, exclusive exports\n";
 }

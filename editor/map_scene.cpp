@@ -28,6 +28,15 @@ std::shared_ptr<const BbMapArt::AreaMesh> EnemyMarker() {
     triangle({-.32f,.06f,.8f},{.32f,.06f,.8f},{0,.06f,1.4f});
     return std::make_shared<const BbMapArt::AreaMesh>(builder.Finish());
 }
+std::shared_ptr<const BbMapArt::AreaMesh> RegionMarker() {
+    BbMapArt::MeshBuilder builder(.01f);
+    const BbMapArt::Vec3 top{0,.65f,0},bottom{0,.02f,0},ring[]={{.24f,.28f,0},{0,.28f,.24f},{-.24f,.28f,0},{0,.28f,-.24f}};
+    const std::uint32_t colors[]={0xff66ddaau,0xff66ddaau,0xff66ddaau};
+    for(int i=0;i<4;++i)for(const auto& end:{top,bottom}) {
+        float v[9];std::copy(end.begin(),end.end(),v);std::copy(ring[i].begin(),ring[i].end(),v+3);std::copy(ring[(i+1)%4].begin(),ring[(i+1)%4].end(),v+6);builder.Add(v,colors);
+    }
+    return std::make_shared<const BbMapArt::AreaMesh>(builder.Finish());
+}
 template<class T> T Get(std::span<const std::uint8_t> b,std::size_t at) {
     if(at>b.size() || sizeof(T)>b.size()-at) throw std::runtime_error("Truncated object archive");
     T v;std::memcpy(&v,b.data()+at,sizeof(T));return v;
@@ -93,6 +102,7 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
     if(!ValidMapName(map)) throw std::runtime_error("Invalid map name");
     const auto root=game/"dvdroot_ps4";Scene result;
     result.enemy_marker=EnemyMarker();
+    result.region_marker=RegionMarker();
     progress("Reading map placements...");
     result.document=Document::Open(root/"map/MapStudio"/(map+".msb.dcx"));
     const auto base_map=map.substr(0,6)+"_00_00";

@@ -10,6 +10,7 @@ struct Scene {
     Document document;
     std::shared_ptr<const BbMapArt::AreaMesh> terrain;
     std::shared_ptr<const BbMapArt::AreaMesh> enemy_marker;
+    std::shared_ptr<const BbMapArt::AreaMesh> region_marker;
     std::map<std::string,std::shared_ptr<const BbMapArt::AreaMesh>> models;
     std::size_t missing_models=0;
 };

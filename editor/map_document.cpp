@@ -63,6 +63,32 @@ void Check(const Transform& t) {
         if(!std::isfinite(f) || std::abs(f)>1e6f) throw std::runtime_error("Transform must contain finite, bounded numbers");
     for(float f:t.scale) if(std::abs(f)<.0001f || std::abs(f)>1000) throw std::runtime_error("Scale must be nonzero and within 1000");
 }
+std::string FreshName(const char* prefix,const std::set<std::string>& used) {
+    for(int i=0;i<100000;++i) {auto n=std::to_string(i);auto name=prefix+std::string(n.size()<4?4-n.size():0,'0')+n;if(!used.contains(name))return name;}
+    throw std::runtime_error("No free record name");
+}
+void AppendName(std::vector<std::uint8_t>& bytes,const std::string& name) {
+    // Generated identifiers are ASCII; existing UTF-16 strings stay in opaque records.
+    for(unsigned char c:name){if(c>=128)throw std::runtime_error("Expected a generated ASCII identifier");bytes.push_back(c);bytes.push_back(0);}
+    bytes.push_back(0);bytes.push_back(0);
+}
+void Align(std::vector<std::uint8_t>& bytes,std::size_t alignment) {bytes.resize((bytes.size()+alignment-1)&~(alignment-1),0);}
+std::vector<std::uint8_t> PointRecord(const Region& r,int id) {
+    std::vector<std::uint8_t> b(0x50);Put<std::int64_t>(b,0,0x50);Put<std::int32_t>(b,12,id);
+    AppendName(b,r.name);Align(b,4);
+    Put<std::int64_t>(b,0x30,b.size());b.resize(b.size()+2);Align(b,4);
+    Put<std::int64_t>(b,0x38,b.size());b.resize(b.size()+2);Align(b,8);
+    Put<std::int64_t>(b,0x48,b.size());b.resize(b.size()+4);Put(b,b.size()-4,r.entity_id);Align(b,8);
+    Put(b,0x14,r.transform.position);Put(b,0x20,r.transform.rotation);return b;
+}
+std::vector<std::uint8_t> PatrolRecord(const Route& r,int id) {
+    std::vector<std::uint8_t> b(0x28);Put<std::int64_t>(b,0,0x28);Put(b,8,r.event_id);
+    Put<std::uint32_t>(b,12,14);Put<std::int32_t>(b,16,id);AppendName(b,r.name);Align(b,8);
+    Put<std::int64_t>(b,0x18,b.size());const auto entity=b.size();b.resize(entity+16);
+    Put<std::int32_t>(b,entity,-1);Put<std::int32_t>(b,entity+4,-1);Put(b,entity+8,r.entity_id);
+    Put<std::int64_t>(b,0x20,b.size());const auto data=b.size();b.resize(data+80);
+    Put(b,data,r.data.type);for(int i=0;i<32;++i)Put<std::int16_t>(b,data+16+i*2,-1);return b;
+}
 void WriteExclusive(const std::filesystem::path& path,std::span<const std::uint8_t> b) {
     int fd=open(path.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0644);
     if(fd<0) throw std::runtime_error("Cannot create export file: "+path.string());
@@ -166,6 +192,25 @@ Document Document::Read(std::span<const std::uint8_t> file) {
     };
     std::vector<std::size_t> patrols;
     for(auto p:lists.at("EVENT_PARAM_ST")) if(Get<std::uint32_t>(b,p+12)==14) patrols.push_back(p);
+    for(auto p:lists.at("POINT_PARAM_ST")) {
+        if(end_of(p)-p<0x50)throw std::runtime_error("Truncated region header");
+        Region r;r.record=p;r.key=int(d.regions.size());r.name=Name(b.first(end_of(p)),Offset(b,p,p));
+        r.shape=Get<std::uint32_t>(b,p+0x10);
+        r.original.position=Get<BbMapArt::Vec3>(b,p+0x14);r.original.rotation=Get<BbMapArt::Vec3>(b,p+0x20);
+        Check(r.original);r.transform=r.original;
+        if(Get<std::int64_t>(b,p+0x48))r.entity_id=Get<std::int32_t>(b,Offset(b,p+0x48,p));
+        d.regions.push_back(std::move(r));
+    }
+    for(auto p:patrols) {
+        Route r;r.record=p;r.key=int(d.routes.size());r.name=Name(b.first(end_of(p)),Offset(b,p,p));
+        r.event_id=Get<std::int32_t>(b,p+8);
+        const auto data=Offset(b,p+0x20,p);
+        if(data<p+0x28 || data>end_of(p) || end_of(p)-data<80)throw std::runtime_error("Invalid patrol data offset");
+        if(Get<std::int64_t>(b,p+0x18))r.entity_id=Get<std::int32_t>(b,Offset(b,p+0x18,p)+8);
+        r.original.type=Get<std::int32_t>(b,data);
+        for(int i=0;i<32;++i)r.original.points[i]=ref(Get<std::int16_t>(b,data+16+i*2),lists.at("POINT_PARAM_ST"));
+        r.data=r.original;d.routes.push_back(std::move(r));
+    }
     std::set<std::string> names;
     for(auto p:all_parts) {
         auto type=Get<std::uint32_t>(b,p+0x14);
@@ -191,13 +236,21 @@ Document Document::Read(std::span<const std::uint8_t> file) {
             e.entity_id=Get<std::int32_t>(b,entity);e.instance_id=o.instance_id;
             e.think_param=Get<std::int32_t>(b,data+8);e.npc_param=Get<std::int32_t>(b,data+12);
             e.talk_id=Get<std::int32_t>(b,data+16);e.chara_init=Get<std::int32_t>(b,data+24);
+            e.patrol_type=Get<std::int16_t>(b,data+20);e.fallback_platoon=Get<std::int16_t>(b,data+22);
             e.collision=ref(Get<std::int32_t>(b,data+28),all_parts,5);
             e.patrol=ref(Get<std::int16_t>(b,data+32),patrols);
             for(int i=0;i<8;++i)e.move_points[i]=ref(Get<std::int16_t>(b,data+40+i*2),lists.at("POINT_PARAM_ST"));
             e.init_anim=Get<std::int32_t>(b,data+56);e.damage_anim=Get<std::int32_t>(b,data+60);
             o.enemy=std::move(e);
+            o.original_enemy=o.enemy;
         }
         d.parts.push_back(std::move(o));
+    }
+    d.next_region_key=int(d.regions.size());d.next_route_key=int(d.routes.size());
+    for(const auto& r:d.routes)for(const auto& point:r.data.points)d.next_region_key=std::max(d.next_region_key,point.index+1);
+    for(const auto& p:d.parts)if(p.enemy) {
+        d.next_route_key=std::max(d.next_route_key,p.enemy->patrol.index+1);
+        for(const auto& point:p.enemy->move_points)d.next_region_key=std::max(d.next_region_key,point.index+1);
     }
     d.ReserveIdentifiers();
     return d;
@@ -224,8 +277,10 @@ void Document::ReserveIdentifiers() {
                 reserved_instances[models[model]].insert(Get<std::int32_t>(b,p+0x10));
             reserved_types[Get<std::uint32_t>(b,p+0x14)].insert(Get<std::int32_t>(b,p+0x18));
             entity(0xb0,0);
-        } else if(s.name=="EVENT_PARAM_ST") entity(0x18,8);
-        else if(s.name=="POINT_PARAM_ST") entity(0x48,0);
+        } else if(s.name=="EVENT_PARAM_ST") {
+            if(Get<std::uint32_t>(b,p+12)==14)reserved_route_names.insert(Name(b,Offset(b,p,p)));
+            entity(0x18,8);
+        } else if(s.name=="POINT_PARAM_ST") {reserved_region_names.insert(Name(b,Offset(b,p,p)));entity(0x48,0);}
     }
 }
 void Document::ReserveSiblings() {
@@ -242,13 +297,17 @@ void Document::ReserveSiblings() {
             const auto sibling=Read(ReadFile(f.path()));
             reserved_names.insert(sibling.reserved_names.begin(),sibling.reserved_names.end());
             reserved_entities.insert(sibling.reserved_entities.begin(),sibling.reserved_entities.end());
+            reserved_region_names.insert(sibling.reserved_region_names.begin(),sibling.reserved_region_names.end());
+            reserved_route_names.insert(sibling.reserved_route_names.begin(),sibling.reserved_route_names.end());
             for(const auto& [model,ids]:sibling.reserved_instances)reserved_instances[model].insert(ids.begin(),ids.end());
         }
     }
     reserved_siblings=true;
 }
 bool Document::Changed() const {
-    return std::ranges::any_of(parts,[](const Part& o){return o.added || o.transform!=o.original;});
+    return std::ranges::any_of(parts,[](const Part& o){return o.added || o.transform!=o.original || o.enemy!=o.original_enemy;}) ||
+        std::ranges::any_of(regions,[](const Region& r){return r.added || r.transform!=r.original;}) ||
+        std::ranges::any_of(routes,[](const Route& r){return r.added || r.data!=r.original;});
 }
 bool Document::Set(std::size_t i,const Transform& t) {
     Check(t);auto& o=parts.at(i);
@@ -256,6 +315,92 @@ bool Document::Set(std::size_t i,const Transform& t) {
     if(o.transform==t) return false;
     auto after=o;after.transform=t;
     history.resize(cursor);history.push_back({i,o,after});++cursor;o=std::move(after);return true;
+}
+bool Document::SetEnemy(std::size_t i,const EnemyData& value) {
+    auto& part=parts.at(i);if(!part.enemy)throw std::runtime_error("Select a character first");
+    auto data=value;const auto& before=*part.enemy;
+    if(data.dummy!=before.dummy || data.entity_id!=before.entity_id || data.instance_id!=before.instance_id)
+        throw std::runtime_error("Character type and identifiers are read only");
+    if(data.patrol_type!=before.patrol_type && (data.patrol_type<0 || data.patrol_type>6))throw std::runtime_error("Unsupported patrol behavior");
+    auto resolve=[&](Reference& ref,const Reference& old,const auto& list) {
+        if(ref==old)return;
+        if(ref.index==-1){ref.name.clear();return;}
+        auto found=std::ranges::find(list,ref.index,[](const auto& record){return record.key;});
+        if(found==list.end())throw std::runtime_error("Reference does not exist in this map");ref.name=found->name;
+    };
+    resolve(data.patrol,before.patrol,routes);
+    for(int n=0;n<8;++n)resolve(data.move_points[n],before.move_points[n],regions);
+    if(data.collision!=before.collision) {
+        if(data.collision.index==-1)data.collision.name.clear();
+        else {
+            const auto& table=*std::ranges::find(sections,std::string("PARTS_PARAM_ST"),&Section::name);
+            if(data.collision.index<0 || std::size_t(data.collision.index)>=table.entries.size() ||
+               Get<std::uint32_t>(raw,table.entries[data.collision.index]+0x14)!=5)throw std::runtime_error("Loading collision must reference a collision part");
+            const auto p=table.entries[data.collision.index];data.collision.name=Name(raw,Offset(raw,p+8,p));
+        }
+    }
+    if(data==before)return false;
+    auto after=part;after.enemy=data;history.resize(cursor);history.push_back({i,part,after});++cursor;part=std::move(after);return true;
+}
+bool Document::SetRegion(std::size_t i,const Transform& t) {
+    Check(t);auto& region=regions.at(i);
+    if(t.scale!=region.original.scale)throw std::runtime_error("Region dimensions are preserved; edit position and rotation");
+    if(t==region.transform)return false;
+    auto after=region;after.transform=t;history.resize(cursor);history.push_back({i,region,after});++cursor;region=std::move(after);return true;
+}
+bool Document::SetRoute(std::size_t i,const RouteData& value) {
+    auto& route=routes.at(i);auto data=value;
+    if(data.type!=route.data.type && (data.type<0 || data.type>6))throw std::runtime_error("Unsupported patrol behavior");
+    for(int n=0;n<32;++n) {
+        auto& ref=data.points[n];if(ref==route.data.points[n])continue;
+        if(ref.index==-1){ref.name.clear();continue;}
+        auto found=std::ranges::find(regions,ref.index,&Region::key);
+        if(found==regions.end())throw std::runtime_error("Waypoint must reference a region in this map");ref.name=found->name;
+    }
+    if(data==route.data)return false;
+    auto after=route;after.data=std::move(data);history.resize(cursor);history.push_back({i,route,after});++cursor;route=std::move(after);return true;
+}
+std::size_t Document::AddWaypoint(const BbMapArt::Vec3& position) {
+    if(regions.size()>=32767)throw std::runtime_error("Patrol region index limit reached");
+    Region r;r.transform.position=position;Check(r.transform);r.original=r.transform;
+    r.entity_id=NewEntityID();r.name=FreshName("Waypoint_",reserved_region_names);reserved_region_names.insert(r.name);
+    r.key=next_region_key++;r.added=true;const auto index=regions.size();
+    history.resize(cursor);history.push_back({index,std::nullopt,r});++cursor;regions.push_back(r);return index;
+}
+std::size_t Document::AddRoute() {
+    if(routes.size()>=32767)throw std::runtime_error("Patrol route index limit reached");
+    Route r;r.entity_id=NewEntityID();r.name=FreshName("Patrol_",reserved_route_names);reserved_route_names.insert(r.name);
+    std::int32_t last=-1;
+    for(const auto& s:sections)if(s.name=="EVENT_PARAM_ST")for(auto p:s.entries)last=std::max(last,Get<std::int32_t>(raw,p+8));
+    for(const auto& route:routes)last=std::max(last,route.event_id);
+    if(last==std::numeric_limits<std::int32_t>::max())throw std::runtime_error("No free event identifier");
+    r.event_id=last+1;r.key=next_route_key++;r.added=true;const auto index=routes.size();
+    history.resize(cursor);history.push_back({index,std::nullopt,r});++cursor;routes.push_back(r);return index;
+}
+bool Document::RemoveRegion(std::size_t i) {
+    const auto& region=regions.at(i);if(!region.added)throw std::runtime_error("Only new waypoints can be removed");
+    for(const auto& route:routes)for(const auto& point:route.data.points)if(point.index==region.key)throw std::runtime_error("Remove this waypoint from its routes first");
+    for(const auto& p:parts)if(p.enemy)for(const auto& point:p.enemy->move_points)if(point.index==region.key)throw std::runtime_error("Remove this waypoint from character move points first");
+    history.resize(cursor);history.push_back({i,region,std::nullopt});++cursor;regions.erase(regions.begin()+std::ptrdiff_t(i));return true;
+}
+bool Document::RemoveRoute(std::size_t i) {
+    const auto& route=routes.at(i);if(!route.added)throw std::runtime_error("Only new routes can be removed");
+    for(const auto& p:parts)if(p.enemy && p.enemy->patrol.index==route.key)throw std::runtime_error("Unassign this route from its characters first");
+    history.resize(cursor);history.push_back({i,route,std::nullopt});++cursor;routes.erase(routes.begin()+std::ptrdiff_t(i));return true;
+}
+std::int32_t Document::NewEntityID(std::int32_t source_id) {
+    ReserveSiblings();
+    int block=source_id>0?source_id/10000:0;
+    const auto map=source_map.filename().string();
+    if(!block && map.size()>=12 && ValidMapName(map.substr(0,12)))
+        block=std::stoi(map.substr(1,2))*10+std::stoi(map.substr(4,2));
+    if(!block && !reserved_entities.empty())block=*reserved_entities.begin()/10000;
+    const std::int64_t first=std::int64_t(block)*10000+9000;
+    if(first+999>std::numeric_limits<std::int32_t>::max())throw std::runtime_error("No free entity identifier range");
+    auto allocated=std::int32_t(first);
+    while(reserved_entities.contains(allocated) && allocated<first+1000)++allocated;
+    if(allocated>=first+1000)throw std::runtime_error("The area's 9000-9999 entity identifier range is full");
+    reserved_entities.insert(allocated);return allocated;
 }
 std::size_t Document::Duplicate(std::size_t i) {
     Part copy=parts.at(i);ReserveSiblings();
@@ -276,16 +421,7 @@ std::size_t Document::Duplicate(std::size_t i) {
     copy.instance_id=next(reserved_instances[copy.model]);
     const auto type=Get<std::uint32_t>(raw,copy.record+0x14);
     copy.type_id=next(reserved_types[type]);
-    int block=copy.entity_id>0?copy.entity_id/10000:0;
-    const auto map=source_map.filename().string();
-    if(!block && map.size()>=12 && ValidMapName(map.substr(0,12)))
-        block=std::stoi(map.substr(1,2))*10+std::stoi(map.substr(4,2));
-    if(!block && !reserved_entities.empty())block=*reserved_entities.begin()/10000;
-    const std::int64_t first=std::int64_t(block)*10000+9000;
-    if(first+999>std::numeric_limits<std::int32_t>::max())throw std::runtime_error("No free entity identifier range");
-    copy.entity_id=std::int32_t(first);
-    while(reserved_entities.contains(copy.entity_id) && copy.entity_id<first+1000)++copy.entity_id;
-    if(copy.entity_id>=first+1000)throw std::runtime_error("The area's 9000-9999 entity identifier range is full");
+    copy.entity_id=NewEntityID(copy.entity_id);
     // Fail before creating a copy when the source cannot be relocated as one record.
     const auto end=record_ends.at(copy.record);
     if(Get<std::int64_t>(raw,copy.record+0xb0)<=0 ||
@@ -305,21 +441,47 @@ bool Document::Remove(std::size_t i) {
 }
 void Document::Apply(const Edit& e,bool forward) {
     const auto& from=forward?e.before:e.after;const auto& to=forward?e.after:e.before;
-    if(from && to)parts.at(e.index)=*to;
-    else if(to)parts.insert(parts.begin()+std::ptrdiff_t(e.index),*to);
-    else parts.erase(parts.begin()+std::ptrdiff_t(e.index));
+    std::visit([&](const auto& entry){
+        using T=std::decay_t<decltype(entry)>;
+        auto& list=[&]() -> auto& {if constexpr(std::is_same_v<T,Part>)return parts;else if constexpr(std::is_same_v<T,Region>)return regions;else return routes;}();
+        if(from && to)list.at(e.index)=std::get<T>(*to);
+        else if(to)list.insert(list.begin()+std::ptrdiff_t(e.index),std::get<T>(*to));
+        else list.erase(list.begin()+std::ptrdiff_t(e.index));
+    },from?*from:*to);
 }
 bool Document::Undo() {if(!cursor)return false;Apply(history[--cursor],false);return true;}
 bool Document::Redo() {if(cursor==history.size())return false;Apply(history[cursor++],true);return true;}
 std::vector<std::uint8_t> Document::Inflated() const {
     auto b=raw;
-    for(const auto& o:parts) if(!o.added) {
-        Put(b,o.record+0x28,o.transform.position);Put(b,o.record+0x34,o.transform.rotation);Put(b,o.record+0x40,o.transform.scale);
-    }
-    const auto count=std::ranges::count(parts,true,&Part::added);if(!count)return b;
+    std::map<int,int> region_indices,route_indices;
+    for(std::size_t n=0;n<regions.size();++n)region_indices[regions[n].key]=int(n);
+    for(std::size_t n=0;n<routes.size();++n)route_indices[routes[n].key]=int(n);
+    auto index=[&](const Reference& ref,const auto& indices) {
+        if(auto found=indices.find(ref.index);found!=indices.end())return found->second;
+        if(ref.index>=0 && std::size_t(ref.index)<indices.size())throw std::runtime_error("An unresolved reference would target a new record");
+        return ref.index;
+    };
+    auto patch_part=[&](auto& bytes,std::size_t p,const Part& part) {
+        Put(bytes,p+0x28,part.transform.position);Put(bytes,p+0x34,part.transform.rotation);Put(bytes,p+0x40,part.transform.scale);
+        if(!part.enemy)return;const auto& e=*part.enemy;const auto data=p+Get<std::int64_t>(bytes,p+0xb8);
+        Put(bytes,data+8,e.think_param);Put(bytes,data+12,e.npc_param);Put(bytes,data+16,e.talk_id);
+        Put(bytes,data+20,e.patrol_type);Put(bytes,data+22,e.fallback_platoon);Put(bytes,data+24,e.chara_init);
+        Put<std::int32_t>(bytes,data+28,e.collision.index);Put<std::int16_t>(bytes,data+32,index(e.patrol,route_indices));
+        for(int n=0;n<8;++n)Put<std::int16_t>(bytes,data+40+n*2,index(e.move_points[n],region_indices));
+        Put(bytes,data+56,e.init_anim);Put(bytes,data+60,e.damage_anim);
+    };
+    auto patch_route=[&](auto& bytes,std::size_t p,const Route& r) {
+        const auto data=p+Get<std::int64_t>(bytes,p+0x20);Put(bytes,data,r.data.type);
+        for(int n=0;n<32;++n)Put<std::int16_t>(bytes,data+16+n*2,index(r.data.points[n],region_indices));
+    };
+    for(const auto& o:parts)if(!o.added)patch_part(b,o.record,o);
+    for(const auto& r:regions)if(!r.added){Put(b,r.record+0x14,r.transform.position);Put(b,r.record+0x20,r.transform.rotation);}
+    for(const auto& r:routes)if(!r.added)patch_route(b,r.record,r);
+    const auto count=std::ranges::count(parts,true,&Part::added);
+    if(!count && !std::ranges::any_of(regions,&Region::added) && !std::ranges::any_of(routes,&Route::added))return b;
     const auto& table=*std::ranges::find(sections,std::string("PARTS_PARAM_ST"),&Section::name);
     if(table.entries.size()+count>=100000)throw std::runtime_error("Too many map placements");
-    struct Record { std::size_t source; const Part* copy=nullptr; };
+    struct Record { std::size_t source; const Part* copy=nullptr; const Region* region=nullptr; const Route* route=nullptr; };
     std::vector<Record> ordered;
     for(auto p:table.entries)ordered.push_back({p});
     for(const auto& o:parts)if(o.added)ordered.push_back({o.record,&o});
@@ -330,6 +492,11 @@ std::vector<std::uint8_t> Document::Inflated() const {
     });
     std::map<std::size_t,std::int32_t> new_indices;
     std::map<int,int> added_models;
+    std::map<std::uint32_t,std::int64_t> next_type_ids;
+    for(auto p:table.entries) {
+        const auto type=Get<std::uint32_t>(raw,p+0x14);
+        next_type_ids[type]=std::max(next_type_ids[type],std::int64_t(Get<std::int32_t>(raw,p+0x18))+1);
+    }
     for(std::size_t n=0;n<ordered.size();++n) {
         if(!ordered[n].copy)new_indices[ordered[n].source]=std::int32_t(n);
         else ++added_models[Get<std::int32_t>(raw,ordered[n].source+0x1c)];
@@ -353,6 +520,13 @@ std::vector<std::uint8_t> Document::Inflated() const {
         std::vector<Record> records;
         if(s.name=="PARTS_PARAM_ST")records=ordered;
         else for(auto p:s.entries)records.push_back({p});
+        if(s.name=="POINT_PARAM_ST")for(const auto& r:regions)if(r.added)records.push_back({0,nullptr,&r});
+        if(s.name=="EVENT_PARAM_ST") {
+            for(const auto& r:routes)if(r.added)records.push_back({0,nullptr,nullptr,&r});
+            std::stable_sort(records.begin(),records.end(),[&](const auto& a,const auto& b){
+                return (a.route?14:Get<std::uint32_t>(raw,a.source+12))<(b.route?14:Get<std::uint32_t>(raw,b.source+12));
+            });
+        }
         const auto at=result.size();if(previous_next)Put<std::int64_t>(result,previous_next,at);
         result.resize(at+16+(records.size()+1)*8,0);
         Put<std::uint32_t>(result,at,3);Put<std::uint32_t>(result,at+4,records.size()+1);
@@ -360,14 +534,17 @@ std::vector<std::uint8_t> Document::Inflated() const {
         for(unsigned char c:s.name){result.push_back(c);result.push_back(0);}result.push_back(0);result.push_back(0);
         result.resize((result.size()+7)&~std::size_t(7),0);
         for(std::size_t n=0;n<records.size();++n) {
-            const auto& record=records[n];const auto p=record.source,end=record_ends.at(p);
-            const auto& bytes=record.copy?raw:b;
-            std::vector<std::uint8_t> data(bytes.begin()+std::ptrdiff_t(p),bytes.begin()+std::ptrdiff_t(end));
+            const auto& record=records[n];const auto p=record.source;
+            std::vector<std::uint8_t> data;
+            if(record.region)data=PointRecord(*record.region,int(n));
+            else if(record.route){data=PatrolRecord(*record.route,route_indices.at(record.route->key));patch_route(data,0,*record.route);}
+            else {const auto& bytes=record.copy?raw:b;data.assign(bytes.begin()+std::ptrdiff_t(p),bytes.begin()+std::ptrdiff_t(record_ends.at(p)));}
             if(record.copy) {
                 const auto& o=*record.copy;Put<std::int64_t>(data,8,data.size());
-                for(unsigned char c:o.name){data.push_back(c);data.push_back(0);}data.push_back(0);data.push_back(0);
-                Put(data,0x10,o.instance_id);Put(data,0x18,o.type_id);Put(data,local(data,0xb0,16),o.entity_id);
-                Put(data,0x28,o.transform.position);Put(data,0x34,o.transform.rotation);Put(data,0x40,o.transform.scale);
+                AppendName(data,o.name);Put(data,0x10,o.instance_id);
+                const auto type=Get<std::uint32_t>(data,0x14);const auto type_id=next_type_ids[type]++;
+                if(type_id>std::numeric_limits<std::int32_t>::max())throw std::runtime_error("Part type identifier limit reached");
+                Put<std::int32_t>(data,0x18,type_id);Put(data,local(data,0xb0,16),o.entity_id);patch_part(data,0,o);
             }
             if(s.name=="PARTS_PARAM_ST") {
                 const auto type=Get<std::uint32_t>(data,0x14);
@@ -403,7 +580,7 @@ std::vector<std::uint8_t> Document::Inflated() const {
 }
 std::vector<std::uint8_t> Document::Save() const {
     if(!Changed()) return source;
-    auto b=Inflated();if(!dcx) return b;
+    auto b=Inflated();if(!dcx) {if(Document::Read(b).Inflated()!=b)throw std::runtime_error("Export verification failed");return b;}
     mz_ulong length=mz_compressBound(b.size());std::vector<std::uint8_t> packed(length);
     if(mz_compress2(packed.data(),&length,b.data(),b.size(),9)!=MZ_OK) throw std::runtime_error("Map compression failed");
     std::vector<std::uint8_t> result(source.begin(),source.begin()+0x4c);
