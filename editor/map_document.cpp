@@ -322,7 +322,7 @@ bool Document::Changed() const {
     return std::ranges::any_of(parts,[](const Part& o){return o.added || o.transform!=o.original || o.enemy!=o.original_enemy;}) ||
         std::ranges::any_of(regions,[](const Region& r){return r.added || r.transform!=r.original;}) ||
         std::ranges::any_of(routes,[](const Route& r){return r.added || r.data!=r.original;}) ||
-        std::ranges::any_of(treasures,[](const Treasure& t){return t.added || t.data!=t.original;}) || !item_lots.empty();
+        std::ranges::any_of(treasures,[](const Treasure& t){return t.added || t.data!=t.original;}) || !item_lots.empty() || !event_edits.empty() || !quests.empty();
 }
 bool Document::Set(std::size_t i,const Transform& t) {
     Check(t);auto& o=parts.at(i);
@@ -403,7 +403,15 @@ ItemLot Document::NewLot(std::int32_t source_id,bool independent) {
     for(lot.id=900000000;lot.id<1000000000;lot.id+=10)if(!table.Find(lot.id) && !reserved_lot_ids.contains(lot.id))break;
     if(lot.id>=1000000000)throw std::runtime_error("Custom item lot range is full");
     if(independent) {
-        const auto original=lot.Flag();if(original<=0)throw std::runtime_error("Choose a pickup with a persistent collection flag");
+        const auto flag=NewPickupFlag(lot.Flag());
+        // Per-slot flags must also be independent. Zero means inherit the common flag.
+        for(int n=0;n<8;++n)Put<std::int32_t>(lot.bytes,96+n*4,0);
+        lot.SetFlag(flag);
+    }
+    reserved_lot_ids.insert(lot.id);lot.name="Editor item "+std::to_string(lot.id);return lot;
+}
+std::int32_t Document::NewPickupFlag(std::int32_t original) {
+        if(original<=0 || !parameters)throw std::runtime_error("Choose a pickup with a persistent collection flag");
         const auto group=original/1000*1000;
         if(!reserved_pickup_flags.contains(group)) {
             const auto used=parameters->UsedFlags(group);std::set<std::int32_t> flags(used.begin(),used.end());
@@ -416,13 +424,68 @@ ItemLot Document::NewLot(std::int32_t source_id,bool independent) {
             }
             reserved_pickup_flags.emplace(group,std::move(flags));
         }
-        auto& flags=reserved_pickup_flags[group];auto flag=group+900;while(flag<group+1000 && flags.contains(flag))++flag;
+        auto& flags=reserved_pickup_flags[group];
+        for(const auto& edit:event_edits)if(edit.value>=std::uint32_t(group) && edit.value<std::uint32_t(group+1000))flags.insert(std::int32_t(edit.value));
+        auto flag=group+900;while(flag<group+1000 && flags.contains(flag))++flag;
         if(flag>=group+1000)throw std::runtime_error("No unused pickup flag in this pickup's retail flag group");
-        // Per-slot flags must also be independent. Zero means inherit the common flag.
-        for(int n=0;n<8;++n)Put<std::int32_t>(lot.bytes,96+n*4,0);
-        lot.SetFlag(flag);flags.insert(flag);
+        flags.insert(flag);return flag;
+}
+void Document::AttachEvents(const std::string& name,std::shared_ptr<const EventFile> file) {
+    if(!ValidEventName(name) || !file || Changed())throw std::runtime_error("Attach event files before editing");
+    for(const auto& event:file->Events())if(event.id>=0 && event.id<=INT32_MAX)reserved_script_ids.insert(std::int32_t(event.id));scripts[name]=std::move(file);
+}
+ScriptOperand Document::EventArgumentValue(const std::string& name,std::size_t event,std::size_t instruction,std::size_t argument) const {
+    const auto found=scripts.find(name);if(found==scripts.end())throw std::runtime_error("Event script is unavailable");
+    auto operand=found->second->Operand(event,instruction,argument);operand.script=name;
+    for(const auto& edit:event_edits)if(edit.script==name && edit.at==operand.at)return edit;return operand;
+}
+bool Document::SetEventArgument(const std::string& name,std::size_t event,std::size_t instruction,std::size_t argument,double value) {
+    const auto script=scripts.find(name);if(script==scripts.end())throw std::runtime_error("Event script is unavailable");
+    auto after=script->second->Edit(event,instruction,argument,value);after.script=name;const auto& command=script->second->Events().at(event).instructions.at(instruction);
+    if(EventArgumentValue(name,event,instruction,argument).value==after.value)return false;
+    if(command.bank==2003 && command.id==4 && argument==0) {
+        const auto id=std::int32_t(after.value);if(std::ranges::find(item_lots,id,&ItemLot::id)==item_lots.end() &&
+           (!parameters || !parameters->Table("ItemLotParam") || !parameters->Table("ItemLotParam")->Find(id)))throw std::runtime_error("Reward item lot does not exist");
     }
-    reserved_lot_ids.insert(lot.id);lot.name="Editor item "+std::to_string(lot.id);return lot;
+    if(command.bank==2000 && command.id==0 && argument==1) {
+        bool present=std::ranges::any_of(quests,[&](const auto& q){return q.event_id==std::int32_t(after.value);});
+        for(const auto& [_,file]:scripts) {
+            const auto target=std::ranges::find(file->Events(),std::int64_t(after.value),&ScriptEvent::id);if(target==file->Events().end())continue;present=true;
+            std::size_t required=0;for(const auto& parameter:target->parameters)required=std::max(required,parameter.source+parameter.length);
+            if(command.length<8 || required>command.length-8)throw std::runtime_error("Called event requires more parameter bytes than this instruction supplies");
+        }
+        if(!present)throw std::runtime_error("Called event ID is not present in the area or common script");
+    }
+    auto existing=std::ranges::find_if(event_edits,[&](const auto& e){return e.script==name && e.at==after.at;});
+    if(existing==event_edits.end()) {
+        if(after.value==after.original)return false;history.resize(cursor);history.push_back({event_edits.size(),std::nullopt,after});++cursor;event_edits.push_back(after);
+    } else {
+        if(*existing==after)return false;const auto index=std::size_t(existing-event_edits.begin());history.resize(cursor);
+        if(after.value==after.original){history.push_back({index,*existing,std::nullopt});++cursor;event_edits.erase(existing);}
+        else {history.push_back({index,*existing,after});++cursor;*existing=after;}
+    }
+    return true;
+}
+std::size_t Document::AddPickupQuest(std::size_t treasure,const ItemContents& reward,const std::string& name) {
+    const auto script=scripts.find(name);if(script==scripts.end() || name=="common.emevd.dcx" || !ValidEventName(name))throw std::runtime_error("Load an area event script first");
+    if(std::ranges::find(script->second->Events(),std::int64_t(0),&ScriptEvent::id)==script->second->Events().end())throw std::runtime_error("Area constructor event is missing");
+    if(!parameters)throw std::runtime_error("Item parameters are unavailable");
+    ItemLot checked;checked.bytes.resize(148);checked.SetFlag(-1);parameters->SetContents(checked,reward);
+    const auto& t=treasures.at(treasure);auto lot=NewLot(t.data.lots[0],false);const auto trigger=lot.Flag();
+    const auto completed=NewPickupFlag(trigger);parameters->SetContents(lot,reward);lot.SetFlag(-1);
+    const auto block=std::stoi(name.substr(1,2))*10+std::stoi(name.substr(4,2));const auto first_id=10000000+block*10000+9000;
+    auto id=first_id;while(id<first_id+1000 && reserved_script_ids.contains(id))++id;if(id>=first_id+1000)throw std::runtime_error("Area custom-event ID range is full");
+    PickupQuest quest{name,t.name,id,trigger,completed,lot.id};const auto first=cursor;history.resize(cursor);
+    history.push_back({item_lots.size(),std::nullopt,lot});++cursor;item_lots.push_back(lot);
+    const auto index=quests.size();history.push_back({index,std::nullopt,quest});++cursor;quests.push_back(quest);reserved_script_ids.insert(id);Group(first);return index;
+}
+bool Document::RemoveQuest(std::size_t index) {
+    const auto quest=quests.at(index);const auto first=cursor;history.resize(cursor);history.push_back({index,quest,std::nullopt});++cursor;quests.erase(quests.begin()+std::ptrdiff_t(index));
+    const auto lot=std::ranges::find(item_lots,quest.reward_lot,&ItemLot::id);
+    if(lot!=item_lots.end() && std::ranges::none_of(quests,[&](const auto& q){return q.reward_lot==lot->id;}) && std::ranges::none_of(event_edits,[&](const auto& e){return e.value==std::uint32_t(lot->id);}) && std::ranges::none_of(treasures,[&](const auto& t){return std::ranges::find(t.data.lots,lot->id)!=t.data.lots.end();})) {
+        const auto at=std::size_t(lot-item_lots.begin());history.push_back({at,*lot,std::nullopt});++cursor;item_lots.erase(lot);
+    }
+    Group(first);return true;
 }
 bool Document::SetTreasure(std::size_t i,const TreasureData& value) {
     auto& t=treasures.at(i);auto data=value;
@@ -466,12 +529,14 @@ std::size_t Document::DuplicateTreasure(std::size_t i) {
 }
 bool Document::RemoveTreasure(std::size_t i) {
     const auto t=treasures.at(i);if(!t.added)throw std::runtime_error("Only newly created pickups can be removed");
+    if(std::ranges::any_of(quests,[&](const auto& q){return q.treasure==t.name;}))throw std::runtime_error("Remove this pickup's reward quest first");
     const auto first=cursor;history.resize(cursor);history.push_back({i,t,std::nullopt});++cursor;treasures.erase(treasures.begin()+std::ptrdiff_t(i));
     const auto part=std::ranges::find(parts,t.data.part.name,&Part::name);
     if(part!=parts.end() && part->added && std::ranges::none_of(treasures,[&](const auto& other){return other.data.part.name==part->name;}))Remove(std::size_t(part-parts.begin()));
     for(const auto id:t.data.lots) {
         const auto lot=std::ranges::find(item_lots,id,&ItemLot::id);if(lot==item_lots.end())continue;
         if(std::ranges::any_of(treasures,[&](const auto& other){return std::ranges::find(other.data.lots,id)!=other.data.lots.end();}))continue;
+        if(std::ranges::any_of(quests,[&](const auto& q){return q.reward_lot==id;}) || std::ranges::any_of(event_edits,[&](const auto& e){return e.value==std::uint32_t(id);}))continue;
         const auto index=std::size_t(lot-item_lots.begin());history.push_back({index,*lot,std::nullopt});++cursor;item_lots.erase(lot);
     }
     Group(first);return true;
@@ -544,7 +609,7 @@ void Document::Apply(const Edit& e,bool forward) {
     const auto& from=forward?e.before:e.after;const auto& to=forward?e.after:e.before;
     std::visit([&](const auto& entry){
         using T=std::decay_t<decltype(entry)>;
-        auto& list=[&]() -> auto& {if constexpr(std::is_same_v<T,Part>)return parts;else if constexpr(std::is_same_v<T,Region>)return regions;else if constexpr(std::is_same_v<T,Route>)return routes;else if constexpr(std::is_same_v<T,Treasure>)return treasures;else return item_lots;}();
+        auto& list=[&]() -> auto& {if constexpr(std::is_same_v<T,Part>)return parts;else if constexpr(std::is_same_v<T,Region>)return regions;else if constexpr(std::is_same_v<T,Route>)return routes;else if constexpr(std::is_same_v<T,Treasure>)return treasures;else if constexpr(std::is_same_v<T,ItemLot>)return item_lots;else if constexpr(std::is_same_v<T,ScriptOperand>)return event_edits;else return quests;}();
         if(from && to)list.at(e.index)=std::get<T>(*to);
         else if(to)list.insert(list.begin()+std::ptrdiff_t(e.index),std::get<T>(*to));
         else list.erase(list.begin()+std::ptrdiff_t(e.index));
@@ -711,7 +776,7 @@ std::vector<std::uint8_t> Document::Inflated() const {
 }
 std::vector<std::uint8_t> Document::Save() const {
     if(!Changed()) return source;
-    auto b=Inflated();if(!dcx) {if(Document::Read(b).Inflated()!=b)throw std::runtime_error("Export verification failed");return b;}
+    auto b=Inflated();if(b==raw)return source;if(!dcx) {if(Document::Read(b).Inflated()!=b)throw std::runtime_error("Export verification failed");return b;}
     mz_ulong length=mz_compressBound(b.size());std::vector<std::uint8_t> packed(length);
     if(mz_compress2(packed.data(),&length,b.data(),b.size(),9)!=MZ_OK) throw std::runtime_error("Map compression failed");
     std::vector<std::uint8_t> result(source.begin(),source.begin()+0x4c);
@@ -731,12 +796,19 @@ std::filesystem::path Document::Export(const std::filesystem::path& folder,const
     const auto bytes=Save();
     if(!item_lots.empty() && !parameters)throw std::runtime_error("Item parameters are unavailable");
     const auto parameter_bytes=item_lots.empty()?std::vector<std::uint8_t>{}:parameters->SaveLots(item_lots);
+    std::map<std::string,std::vector<std::uint8_t>> event_files;
+    for(const auto& [name,file]:scripts) {
+        std::vector<ScriptOperand> edits;for(const auto& e:event_edits)if(e.script==name)edits.push_back(e);
+        std::vector<PickupQuest> added;for(const auto& q:quests)if(q.script==name)added.push_back(q);
+        if(!edits.empty() || !added.empty())event_files[name]=file->Save(edits,added);
+    }
     if(!folder.parent_path().empty()) fs::create_directories(folder.parent_path());
     if(!fs::create_directory(folder)) throw std::runtime_error("Choose a new export folder; an existing folder will not be replaced");
     try {
         auto relative=fs::path("dvdroot_ps4/map/MapStudio")/(map+(dcx?".msb.dcx":".msb"));
         fs::create_directories((folder/relative).parent_path());WriteExclusive(folder/relative,bytes);
         if(!parameter_bytes.empty()) {const auto path=folder/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx";fs::create_directories(path.parent_path());WriteExclusive(path,parameter_bytes);}
+        for(const auto& [name,data]:event_files){const auto path=folder/"dvdroot_ps4/event"/name;fs::create_directories(path.parent_path());WriteExclusive(path,data);}
         const std::string note="Bloodborne map editor mod\nMap: "+map+"\nEnable this folder in Mods & Cheats. Reload the area to apply it.\n"+
             (parameter_bytes.empty()?std::string():"Includes a full gameparam binder with private item-lot rows. Combine parameter changes before using other gameparam mods.\n");
         WriteExclusive(folder/"README.txt",std::span(reinterpret_cast<const std::uint8_t*>(note.data()),note.size()));

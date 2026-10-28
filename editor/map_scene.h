@@ -11,7 +11,7 @@ struct Scene {
     Document document;
     GameParams params;
     std::map<std::int32_t,std::string> talk_scripts;
-    std::string param_error,talk_error;
+    std::string param_error,talk_error,event_error;
     std::shared_ptr<const BbMapArt::AreaMesh> terrain;
     std::shared_ptr<const BbMapArt::AreaMesh> enemy_marker;
     std::shared_ptr<const BbMapArt::AreaMesh> region_marker;

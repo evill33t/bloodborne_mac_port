@@ -185,6 +185,12 @@ struct State {
     Transform fields;
     EnemyData enemy_fields;
     ItemContents item_fields;
+    ItemContents quest_fields{4,1000,5};
+    bool show_events=false,event_entity_filter=false,event_builder_open=true;
+    std::string event_file;
+    int selected_event=-1,selected_instruction=-1;
+    std::vector<double> event_values;
+    char event_filter[128]={};
     char filter[128]={};
     std::optional<Transform> drag;
     Transform drag_start;
@@ -197,12 +203,14 @@ struct State {
     enum class Pending { None, Duplicate, Remove, Waypoint, Route, RemoveRoute } pending=Pending::None;
     std::vector<std::uint8_t> exported;
     std::vector<ItemLot> exported_lots;
+    std::vector<ScriptOperand> exported_events;
+    std::vector<PickupQuest> exported_quests;
     mutable std::uint64_t unsaved_version=UINT64_MAX;
     mutable bool unsaved_cached=false;
     ~State() {stop.request_stop();if(loading.valid()) loading.wait();}
     bool Unsaved() const {
         if(!scene)return false;const auto& doc=scene->document;
-        if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.Inflated()!=exported);unsaved_version=doc.Version();}
+        if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.EventEdits()!=exported_events || doc.Quests()!=exported_quests || doc.Inflated()!=exported);unsaved_version=doc.Version();}
         return unsaved_cached;
     }
     bool Discard() {
@@ -216,7 +224,7 @@ struct State {
     }
     void Load() {
         if(loading.valid()) return;
-        scene.reset();selected=selected_region=active_route=selected_treasure=-1;treasure_selection=false;treasure_name.clear();region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();exported_lots.clear();unsaved_version=UINT64_MAX;error.clear();progress="Opening map...";
+        scene.reset();selected=selected_region=active_route=selected_treasure=-1;treasure_selection=false;treasure_name.clear();region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();exported_lots.clear();exported_events.clear();exported_quests.clear();event_file.clear();selected_event=selected_instruction=-1;event_values.clear();unsaved_version=UINT64_MAX;error.clear();progress="Opening map...";
         const auto game=options.game;
         const auto map=options.map;
         loading=std::async(std::launch::async,[this,game,map] {
@@ -297,6 +305,23 @@ struct State {
         ValidateCharacterReferences(*scene->document.Parts()[selected].enemy,data,scene->params,scene->talk_scripts);
         scene->document.SetEnemy(selected,data);enemy_fields=data;
     }
+    const EventFile* Events() const {
+        if(!scene)return nullptr;const auto found=scene->document.Scripts().find(event_file);return found==scene->document.Scripts().end()?nullptr:found->second.get();
+    }
+    void SelectEvent(int event,int instruction=-1) {
+        if(event>=0)event_builder_open=false;
+        selected_event=event;selected_instruction=instruction;event_values.clear();const auto* file=Events();if(!file || event<0 || instruction<0)return;
+        const auto& code=file->Events().at(event).instructions.at(instruction);const auto* command=file->Command(code);if(!command)return;
+        for(std::size_t a=0;a<command->arguments.size();++a) {
+            try{event_values.push_back(EventFile::Number(scene->document.EventArgumentValue(event_file,event,instruction,a)));}catch(const std::exception&){event_values.push_back(0);}
+        }
+    }
+    void CreatePickupQuest() {
+        if(selected_treasure<0)throw std::runtime_error("Select a pickup first");
+        const auto script=options.map.substr(0,6)+"_00_00.emevd.dcx";
+        const auto index=scene->document.AddPickupQuest(selected_treasure,quest_fields,script);show_events=true;event_builder_open=true;
+        status="Created pickup reward event "+std::to_string(scene->document.Quests()[index].event_id)+". Export and reload to test.";
+    }
     void Duplicate() {
         if(scene && selected_treasure>=0){const auto i=scene->document.DuplicateTreasure(selected_treasure);SelectTreasure(int(i),false);status="Created independent pickup. Move it and choose its contents.";return;}
         if(!scene || selected<0)return;
@@ -326,13 +351,14 @@ struct State {
         }
         const auto& routes=scene->document.Routes();const auto route=std::ranges::find(routes,route_key,&Route::key);
         active_route=route==routes.end()?-1:int(route-routes.begin());
+        SelectEvent(selected_event,selected_instruction);
         if(changed)status=redo?"Redid last edit.":"Undid last edit.";
         return changed;
     }
     void Export(const fs::path& folder) {
         if(!scene) return;
         auto path=scene->document.Export(fs::absolute(folder),options.map);
-        exported=scene->document.Inflated();exported_lots=scene->document.ItemLots();unsaved_version=UINT64_MAX;
+        exported=scene->document.Inflated();exported_lots=scene->document.ItemLots();exported_events=scene->document.EventEdits();exported_quests=scene->document.Quests();unsaved_version=UINT64_MAX;
         status="Exported mod: "+folder.filename().string()+". Enable it in Mods & Cheats, then reload the area.";
         std::printf("EXPORTED %s\n",path.c_str());
     }
@@ -377,6 +403,24 @@ struct State {
                 const auto& entries=scene->document.Routes();const auto found=std::ranges::find(entries,name,&Route::name);
                 if(found==entries.end())throw std::runtime_error("Patrol not found: "+name);SelectRoute(int(found-entries.begin()),true);layer=4;
             }
+        } else if(verb=="events")show_events=true;
+        else if(verb=="script") {
+            std::string name;line>>name;if(!scene->document.Scripts().contains(name))throw std::runtime_error("Script not loaded");event_file=name;SelectEvent(-1);show_events=true;
+        } else if(verb=="event") {
+            std::int64_t id;if(!(line>>id) || !Events())throw std::runtime_error("Select a script first");const auto& list=Events()->Events();const auto found=std::ranges::find(list,id,&ScriptEvent::id);
+            if(found==list.end())throw std::runtime_error("Event not found");SelectEvent(int(found-list.begin()));
+        } else if(verb=="instruction") {
+            int index;if(!(line>>index) || !Events() || selected_event<0 || index<0 || std::size_t(index)>=Events()->Events()[selected_event].instructions.size())throw std::runtime_error("Instruction not found");SelectEvent(selected_event,index);
+        } else if(verb=="argument" || verb=="assert-argument") {
+            std::size_t arg;double value;if(!(line>>arg>>value) || selected_event<0 || selected_instruction<0)throw std::runtime_error("Select an event and instruction first");
+            if(verb=="argument"){scene->document.SetEventArgument(event_file,selected_event,selected_instruction,arg,value);SelectEvent(selected_event,selected_instruction);}
+            else if(std::abs(EventFile::Number(scene->document.EventArgumentValue(event_file,selected_event,selected_instruction,arg))-value)>.0001)throw std::runtime_error("Unexpected event argument");
+        } else if(verb=="quest-reward") {
+            if(!(line>>quest_fields.category>>quest_fields.item>>quest_fields.count))throw std::runtime_error("quest-reward needs category item count");CreatePickupQuest();
+        } else if(verb=="assert-quest-count") {
+            std::size_t n;if(!(line>>n) || n!=scene->document.Quests().size())throw std::runtime_error("Unexpected quest count");
+        } else if(verb=="remove-quest") {
+            std::size_t index;if(!(line>>index))throw std::runtime_error("Missing quest index");scene->document.RemoveQuest(index);
         } else if(verb=="treasure") {
             std::string name;std::getline(line>>std::ws,name);const auto& list=scene->document.Treasures();const auto found=std::ranges::find(list,name,&Treasure::name);
             if(found==list.end())throw std::runtime_error("Treasure not found: "+name);SelectTreasure(int(found-list.begin()),true);layer=6;
@@ -458,6 +502,92 @@ struct State {
         ++input_frame;
     }
 };
+void EventTools(State& s) {
+    if(!s.show_events || !s.scene)return;
+    ImGui::SetNextWindowSize({960,660},ImGuiCond_FirstUseEver);ImGui::SetNextWindowPos({340,100},ImGuiCond_FirstUseEver);
+    if(!ImGui::Begin("Events and quests",&s.show_events)){ImGui::End();return;}
+    auto& doc=s.scene->document;
+    if(!s.scene->event_error.empty())ImGui::TextWrapped("%s",s.scene->event_error.c_str());
+    if(!s.error.empty())ImGui::TextWrapped("%s",s.error.c_str());
+    ImGui::SetNextItemOpen(s.event_builder_open,ImGuiCond_Always);s.event_builder_open=ImGui::CollapsingHeader("Pickup reward");
+    if(s.event_builder_open) {
+        if(s.selected_treasure>=0)ImGui::TextWrapped("Trigger: collect %s",doc.Treasures()[s.selected_treasure].name.c_str());
+        else ImGui::TextDisabled("Select an item pickup in the map to choose a trigger.");
+        const int categories[]={0,1,4};const char* names[]={"Weapon","Armor","Consumable"};int category=s.quest_fields.category==0?0:s.quest_fields.category==1?1:2;
+        if(ImGui::Combo("Reward category",&category,names,3))s.quest_fields.category=categories[category];
+        const char* table=s.quest_fields.category==0?"EquipParamWeapon":s.quest_fields.category==1?"EquipParamProtector":"EquipParamGoods";
+        ParamChooser("Reward item",&s.quest_fields.item,s.scene->params.Table(table));ImGui::InputInt("Reward count",&s.quest_fields.count);
+        ImGui::BeginDisabled(s.selected_treasure<0);if(ImGui::Button("Create pickup reward quest"))s.Action([&]{s.CreatePickupQuest();});ImGui::EndDisabled();
+        ImGui::TextWrapped("The area waits for this pickup's collection flag, grants the reward once, and saves a separate completion flag. Export and reload to test.");
+        for(std::size_t i=0;i<doc.Quests().size();++i) {
+            const auto q=doc.Quests()[i];ImGui::PushID(int(i));ImGui::Separator();
+            ImGui::TextWrapped("Event %d: %s -> item lot %d",q.event_id,q.treasure.c_str(),q.reward_lot);
+            ImGui::Text("Trigger flag %d / completion %d",q.trigger_flag,q.completion_flag);
+            if(ImGui::Button("Remove new quest")){s.Action([&]{doc.RemoveQuest(i);});ImGui::PopID();break;}ImGui::PopID();
+        }
+    }
+    ImGui::SeparatorText("Existing event scripts");
+    if(s.event_file.empty())s.event_file=options.map.substr(0,6)+"_00_00.emevd.dcx";
+    if(ImGui::BeginCombo("Script",s.event_file.c_str())) {
+        for(const auto& [name,_]:doc.Scripts())if(ImGui::Selectable(name.c_str(),name==s.event_file)){s.event_file=name;s.SelectEvent(-1);}
+        ImGui::EndCombo();
+    }
+    const auto* file=s.Events();if(!file){ImGui::TextDisabled("Event file unavailable.");ImGui::End();return;}
+    ImGui::InputTextWithHint("##event-filter","Filter event ID or name",s.event_filter,sizeof(s.event_filter));
+    const int entity=s.selected>=0?doc.Parts()[s.selected].entity_id:-1;
+    ImGui::BeginDisabled(entity<=0);ImGui::Checkbox("Match selected entity as an integer constant",&s.event_entity_filter);ImGui::EndDisabled();
+    if(ImGui::BeginTable("Event browser",2,ImGuiTableFlags_Resizable|ImGuiTableFlags_BordersInnerV)) {
+        ImGui::TableSetupColumn("Events",ImGuiTableColumnFlags_WidthFixed,300);ImGui::TableSetupColumn("Instructions");ImGui::TableNextColumn();
+        ImGui::BeginChild("Event list",{0,220},ImGuiChildFlags_Borders);
+        for(std::size_t e=0;e<file->Events().size();++e) {
+            const auto& event=file->Events()[e];const auto id=std::to_string(event.id);
+            if(s.event_filter[0] && id.find(s.event_filter)==std::string::npos && event.name.find(s.event_filter)==std::string::npos)continue;
+            if(s.event_entity_filter && entity>0) {
+                bool match=false;
+                for(std::size_t i=0;i<event.instructions.size() && !match;++i)if(const auto* command=file->Command(event.instructions[i]))for(std::size_t a=0;a<command->arguments.size();++a) {
+                    if(command->arguments[a].type==6)continue;
+                    try{if(EventFile::Number(doc.EventArgumentValue(s.event_file,e,i,a))==entity){match=true;break;}}catch(const std::exception&){}
+                }
+                if(!match)continue;
+            }
+            const auto label=id+" "+event.name;ImGui::PushID(int(e));if(ImGui::Selectable(label.c_str(),s.selected_event==int(e)))s.SelectEvent(int(e));ImGui::PopID();
+        }
+        ImGui::EndChild();ImGui::TableNextColumn();
+        if(s.selected_event>=0) {
+            const auto& event=file->Events()[s.selected_event];ImGui::TextWrapped("%lld %s",static_cast<long long>(event.id),event.name.c_str());
+            ImGui::BeginChild("Instructions",{0,190},ImGuiChildFlags_Borders,ImGuiWindowFlags_HorizontalScrollbar);
+            ImGuiListClipper clipper;clipper.Begin(int(event.instructions.size()));
+            while(clipper.Step())for(int i=clipper.DisplayStart;i<clipper.DisplayEnd;++i) {
+                const auto& code=event.instructions[i];const auto* command=file->Command(code);
+                const auto label=std::to_string(i)+": "+std::to_string(code.bank)+":"+std::to_string(code.id)+" "+(command?command->name:"Unknown command");
+                if(ImGui::Selectable(label.c_str(),s.selected_instruction==i))s.SelectEvent(s.selected_event,i);
+            }
+            ImGui::EndChild();
+        }
+        ImGui::EndTable();
+    }
+    if(s.selected_event>=0 && s.selected_instruction>=0) {
+        const auto& code=file->Events()[s.selected_event].instructions[s.selected_instruction];const auto* command=file->Command(code);
+        ImGui::Separator();ImGui::TextWrapped("%d:%d %s",code.bank,code.id,command?command->name.c_str():"Unknown command");
+        if(command)for(std::size_t a=0;a<command->arguments.size();++a) {
+            const auto& arg=command->arguments[a];ImGui::PushID(int(a));ImGui::TextWrapped("%zu: %s",a,arg.name.c_str());
+            if(!arg.width || arg.offset>code.length || arg.width>code.length-arg.offset)ImGui::TextDisabled("Unsupported argument layout; preserved.");
+            else {
+                const bool supplied=file->Parameterized(s.selected_event,s.selected_instruction,arg);ImGui::BeginDisabled(supplied);
+                if(!arg.choices.empty()) {
+                    const auto choice=arg.choices.find(std::int64_t(s.event_values[a]));
+                    if(ImGui::BeginCombo("Value",choice==arg.choices.end()?"Unlisted value":choice->second.c_str())) {
+                        for(const auto& [number,name]:arg.choices)if(ImGui::Selectable(name.c_str(),s.event_values[a]==number))s.event_values[a]=double(number);ImGui::EndCombo();
+                    }
+                } else ImGui::InputDouble("Value",&s.event_values[a],0,0,"%.9g");
+                ImGui::SameLine();if(ImGui::Button("Apply"))s.Action([&]{doc.SetEventArgument(s.event_file,s.selected_event,s.selected_instruction,a,s.event_values[a]);});
+                ImGui::EndDisabled();if(supplied)ImGui::TextDisabled("Supplied by event parameters. Edit the caller's argument.");
+            }
+            ImGui::PopID();
+        }
+    }
+    ImGui::End();
+}
 std::unique_ptr<State> state;
 
 void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInteger height) {
@@ -524,6 +654,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
         if(ImGui::Button("Undo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_Z)) s.History(false);
         ImGui::SameLine();
         if(ImGui::Button("Redo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_Z)) s.History(true);
+        ImGui::SameLine();if(ImGui::Button("Events / quests..."))s.show_events=true;
         if(s.scene && s.selected>=0) {
             if(ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_D))s.pending=State::Pending::Duplicate;
             if(s.scene->document.Parts()[s.selected].added && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_Backspace)))s.pending=State::Pending::Remove;
@@ -755,7 +886,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             ImGui::TextUnformatted(s.Unsaved()?"Unexported changes":"Map ready");ImGui::SameLine();ImGui::TextDisabled("%zu terrain triangles",scene.terrain->indices.size()/3);
             if(!s.status.empty()) ImGui::TextWrapped("%s",s.status.c_str());
         }
-        ImGui::End();ImGui::Render();
+        ImGui::End();EventTools(s);ImGui::Render();
         pass.colorAttachments[0].loadAction=MTLLoadActionClear;pass.colorAttachments[0].clearColor=MTLClearColorMake(.04,.05,.06,1);
         auto encoder=[command renderCommandEncoderWithDescriptor:pass];
         ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(),command,encoder);[encoder endEncoding];

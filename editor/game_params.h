@@ -18,6 +18,7 @@ struct BinderFile {
 // Strict readers for the retail Bloodborne DFLT/BND4 and 64-bit Unicode PARAM formats.
 // No game-specific row layouts are inferred from names or numeric ID ranges.
 std::vector<std::uint8_t> UnpackAsset(std::span<const std::uint8_t> bytes);
+std::vector<std::uint8_t> PackAsset(std::span<const std::uint8_t> envelope,std::span<const std::uint8_t> raw);
 std::vector<BinderFile> ReadBinder(std::span<const std::uint8_t> bytes);
 struct ParamRow {
     std::int32_t id=0;

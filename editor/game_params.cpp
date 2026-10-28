@@ -53,6 +53,15 @@ std::vector<std::uint8_t> UnpackAsset(std::span<const std::uint8_t> b) {
     if(mz_uncompress(raw.data(),&size,b.data()+0x4c,b.size()-0x4c)!=MZ_OK || size!=raw.size())throw std::runtime_error("Parameter decompression failed");
     return raw;
 }
+std::vector<std::uint8_t> PackAsset(std::span<const std::uint8_t> envelope,std::span<const std::uint8_t> raw) {
+    if(raw.size()>256*1024*1024)throw std::runtime_error("Asset exceeds compression limit");
+    if(envelope.size()<4 || std::memcmp(envelope.data(),"DCX\0",4))return {raw.begin(),raw.end()};
+    if(envelope.size()<0x4c)throw std::runtime_error("Truncated DCX envelope");
+    std::vector<std::uint8_t> result(envelope.begin(),envelope.begin()+0x4c);mz_ulong size=mz_compressBound(raw.size());std::vector<std::uint8_t> compressed(size);
+    if(mz_compress2(compressed.data(),&size,raw.data(),raw.size(),9)!=MZ_OK)throw std::runtime_error("Asset compression failed");
+    for(int i=0;i<4;++i){result[0x1c+i]=std::uint8_t(raw.size()>>(24-i*8));result[0x20+i]=std::uint8_t(size>>(24-i*8));}
+    result.insert(result.end(),compressed.begin(),compressed.begin()+size);return result;
+}
 std::vector<BinderFile> ReadBinder(std::span<const std::uint8_t> packed) {
     const auto raw=UnpackAsset(packed);const std::span<const std::uint8_t> b=raw;
     if(b.size()<64 || std::memcmp(b.data(),"BND4",4) || b[9] || b[10]!=1 || b[48]!=1 || b[49]!=0x74 ||
@@ -166,13 +175,7 @@ std::vector<std::uint8_t> GameParams::SaveLots(const std::vector<ItemLot>& lots)
     if(entry==files.end())throw std::runtime_error("Item lot binder entry missing");
     binder.resize((binder.size()+15)&~std::size_t(15),0);if(binder.size()+param.size()>256*1024*1024)throw std::runtime_error("Parameter binder exceeds limit");
     Put<std::uint64_t>(binder,entry->header+8,param.size());Put<std::uint64_t>(binder,entry->header+16,param.size());Put<std::uint32_t>(binder,entry->header+24,binder.size());binder.insert(binder.end(),param.begin(),param.end());
-    std::vector<std::uint8_t> result;
-    if(source.size()>=4 && !std::memcmp(source.data(),"DCX\0",4)) {
-        result.assign(source.begin(),source.begin()+0x4c);mz_ulong size=mz_compressBound(binder.size());std::vector<std::uint8_t> compressed(size);
-        if(mz_compress2(compressed.data(),&size,binder.data(),binder.size(),9)!=MZ_OK)throw std::runtime_error("Parameter compression failed");
-        for(int i=0;i<4;++i){result[0x1c+i]=std::uint8_t(binder.size()>>(24-i*8));result[0x20+i]=std::uint8_t(size>>(24-i*8));}
-        result.insert(result.end(),compressed.begin(),compressed.begin()+size);
-    } else result=std::move(binder);
+    auto result=PackAsset(source,binder);
     const auto verified=Read(result);const auto* saved=verified.Table("ItemLotParam");
     if(!saved || saved->rows.size()!=table->rows.size()+lots.size())throw std::runtime_error("Parameter export verification failed");
     for(const auto& lot:lots){const auto check=ReadItemLot(*saved,lot.id);if(check.bytes!=lot.bytes)throw std::runtime_error("Custom item lot verification failed");}

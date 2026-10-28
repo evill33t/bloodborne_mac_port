@@ -42,6 +42,12 @@ does not provide animation, AI, collision or event compatibility with Bloodborne
 
 ## Current evidence
 
+Completed checkpoints cover prop/enemy duplication, regions/patrols, native NPC/AI and
+area-talk lookup, independently collectible item pickups, and typed EMEVD editing plus a
+pickup-reward quest template. Patrols, NPC stats, item collection/reload and quest
+execution/reload have bounded in-game evidence. The editor still uses character proxies;
+full character preview, source import and broader quest/dialogue authoring remain work.
+
 See [MAP_EDITOR.md](MAP_EDITOR.md) for shipped controls and validation boundaries.
 Ignored per-milestone evidence lives under `out/map-editor/`. The first duplication attempt
 and its loader fault are retained separately from the corrected grouped exports and

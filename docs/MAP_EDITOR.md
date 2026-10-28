@@ -115,6 +115,49 @@ out/map-editor/bbmap-editor --game /path/to/game --list-param EquipParamGoods
 out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_00 --list-param TalkScripts
 ```
 
+## Events and simple quests
+
+Open **Events / quests…**. The modeless window reads the area's EMEVD and common script,
+event names from EMELD, and instruction argument types/names/enumerations from your game's
+`common.emedf.dcx`. Filter events by ID or name, or match the selected placement's entity ID
+as an integer constant. Integer matches are navigation aids, not a complete reference graph.
+
+Select an event and instruction to inspect its arguments. Supported constants have typed
+number or enumeration controls and **Apply**. Parameter-fed arguments are protected; change
+their caller's input instead. Unknown commands/layouts remain preserved. New item-lot
+references must exist, and changed event-call targets must be loaded and accept the available
+parameter bytes. These checks validate encoding and supported references; they do not prove
+that every instruction change is sensible in the game's current quest state.
+
+To create a simple quest, select a pickup in the map, choose a reward item/count in the
+**Pickup reward** panel, and click **Create pickup reward quest**. The editor adds a new area
+event and constructor call. It waits for the pickup's collection flag, awards a private item
+lot once, then sets an independent persistent completion flag. The quest and its unused
+reward lot can be removed together during the current session. Creation/removal and typed
+argument edits use the main undo/redo history and participate in export/unsaved-state checks.
+
+Export includes changed `dvdroot_ps4/event/*.emevd.dcx` files alongside the map and any item
+parameters. Existing instructions, layers, parameters, linked files and string data are
+preserved. Event-only edits leave the exported MSB byte-identical and include no parameter
+binder. Event files are whole-file mod replacements; combine changes when another mod edits
+the same script. This is a typed event editor with a pickup-reward quest template. ESD
+dialogue/state-machine authoring and a general quest graph are not implemented.
+
+Validation under ignored `out/map-editor/events-validation/` covers synthetic fixtures and
+27 real root EMEVD files: 112,648 typed constants, 12,144 protected parameter-fed fields,
+byte-identical unchanged round trips, bounded edits, shared history and new-event insertion.
+SoulsFormats independently verifies all original instructions, layers, parameters, strings
+and links, the new constructor call and completion guard, and a rewrite of the output.
+Native replay checks quest creation/removal/history/export and an isolated float argument
+change whose output differs only at that argument's bytes.
+
+The gameplay test collects a three-vial pickup through ordinary walking and action input;
+the newly authored event awards five more. The reward panel shows both stacks and the HUD
+reaches eight. A private-save reload retains eight without awarding the quest again. No
+travel, player-placement, flag-writing or inventory-writing helper runs in these tests.
+All 124 tracked original asset/seed hashes remain unchanged. This bounded test establishes
+the template's execution and persistence, not campaign-wide quest compatibility.
+
 ## Enemy placement
 
 Choose **Enemies / characters** in the list filter. Existing MSBB Enemy and DummyEnemy parts appear as

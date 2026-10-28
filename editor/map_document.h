@@ -2,6 +2,7 @@
 #pragma once
 #include "bbport_map_art.h"
 #include "game_params.h"
+#include "event_document.h"
 #include <filesystem>
 #include <atomic>
 #include <optional>
@@ -93,6 +94,14 @@ public:
     const std::vector<Treasure>& Treasures() const {return treasures;}
     const std::vector<ItemLot>& ItemLots() const {return item_lots;}
     void AttachParameters(std::shared_ptr<const GameParams> value){parameters=std::move(value);}
+    void AttachEvents(const std::string& name,std::shared_ptr<const EventFile> file);
+    const std::map<std::string,std::shared_ptr<const EventFile>>& Scripts() const {return scripts;}
+    const std::vector<ScriptOperand>& EventEdits() const {return event_edits;}
+    const std::vector<PickupQuest>& Quests() const {return quests;}
+    ScriptOperand EventArgumentValue(const std::string& script,std::size_t event,std::size_t instruction,std::size_t argument) const;
+    bool SetEventArgument(const std::string& script,std::size_t event,std::size_t instruction,std::size_t argument,double value);
+    std::size_t AddPickupQuest(std::size_t treasure,const ItemContents& reward,const std::string& script);
+    bool RemoveQuest(std::size_t index);
     std::size_t DuplicateTreasure(std::size_t index);
     bool RemoveTreasure(std::size_t index);
     bool SetTreasure(std::size_t index,const TreasureData& data);
@@ -126,6 +135,10 @@ private:
     std::vector<Treasure> treasures;
     std::vector<ItemLot> item_lots;
     std::shared_ptr<const GameParams> parameters;
+    std::map<std::string,std::shared_ptr<const EventFile>> scripts;
+    std::vector<ScriptOperand> event_edits;
+    std::vector<PickupQuest> quests;
+    std::set<std::int32_t> reserved_script_ids;
     int next_region_key=0,next_route_key=0;
     struct Section { std::string name; std::size_t at, name_at, next; std::vector<std::size_t> entries; };
     std::vector<Section> sections;
@@ -144,8 +157,9 @@ private:
     std::int32_t NewEntityID(std::int32_t source_id=-1);
     std::int32_t NewEventID() const;
     ItemLot NewLot(std::int32_t source,bool independent);
+    std::int32_t NewPickupFlag(std::int32_t source);
     void Group(std::size_t first);
-    using Entry=std::variant<Part,Region,Route,Treasure,ItemLot>;
+    using Entry=std::variant<Part,Region,Route,Treasure,ItemLot,ScriptOperand,PickupQuest>;
     struct Edit {
         std::size_t index;std::optional<Entry> before,after;std::size_t group=0;
         static std::uint64_t NextVersion(){static std::atomic<std::uint64_t> value{0};return ++value;}

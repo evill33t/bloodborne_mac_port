@@ -109,6 +109,12 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
     try{result.params=GameParams::Open(game);result.document.AttachParameters(std::make_shared<const GameParams>(result.params));}catch(const std::exception& e){result.param_error=e.what();}
     try{result.talk_scripts=GameParams::TalkScripts(game,map);}catch(const std::exception& e){result.talk_error=e.what();}
     const auto base_map=map.substr(0,6)+"_00_00";
+    progress("Reading event scripts and command definitions...");
+    try {
+        const auto definitions=std::make_shared<const EventDefinitions>(EventDefinitions::Read(ReadFile(root/"event/common.emedf.dcx")));
+        for(const auto& name:{std::string("common.emevd.dcx"),base_map+".emevd.dcx"})if(std::filesystem::exists(root/"event"/name))
+            result.document.AttachEvents(name,std::make_shared<const EventFile>(EventFile::Open(root/"event"/name,definitions)));
+    }catch(const std::exception& e){result.event_error=e.what();}
     const auto read=[&](const std::string& relative) {
         if(stop.stop_requested()) return std::vector<std::uint8_t>{};
         // The in-game atlas uses base layouts. An editor must render the exact selected phase

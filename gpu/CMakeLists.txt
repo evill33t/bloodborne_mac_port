@@ -526,7 +526,7 @@ target_link_libraries(bbmap-prepare PRIVATE miniz::miniz)
 
 if(APPLE)
     # Independent editor: dev's read-only terrain/model pipeline plus byte-preserving MSB edits.
-    add_executable(bbmap-editor ../editor/map_editor.mm ../editor/map_document.cpp ../editor/game_params.cpp ../editor/map_scene.cpp
+    add_executable(bbmap-editor ../editor/map_editor.mm ../editor/map_document.cpp ../editor/game_params.cpp ../editor/event_document.cpp ../editor/map_scene.cpp
         shim/bbport_map_art.cpp shim/bbport_map_collision.cpp shim/bbport_game_art.cpp
         third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
         third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
@@ -536,12 +536,16 @@ if(APPLE)
         "-framework MetalKit" "-framework QuartzCore" "-framework GameController")
     set_source_files_properties(../editor/map_editor.mm third_party/imgui/backends/imgui_impl_osx.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-    add_executable(map-editor-test EXCLUDE_FROM_ALL ../tests/test_map_editor.cpp ../editor/map_document.cpp ../editor/game_params.cpp)
+    add_executable(map-editor-test EXCLUDE_FROM_ALL ../tests/test_map_editor.cpp ../editor/map_document.cpp ../editor/game_params.cpp ../editor/event_document.cpp)
     target_include_directories(map-editor-test PRIVATE ../editor shim)
     target_compile_options(map-editor-test PRIVATE -UNDEBUG)
     target_link_libraries(map-editor-test PRIVATE miniz::miniz)
-    add_executable(game-params-test EXCLUDE_FROM_ALL ../tests/test_game_params.cpp ../editor/game_params.cpp ../editor/map_document.cpp)
+    add_executable(game-params-test EXCLUDE_FROM_ALL ../tests/test_game_params.cpp ../editor/game_params.cpp ../editor/map_document.cpp ../editor/event_document.cpp)
     target_include_directories(game-params-test PRIVATE ../editor shim)
     target_compile_options(game-params-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_link_libraries(game-params-test PRIVATE miniz::miniz)
+    add_executable(event-document-test EXCLUDE_FROM_ALL ../tests/test_event_document.cpp ../editor/event_document.cpp ../editor/game_params.cpp ../editor/map_document.cpp)
+    target_include_directories(event-document-test PRIVATE ../editor shim)
+    target_compile_options(event-document-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(event-document-test PRIVATE miniz::miniz)
 endif()
