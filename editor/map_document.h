@@ -117,6 +117,7 @@ public:
     bool RemoveRegion(std::size_t index);
     bool RemoveRoute(std::size_t index);
     std::size_t Duplicate(std::size_t index,bool activate_object=false);
+    std::size_t DuplicateAt(std::size_t index,const Transform& transform);
     // Only copies created in this session can be removed; existing reference targets stay valid.
     bool Remove(std::size_t index);
     bool Undo();

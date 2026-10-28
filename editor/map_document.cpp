@@ -599,6 +599,10 @@ std::size_t Document::Duplicate(std::size_t i,bool activate_object) {
     reserved_instances[copy.model].insert(copy.instance_id);reserved_types[type].insert(copy.type_id);
     return index;
 }
+std::size_t Document::DuplicateAt(std::size_t i,const Transform& transform) {
+    Check(transform);const auto& p=parts.at(i);if(p.kind==PartKind::Enemy && transform.scale!=p.original.scale)throw std::runtime_error("Enemy scale is preserved; edit position and rotation only");
+    const auto first=cursor;const auto copy=Duplicate(i);Set(copy,transform);Group(first);return copy;
+}
 bool Document::Remove(std::size_t i) {
     if(!parts.at(i).added)throw std::runtime_error("Only copies created in this session can be removed");
     for(const auto& t:treasures)if(t.data.part.name==parts[i].name)throw std::runtime_error("Remove the attached treasure before its part");

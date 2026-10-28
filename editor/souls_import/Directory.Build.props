@@ -1,0 +1,4 @@
+<Project><PropertyGroup>
+  <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../../out/map-editor/import-obj/</BaseIntermediateOutputPath>
+  <BaseOutputPath>$(MSBuildThisFileDirectory)../../out/map-editor/import-bin/</BaseOutputPath>
+</PropertyGroup></Project>

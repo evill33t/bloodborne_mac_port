@@ -163,7 +163,8 @@ the template's execution and persistence, not campaign-wide quest compatibility.
 ## Enemy placement
 
 Choose **Enemies / characters** in the list filter. Existing MSBB Enemy and DummyEnemy parts appear as
-selectable capsules with a facing arrow; character geometry and animations are not loaded.
+selectable capsules with a facing arrow by default. The optional source adapter can load
+untextured bind-pose character geometry; animations are not previewed.
 The layer includes friendly and scripted characters stored as Enemy parts. **Show objects**
 and **Show enemies** control viewport visibility independently of the list filter.
 
@@ -422,3 +423,92 @@ checks, not campaign, arbitrary scripted-object or killed-enemy/rest-cycle cover
 Evidence and the usable mod are under ignored `out/map-editor/duplication-validation/`:
 `validation.json`, `grouped-format-check.log`, `modified-final-observed/` and
 `mods-grouped/two-enemies-and-prop/`. Original assets and saves remain unchanged.
+
+## Source maps and character previews
+
+The optional importer uses the SoulsFormats library from a local Smithbox build. Install
+.NET 10 and build that adapter before rebuilding the editor app:
+
+```sh
+SMITHBOX_DIR=/path/to/Smithbox bash scripts/macos/build_souls_import.sh
+bash scripts/macos/build_map_editor.sh
+```
+
+The adapter reads your own game files and writes an exclusive `.bbsource` preview outside
+the source folder. The native editor validates this bounded scene format, owns its meshes,
+and renders/picks them in Metal. The adapter is a separate process; it does not load any
+foreign game's executable or run its scripts. No source-game assets are added to this repo.
+
+Open **Source maps…**, choose the game profile and folder, enter its map ID, then click
+**Prepare preview**. Source loading runs on a worker. DS2/Scholar's installed `Game` folder
+can be read directly: the reader decrypts the BHD index using its shipped public PEM,
+reads individual BDT entries, and joins generator location/registration/enemy parameters.
+DS3 installed archives are also read directly using Smithbox's archive key definitions.
+Other profiles currently require **loose, unpacked game files**. Compression codecs
+available in your SoulsFormats build determine which compressed assets can be read.
+Unsupported files and placeholders appear in the conversion report. Source previews use
+flat shading and bind-pose character geometry (terrain welded on a 35 cm grid, other
+models on a 2 cm grid; sky and alpha-card materials are omitted), with capsule fallbacks for missing characters.
+Collision and other nonvisual parts are retained as metadata rather than drawn.
+
+| Profile | Adapter coverage |
+| --- | --- |
+| Bloodborne | Real maps and character bind poses checked against local assets |
+| Dark Souls II Scholar | All 28 installed maps pass preparation and native scene validation; joined generator tables and FLVER previews checked |
+| Dark Souls III | Installed archives, MSB3, FLVER map/prop/character preview checked on the local Cemetery of Ash map |
+| Dark Souls Remastered | All 18 installed gameplay maps pass preparation and native scene validation; Firelink Shrine checked in Metal |
+| Demon's Souls, original DS1, original DS2, Sekiro, Elden Ring, AC6, Nightreign | MSB reader selection and empty-format round trips tested; real asset validation awaits local dumps |
+| Duskbloods / network test | Listed with current Smithbox profiles; the installed SoulsFormats library has no reader, so preparation reports unavailable |
+
+The profile list follows [Smithbox's project types](https://github.com/vawser/Smithbox/blob/main/src/Smithbox.Program/Editors/Project%20Editor/Enums/ProjectType.cs).
+Format fixtures do not establish real-game asset compatibility. Newer game readers and
+platform-specific decompression libraries may require a newer compatible Smithbox build.
+
+Source navigation uses the same orbit/pan/zoom controls. Select a part in the list or click
+its geometry. **Frame map** fits the available geometry; **Cutaway** removes geometry above
+the selected placement. **Isolate selected** fits one model without surrounding scenery. **Hide this model**
+removes all instances of an obstructing model from the preview; **Restore hidden** shows them again.
+Select **Characters only** when preparing a Bloodborne map to load
+its characters without the terrain budget. For a source Bloodborne map matching the current
+map variant, **Use character models in editor** replaces available capsules in the main
+viewport with untextured bind-pose models. These previews are visual aids, not animation or
+hitbox previews. They do not change mod exports.
+
+To reuse a foreign spawn/prop arrangement:
+
+1. Select its first placement and click **Use as source anchor**.
+2. Choose a Bloodborne placement of the same kind as the template. **Target current
+   selection** uses the current native placement and position as the destination anchor.
+3. Adjust the target anchor and yaw offset. Select source placements and click
+   **Create Bloodborne placement** to transfer their positions relative to those anchors.
+4. The created copy is selected in the main editor and uses the normal transform,
+   undo/redo, remove and export workflow. One Undo removes the entire transferred copy.
+
+Transfer preserves the chosen Bloodborne template's model, AI, parameter, scale and
+collision references; source positions and rotations supply the layout. It never treats
+foreign IDs as Bloodborne IDs. Original source data remains unchanged. This is a **layout
+transfer**, not a playable port of foreign character assets or a whole map. Foreign models,
+textures, rigs, animations, AI, collision, navigation, item tables and event/quest logic are
+not exported into Bloodborne. Preparing a source scene does not establish that those systems
+can run in Bloodborne.
+
+The importer is also available from the command line:
+
+```sh
+dotnet out/map-editor/souls-import/SoulsImport.dll profiles
+dotnet out/map-editor/souls-import/SoulsImport.dll import \
+  --profile DS2S --root /path/to/DS2Scholar/Game --map m10_02_00_00 \
+  --smithbox /path/to/Smithbox --output /path/to/new-preview.bbsource
+out/map-editor/bbmap-editor --game /path/to/CUSA00900 --source /path/to/new-preview.bbsource
+```
+
+Checks: `tests/test_source_scene.sh` exercises malformed/truncated files and bounded geometry.
+It optionally accepts a real `.bbsource` file and a Bloodborne `.msb.dcx` to verify native
+placement transfer, yaw/anchor transforms, grouped history and exported readback.
+`SMITHBOX_DIR=... bash tests/test_souls_import.sh` also builds the managed adapter and runs
+its format fixtures. These tests do not replace gameplay checks.
+
+An isolated runtime check loaded a DS2 generator layout transferred to a Bloodborne template: both
+original entity 2410015 and new entity 2419000 were observed at their exported positions with
+150 HP. The test used native travel to the Central Yharnam lamp and read-only enemy observers.
+This proves the native placement export loaded; it does not prove foreign enemy asset conversion.

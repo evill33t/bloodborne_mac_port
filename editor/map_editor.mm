@@ -4,6 +4,7 @@
 #import <AppKit/AppKit.h>
 #import <MetalKit/MetalKit.h>
 #include "map_scene.h"
+#include "source_scene.h"
 #include "bbport_map_view.h"
 #include "imgui.h"
 #include "imgui_impl_metal.h"
@@ -24,12 +25,13 @@ namespace {
 using namespace BbMapEditor;
 namespace fs=std::filesystem;
 struct Options {
-    fs::path game,output,script;
+    fs::path game,output,script,source;
     std::string map="m24_01_00_00",select,list_param;
     std::optional<BbMapArt::Vec3> translation;
     bool batch=false,list=false,list_regions=false,list_routes=false,list_treasures=false,duplicate=false;
 };
 Options options;
+const char* source_profiles[]={"DES","DS1","DS1R","DS2","DS2S","DS3","BB","SDT","ER","AC6","NR","DB_NT","DB"};
 int exit_code=0;
 void Finish() {
     [NSApp stop:nil];
@@ -106,7 +108,7 @@ public:
     void Clear() {meshes.clear();}
     void Render(id<MTLCommandBuffer> command,const Scene& scene,const BbMapView::Camera& camera,
                 ImVec2 size,float dpi,int selected,int selected_region,const std::optional<Transform>& preview,float ceiling,
-                bool show_objects,bool show_enemies,bool show_regions,int active_route,bool route_only) {
+                bool show_objects,bool show_enemies,bool show_regions,int active_route,bool route_only,const SourceScene* source=nullptr,bool isolate=false,const std::set<std::string>* hidden=nullptr) {
         const NSUInteger width=std::clamp(int(size.x*dpi),1,8192),height=std::clamp(int(size.y*dpi),1,8192);
         if(!color || color.width!=width || color.height!=height) {
             auto d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:width height:height mipmapped:NO];
@@ -142,12 +144,23 @@ public:
             [encoder setVertexBytes:&c length:sizeof(c) atIndex:2];[encoder setFragmentBytes:&c length:sizeof(c) atIndex:2];
             [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:gpu.count indexType:MTLIndexTypeUInt32 indexBuffer:gpu.indices indexBufferOffset:0];
         };
+        if(source) {
+            for(std::size_t i=0;i<source->placements.size();++i) {
+                const auto& p=source->placements[i];if(p.kind>2 || (isolate && int(i)!=selected) || (hidden && hidden->contains(p.model)))continue;
+                const auto model=source->models.find(p.model);
+                if(model!=source->models.end())draw(model->second,p.transform,std::uint32_t(i+1));
+                else if(p.kind==2)draw(scene.enemy_marker,p.transform,std::uint32_t(i+1));
+                else if(p.kind==1)draw(scene.region_marker,p.transform,std::uint32_t(i+1));
+            }
+            [encoder endEncoding];return;
+        }
         draw(scene.terrain,{},0);
         const auto& objects=scene.document.Parts();
         for(std::size_t i=0;i<objects.size();++i) {
             const auto& o=objects[i];
             if(o.kind==PartKind::Enemy) {
-                if(show_enemies) draw(scene.enemy_marker,int(i)==selected && preview?*preview:o.transform,std::uint32_t(i+1));
+                const auto model=scene.models.find(o.model);
+                if(show_enemies) draw(model!=scene.models.end() && model->second?model->second:scene.enemy_marker,int(i)==selected && preview?*preview:o.transform,std::uint32_t(i+1));
                 continue;
             }
             if(!show_objects) continue;
@@ -167,6 +180,47 @@ public:
 struct State {
     std::shared_ptr<Scene> scene;
     std::future<std::shared_ptr<Scene>> loading;
+    std::shared_ptr<SourceScene> source;
+    std::future<std::shared_ptr<SourceScene>> source_loading;
+    bool show_source=false,source_fitted=false,source_characters_only=false,source_isolate=false,source_cutaway=false;
+    int source_selected=-1,source_profile=4,native_template=-1;
+    BbMapArt::Vec3 source_anchor{},target_anchor{};
+    float source_yaw=0;
+    BbMapView::Camera source_camera{0,0,0,4,.45f,.85f};
+    char source_root[2048]={},source_map[32]="m10_02_00_00",source_filter[128]={};
+    std::string source_status,native_template_name;
+    std::set<std::string> source_hidden;
+    void OpenSource(const fs::path& path) {source=std::make_shared<SourceScene>(SourceScene::Open(path));show_source=true;source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};native_template=-1;native_template_name.clear();const auto it=std::ranges::find(source_profiles,source->game);if(it!=std::end(source_profiles))source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",source->map.c_str());}
+    void PrepareSource() {
+        if(!ValidMapName(source_map) || !source_root[0])throw std::runtime_error("Choose the source game folder and a valid map ID");
+        fs::path helper=fs::path(NSBundle.mainBundle.resourcePath.UTF8String)/"souls-import";
+        if(!fs::exists(helper/"SoulsImport.dll"))helper=fs::path(NSBundle.mainBundle.executablePath.UTF8String).parent_path()/"souls-import";
+        if(!fs::exists(helper/"SoulsImport.dll"))throw std::runtime_error("Build the optional source adapter with scripts/macos/build_souls_import.sh, then rebuild this app");
+        fs::path dotnet;for(const auto* p:{"/usr/local/share/dotnet/dotnet","/opt/homebrew/bin/dotnet","/usr/local/bin/dotnet"})if(fs::exists(p)){dotnet=p;break;}
+        if(dotnet.empty())throw std::runtime_error("The source adapter requires the .NET 10 runtime");
+        std::ifstream config(helper/"smithbox-path.txt");std::string smithbox;std::getline(config,smithbox);
+        const auto game=std::string(source_root),map=std::string(source_map),profile=std::string(source_profiles[source_profile]);const bool characters=source_characters_only;
+        source_status="Reading source archives and geometry...";
+        source_loading=std::async(std::launch::async,[helper,dotnet,game,map,profile,smithbox,characters] {
+          @autoreleasepool {
+            const auto output=fs::path(NSTemporaryDirectory().UTF8String)/(std::string(NSUUID.UUID.UUIDString.UTF8String)+".bbsource");
+            auto string=[](const std::string& v){return [NSString stringWithUTF8String:v.c_str()];};
+            auto task=[NSTask new];task.executableURL=[NSURL fileURLWithPath:string(dotnet.string())];
+            task.arguments=@[string((helper/"SoulsImport.dll").string()),@"import",@"--profile",string(profile),@"--root",string(game),@"--map",string(map),@"--smithbox",string(smithbox),@"--output",string(output.string()),@"--characters-only",characters?@"1":@"0"];
+            auto pipe=[NSPipe pipe];task.standardOutput=pipe;task.standardError=pipe;NSError* error=nil;
+            if(![task launchAndReturnError:&error])throw std::runtime_error(error.localizedDescription.UTF8String);
+            auto log=[pipe.fileHandleForReading readDataToEndOfFile];[task waitUntilExit];
+            if(task.terminationStatus){auto message=[[NSString alloc]initWithData:log encoding:NSUTF8StringEncoding];throw std::runtime_error(message?message.UTF8String:"Source adapter failed");}
+            try{auto source=std::make_shared<SourceScene>(SourceScene::Open(output));fs::remove(output);return source;}catch(...){fs::remove(output);throw;}
+          }
+        });
+    }
+    void TransferSource() {
+        const auto& parts=scene->document.Parts();const auto native=std::ranges::find(parts,native_template_name,&Part::name);native_template=native==parts.end()?-1:int(native-parts.begin());
+        if(!source || source_selected<0 || native_template<0)throw std::runtime_error("Select a source placement and a Bloodborne template");
+        const auto copy=source->Transfer(scene->document,native_template,source_selected,source_anchor,target_anchor,source_yaw);
+        Select(int(copy),true);status="Transferred "+source->placements[source_selected].name+" using Bloodborne "+scene->document.Parts()[copy].model+". Source AI and assets were not converted.";
+    }
     std::stop_source stop;
     std::mutex mutex;
     std::string progress,error,status;
@@ -178,7 +232,7 @@ struct State {
     bool region_selection=false;
     bool treasure_selection=false;
     std::string treasure_name;
-    bool fitted=false;
+    bool fitted=false,clear_meshes=false;
     bool cutaway=false;
     bool show_objects=true,show_enemies=true;
     bool show_regions=false,route_only=true;
@@ -210,7 +264,7 @@ struct State {
     std::vector<PickupQuest> exported_quests;
     mutable std::uint64_t unsaved_version=UINT64_MAX;
     mutable bool unsaved_cached=false;
-    ~State() {stop.request_stop();if(loading.valid()) loading.wait();}
+    ~State() {stop.request_stop();if(loading.valid()) loading.wait();if(source_loading.valid())source_loading.wait();}
     bool Unsaved() const {
         if(!scene)return false;const auto& doc=scene->document;
         if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.EventEdits()!=exported_events || doc.Quests()!=exported_quests || doc.Inflated()!=exported);unsaved_version=doc.Version();}
@@ -227,7 +281,7 @@ struct State {
     }
     void Load() {
         if(loading.valid()) return;
-        scene.reset();selected=selected_region=active_route=selected_treasure=-1;treasure_selection=false;treasure_name.clear();region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();exported_lots.clear();exported_events.clear();exported_quests.clear();event_file.clear();selected_event=selected_instruction=-1;event_values.clear();unsaved_version=UINT64_MAX;error.clear();progress="Opening map...";
+        native_template=-1;native_template_name.clear();scene.reset();selected=selected_region=active_route=selected_treasure=-1;treasure_selection=false;treasure_name.clear();region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();exported_lots.clear();exported_events.clear();exported_quests.clear();event_file.clear();selected_event=selected_instruction=-1;event_values.clear();unsaved_version=UINT64_MAX;error.clear();progress="Opening map...";
         const auto game=options.game;
         const auto map=options.map;
         loading=std::async(std::launch::async,[this,game,map] {
@@ -372,6 +426,7 @@ struct State {
         if([panel runModal]==NSModalResponseOK) Export(panel.URL.fileSystemRepresentation);
     }
     void Poll() {
+        if(source_loading.valid() && source_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){Action([&]{source=source_loading.get();source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};});source_status=error.empty()?"Source preview ready":"Source preview failed";if(!error.empty() && !commands.empty()){exit_code=1;Finish();}}
         const auto action=pending;pending=Pending::None;
         if(action!=Pending::None)Action([&]{
             if(action==Pending::Duplicate)Duplicate();else if(action==Pending::Remove)Remove();
@@ -390,10 +445,24 @@ struct State {
         }
     }
     void Script() {
-        if(!scene || command>=commands.size() || ++frames<12) return;
+        if(!scene || source_loading.valid() || command>=commands.size() || ++frames<12) return;
         frames=0;std::istringstream line(commands[command++]);std::string verb;line>>verb;
         std::printf("EDITOR %s\n",commands[command-1].c_str());
-        if(verb=="select") {
+        if(verb=="source-config") {std::string profile,map,path;line>>profile>>map;std::getline(line>>std::ws,path);const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles)||!ValidMapName(map)||path.empty())throw std::runtime_error("Invalid source configuration");source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",map.c_str());std::snprintf(source_root,sizeof(source_root),"%s",path.c_str());show_source=true;
+        } else if(verb=="source-prepare") {PrepareSource();
+        } else if(verb=="source-open") {std::string path;std::getline(line>>std::ws,path);OpenSource(path);
+        } else if(verb=="source-select") {std::string name;line>>name;if(!source)throw std::runtime_error("No source scene");const auto it=std::ranges::find(source->placements,name,&SourcePlacement::name);if(it==source->placements.end())throw std::runtime_error("Source placement not found");source_selected=int(it-source->placements.begin());
+        } else if(verb=="source-characters") {if(!source || source->game!="BB" || source->map!=options.map)throw std::runtime_error("Open a matching Bloodborne source map first");for(const auto& [name,mesh]:source->models)if(name.starts_with("c"))scene->models[name]=mesh;clear_meshes=true;
+        } else if(verb=="source-hide") {show_source=false;
+        } else if(verb=="source-isolate") {source_isolate=true;source_fitted=false;
+        } else if(verb=="source-hide-model") {std::string model;line>>model;if(model.empty())throw std::runtime_error("Missing source model");source_hidden.insert(model);source_fitted=false;
+        } else if(verb=="source-cutaway") {source_cutaway=true;
+        } else if(verb=="source-frame") {if(source_selected<0)throw std::runtime_error("Select source placement");const auto& p=source->placements.at(source_selected);source_camera.x=p.transform.position[0];source_camera.y=p.transform.position[1]+1;source_camera.z=p.transform.position[2];source_camera.zoom=30;source_fitted=true;
+        } else if(verb=="source-anchor") {source_anchor=source->placements.at(source_selected).transform.position;
+        } else if(verb=="source-target") {if(!(line>>target_anchor[0]>>target_anchor[1]>>target_anchor[2]))throw std::runtime_error("Invalid target anchor");
+        } else if(verb=="source-template") {native_template=selected;native_template_name=scene->document.Parts().at(selected).name;
+        } else if(verb=="source-transfer") {TransferSource();
+        } else if(verb=="select") {
             std::string name;line>>name;const auto& objects=scene->document.Parts();auto it=std::ranges::find(objects,name,&Part::name);
             if(it==objects.end()) throw std::runtime_error("Script placement not found: "+name);
             Select(int(it-objects.begin()),true);fitted=true;if(layer>=3)layer=0;
@@ -591,6 +660,91 @@ void EventTools(State& s) {
     }
     ImGui::End();
 }
+std::optional<ImVec2> SourceTools(State& s,Viewport& viewport,id<MTLCommandBuffer> command) {
+    if(!s.show_source || !s.scene)return {};
+    ImGui::SetNextWindowSize({1130,750},ImGuiCond_FirstUseEver);
+    if(!ImGui::Begin("Source maps and placement transfer",&s.show_source)){ImGui::End();return {};}
+    ImGui::SetNextItemWidth(100);ImGui::Combo("Game",&s.source_profile,source_profiles,int(std::size(source_profiles)));ImGui::SameLine();
+    if(ImGui::Button("Choose source folder...")) {
+        auto panel=[NSOpenPanel openPanel];panel.canChooseDirectories=YES;panel.canChooseFiles=NO;panel.title=@"Choose a loose game dump or DS2 Game folder";
+        if([panel runModal]==NSModalResponseOK)std::snprintf(s.source_root,sizeof(s.source_root),"%s",panel.URL.fileSystemRepresentation);
+    }
+    ImGui::SameLine();if(ImGui::Button("Open prepared preview..."))s.Action([&]{auto panel=[NSOpenPanel openPanel];panel.title=@"Choose a .bbsource scene";if([panel runModal]==NSModalResponseOK){viewport.Clear();s.OpenSource(panel.URL.fileSystemRepresentation);}});
+    ImGui::SetNextItemWidth(-1);ImGui::InputTextWithHint("##source-folder","Source game folder",s.source_root,sizeof(s.source_root));
+    ImGui::SetNextItemWidth(170);ImGui::InputText("Map",s.source_map,sizeof(s.source_map));ImGui::SameLine();
+    ImGui::BeginDisabled(s.source_loading.valid());
+    if(ImGui::Button("Prepare preview"))s.Action([&]{s.PrepareSource();});
+    ImGui::EndDisabled();ImGui::SameLine();ImGui::Checkbox("Characters only",&s.source_characters_only);if(!s.source_status.empty())ImGui::TextWrapped("%s",s.source_status.c_str());
+    ImGui::TextDisabled("DS2/DS3 installed archives or loose files. Source geometry and IDs stay separate from Bloodborne exports.");
+    if(!s.error.empty())ImGui::TextWrapped("%s",s.error.c_str());
+    std::optional<ImVec2> pick;
+    if(s.source) {
+        static const SourceScene* rendered=nullptr;if(rendered!=s.source.get()){viewport.Clear();rendered=s.source.get();}
+        const auto& source=*s.source;
+        ImGui::Text("%s  /  %s  /  %zu models",source.game.c_str(),source.map.c_str(),source.models.size());
+        if(source.game=="BB" && source.map==options.map){ImGui::SameLine();if(ImGui::Button("Use character models in editor")) {
+            std::size_t count=0;for(const auto& [name,mesh]:source.models)if(name.starts_with("c")){s.scene->models[name]=mesh;++count;}s.clear_meshes=true;s.status="Loaded "+std::to_string(count)+" untextured character models in bind pose";
+        }}
+        ImGui::BeginChild("Source inspector",{300,0},ImGuiChildFlags_Borders);
+        ImGui::InputTextWithHint("##source-filter","Filter placement or model",s.source_filter,sizeof(s.source_filter));
+        ImGui::BeginChild("Source placements",{0,180},ImGuiChildFlags_Borders);
+        for(std::size_t i=0;i<source.placements.size();++i) {
+            const auto& p=source.placements[i];if(p.kind>2 || (s.source_filter[0] && p.name.find(s.source_filter)==std::string::npos && p.model.find(s.source_filter)==std::string::npos))continue;
+            ImGui::PushID(int(i));if(ImGui::Selectable(p.name.c_str(),s.source_selected==int(i))) {
+                s.source_selected=int(i);s.source_camera.x=p.transform.position[0];s.source_camera.y=p.transform.position[1]+1;s.source_camera.z=p.transform.position[2];s.source_camera.zoom=30;s.source_fitted=true;
+            }ImGui::PopID();
+        }
+        ImGui::EndChild();
+        if(s.source_selected>=0) {
+            const auto& p=source.placements[s.source_selected];
+            ImGui::TextWrapped("%s / %s",p.name.c_str(),p.model.c_str());
+            ImGui::Text("Position: %.2f, %.2f, %.2f",p.transform.position[0],p.transform.position[1],p.transform.position[2]);
+            if(ImGui::Button("Hide this model")){s.source_hidden.insert(p.model);s.source_selected=-1;s.source_fitted=false;s.source_isolate=false;}
+            if(p.source_id>=0)ImGui::Text("Source enemy ID: %d",p.source_id);
+            if(ImGui::Button("Use as source anchor"))s.source_anchor=p.transform.position;
+            ImGui::TextUnformatted("Source anchor");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##source-anchor",s.source_anchor.data(),"%.2f");
+            ImGui::TextUnformatted("Target anchor");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##target-anchor",s.target_anchor.data(),"%.2f");ImGui::InputFloat("Yaw offset",&s.source_yaw);
+            const auto& parts=s.scene->document.Parts();
+            const auto native=std::ranges::find(parts,s.native_template_name,&Part::name);s.native_template=native==parts.end()?-1:int(native-parts.begin());
+            const auto label=s.native_template<0?"Choose native template":parts[s.native_template].name.c_str();
+            ImGui::SetNextItemWidth(-1);
+            if(ImGui::BeginCombo("##native-template",label)) {
+                for(std::size_t i=0;i<parts.size();++i)if((p.kind==1 && parts[i].kind==PartKind::Object)||(p.kind==2 && parts[i].kind==PartKind::Enemy)) {
+                    if(ImGui::Selectable(parts[i].name.c_str(),s.native_template==int(i))){s.native_template=int(i);s.native_template_name=parts[i].name;}
+                }
+                ImGui::EndCombo();
+            }
+            if(ImGui::Button("Target current selection") && s.selected>=0){s.native_template=s.selected;s.native_template_name=parts[s.selected].name;s.target_anchor=parts[s.selected].transform.position;}
+            ImGui::BeginDisabled(s.native_template<0 || (p.kind!=1 && p.kind!=2));
+            if(ImGui::Button("Create Bloodborne placement"))s.Action([&]{s.TransferSource();});ImGui::EndDisabled();
+            ImGui::TextWrapped("Uses the chosen Bloodborne model, AI and collision. Copies relative position and rotation. Undo removes the copy.");
+        }
+        if(ImGui::CollapsingHeader("Conversion report"))ImGui::TextWrapped("%s",source.notice.c_str());
+        ImGui::EndChild();ImGui::SameLine();
+        ImGui::BeginChild("Source Metal preview",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+        if(ImGui::Button("Frame map")){s.source_fitted=false;s.source_isolate=false;}
+        ImGui::SameLine();ImGui::Checkbox("Cutaway",&s.source_cutaway);ImGui::SameLine();if(ImGui::Checkbox("Isolate selected",&s.source_isolate))s.source_fitted=false;
+        if(!s.source_hidden.empty()){ImGui::SameLine();if(ImGui::Button("Restore hidden")){s.source_hidden.clear();s.source_fitted=false;}}
+        const auto top=ImGui::GetCursorScreenPos();auto size=ImGui::GetContentRegionAvail();size.x=std::max(1.f,size.x);size.y=std::max(1.f,size.y);
+        if(!s.source_fitted) {
+            BbMapArt::Vec3 lo{FLT_MAX,FLT_MAX,FLT_MAX},hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};
+            for(const auto& p:source.placements)if(p.kind<=2){if(s.source_hidden.contains(p.model) || (s.source_isolate && s.source_selected>=0 && &p!=&source.placements[s.source_selected]))continue;const auto model=source.models.find(p.model);if(model==source.models.end())continue;const auto& v=model->second->positions;for(std::size_t i=0;i+2<v.size();i+=3){auto w=WorldPoint(p.transform,v.data()+i);for(int c=0;c<3;++c){lo[c]=std::min(lo[c],w[c]);hi[c]=std::max(hi[c],w[c]);}}}
+            if(lo[0]<=hi[0]){s.source_camera.x=(lo[0]+hi[0])*.5f;s.source_camera.y=(lo[1]+hi[1])*.5f;s.source_camera.z=(lo[2]+hi[2])*.5f;s.source_camera.zoom=BbMapView::FitZoom(s.source_camera,lo[0],lo[2],hi[0],hi[2],size.x,size.y,lo[1],hi[1]);}s.source_fitted=true;
+        }
+        const auto ceiling=s.source_cutaway && s.source_selected>=0?source.placements[s.source_selected].transform.position[1]+4:1000000.f;
+        viewport.Render(command,*s.scene,s.source_camera,size,std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.x),s.source_selected,-1,{},ceiling,true,true,false,-1,false,&source,s.source_isolate,&s.source_hidden);
+        ImGui::Image((ImTextureID)(__bridge void*)viewport.color,size);
+        if(ImGui::IsItemHovered()) {
+            const auto& io=ImGui::GetIO();s.source_camera.zoom=std::clamp(s.source_camera.zoom*std::pow(1.12f,io.MouseWheel),.05f,1000.f);
+            if(ImGui::IsMouseDragging(ImGuiMouseButton_Right)){s.source_camera.yaw-=io.MouseDelta.x*.008f;s.source_camera.pitch=std::clamp(s.source_camera.pitch+io.MouseDelta.y*.008f,.08f,1.52f);}
+            if(ImGui::IsMouseDragging(ImGuiMouseButton_Middle)){auto a=s.source_camera.Ground(0,0),b=s.source_camera.Ground(io.MouseDelta.x,io.MouseDelta.y);s.source_camera.x-=b[0]-a[0];s.source_camera.z-=b[1]-a[1];}
+            if(ImGui::IsMouseClicked(ImGuiMouseButton_Left))pick=ImVec2(io.MousePos.x-top.x,io.MousePos.y-top.y);
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();return pick;
+}
+
 std::unique_ptr<State> state;
 
 void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInteger height) {
@@ -608,11 +762,11 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
 @implementation EditorController {
     id<MTLDevice> _device;
     id<MTLCommandQueue> _queue;
-    std::unique_ptr<Viewport> _viewport;
+    std::unique_ptr<Viewport> _viewport,_sourceViewport;
 }
 - (void)loadView {
     _device=MTLCreateSystemDefaultDevice();if(!_device) throw std::runtime_error("No Metal device");
-    _queue=[_device newCommandQueue];_viewport=std::make_unique<Viewport>(_device);
+    _queue=[_device newCommandQueue];_viewport=std::make_unique<Viewport>(_device);_sourceViewport=std::make_unique<Viewport>(_device);
     auto view=[[MTKView alloc] initWithFrame:NSMakeRect(0,0,1360,850) device:_device];
     view.delegate=self;view.colorPixelFormat=MTLPixelFormatBGRA8Unorm;view.framebufferOnly=NO;view.preferredFramesPerSecond=60;self.view=view;
     ImGui::CreateContext();ImGui::GetIO().IniFilename=nullptr;ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_NavEnableKeyboard;
@@ -631,7 +785,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
 - (void)drawInMTKView:(MTKView*)view {
   @autoreleasepool {
     try {
-        state->Poll();state->Script();
+        state->Poll();state->Script();if(state->clear_meshes){_viewport->Clear();state->clear_meshes=false;}
         auto drawable=view.currentDrawable;auto pass=view.currentRenderPassDescriptor;if(!drawable || !pass) return;
         ImGuiIO& io=ImGui::GetIO();io.DisplaySize=ImVec2(view.bounds.size.width,view.bounds.size.height);
         io.DisplayFramebufferScale=ImVec2(view.drawableSize.width/io.DisplaySize.x,view.drawableSize.height/io.DisplaySize.y);
@@ -658,6 +812,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
         ImGui::SameLine();
         if(ImGui::Button("Redo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_Z)) s.History(true);
         ImGui::SameLine();if(ImGui::Button("Events / quests..."))s.show_events=true;
+        ImGui::SameLine();if(ImGui::Button("Source maps..."))s.show_source=true;
         if(s.scene && s.selected>=0) {
             if(ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_D))s.pending=State::Pending::Duplicate;
             if(s.scene->document.Parts()[s.selected].added && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_Backspace)))s.pending=State::Pending::Remove;
@@ -711,7 +866,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 if(ImGui::Button("Frame selected  F")) {if(s.selected_treasure>=0)s.SelectTreasure(s.selected_treasure,true);else s.Select(s.selected,true);}
                 if(o.enemy) {
                     const auto& e=*o.enemy;
-                    ImGui::TextWrapped("Enemy proxy: capsule and facing arrow. Character models are not loaded.");
+                    const auto model=scene.models.find(o.model);ImGui::TextWrapped("%s",model!=scene.models.end() && model->second?"Character model: untextured bind pose.":"Enemy proxy: capsule and facing arrow. Load character models through Source maps.");
                     if(const auto* table=scene.params.Table("NpcParam"))if(const auto info=ReadNpcInfo(*table,e.npc_param)) {
                         ImGui::Text("Base HP: %u / NPC type: %u",info->hp,unsigned(info->type));ImGui::Text("Team: %u",unsigned(info->team));
                         if(const auto* row=table->Find(e.npc_param))ImGui::TextWrapped("%s",row->name.c_str());
@@ -889,7 +1044,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             ImGui::TextUnformatted(s.Unsaved()?"Unexported changes":"Map ready");ImGui::SameLine();ImGui::TextDisabled("%zu terrain triangles",scene.terrain->indices.size()/3);
             if(!s.status.empty()) ImGui::TextWrapped("%s",s.status.c_str());
         }
-        ImGui::End();EventTools(s);ImGui::Render();
+        ImGui::End();EventTools(s);const auto source_pick=SourceTools(s,*_sourceViewport,command);ImGui::Render();
         pass.colorAttachments[0].loadAction=MTLLoadActionClear;pass.colorAttachments[0].clearColor=MTLClearColorMake(.04,.05,.06,1);
         auto encoder=[command renderCommandEncoderWithDescriptor:pass];
         ImGui_ImplMetal_RenderDrawData(ImGui::GetDrawData(),command,encoder);[encoder endEncoding];
@@ -899,10 +1054,14 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             auto blit=[command blitCommandEncoder];[blit copyFromTexture:drawable.texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(drawable.texture.width,drawable.texture.height,1) toBuffer:pixels destinationOffset:0 destinationBytesPerRow:drawable.texture.width*4 destinationBytesPerImage:drawable.texture.width*drawable.texture.height*4];[blit endEncoding];
         }
         [command presentDrawable:drawable];[command commit];
-        if(pick || pixels) {
+        if(pick || source_pick || pixels) {
             [command waitUntilCompleted];
             if(command.status==MTLCommandBufferStatusError) throw std::runtime_error(command.error.localizedDescription.UTF8String);
             if(pixels) {SaveImage(shot,pixels,drawable.texture.width,drawable.texture.height);s.capture.clear();}
+            if(source_pick && s.source) {
+                std::uint32_t id=0;const auto x=std::clamp(int(source_pick->x*io.DisplayFramebufferScale.x),0,int(_sourceViewport->ids.width)-1),y=std::clamp(int(source_pick->y*io.DisplayFramebufferScale.y),0,int(_sourceViewport->ids.height)-1);
+                [_sourceViewport->ids getBytes:&id bytesPerRow:4 fromRegion:MTLRegionMake2D(x,y,1,1) mipmapLevel:0];s.source_selected=id && id<=s.source->placements.size()?int(id)-1:-1;
+            }
             if(pick) {
                 std::uint32_t id=0;
                 auto x=std::clamp(int(pick->x*io.DisplayFramebufferScale.x),0,int(_viewport->ids.width)-1),y=std::clamp(int(pick->y*io.DisplayFramebufferScale.y),0,int(_viewport->ids.height)-1);
@@ -944,6 +1103,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
         }
         std::sort(state->maps.begin(),state->maps.end());
         if(!options.script.empty()) {std::ifstream f(options.script);if(!f)throw std::runtime_error("Cannot read editor script");for(std::string line;std::getline(f,line);)if(!line.empty() && line[0]!='#')state->commands.push_back(line);}
+        if(!options.source.empty())state->OpenSource(options.source);
         self.controller=[EditorController new];
         self.window=[[NSWindow alloc] initWithContentRect:NSMakeRect(80,80,1360,850) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
         self.window.title=@"Bloodborne Map Editor";self.window.contentViewController=self.controller;self.window.delegate=self.controller;self.window.minSize=NSMakeSize(1000,700);
@@ -960,7 +1120,7 @@ int main(int argc,char** argv) {
             auto value=[&](){if(i+1==argc)throw std::runtime_error("Missing value for "+key);return std::string(argv[++i]);};
             if(key=="--game")options.game=value();else if(key=="--map")options.map=value();
             else if(key=="--select")options.select=value();else if(key=="--export")options.output=value();
-            else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
+            else if(key=="--source")options.source=value();else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
             else if(key=="--list")options.list=true;
             else if(key=="--list-regions")options.list_regions=true;
             else if(key=="--list-routes")options.list_routes=true;
@@ -968,7 +1128,7 @@ int main(int argc,char** argv) {
             else if(key=="--list-param")options.list_param=value();
             else if(key=="--duplicate")options.duplicate=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
-            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes / --list-treasures: inspect map records\n  --list-param NpcParam|NpcThinkParam|CharaInitParam|ItemLotParam|EquipParamGoods|TalkScripts");return 0;}
+            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file] [--source prepared.bbsource]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes / --list-treasures: inspect map records\n  --list-param NpcParam|NpcThinkParam|CharaInitParam|ItemLotParam|EquipParamGoods|TalkScripts");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
