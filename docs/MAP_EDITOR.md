@@ -57,6 +57,8 @@ For a reproducible command-line edit or an unchanged round-trip export:
 out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_00 --list
 out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_00 \
   --batch --select o240083_1025 --translate 3 0 0 --export /path/to/new-mod
+out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_01 \
+  --batch --select c2630_0000 --duplicate --translate -1 0 2 --export /path/to/new-enemy-mod
 out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_00 \
   --batch --export /path/to/unchanged-mod
 ```
@@ -73,15 +75,39 @@ objects. Enemy scale is preserved. The **Enemy references** section shows read-o
 and instance IDs, NPC/AI parameters, initial animation, loading collision, patrol event and
 move-point region names. Missing references are reported with their original index.
 
-Exports preserve these references, event scripts, draw/backread groups and every byte outside
+Transform edits preserve these references, event scripts, draw/backread groups and every byte outside
 the edited transform fields. Moving an enemy leaves its patrol regions in place. Its loading
 collision controls streaming, and game events or saved death flags can disable it or change its
 placement. Keep the first moves local, test the exact map phase, and check behavior after
 reloading using a copied save. The editor does not validate walkability or rebuild navigation.
 
-This milestone does not insert, duplicate or delete enemies, edit NPC/AI parameters, move
-patrol regions or modify scripted encounters. The inspector identifies each enemy's MSB type;
-Player parts remain untouched.
+NPC/AI parameters and patrol regions remain read only. The inspector identifies each enemy's
+MSB type; Player parts remain untouched.
+
+## Duplicate enemies and props
+
+Select an Object, Enemy or DummyEnemy and choose **Duplicate** or press **Command-D**.
+The new copy is selected at the source's current transform. Move it with the axis handles or
+inspector, rotate it, and export the mod. Props also retain editable scale. **Undo** and
+**Redo** cover creating, transforming and removing copies, and restore their identifiers.
+
+**Remove copy**, **Delete** or **Backspace** removes a copy created in the current session.
+Undo restores it. Existing map records cannot be deleted; after reopening an export, its
+placements are all treated as existing records. Removing every copy and undoing other edits
+restores a byte-identical original export.
+
+Each copy receives a fresh model-based name, entity ID, model instance ID and part type ID.
+Allocation reserves identifiers from all parts, events and regions, including area variants
+beside the opened map. Copies use the source entity's 9000-9999 ID range, or the opened map's
+range when the source has no entity ID. Allocation stops if that range is full. Structural
+exports keep part type groups contiguous and remap affected reference indices, preserving
+collision, event, patrol and other reference targets.
+
+Copies retain the source's model, groups, loading collision, NPC/AI settings and other
+opaque part data. Event scripts, patrol regions and treasure events are not duplicated.
+An ordinary enemy or prop is the useful starting point: scripted doors, bosses or quest
+characters may need additional event work. Keep placements within the source collision's
+area and check them in-game; there is no floor snapping or navigation validation yet.
 
 ## Implementation and boundaries
 
@@ -97,14 +123,21 @@ It does not reproduce retail material shaders, object animations, active draw gr
 game physics. Central Yharnam currently has 35 object model identifiers this loader cannot
 display. These parts remain editable by their names, with an explicit missing-model message.
 
-The editor edits **existing Object, Enemy and DummyEnemy parts**. Map pieces, collisions,
-navigation, event scripts, IDs and placement creation/deletion are outside this implementation.
+The editor transforms and duplicates **Object, Enemy and DummyEnemy parts**. Map pieces,
+collisions, navigation, event scripts, manual ID editing and deletion of existing parts are
+outside this implementation.
 There is no live injection or automatic game launch. Export changes are applied on an area
 reload or a new game launch.
 
 The map document retains the original inflated MSBB and compressed source. Unchanged exports
-are byte-identical. Changed exports patch only the selected position/rotation/scale fields,
-preserve every other byte, and recompress the supported Bloodborne DFLT DCX envelope. An export
+are byte-identical. Transform-only exports patch the selected position/rotation/scale fields
+and preserve every other byte. Duplication rebuilds section offset tables and adds copies with
+new identifiers, names and transforms. Part records remain in contiguous type groups. Existing
+record payloads retain their opaque data and relative offsets; affected model instance counts
+and full-part reference indices are updated. Collision references on objects/enemies and event
+references in base events, treasure, generators, object actions and platoons retain their named
+targets. ConnectCollision uses collision-subtype indices, whose order is preserved.
+The supported Bloodborne DFLT DCX envelope is recompressed. An export
 is reopened and compared before writing. Unexpected headers, bounds, cycles, duplicate names,
 invalid model references and non-finite transforms are rejected.
 
@@ -125,12 +158,15 @@ bash tests/test_map.sh arm64
 
 Document fixtures cover byte preservation, object/enemy transform-only edits, enemy scale
 protection, collision/patrol/region resolution, unresolved references, UTF-16 names,
-recompression, undo/redo, malformed input and export protection. All 24 supplied base/DLC MSBs
+recompression, duplication of props/enemies/DummyEnemies, preserved reference targets and opaque
+record contents, fresh identifiers across sibling variants, undo/remove/redo, malformed input
+and export protection. All 24 supplied base/DLC MSBs
 passed unchanged and edited/reopened round trips for both objects and enemies. This is format evidence, not gameplay coverage
 for all those areas.
 
 `--script file` runs local editor checks after the map loads. Commands include `select name`,
-`deselect`, `move dx dy dz`, `rotate dx dy dz` (degrees), `undo`, `redo`, `export path`, `capture path` and `quit`.
+`deselect`, `duplicate`, `remove`, `move dx dy dz`, `rotate dx dy dz` (degrees), `undo`, `redo`,
+`export path`, `capture path` and `quit`. `assert-count n` verifies the editable placement count.
 `click x y` and `drag x y end-x end-y` replay input in the editor's own logical coordinates;
 `assert-selected name`, `assert-position x y z tolerance` and `assert-rotation x y z tolerance`
 verify the resulting document.
@@ -196,3 +232,38 @@ captures and per-session character-state logs. Viewport replay verifies real Met
 picking, handle dragging, position/rotation undo and redo. Format tests cover Object, Enemy
 and DummyEnemy transforms across all 24 available base/DLC maps; they are distinct from the
 bounded gameplay checks above.
+
+### Enemy and prop duplication check (2026-10-28)
+
+The grouped writer exports two new parts in `m24_01_00_01`, increasing the full part table
+from 6172 to 6174. `c2630_0000` remains at its original position; its copy `c2630_0011`
+(entity 2419000, instance 1007) spawns at `(-193.014999, -44.158001, 84.727997)` with yaw
+168.998 degrees. Both ordinary enemies stream in, move toward the player during combat,
+and reset to their separate authored positions at 150/150 HP after the player dies.
+
+The prop `o240027_2005` remains at `(-191.452942, -43.963432, 77.411873)`. Its copy
+`o240027_0000` (entity 2419001, instance 8005) loads at
+`(-193.452942, -43.963432, 78.411873)`. A temporary read-only observer confirms both the
+loaded placement and world-matrix translation for each named prop. The object registry
+contains 1693 objects, including the new copy. Enemy and prop state are never written by
+the observer; the player test controls use the same private-save/native-travel approach
+as the earlier milestone.
+
+Native Metal replay checks the Duplicate and Remove buttons, selection, copy transforms,
+undo/redo and export for enemies and props. All 24 maps pass duplication/reopen checks for
+Object, Enemy and DummyEnemy types, including reference-target and opaque record checks.
+Smithbox's independent SoulsFormats reader resolves the final export's part and event
+references to the same names, preserves all existing placements, and rewrites it successfully.
+
+The initial append-only writer passed a library read but faulted the retail loader. It was
+replaced with contiguous part type groups and full-part reference remapping. Corrected runs
+load and complete the two-enemy combat/reset sequence. The final recorded-evidence check
+also verifies both prop world transforms, 68 unchanged source/seed hashes and a deliberate
+test shutdown with no guest fault or Metal validation assertion. The initial summary helper
+tripped over its own diagnostic rows; its raw output is retained, and the final coordinate
+and encounter checks use the recorded live data. These are bounded ordinary-enemy/prop
+checks, not campaign, arbitrary scripted-object or killed-enemy/rest-cycle coverage.
+
+Evidence and the usable mod are under ignored `out/map-editor/duplication-validation/`:
+`validation.json`, `grouped-format-check.log`, `modified-final-observed/` and
+`mods-grouped/two-enemies-and-prop/`. Original assets and saves remain unchanged.

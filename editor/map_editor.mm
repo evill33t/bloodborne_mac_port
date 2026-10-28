@@ -26,7 +26,7 @@ struct Options {
     fs::path game,output,script;
     std::string map="m24_01_00_00",select;
     std::optional<BbMapArt::Vec3> translation;
-    bool batch=false,list=false;
+    bool batch=false,list=false,duplicate=false;
 };
 Options options;
 int exit_code=0;
@@ -140,6 +140,7 @@ struct State {
     std::stop_source stop;
     std::mutex mutex;
     std::string progress,error,status;
+    std::string selection_name;
     std::vector<std::string> maps,commands;
     std::size_t command=0;
     int frames=0,selected=-1;
@@ -159,6 +160,7 @@ struct State {
     std::optional<std::array<ImVec2,2>> input_drag;
     int input_frame=0;
     fs::path capture;
+    enum class Pending { None, Duplicate, Remove } pending=Pending::None;
     std::vector<std::uint8_t> exported;
     ~State() {stop.request_stop();if(loading.valid()) loading.wait();}
     bool Unsaved() const {return scene && scene->document.Changed() && scene->document.Inflated()!=exported;}
@@ -173,7 +175,7 @@ struct State {
     }
     void Load() {
         if(loading.valid()) return;
-        scene.reset();selected=-1;fitted=false;cutaway=false;exported.clear();error.clear();progress="Opening map...";
+        scene.reset();selected=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();error.clear();progress="Opening map...";
         const auto game=options.game;
         const auto map=options.map;
         loading=std::async(std::launch::async,[this,game,map] {
@@ -184,7 +186,26 @@ struct State {
         selected=index;drag.reset();drag_axis=-1;
         if(!scene || index<0) return;
         const auto& object=scene->document.Parts().at(index);fields=object.transform;
+        selection_name=object.name;
         if(focus) {camera.x=fields.position[0];camera.y=fields.position[1]+1;camera.z=fields.position[2];camera.zoom=45;cutaway=true;ceiling=fields.position[1]+4;}
+    }
+    void Duplicate() {
+        if(!scene || selected<0)return;
+        const auto index=scene->document.Duplicate(selected);Select(int(index),false);
+        status="Created "+scene->document.Parts()[index].name+". Move the copy to its new position.";
+    }
+    void Remove() {
+        if(!scene || selected<0)return;
+        scene->document.Remove(selected);Select(-1,false);status="Removed copy. Undo restores it.";
+    }
+    bool History(bool redo) {
+        if(!scene)return false;
+        const auto name=selected<0?selection_name:scene->document.Parts()[selected].name;
+        const bool changed=redo?scene->document.Redo():scene->document.Undo();
+        const auto& parts=scene->document.Parts();const auto found=std::ranges::find(parts,name,&Part::name);
+        Select(found==parts.end()?-1:int(found-parts.begin()),false);
+        if(changed)status=redo?"Redid last edit.":"Undid last edit.";
+        return changed;
     }
     void Export(const fs::path& folder) {
         if(!scene) return;
@@ -199,6 +220,8 @@ struct State {
         if([panel runModal]==NSModalResponseOK) Export(panel.URL.fileSystemRepresentation);
     }
     void Poll() {
+        const auto action=pending;pending=Pending::None;
+        if(action!=Pending::None)Action([&]{if(action==Pending::Duplicate)Duplicate();else Remove();});
         if(loading.valid() && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
             try {scene=loading.get();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
             catch(const std::exception& e) {error=e.what();if(!commands.empty()) {exit_code=1;Finish();}}
@@ -246,8 +269,12 @@ struct State {
             for(auto& v:t.rotation) {float delta;if(!(line>>delta)) throw std::runtime_error("rotate needs three degrees");v+=delta;}
             scene->document.Set(selected,t);fields=t;
         } else if(verb=="undo" || verb=="redo") {
-            if(!(verb=="undo"?scene->document.Undo():scene->document.Redo())) throw std::runtime_error("Empty undo/redo history");
-            if(selected>=0) fields=scene->document.Parts()[selected].transform;
+            if(!History(verb=="redo"))throw std::runtime_error("Empty undo/redo history");
+        } else if(verb=="duplicate" || verb=="remove") {
+            if(selected<0)throw std::runtime_error("Select a placement first");
+            if(verb=="duplicate")Duplicate();else Remove();
+        } else if(verb=="assert-count") {
+            std::size_t count;if(!(line>>count) || count!=scene->document.Parts().size())throw std::runtime_error("Unexpected placement count");
         } else if(verb=="export" || verb=="capture") {
             std::string path;std::getline(line>>std::ws,path);if(path.empty()) throw std::runtime_error("Missing script path");
             if(verb=="export") Export(path);else capture=path;
@@ -320,9 +347,13 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
         ImGui::BeginDisabled(!s.scene);
         if(ImGui::Button("Export mod...  Cmd+Shift+E") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_E)) s.Action([&]{s.ExportDialog();});
         ImGui::SameLine();
-        if(ImGui::Button("Undo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_Z)) {s.scene->document.Undo();if(s.selected>=0)s.fields=s.scene->document.Parts()[s.selected].transform;}
+        if(ImGui::Button("Undo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_Z)) s.History(false);
         ImGui::SameLine();
-        if(ImGui::Button("Redo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_Z)) {s.scene->document.Redo();if(s.selected>=0)s.fields=s.scene->document.Parts()[s.selected].transform;}
+        if(ImGui::Button("Redo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_Z)) s.History(true);
+        if(s.scene && s.selected>=0) {
+            if(ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_D))s.pending=State::Pending::Duplicate;
+            if(s.scene->document.Parts()[s.selected].added && (ImGui::Shortcut(ImGuiKey_Delete) || ImGui::Shortcut(ImGuiKey_Backspace)))s.pending=State::Pending::Remove;
+        }
         ImGui::EndDisabled();
         if(!s.error.empty()) ImGui::TextWrapped("%s",s.error.c_str());
         if(!s.scene) {std::scoped_lock lock(s.mutex);ImGui::TextWrapped("%s",s.progress.c_str());ImGui::TextDisabled("Loading your game assets. The window remains responsive.");}
@@ -343,6 +374,9 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             ImGui::EndChild();ImGui::Separator();
             if(s.selected>=0) {
                 const auto& o=objects[s.selected];ImGui::TextWrapped("%s",o.name.c_str());ImGui::TextDisabled("Model: %s",o.model.c_str());
+                if(ImGui::Button("Duplicate  Cmd+D"))s.pending=State::Pending::Duplicate;
+                if(o.added) {ImGui::SameLine();if(ImGui::Button("Remove copy"))s.pending=State::Pending::Remove;}
+                ImGui::Text("Entity ID: %d",o.entity_id);ImGui::Text("Instance ID: %d",o.instance_id);
                 ImGui::TextUnformatted("Position (metres)");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##position",s.fields.position.data(),"%.3f");
                 ImGui::TextUnformatted("Rotation (degrees)");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##rotation",s.fields.rotation.data(),"%.2f");
                 if(o.kind==PartKind::Object) {ImGui::TextUnformatted("Scale");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##scale",s.fields.scale.data(),"%.3f");}
@@ -381,7 +415,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             if(changed_objects || changed_enemies) {
                 if(s.selected>=0 && ((objects[s.selected].kind==PartKind::Enemy && !s.show_enemies) || (objects[s.selected].kind==PartKind::Object && !s.show_objects))) s.Select(-1,false);
             }
-            ImGui::TextDisabled("Existing placements only.");
+            ImGui::TextWrapped("Copies share the source's collision and behavior settings. Move them nearby, then reload to test.");
             if(scene.missing_models) ImGui::TextWrapped("%zu object models unavailable.",scene.missing_models);
             ImGui::EndChild();ImGui::SameLine();
             ImGui::BeginChild("Metal viewport",{0,-42},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
@@ -498,20 +532,25 @@ int main(int argc,char** argv) {
             else if(key=="--select")options.select=value();else if(key=="--export")options.output=value();
             else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
             else if(key=="--list")options.list=true;
+            else if(key=="--duplicate")options.duplicate=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
-            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part --translate X Y Z --export new-mod-folder\n  --list: inspect existing object and enemy placements without opening the editor");return 0;}
+            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list: inspect object and enemy placements without opening the editor");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
-            if(options.translation && !options.batch) throw std::runtime_error("Use --batch for a command-line translation, or move the placement in the editor");
+        if((options.translation || options.duplicate) && (!options.batch || options.list))throw std::runtime_error("Use --batch for command-line edits");
         if(options.batch || options.list) {
             auto doc=Document::Open(options.game/"dvdroot_ps4/map/MapStudio"/(options.map+".msb.dcx"));
-            if(options.list) {for(const auto& o:doc.Parts()) std::printf("%s\t%s\t%.6f %.6f %.6f\t%s\t%d\n",o.name.c_str(),o.model.c_str(),o.transform.position[0],o.transform.position[1],o.transform.position[2],o.enemy?"enemy":"object",o.enemy?o.enemy->entity_id:-1);return 0;}
+            if(options.list) {for(const auto& o:doc.Parts()) std::printf("%s\t%s\t%.6f %.6f %.6f\t%s\t%d\n",o.name.c_str(),o.model.c_str(),o.transform.position[0],o.transform.position[1],o.transform.position[2],o.enemy?"enemy":"object",o.entity_id);return 0;}
             if(options.output.empty())throw std::runtime_error("--batch needs --export with a new mod folder");
-            if(options.translation) {
+            if(options.translation || options.duplicate) {
                 const auto& objects=doc.Parts();auto found=std::ranges::find(objects,options.select,&Part::name);
                 if(found==objects.end())throw std::runtime_error("Placement not found");
-                auto t=found->transform;for(int i=0;i<3;++i)t.position[i]+=(*options.translation)[i];doc.Set(found-objects.begin(),t);
+                auto index=std::size_t(found-objects.begin());if(options.duplicate)index=doc.Duplicate(index);
+                auto t=doc.Parts()[index].transform;
+                if(options.translation)for(int i=0;i<3;++i)t.position[i]+=(*options.translation)[i];
+                doc.Set(index,t);
+                if(options.duplicate)std::printf("CREATED %s entity=%d instance=%d\n",doc.Parts()[index].name.c_str(),doc.Parts()[index].entity_id,doc.Parts()[index].instance_id);
             }
             std::printf("EXPORTED %s\n",doc.Export(fs::absolute(options.output),options.map).c_str());return 0;
         }
