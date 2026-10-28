@@ -134,8 +134,8 @@ GameParams GameParams::Read(std::span<const std::uint8_t> binder) {
     }
     return result;
 }
-GameParams GameParams::Open(const std::filesystem::path& game) {
-    auto result=Read(ReadFile(game/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx"));
+GameParams GameParams::Open(const std::filesystem::path& game,std::span<const std::uint8_t> baseline) {
+    auto result=baseline.empty()?Read(ReadFile(game/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx")):Read(baseline);
     try {
         std::filesystem::path messages;for(const auto* language:{"enggb","engus"}){const auto p=game/"dvdroot_ps4/msg"/language/"item.msgbnd.dcx";if(std::filesystem::exists(p)){messages=p;break;}}
         if(!messages.empty())for(const auto& file:ReadBinder(ReadFile(messages))) {

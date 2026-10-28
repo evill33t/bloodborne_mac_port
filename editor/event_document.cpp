@@ -56,7 +56,7 @@ EventDefinitions EventDefinitions::Read(std::span<const std::uint8_t> file) {
     auto name=[&](std::int64_t relative){if(relative<0 || relative>=strings)throw std::runtime_error("Invalid event definition string");return Text(b.first(string_at+strings),string_at+relative);};
     const auto enum_count=Get<std::int64_t>(b,16+12*8),enum_at=Get<std::int64_t>(b,16+13*8),value_count=Get<std::int64_t>(b,16+14*8),value_at=Get<std::int64_t>(b,16+15*8);
     Range(b,enum_at,enum_count,24);Range(b,value_at,value_count,16);
-    EventDefinitions result;
+    EventDefinitions result;result.source.assign(file.begin(),file.end());
     for(std::int64_t c=0;c<classes;++c) {
         const auto at=class_at+c*32;const auto bank=Get<std::int64_t>(b,at),count=Get<std::int64_t>(b,at+8),offset=Get<std::int64_t>(b,at+16);
         if(bank<0 || bank>INT32_MAX || offset<0 || count<0 || offset/32>instructions || count>instructions-offset/32 || offset%32)throw std::runtime_error("Invalid command class");
@@ -111,8 +111,8 @@ EventFile EventFile::Read(std::span<const std::uint8_t> file,std::shared_ptr<con
     }
     return result;
 }
-EventFile EventFile::Open(const std::filesystem::path& path,std::shared_ptr<const EventDefinitions> defs) {
-    auto result=Read(ReadFile(path),std::move(defs));auto names=path;names.replace_filename(path.filename().string().substr(0,path.filename().string().size()-10)+".emeld.dcx");
+EventFile EventFile::Open(const std::filesystem::path& path,std::shared_ptr<const EventDefinitions> defs,std::span<const std::uint8_t> baseline) {
+    auto result=baseline.empty()?Read(ReadFile(path),std::move(defs)):Read(baseline,std::move(defs));auto names=path;names.replace_filename(path.filename().string().substr(0,path.filename().string().size()-10)+".emeld.dcx");
     if(!std::filesystem::exists(names))return result;const auto raw=UnpackAsset(ReadFile(names));const std::span<const std::uint8_t> b=raw;
     if(!Header(b,"ELD\0") || b.size()<80)throw std::runtime_error("Expected Bloodborne EMELD names");
     const auto count=Get<std::int64_t>(b,16),at=Get<std::int64_t>(b,24),length=Get<std::int64_t>(b,64),strings=Get<std::int64_t>(b,72);Range(b,at,count,16);Range(b,strings,length);

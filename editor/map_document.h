@@ -84,6 +84,7 @@ struct Treasure {
 };
 // Copies retain uninterpreted record data, with fresh identifiers. Structural exports
 // keep part type groups contiguous and remap references to preserve their targets.
+class Project;
 class Document {
 public:
     static Document Read(std::span<const std::uint8_t> file);
@@ -118,7 +119,7 @@ public:
     bool RemoveRoute(std::size_t index);
     std::size_t Duplicate(std::size_t index,bool activate_object=false);
     std::size_t DuplicateAt(std::size_t index,const Transform& transform);
-    // Only copies created in this session can be removed; existing reference targets stay valid.
+    // Only editor-created copies can be removed; existing reference targets stay valid.
     bool Remove(std::size_t index);
     bool Undo();
     bool Redo();
@@ -127,6 +128,7 @@ public:
     // Exclusive creation: exports cannot overwrite a source map or an existing mod.
     std::filesystem::path Export(const std::filesystem::path& folder, const std::string& map) const;
 private:
+    friend class Project;
     std::vector<std::uint8_t> source, raw;
     std::filesystem::path source_game;
     std::filesystem::path source_map;

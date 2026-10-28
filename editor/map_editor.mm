@@ -4,6 +4,7 @@
 #import <AppKit/AppKit.h>
 #import <MetalKit/MetalKit.h>
 #include "map_scene.h"
+#include "project_file.h"
 #include "source_scene.h"
 #include "bbport_map_view.h"
 #include "imgui.h"
@@ -26,7 +27,7 @@ namespace {
 using namespace BbMapEditor;
 namespace fs=std::filesystem;
 struct Options {
-    fs::path game,output,script,source;
+    fs::path game,output,script,source,project;
     std::string map="m24_01_00_00",select,list_param;
     std::optional<BbMapArt::Vec3> translation;
     bool batch=false,list=false,list_regions=false,list_routes=false,list_treasures=false,duplicate=false;
@@ -187,6 +188,9 @@ public:
 
 struct State {
     std::shared_ptr<Scene> scene;
+    std::shared_ptr<Project> loading_project;
+    fs::path project_path;
+    std::uint64_t saved_project_version=UINT64_MAX;
     std::future<std::shared_ptr<Scene>> loading;
     std::shared_ptr<SourceScene> source;
     std::future<std::shared_ptr<SourceScene>> source_loading;
@@ -279,23 +283,73 @@ struct State {
         if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.EventEdits()!=exported_events || doc.Quests()!=exported_quests || doc.Inflated()!=exported);unsaved_version=doc.Version();}
         return unsaved_cached;
     }
+    bool ProjectDirty() const {return scene && (project_path.empty()?scene->document.Changed():scene->document.Version()!=saved_project_version);}
     bool Discard() {
-        if(!Unsaved()) return true;
-        auto alert=[NSAlert new];alert.messageText=@"Discard unexported map changes?";
+        if(project_path.empty()?!Unsaved():!ProjectDirty()) return true;
+        auto alert=[NSAlert new];alert.messageText=@"Discard unsaved editor changes?";
+        alert.informativeText=@"Save a project to keep the editing session, or export a mod before leaving.";
         [alert addButtonWithTitle:@"Keep Editing"];[alert addButtonWithTitle:@"Discard Changes"];
         return [alert runModal]==NSAlertSecondButtonReturn;
     }
     template<class F> void Action(F f) {
         try {error.clear();f();}catch(const std::exception& e) {error=e.what();}
     }
-    void Load() {
+    void Load(std::shared_ptr<Project> project={},const fs::path& path={}) {
         if(loading.valid()) return;
+        loading_project=std::move(project);project_path=path;saved_project_version=UINT64_MAX;clear_meshes=true;
         native_template=-1;native_template_name.clear();scene.reset();selected=selected_region=active_route=selected_treasure=-1;treasure_selection=false;treasure_name.clear();region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();exported_lots.clear();exported_events.clear();exported_quests.clear();event_file.clear();selected_event=selected_instruction=-1;event_values.clear();unsaved_version=UINT64_MAX;error.clear();progress="Opening map...";
         const auto game=options.game;
         const auto map=options.map;
-        loading=std::async(std::launch::async,[this,game,map] {
-            return std::make_shared<Scene>(LoadScene(game,map,[this](std::string s){std::scoped_lock lock(mutex);progress=std::move(s);},stop.get_token()));
+        loading=std::async(std::launch::async,[this,game,map,project=loading_project] {
+            return std::make_shared<Scene>(LoadScene(game,map,[this](std::string s){std::scoped_lock lock(mutex);progress=std::move(s);},stop.get_token(),project.get()));
         });
+    }
+    void OpenProject(const fs::path& path,const fs::path& replacement={}) {
+        auto project=std::make_shared<Project>(Project::Open(path));
+        if(!replacement.empty())project->game=fs::weakly_canonical(replacement);
+        if(!fs::is_directory(project->game/"dvdroot_ps4/map"))throw std::runtime_error("Project game folder is unavailable. Reopen with --project file --game replacement-folder");
+        options.game=project->game;options.map=project->map;options.select.clear();maps.clear();
+        const auto folder=options.game/"dvdroot_ps4/map/MapStudio";
+        if(fs::is_directory(folder))for(const auto& entry:fs::directory_iterator(folder)){
+            const auto name=entry.path().filename().string();if(name.ends_with(".msb.dcx") && ValidMapName(name.substr(0,12)))maps.push_back(name.substr(0,12));
+        }
+        if(std::ranges::find(maps,options.map)==maps.end())maps.push_back(options.map);std::sort(maps.begin(),maps.end());Load(project,fs::absolute(path));
+    }
+    void OpenProjectDialog() {
+        auto panel=[NSOpenPanel openPanel];panel.title=@"Open a Bloodborne editor project";panel.canChooseDirectories=NO;
+        if([panel runModal]!=NSModalResponseOK || !Discard())return;
+        const auto path=fs::path(panel.URL.fileSystemRepresentation);auto project=Project::Open(path);fs::path replacement;
+        if(!fs::is_directory(project.game/"dvdroot_ps4/map")){
+            auto folder=[NSOpenPanel openPanel];folder.title=@"Locate this project's Bloodborne game folder";folder.canChooseDirectories=YES;folder.canChooseFiles=NO;
+            if([folder runModal]!=NSModalResponseOK)return;replacement=folder.URL.fileSystemRepresentation;
+        }
+        OpenProject(path,replacement);
+    }
+    void SaveProject(const fs::path& path) {
+        if(!scene)throw std::runtime_error("Open a map before saving a project");
+        auto project=Project::Capture(options.game,options.map,scene->document);project.exported=!Unsaved();project.exported_msb=exported;project.exported_lots=exported_lots;project.exported_events=exported_events;project.exported_quests=exported_quests;project.route_key=route_key;
+        project.camera={camera.x,camera.y,camera.z,camera.zoom,camera.yaw,camera.pitch};
+        if(selected_treasure>=0){project.selected_kind=3;project.selected_name=scene->document.Treasures()[selected_treasure].name;}
+        else if(selected_region>=0){project.selected_kind=2;project.selected_name=scene->document.Regions()[selected_region].name;}
+        else if(selected>=0){project.selected_kind=1;project.selected_name=scene->document.Parts()[selected].name;}
+        project.Save(path);project_path=fs::absolute(path);saved_project_version=scene->document.Version();status="Saved project: "+project_path.filename().string();std::printf("PROJECT SAVED %s\n",project_path.c_str());
+    }
+    void SaveProjectDialog(bool save_as=false) {
+        if(!save_as && !project_path.empty()){SaveProject(project_path);return;}
+        auto panel=[NSSavePanel savePanel];panel.title=@"Save editor project";panel.nameFieldStringValue=project_path.empty()?@"Untitled.bbmapproject":[NSString stringWithUTF8String:project_path.filename().c_str()];panel.canCreateDirectories=YES;
+        if([panel runModal]==NSModalResponseOK)SaveProject(panel.URL.fileSystemRepresentation);
+    }
+    void RestoreProjectView() {
+        if(!scene || !loading_project)return;const auto& p=*loading_project;
+        if(p.route_key>=0){const auto& list=scene->document.Routes();const auto i=std::ranges::find(list,p.route_key,&Route::key);if(i!=list.end())SelectRoute(int(i-list.begin()),false);}
+        if(p.selected_kind==1){const auto& list=scene->document.Parts();const auto i=std::ranges::find(list,p.selected_name,&Part::name);if(i!=list.end())Select(int(i-list.begin()),true);}
+        else if(p.selected_kind==2){const auto& list=scene->document.Regions();const auto i=std::ranges::find(list,p.selected_name,&Region::name);if(i!=list.end()){SelectRegion(int(i-list.begin()),true);layer=3;}}
+        else if(p.selected_kind==3){const auto& list=scene->document.Treasures();const auto i=std::ranges::find(list,p.selected_name,&Treasure::name);if(i!=list.end()){SelectTreasure(int(i-list.begin()),true);layer=6;}}
+        camera={p.camera[0],p.camera[1],p.camera[2],p.camera[3],p.camera[4],p.camera[5]};fitted=true;
+        saved_project_version=scene->document.Version();
+        exported=p.exported_msb;exported_lots=p.exported_lots;exported_events=p.exported_events;exported_quests=p.exported_quests;unsaved_version=UINT64_MAX;
+        if(p.exported){exported=scene->document.Inflated();exported_lots=scene->document.ItemLots();exported_events=scene->document.EventEdits();exported_quests=scene->document.Quests();unsaved_version=UINT64_MAX;}
+        loading_project.reset();status="Opened project: "+project_path.filename().string();std::printf("PROJECT OPENED %s\n",project_path.c_str());
     }
     void Select(int index,bool focus) {
         selected=index;selected_region=selected_treasure=-1;treasure_selection=false;drag.reset();drag_axis=-1;
@@ -450,7 +504,7 @@ struct State {
             else if(active_route>=0){scene->document.RemoveRoute(active_route);active_route=-1;}
         });
         if(loading.valid() && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
-            try {scene=loading.get();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
+            try {scene=loading.get();RestoreProjectView();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
             catch(const std::exception& e) {error=e.what();if(!commands.empty()) {exit_code=1;Finish();}}
             frames=0;
             if(scene && !options.select.empty()) {
@@ -464,7 +518,9 @@ struct State {
         if(!scene || source_loading.valid() || command>=commands.size() || ++frames<12) return;
         frames=0;std::istringstream line(commands[command++]);std::string verb;line>>verb;
         std::printf("EDITOR %s\n",commands[command-1].c_str());
-        if(verb=="snap") {if(line>>snap_range){if(!(line>>snap_offset))snap_offset=0;}Snap();
+        if(verb=="save-project" || verb=="open-project") {std::string path;std::getline(line>>std::ws,path);if(path.empty())throw std::runtime_error("Missing project path");if(verb=="save-project")SaveProject(path);else OpenProject(path);
+        } else if(verb=="assert-project-dirty"){int expected;if(!(line>>expected) || ProjectDirty()!=bool(expected))throw std::runtime_error("Unexpected project state");
+        } else if(verb=="snap") {if(line>>snap_range){if(!(line>>snap_offset))snap_offset=0;}Snap();
         } else if(verb=="collision") {show_collision=true;show_terrain=false;
         } else if(verb=="source-config") {std::string profile,map,path;line>>profile>>map;std::getline(line>>std::ws,path);const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles)||!ValidMapName(map)||path.empty())throw std::runtime_error("Invalid source configuration");source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",map.c_str());std::snprintf(source_root,sizeof(source_root),"%s",path.c_str());show_source=true;
         } else if(verb=="source-prepare") {PrepareSource();
@@ -813,6 +869,14 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
         ImGui::Begin("Bloodborne Map Editor",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings);
         ImGui::TextUnformatted("BLOODBORNE  /  MAP EDITOR");ImGui::SameLine();ImGui::TextDisabled("Metal");ImGui::Separator();
         auto& s=*state;
+        ImGui::BeginDisabled(s.loading.valid());
+        if(ImGui::Button("Open project...  Cmd+O") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_O))s.Action([&]{s.OpenProjectDialog();});
+        ImGui::SameLine();ImGui::BeginDisabled(!s.scene);
+        if(ImGui::Button("Save project  Cmd+S") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_S))s.Action([&]{s.SaveProjectDialog();});
+        ImGui::SameLine();if(ImGui::Button("Save as...") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_S))s.Action([&]{s.SaveProjectDialog(true);});
+        ImGui::EndDisabled();
+        ImGui::SameLine();ImGui::TextDisabled("%s%s",s.project_path.empty()?"Untitled":s.project_path.filename().c_str(),s.ProjectDirty()?" *":"");
+        ImGui::EndDisabled();
         ImGui::SetNextItemWidth(190);
         ImGui::BeginDisabled(s.loading.valid());
         if(ImGui::BeginCombo("Map variant",options.map.c_str())) {
@@ -1118,22 +1182,24 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
 }
 - (void)applicationDidFinishLaunching:(NSNotification*)notification {
     try {
-        if(options.game.empty()) {
+        std::shared_ptr<Project> initial_project;
+        if(!options.project.empty()){initial_project=std::make_shared<Project>(Project::Open(options.project));if(options.game.empty())options.game=initial_project->game;else initial_project->game=options.game;options.map=initial_project->map;}
+        if(options.game.empty() || (initial_project && !fs::is_directory(options.game/"dvdroot_ps4/map"))) {
             auto panel=[NSOpenPanel openPanel];panel.title=@"Choose your Bloodborne game folder";panel.canChooseDirectories=YES;panel.canChooseFiles=NO;
             if([panel runModal]!=NSModalResponseOK) {Finish();return;}
-            options.game=panel.URL.fileSystemRepresentation;
+            options.game=panel.URL.fileSystemRepresentation;if(initial_project)initial_project->game=options.game;
         }
         state=std::make_unique<State>();
-        for(const auto& entry:fs::directory_iterator(options.game/"dvdroot_ps4/map/MapStudio")) {
+        if(fs::is_directory(options.game/"dvdroot_ps4/map/MapStudio"))for(const auto& entry:fs::directory_iterator(options.game/"dvdroot_ps4/map/MapStudio")) {
             auto name=entry.path().filename().string();if(name.ends_with(".msb.dcx") && ValidMapName(name.substr(0,12)))state->maps.push_back(name.substr(0,12));
         }
-        std::sort(state->maps.begin(),state->maps.end());
+        if(std::ranges::find(state->maps,options.map)==state->maps.end())state->maps.push_back(options.map);std::sort(state->maps.begin(),state->maps.end());
         if(!options.script.empty()) {std::ifstream f(options.script);if(!f)throw std::runtime_error("Cannot read editor script");for(std::string line;std::getline(f,line);)if(!line.empty() && line[0]!='#')state->commands.push_back(line);}
         if(!options.source.empty())state->OpenSource(options.source);
         self.controller=[EditorController new];
         self.window=[[NSWindow alloc] initWithContentRect:NSMakeRect(80,80,1360,850) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
         self.window.title=@"Bloodborne Map Editor";self.window.contentViewController=self.controller;self.window.delegate=self.controller;self.window.minSize=NSMakeSize(1000,700);
-        [self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];state->Load();
+        [self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];state->Load(initial_project,options.project);
     } catch(const std::exception& e) {std::fprintf(stderr,"Map editor: %s\n",e.what());exit_code=1;Finish();}
 }
 @end
@@ -1146,7 +1212,7 @@ int main(int argc,char** argv) {
             auto value=[&](){if(i+1==argc)throw std::runtime_error("Missing value for "+key);return std::string(argv[++i]);};
             if(key=="--game")options.game=value();else if(key=="--map")options.map=value();
             else if(key=="--select")options.select=value();else if(key=="--export")options.output=value();
-            else if(key=="--source")options.source=value();else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
+            else if(key=="--project")options.project=value();else if(key=="--source")options.source=value();else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
             else if(key=="--list")options.list=true;
             else if(key=="--list-regions")options.list_regions=true;
             else if(key=="--list-routes")options.list_routes=true;
@@ -1154,10 +1220,11 @@ int main(int argc,char** argv) {
             else if(key=="--list-param")options.list_param=value();
             else if(key=="--duplicate")options.duplicate=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
-            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file] [--source prepared.bbsource]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes / --list-treasures: inspect map records\n  --list-param NpcParam|NpcThinkParam|CharaInitParam|ItemLotParam|EquipParamGoods|TalkScripts");return 0;}
+            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file] [--project session.bbmapproject] [--source prepared.bbsource]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes / --list-treasures: inspect map records\n  --list-param NpcParam|NpcThinkParam|CharaInitParam|ItemLotParam|EquipParamGoods|TalkScripts");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
+        if(!options.project.empty() && (options.batch || options.list || options.list_regions || options.list_routes || options.list_treasures || !options.list_param.empty()))throw std::runtime_error("Use --project with the native editor and --script for project automation");
         if(!options.list_param.empty()) {
             if(options.list_param=="TalkScripts") {for(const auto& [id,name]:GameParams::TalkScripts(options.game,options.map))std::printf("%d\t%s\n",id,name.c_str());return 0;}
             const auto params=GameParams::Open(options.game);const auto* table=params.Table(options.list_param);

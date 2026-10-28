@@ -526,7 +526,7 @@ target_link_libraries(bbmap-prepare PRIVATE miniz::miniz)
 
 if(APPLE)
     # Independent editor: dev's read-only terrain/model pipeline plus byte-preserving MSB edits.
-    add_executable(bbmap-editor ../editor/map_editor.mm ../editor/map_document.cpp ../editor/game_params.cpp ../editor/event_document.cpp ../editor/map_scene.cpp ../editor/source_scene.cpp ../editor/collision_scene.cpp
+    add_executable(bbmap-editor ../editor/project_file.cpp ../editor/map_editor.mm ../editor/map_document.cpp ../editor/game_params.cpp ../editor/event_document.cpp ../editor/map_scene.cpp ../editor/source_scene.cpp ../editor/collision_scene.cpp
         shim/bbport_map_art.cpp shim/bbport_map_collision.cpp shim/bbport_game_art.cpp
         third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
         third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
@@ -552,6 +552,10 @@ if(APPLE)
     target_include_directories(game-params-test PRIVATE ../editor shim)
     target_compile_options(game-params-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_link_libraries(game-params-test PRIVATE miniz::miniz)
+    add_executable(project-file-test EXCLUDE_FROM_ALL ../tests/test_project_file.cpp ../editor/project_file.cpp ../editor/event_document.cpp ../editor/game_params.cpp ../editor/map_document.cpp)
+    target_include_directories(project-file-test PRIVATE ../editor shim)
+    target_compile_options(project-file-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(project-file-test PRIVATE miniz::miniz)
     add_executable(event-document-test EXCLUDE_FROM_ALL ../tests/test_event_document.cpp ../editor/event_document.cpp ../editor/game_params.cpp ../editor/map_document.cpp)
     target_include_directories(event-document-test PRIVATE ../editor shim)
     target_compile_options(event-document-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)

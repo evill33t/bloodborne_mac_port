@@ -13,7 +13,7 @@ if [[ ! -f $imgui/imgui.cpp || ! -f $prefix/lib/libminiz.a ]]; then
 fi
 flags=(-arch arm64 -mmacosx-version-min=15.0 -std=c++20 -O2 -g -Wall -Wextra
     -Ieditor -Igpu/shim -isystem "$prefix/include/miniz" -I"$imgui" -I"$imgui/backends")
-sources=(editor/map_document.cpp editor/game_params.cpp editor/event_document.cpp editor/map_scene.cpp editor/source_scene.cpp editor/collision_scene.cpp editor/map_editor.mm
+sources=(editor/project_file.cpp editor/map_document.cpp editor/game_params.cpp editor/event_document.cpp editor/map_scene.cpp editor/source_scene.cpp editor/collision_scene.cpp editor/map_editor.mm
     gpu/shim/bbport_map_art.cpp gpu/shim/bbport_map_collision.cpp gpu/shim/bbport_game_art.cpp
     "$imgui/imgui.cpp" "$imgui/imgui_draw.cpp" "$imgui/imgui_tables.cpp" "$imgui/imgui_widgets.cpp"
     "$imgui/backends/imgui_impl_metal.mm" "$imgui/backends/imgui_impl_osx.mm")

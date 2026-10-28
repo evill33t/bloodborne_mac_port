@@ -8,6 +8,7 @@
 #include <memory>
 #include <stop_token>
 namespace BbMapEditor {
+class Project;
 struct Scene {
     Document document;
     GameParams params;
@@ -21,5 +22,5 @@ struct Scene {
     std::size_t missing_models=0;
 };
 Scene LoadScene(const std::filesystem::path& game,const std::string& map,
-                const std::function<void(std::string)>& progress,std::stop_token stop={});
+                const std::function<void(std::string)>& progress,std::stop_token stop={},const Project* project=nullptr);
 } // namespace BbMapEditor

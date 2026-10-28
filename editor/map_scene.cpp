@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "map_scene.h"
+#include "project_file.h"
 #include "bbport_game_art.h"
 #include <cstring>
 #include <cmath>
@@ -98,29 +99,32 @@ std::shared_ptr<const BbMapArt::AreaMesh> ObjectMesh(std::span<const std::uint8_
 }
 }
 Scene LoadScene(const std::filesystem::path& game,const std::string& map,
-                const std::function<void(std::string)>& progress,std::stop_token stop) {
+                const std::function<void(std::string)>& progress,std::stop_token stop,const Project* project) {
     if(!ValidMapName(map)) throw std::runtime_error("Invalid map name");
     const auto root=game/"dvdroot_ps4";Scene result;
     result.enemy_marker=EnemyMarker();
     result.region_marker=RegionMarker();
     progress("Reading map placements...");
-    result.document=Document::Open(root/"map/MapStudio"/(map+".msb.dcx"));
+    result.document=project?project->OriginalDocument():Document::Open(root/"map/MapStudio"/(map+".msb.dcx"));
     progress("Reading character and item parameters...");
-    try{result.params=GameParams::Open(game);result.document.AttachParameters(std::make_shared<const GameParams>(result.params));}catch(const std::exception& e){result.param_error=e.what();}
+    try{result.params=GameParams::Open(game,project?project->Source("param/gameparam/gameparam.parambnd.dcx"):std::span<const std::uint8_t>{});result.document.AttachParameters(std::make_shared<const GameParams>(result.params));}catch(const std::exception& e){result.param_error=e.what();}
     try{result.talk_scripts=GameParams::TalkScripts(game,map);}catch(const std::exception& e){result.talk_error=e.what();}
     const auto base_map=map.substr(0,6)+"_00_00";
     progress("Reading event scripts and command definitions...");
     try {
-        const auto definitions=std::make_shared<const EventDefinitions>(EventDefinitions::Read(ReadFile(root/"event/common.emedf.dcx")));
-        for(const auto& name:{std::string("common.emevd.dcx"),base_map+".emevd.dcx"})if(std::filesystem::exists(root/"event"/name))
-            result.document.AttachEvents(name,std::make_shared<const EventFile>(EventFile::Open(root/"event"/name,definitions)));
+        const auto baseline=project?project->Source("event/common.emedf.dcx"):std::span<const std::uint8_t>{};
+        const auto definitions=std::make_shared<const EventDefinitions>(EventDefinitions::Read(baseline.empty()?ReadFile(root/"event/common.emedf.dcx"):std::vector<std::uint8_t>(baseline.begin(),baseline.end())));
+        const auto names=project?project->EventNames():std::vector<std::string>{"common.emevd.dcx",base_map+".emevd.dcx"};
+        for(const auto& name:names)if(project || std::filesystem::exists(root/"event"/name))
+            result.document.AttachEvents(name,std::make_shared<const EventFile>(EventFile::Open(root/"event"/name,definitions,project?project->Source("event/"+name):std::span<const std::uint8_t>{})));
     }catch(const std::exception& e){result.event_error=e.what();}
+    if(project)project->Restore(result.document);
     const auto read=[&](const std::string& relative) {
         if(stop.stop_requested()) return std::vector<std::uint8_t>{};
         // The in-game atlas uses base layouts. An editor must render the exact selected phase
         // layout while continuing to resolve terrain models/textures from the area's base folder.
         const auto path=relative=="map/MapStudio/"+base_map+".msb.dcx"?"map/MapStudio/"+map+".msb.dcx":relative;
-        try {return ReadFile(root/path);} catch(const std::exception&) {return std::vector<std::uint8_t>{};}
+        try {if(project){const auto b=project->Source(path);if(!b.empty())return std::vector<std::uint8_t>(b.begin(),b.end());}return ReadFile(root/path);} catch(const std::exception&) {return std::vector<std::uint8_t>{};}
     };
     const auto range=[&](const std::string& relative,std::uint64_t offset,std::uint64_t size) {
         std::vector<std::uint8_t> b;if(stop.stop_requested() || size>512*1024*1024) return b;

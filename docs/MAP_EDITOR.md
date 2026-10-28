@@ -23,6 +23,48 @@ out/map-editor/bbmap-editor --game /path/to/CUSA00900 --map m24_01_00_00
 The ordinary GPU CMake project also has `bbmap-editor` and `map-editor-test` targets on macOS.
 Asset loading happens on a worker; the editor shows progress while reading terrain and models.
 
+## Save and reopen projects
+
+**Save project** (Command-S) writes a `.bbmapproject` outside the game folder. **Open project**
+(Command-O) resumes it; **Save as** (Command-Shift-S) creates another project file. The title
+row marks edits since the last project save with `*`. Project saving and mod export have
+separate states: saving retains your work, while **Export mod** produces the files used by
+the game. A saved project can be closed without discarding work even when its latest changes
+have not been exported.
+
+Projects retain the original map, parameter and event baselines, newly created prop/enemy
+and pickup ownership, private item lots, regions, routes, NPC settings, event arguments,
+pickup reward quests, identifier reservations, full grouped undo/redo history including its
+redo tail, the last export state, camera and selection. Undo can still return to the exact
+original MSB bytes after reopening. Source previews can be opened again separately; their
+large mesh caches are not embedded in projects. Terrain, object models, textures and display
+labels continue to load from your game folder. If the folder moves, the open dialog offers a
+replacement folder, or use:
+
+```sh
+out/map-editor/bbmap-editor --project /path/to/session.bbmapproject --game /new/path/to/CUSA00900
+```
+
+Project files contain private game baselines and are intended for local editing. Share the
+exported mod when distributing changes. Saves use a bounded, checksummed format and atomic
+file replacement; an unrelated file, damaged existing project, directory symlink into the
+game folder, or file symlink is refused as a save destination. Loading validates history
+against its embedded source before replacing the document.
+
+`bash tests/test_project_file.sh /path/to/CUSA00900` checks ownership, allocator reservations,
+source-baseline independence, grouped history and redo tails, malformed records, path guards,
+and real pickup/quest/event export equality. Native replay under ignored
+`out/map-editor/project-validation/final/` creates a project, closes the editor, reopens it in
+a fresh process, removes and restores the new pickup/quest, exercises redo and export-state
+transitions, and compares all four exported files byte for byte. A subsequent gameplay check
+under `out/map-editor/project-validation/playable/` exports the pickup quest from a reopened
+project. Ordinary walking/action input collects three vials plus the scripted five-vial
+reward; the HUD shows eight, and a private-save reload stays at eight without repeating the
+award. SoulsFormats independently verifies the exported quest and preserved original
+instructions. All 124 tracked original asset/seed hashes remain unchanged. This bounded
+scenario verifies the reopened-project export; it does not establish arbitrary quest or
+campaign compatibility.
+
 ## Edit and export
 
 1. Choose the **map variant**. Game phases can use different MSBs: Central Yharnam has
@@ -39,8 +81,9 @@ Asset loading happens on a worker; the editor shows progress while reading terra
    Selecting an object enables a roof cutaway at its height; adjust the ceiling or turn the
    cutaway off in the inspector.
 4. Click **Export mod…** (Command-Shift-E) and choose a **new folder outside the game folder**.
-   Existing export folders are refused. The editor confirms discarding unexported changes on
-   quit or when changing areas. Command-Z and Command-Shift-Z undo and redo.
+   Existing export folders are refused. Save a project to retain the editing session; the editor
+   confirms discarding unsaved work on quit or when changing areas. Command-Z and
+   Command-Shift-Z undo and redo.
 5. Add the exported folder in the port's **Mods & Cheats**, enable it, and launch/reload the area.
    Test against a copied save. The game's scripts, active display groups, animation and physics
    still determine what happens to an object after it loads.

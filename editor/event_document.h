@@ -16,7 +16,9 @@ public:
     static EventDefinitions Read(std::span<const std::uint8_t> bytes);
     const EventCommand* Find(int bank,int id) const;
     std::size_t Count() const {return commands.size();}
+    std::span<const std::uint8_t> OriginalSource() const {return source;}
 private:
+    std::vector<std::uint8_t> source;
     std::map<std::pair<int,int>,EventCommand> commands;
 };
 struct ScriptOperand {
@@ -46,7 +48,9 @@ struct ScriptEvent {
 class EventFile {
 public:
     static EventFile Read(std::span<const std::uint8_t> bytes,std::shared_ptr<const EventDefinitions> definitions={});
-    static EventFile Open(const std::filesystem::path& path,std::shared_ptr<const EventDefinitions> definitions);
+    static EventFile Open(const std::filesystem::path& path,std::shared_ptr<const EventDefinitions> definitions,std::span<const std::uint8_t> baseline={});
+    std::span<const std::uint8_t> OriginalSource() const {return source;}
+    const EventDefinitions* Definitions() const {return definitions.get();}
     const std::vector<ScriptEvent>& Events() const {return events;}
     const EventCommand* Command(const EventInstruction& instruction) const;
     bool Parameterized(std::size_t event,std::size_t instruction,const EventArgument& arg) const;

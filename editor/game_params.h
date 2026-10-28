@@ -56,7 +56,8 @@ ItemLot ReadItemLot(const ParamTable& table,std::int32_t id);
 class GameParams {
 public:
     static GameParams Read(std::span<const std::uint8_t> binder);
-    static GameParams Open(const std::filesystem::path& game);
+    static GameParams Open(const std::filesystem::path& game,std::span<const std::uint8_t> baseline={});
+    std::span<const std::uint8_t> OriginalSource() const {return source;}
     const ParamTable* Table(const std::string& name) const;
     const std::map<std::string,ParamTable>& Tables() const {return tables;}
     // TalkID references an ESD in the area's talk binder, not a TalkParam row.
