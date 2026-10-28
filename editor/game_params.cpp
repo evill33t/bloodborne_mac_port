@@ -15,6 +15,9 @@ template<class T> T Get(std::span<const std::uint8_t> b,std::size_t at) {
     if(at>b.size() || sizeof(T)>b.size()-at)throw std::runtime_error("Truncated parameter asset");
     T v;std::memcpy(&v,b.data()+at,sizeof(T));return v;
 }
+template<class T> void Put(std::vector<std::uint8_t>& b,std::size_t at,T value) {
+    if(at>b.size() || sizeof(T)>b.size()-at)throw std::runtime_error("Invalid parameter write offset");std::memcpy(b.data()+at,&value,sizeof(T));
+}
 std::string Utf16(std::span<const std::uint8_t> b,std::size_t at) {
     std::string text;
     for(int n=0;n<8192;++n,at+=2) {
@@ -42,7 +45,7 @@ std::string Basename(const std::string& path) {
 }
 std::vector<std::uint8_t> UnpackAsset(std::span<const std::uint8_t> b) {
     if(b.size()<4 || std::memcmp(b.data(),"DCX\0",4))return {b.begin(),b.end()};
-    if(b.size()<0x4c || BE(b,4)!=0x10000 || BE(b,0x10)!=0x44 || BE(b,0x14)!=0x4c ||
+    if(b.size()<0x4c || BE(b,4)!=0x10000 || !((BE(b,0x10)==0x44 && BE(b,0x14)==0x4c) || (BE(b,0x10)==0x24 && BE(b,0x14)==0x2c)) ||
        std::memcmp(b.data()+0x18,"DCS\0",4) || std::memcmp(b.data()+0x24,"DCP\0DFLT",8) ||
        std::memcmp(b.data()+0x44,"DCA\0",4) || BE(b,0x48)!=8 || BE(b,0x20)!=b.size()-0x4c ||
        !BE(b,0x1c) || BE(b,0x1c)>256*1024*1024)throw std::runtime_error("Unsupported parameter DCX envelope");
@@ -56,12 +59,13 @@ std::vector<BinderFile> ReadBinder(std::span<const std::uint8_t> packed) {
        Get<std::uint64_t>(b,16)!=64 || Get<std::uint64_t>(b,32)!=36)throw std::runtime_error("Unsupported Bloodborne binder");
     const auto count=Get<std::uint32_t>(b,12);if(count>100000 || count>(b.size()-64)/36)throw std::runtime_error("Invalid binder count");
     const auto data_start=Get<std::uint64_t>(b,40);if(data_start<64+std::size_t(count)*36 || data_start>b.size())throw std::runtime_error("Invalid binder data start");
-    std::vector<BinderFile> files;
+    std::vector<BinderFile> files;std::uint64_t total=0;
     for(std::size_t i=0;i<count;++i) {
         const auto at=64+i*36;const auto size=Get<std::uint64_t>(b,at+8),unpacked=Get<std::uint64_t>(b,at+16);
         const auto offset=Get<std::uint32_t>(b,at+24),name=Get<std::uint32_t>(b,at+32);
         if(Get<std::uint32_t>(b,at)!=0x40 || size!=unpacked || offset<data_start || offset>b.size() || size>b.size()-offset || name<64+std::size_t(count)*36 || name>=data_start)
             throw std::runtime_error("Unsupported or invalid binder entry");
+        if(size>256*1024*1024-total)throw std::runtime_error("Binder entry data exceeds limit");total+=size;
         files.push_back({Utf16(b.first(data_start),name),Get<std::int32_t>(b,at+28),at,{b.begin()+offset,b.begin()+offset+size}});
     }
     return files;
@@ -96,7 +100,7 @@ std::optional<NpcInfo> ReadNpcInfo(const ParamTable& table,std::int32_t id) {
     const auto data=table.Data(*row);return NpcInfo{Get<std::uint32_t>(data,32),data[302],data[303]};
 }
 GameParams GameParams::Read(std::span<const std::uint8_t> binder) {
-    GameParams result;
+    GameParams result;result.source.assign(binder.begin(),binder.end());
     const std::set<std::string> wanted={"NpcParam","NpcThinkParam","CharaInitParam","ItemLotParam","EquipParamWeapon","EquipParamProtector","EquipParamAccessory","EquipParamGoods"};
     for(auto& file:ReadBinder(binder)) {
         const auto name=Basename(file.name);if(!name.ends_with(".param"))continue;const auto key=name.substr(0,name.size()-6);
@@ -106,6 +110,74 @@ GameParams GameParams::Read(std::span<const std::uint8_t> binder) {
 }
 GameParams GameParams::Open(const std::filesystem::path& game) {return Read(ReadFile(game/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx"));}
 const ParamTable* GameParams::Table(const std::string& name) const {auto p=tables.find(name);return p==tables.end()?nullptr:&p->second;}
+ItemLot ReadItemLot(const ParamTable& table,std::int32_t id) {
+    const auto* row=table.Find(id);
+    if(!row || table.type!="ITEMLOT_PARAM_ST" || Get<std::int16_t>(table.bytes,8)!=2 || row->size!=148)throw std::runtime_error("Unsupported or missing item lot");
+    const auto data=table.Data(*row);return {id,id,row->name,{data.begin(),data.end()}};
+}
+std::int32_t ItemLot::Flag() const {return Get<std::int32_t>(bytes,128);}
+void ItemLot::SetFlag(std::int32_t flag) {Put(bytes,128,flag);}
+ItemContents ItemLot::First() const {return {Get<std::int32_t>(bytes,32),Get<std::int32_t>(bytes,0),Get<std::uint8_t>(bytes,138)};}
+void GameParams::SetContents(ItemLot& lot,const ItemContents& contents) const {
+    const char* name=contents.category==0?"EquipParamWeapon":contents.category==1?"EquipParamProtector":contents.category==4?"EquipParamGoods":nullptr;
+    if(!name)throw std::runtime_error("Choose a weapon, armor or consumable item");
+    const auto* table=Table(name);if(!table || !table->Find(contents.item))throw std::runtime_error("Item does not exist in this game's equipment table");
+    if(contents.count<1 || contents.count>99 || (contents.category!=4 && contents.count!=1))throw std::runtime_error("Choose 1-99 consumables, or one equipment item");
+    if(lot.bytes.size()!=148)throw std::runtime_error("Unsupported item lot layout");
+    // A custom pickup gives exactly one selected item stack, without luck/cumulative rolls.
+    const auto flag=lot.Flag();lot.bytes.assign(148,0);Put(lot.bytes,0,contents.item);Put(lot.bytes,32,contents.category);
+    Put<std::uint16_t>(lot.bytes,64,1000);Put(lot.bytes,128,flag);Put<std::int32_t>(lot.bytes,132,-1);lot.bytes[138]=std::uint8_t(contents.count);
+}
+std::vector<std::int32_t> GameParams::UsedFlags(std::int32_t group) const {
+    if(group<0 || group>std::numeric_limits<std::int32_t>::max()-1000)throw std::runtime_error("Invalid pickup flag group");
+    const auto raw=UnpackAsset(source);std::set<std::int32_t> used;
+    for(std::size_t i=0;i+4<=raw.size();++i){const auto flag=Get<std::int32_t>(raw,i);if(flag>=group && flag<group+1000)used.insert(flag);}
+    return {used.begin(),used.end()};
+}
+std::vector<std::uint8_t> GameParams::SaveLots(const std::vector<ItemLot>& lots) const {
+    if(lots.empty())return source;
+    const auto* table=Table("ItemLotParam");if(!table)throw std::runtime_error("ItemLotParam is unavailable");
+    const auto& old=table->bytes;const auto start=Get<std::uint64_t>(old,48);const auto strings=Get<std::uint32_t>(old,0);
+    if(table->rows.size()+lots.size()>65535 || strings-start!=table->rows.size()*148)throw std::runtime_error("Unsupported item lot data layout");
+    struct Row {const ParamRow* old=nullptr;const ItemLot* lot=nullptr;};std::vector<Row> ordered;
+    std::set<std::int32_t> ids;for(const auto& r:table->rows){if(r.size!=148)throw std::runtime_error("Unsupported item lot row size");ordered.push_back({&r});ids.insert(r.id);}
+    for(const auto& lot:lots) {
+        if(lot.bytes.size()!=148 || !ids.insert(lot.id).second)throw std::runtime_error("Conflicting or invalid custom item lot");
+        auto pos=std::ranges::find_if(ordered,[&](const Row& r){return (r.old?r.old->id:r.lot->id)>lot.id;});ordered.insert(pos,{nullptr,&lot});
+    }
+    const auto padding=start-(64+table->rows.size()*24);const auto data_start=64+ordered.size()*24+padding;
+    std::vector<std::uint8_t> param(old.begin(),old.begin()+64);param.resize(data_start,0);
+    std::copy(old.begin()+64+table->rows.size()*24,old.begin()+start,param.begin()+64+ordered.size()*24);
+    Put<std::uint16_t>(param,10,ordered.size());Put<std::uint64_t>(param,48,data_start);
+    for(std::size_t i=0;i<ordered.size();++i) {
+        const auto& row=ordered[i];const auto at=64+i*24;
+        if(row.old){const auto index=std::size_t(row.old-table->rows.data());std::copy_n(old.begin()+64+index*24,24,param.begin()+at);}
+        else Put(param,at,row.lot->id);
+        Put<std::uint64_t>(param,at+8,param.size());const auto bytes=row.old?table->Data(*row.old):std::span<const std::uint8_t>(row.lot->bytes);
+        param.insert(param.end(),bytes.begin(),bytes.end());
+    }
+    const auto new_strings=param.size();Put<std::uint32_t>(param,0,new_strings);param.insert(param.end(),old.begin()+strings,old.end());
+    for(std::size_t i=0;i<ordered.size();++i) {
+        const auto& row=ordered[i];const auto at=64+i*24;
+        if(row.old){const auto name=Get<std::uint64_t>(old,64+std::size_t(row.old-table->rows.data())*24+16);Put<std::uint64_t>(param,at+16,name?new_strings+name-strings:0);}
+        else {Put<std::uint64_t>(param,at+16,param.size());const auto name="Editor item "+std::to_string(row.lot->id);for(unsigned char c:name){param.push_back(c);param.push_back(0);}param.push_back(0);param.push_back(0);}
+    }
+    auto binder=UnpackAsset(source);const auto files=ReadBinder(source);const auto entry=std::ranges::find_if(files,[](const auto& f){return Basename(f.name)=="ItemLotParam.param";});
+    if(entry==files.end())throw std::runtime_error("Item lot binder entry missing");
+    binder.resize((binder.size()+15)&~std::size_t(15),0);if(binder.size()+param.size()>256*1024*1024)throw std::runtime_error("Parameter binder exceeds limit");
+    Put<std::uint64_t>(binder,entry->header+8,param.size());Put<std::uint64_t>(binder,entry->header+16,param.size());Put<std::uint32_t>(binder,entry->header+24,binder.size());binder.insert(binder.end(),param.begin(),param.end());
+    std::vector<std::uint8_t> result;
+    if(source.size()>=4 && !std::memcmp(source.data(),"DCX\0",4)) {
+        result.assign(source.begin(),source.begin()+0x4c);mz_ulong size=mz_compressBound(binder.size());std::vector<std::uint8_t> compressed(size);
+        if(mz_compress2(compressed.data(),&size,binder.data(),binder.size(),9)!=MZ_OK)throw std::runtime_error("Parameter compression failed");
+        for(int i=0;i<4;++i){result[0x1c+i]=std::uint8_t(binder.size()>>(24-i*8));result[0x20+i]=std::uint8_t(size>>(24-i*8));}
+        result.insert(result.end(),compressed.begin(),compressed.begin()+size);
+    } else result=std::move(binder);
+    const auto verified=Read(result);const auto* saved=verified.Table("ItemLotParam");
+    if(!saved || saved->rows.size()!=table->rows.size()+lots.size())throw std::runtime_error("Parameter export verification failed");
+    for(const auto& lot:lots){const auto check=ReadItemLot(*saved,lot.id);if(check.bytes!=lot.bytes)throw std::runtime_error("Custom item lot verification failed");}
+    return result;
+}
 std::map<std::int32_t,std::string> GameParams::TalkScripts(const std::filesystem::path& game,const std::string& map) {
     if(!ValidMapName(map))throw std::runtime_error("Invalid talk map name");
     std::map<std::int32_t,std::string> result;const auto path=game/"dvdroot_ps4/script/talk"/(map.substr(0,6)+"_00_00.talkesdbnd.dcx");

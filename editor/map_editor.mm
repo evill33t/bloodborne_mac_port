@@ -26,7 +26,7 @@ struct Options {
     fs::path game,output,script;
     std::string map="m24_01_00_00",select,list_param;
     std::optional<BbMapArt::Vec3> translation;
-    bool batch=false,list=false,list_regions=false,list_routes=false,duplicate=false;
+    bool batch=false,list=false,list_regions=false,list_routes=false,list_treasures=false,duplicate=false;
 };
 Options options;
 int exit_code=0;
@@ -170,9 +170,11 @@ struct State {
     std::string selection_name;
     std::vector<std::string> maps,commands;
     std::size_t command=0;
-    int frames=0,selected=-1,selected_region=-1,active_route=-1;
+    int frames=0,selected=-1,selected_region=-1,active_route=-1,selected_treasure=-1;
     int region_key=-1,route_key=-1;
     bool region_selection=false;
+    bool treasure_selection=false;
+    std::string treasure_name;
     bool fitted=false;
     bool cutaway=false;
     bool show_objects=true,show_enemies=true;
@@ -182,6 +184,7 @@ struct State {
     BbMapView::Camera camera{0,0,0,4,.45f,.85f};
     Transform fields;
     EnemyData enemy_fields;
+    ItemContents item_fields;
     char filter[128]={};
     std::optional<Transform> drag;
     Transform drag_start;
@@ -193,8 +196,15 @@ struct State {
     fs::path capture;
     enum class Pending { None, Duplicate, Remove, Waypoint, Route, RemoveRoute } pending=Pending::None;
     std::vector<std::uint8_t> exported;
+    std::vector<ItemLot> exported_lots;
+    mutable std::uint64_t unsaved_version=UINT64_MAX;
+    mutable bool unsaved_cached=false;
     ~State() {stop.request_stop();if(loading.valid()) loading.wait();}
-    bool Unsaved() const {return scene && scene->document.Changed() && scene->document.Inflated()!=exported;}
+    bool Unsaved() const {
+        if(!scene)return false;const auto& doc=scene->document;
+        if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.Inflated()!=exported);unsaved_version=doc.Version();}
+        return unsaved_cached;
+    }
     bool Discard() {
         if(!Unsaved()) return true;
         auto alert=[NSAlert new];alert.messageText=@"Discard unexported map changes?";
@@ -206,7 +216,7 @@ struct State {
     }
     void Load() {
         if(loading.valid()) return;
-        scene.reset();selected=selected_region=active_route=-1;region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();error.clear();progress="Opening map...";
+        scene.reset();selected=selected_region=active_route=selected_treasure=-1;treasure_selection=false;treasure_name.clear();region_key=route_key=-1;selection_name.clear();fitted=false;cutaway=false;exported.clear();exported_lots.clear();unsaved_version=UINT64_MAX;error.clear();progress="Opening map...";
         const auto game=options.game;
         const auto map=options.map;
         loading=std::async(std::launch::async,[this,game,map] {
@@ -214,18 +224,29 @@ struct State {
         });
     }
     void Select(int index,bool focus) {
-        selected=index;selected_region=-1;drag.reset();drag_axis=-1;
+        selected=index;selected_region=selected_treasure=-1;treasure_selection=false;drag.reset();drag_axis=-1;
         if(!scene || index<0) return;
         const auto& object=scene->document.Parts().at(index);fields=object.transform;
         selection_name=object.name;region_selection=false;if(object.enemy)enemy_fields=*object.enemy;
         if(focus) {camera.x=fields.position[0];camera.y=fields.position[1]+1;camera.z=fields.position[2];camera.zoom=45;cutaway=true;ceiling=fields.position[1]+4;}
     }
     void SelectRegion(int index,bool focus) {
-        selected=-1;selected_region=index;drag.reset();drag_axis=-1;
+        selected=selected_treasure=-1;treasure_selection=false;selected_region=index;drag.reset();drag_axis=-1;
         if(!scene || index<0)return;
         const auto& region=scene->document.Regions().at(index);fields=region.transform;
         region_key=region.key;region_selection=true;show_regions=true;
         if(focus){camera.x=fields.position[0];camera.y=fields.position[1]+1;camera.z=fields.position[2];camera.zoom=45;cutaway=true;ceiling=fields.position[1]+4;}
+    }
+    std::optional<ItemLot> CurrentLot() const {
+        if(selected_treasure<0)return {};const auto& t=scene->document.Treasures()[selected_treasure];
+        const auto& lots=scene->document.ItemLots();const auto found=std::ranges::find(lots,t.data.lots[0],&ItemLot::id);if(found!=lots.end())return *found;
+        const auto* table=scene->params.Table("ItemLotParam");if(!table || !table->Find(t.data.lots[0]))return {};
+        try{return ReadItemLot(*table,t.data.lots[0]);}catch(const std::exception&){return {};}
+    }
+    void SelectTreasure(int index,bool focus) {
+        const auto& t=scene->document.Treasures().at(index);const auto& parts=scene->document.Parts();const auto part=std::ranges::find(parts,t.data.part.name,&Part::name);
+        Select(part==parts.end()?-1:int(part-parts.begin()),focus);selected_treasure=index;treasure_selection=true;treasure_name=t.name;
+        if(const auto lot=CurrentLot())item_fields=lot->First();else item_fields={};
     }
     const Transform* Current() const {
         if(!scene)return nullptr;
@@ -277,12 +298,14 @@ struct State {
         scene->document.SetEnemy(selected,data);enemy_fields=data;
     }
     void Duplicate() {
+        if(scene && selected_treasure>=0){const auto i=scene->document.DuplicateTreasure(selected_treasure);SelectTreasure(int(i),false);status="Created independent pickup. Move it and choose its contents.";return;}
         if(!scene || selected<0)return;
         const auto index=scene->document.Duplicate(selected);Select(int(index),false);
         status="Created "+scene->document.Parts()[index].name+". Move the copy to its new position.";
     }
     void Remove() {
         if(!scene)return;
+        if(selected_treasure>=0){scene->document.RemoveTreasure(selected_treasure);Select(-1,false);treasure_selection=true;status="Removed pickup. Undo restores its object, event and item lot.";return;}
         if(selected_region>=0)scene->document.RemoveRegion(selected_region);
         else if(selected>=0)scene->document.Remove(selected);else return;
         Select(-1,false);status="Removed copy. Undo restores it.";
@@ -291,7 +314,10 @@ struct State {
         if(!scene)return false;
         const auto name=selected<0?selection_name:scene->document.Parts()[selected].name;
         const bool changed=redo?scene->document.Redo():scene->document.Undo();
-        if(region_selection) {
+        if(treasure_selection) {
+            const auto& entries=scene->document.Treasures();const auto found=std::ranges::find(entries,treasure_name,&Treasure::name);
+            if(found!=entries.end())SelectTreasure(int(found-entries.begin()),false);else{Select(-1,false);treasure_selection=true;}
+        } else if(region_selection) {
             const auto& regions=scene->document.Regions();const auto found=std::ranges::find(regions,region_key,&Region::key);
             SelectRegion(found==regions.end()?-1:int(found-regions.begin()),false);
         } else {
@@ -306,7 +332,8 @@ struct State {
     void Export(const fs::path& folder) {
         if(!scene) return;
         auto path=scene->document.Export(fs::absolute(folder),options.map);
-        exported=scene->document.Inflated();status="Exported mod: "+folder.filename().string()+". Enable it in Mods & Cheats, then reload the area.";
+        exported=scene->document.Inflated();exported_lots=scene->document.ItemLots();unsaved_version=UINT64_MAX;
+        status="Exported mod: "+folder.filename().string()+". Enable it in Mods & Cheats, then reload the area.";
         std::printf("EXPORTED %s\n",path.c_str());
     }
     void ExportDialog() {
@@ -350,6 +377,17 @@ struct State {
                 const auto& entries=scene->document.Routes();const auto found=std::ranges::find(entries,name,&Route::name);
                 if(found==entries.end())throw std::runtime_error("Patrol not found: "+name);SelectRoute(int(found-entries.begin()),true);layer=4;
             }
+        } else if(verb=="treasure") {
+            std::string name;std::getline(line>>std::ws,name);const auto& list=scene->document.Treasures();const auto found=std::ranges::find(list,name,&Treasure::name);
+            if(found==list.end())throw std::runtime_error("Treasure not found: "+name);SelectTreasure(int(found-list.begin()),true);layer=6;
+        } else if(verb=="item" || verb=="assert-item") {
+            ItemContents contents;if(!(line>>contents.category>>contents.item>>contents.count) || selected_treasure<0)throw std::runtime_error("item needs a selected pickup and category ID count");
+            if(verb=="item"){scene->document.SetItemContents(selected_treasure,contents);item_fields=contents;}
+            else {const auto lot=CurrentLot();if(!lot || lot->First()!=contents)throw std::runtime_error("Unexpected pickup contents");}
+        } else if(verb=="assert-treasure-count") {
+            std::size_t n;if(!(line>>n) || n!=scene->document.Treasures().size())throw std::runtime_error("Unexpected treasure count");
+        } else if(verb=="assert-unsaved") {
+            int expected;if(!(line>>expected) || Unsaved()!=bool(expected))throw std::runtime_error("Unexpected export state");
         } else if(verb=="waypoint") {
             BbMapArt::Vec3 p;for(auto& f:p)if(!(line>>f))throw std::runtime_error("waypoint needs x y z");
             SelectRegion(int(scene->document.AddWaypoint(p)),true);layer=3;
@@ -502,7 +540,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             const auto enemies=std::ranges::count(objects,PartKind::Enemy,&Part::kind);
             ImGui::Text("%zu objects / %zu enemies",objects.size()-enemies,std::size_t(enemies));
             ImGui::Text("%zu regions / %zu patrols",scene.document.Regions().size(),scene.document.Routes().size());
-            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"Objects and characters\0Objects\0Enemies / NPCs\0Regions / waypoints\0Patrol routes\0NPCs with talk scripts\0");
+            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"Objects and characters\0Objects\0Enemies / NPCs\0Regions / waypoints\0Patrol routes\0NPCs with talk scripts\0Items / pickups\0");
             if(ImGui::Button("New waypoint"))s.pending=State::Pending::Waypoint;
             ImGui::SameLine();if(ImGui::Button("New patrol"))s.pending=State::Pending::Route;
             ImGui::InputTextWithHint("##filter","Filter by name or model",s.filter,sizeof(s.filter));
@@ -516,6 +554,10 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             if(s.layer==3)for(std::size_t i=0;i<scene.document.Regions().size();++i) {
                 const auto& r=scene.document.Regions()[i];if(s.filter[0] && r.name.find(s.filter)==std::string::npos)continue;
                 ImGui::PushID(int(i));if(ImGui::Selectable(r.name.c_str(),int(i)==s.selected_region))s.SelectRegion(int(i),true);ImGui::PopID();
+            }
+            if(s.layer==6)for(std::size_t i=0;i<scene.document.Treasures().size();++i) {
+                const auto& t=scene.document.Treasures()[i];if(s.filter[0] && t.name.find(s.filter)==std::string::npos && t.data.part.name.find(s.filter)==std::string::npos)continue;
+                ImGui::PushID(int(i));if(ImGui::Selectable(t.name.c_str(),int(i)==s.selected_treasure))s.SelectTreasure(int(i),true);ImGui::PopID();
             }
             if(s.layer==4)for(std::size_t i=0;i<scene.document.Routes().size();++i) {
                 const auto& r=scene.document.Routes()[i];if(s.filter[0] && r.name.find(s.filter)==std::string::npos)continue;
@@ -532,7 +574,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 if(o.kind==PartKind::Object) {ImGui::TextUnformatted("Scale");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##scale",s.fields.scale.data(),"%.3f");}
                 if(ImGui::Button("Apply transform")) s.Action([&]{scene.document.Set(s.selected,s.fields);});
                 ImGui::SameLine();if(ImGui::Button("Reset")) {scene.document.Set(s.selected,o.original);s.fields=o.original;}
-                if(ImGui::Button("Frame selected  F")) s.Select(s.selected,true);
+                if(ImGui::Button("Frame selected  F")) {if(s.selected_treasure>=0)s.SelectTreasure(s.selected_treasure,true);else s.Select(s.selected,true);}
                 if(o.enemy) {
                     const auto& e=*o.enemy;
                     ImGui::TextWrapped("Enemy proxy: capsule and facing arrow. Character models are not loaded.");
@@ -587,6 +629,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                         ImGui::TextWrapped("Open the assigned patrol to edit its points. Events can override routes or placement. Reload to test.");
                     }
                 } else {
+                    if(o.type==9)ImGui::TextWrapped("Dormant DummyObject. Duplicating it as a pickup creates an active Object copy.");
                     auto model=scene.models.find(o.model);
                     if(model==scene.models.end() || !model->second) ImGui::TextWrapped("Model unavailable. This object's placement can still be edited.");
                 }
@@ -599,7 +642,21 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 ImGui::SameLine();if(ImGui::Button("Reset"))s.Action([&]{s.SetTransform(r.original);});
                 if(r.added && ImGui::Button("Remove waypoint"))s.pending=State::Pending::Remove;
                 ImGui::TextWrapped("Marker shows the region origin. Existing volume dimensions are preserved.");
-            } else ImGui::TextWrapped("Select a placement, region or patrol in the list, or click its marker.");
+            } else ImGui::TextWrapped("Select a placement, pickup, region or patrol in the list, or click its marker.");
+            if(s.selected_treasure>=0) {
+                const auto& t=scene.document.Treasures()[s.selected_treasure];ImGui::Separator();ImGui::TextWrapped("Pickup: %s",t.name.c_str());
+                ImGui::TextWrapped("Object: %s",t.data.part.name.c_str());ImGui::Text("Item lots: %d / %d / %d",t.data.lots[0],t.data.lots[1],t.data.lots[2]);
+                if(const auto lot=s.CurrentLot())ImGui::Text("Collection flag: %d",lot->Flag());
+                if(ImGui::Button("Duplicate pickup  Cmd+D"))s.pending=State::Pending::Duplicate;
+                ImGui::BeginDisabled(!t.added);if(ImGui::Button("Remove pickup"))s.pending=State::Pending::Remove;ImGui::EndDisabled();
+                const char* categories[]={"Weapon","Armor","Consumable"};const int values[]={0,1,4};int category=s.item_fields.category==0?0:s.item_fields.category==1?1:s.item_fields.category==4?2:-1;
+                if(ImGui::Combo("Category",&category,categories,3))s.item_fields.category=values[category];
+                const char* table=s.item_fields.category==0?"EquipParamWeapon":s.item_fields.category==1?"EquipParamProtector":s.item_fields.category==4?"EquipParamGoods":"";
+                ParamChooser("Item",&s.item_fields.item,scene.params.Table(table));ImGui::InputInt("Count",&s.item_fields.count);
+                if(ImGui::Button("Apply item contents"))s.Action([&]{scene.document.SetItemContents(s.selected_treasure,s.item_fields);});
+                auto data=t.data;if(ImGui::Checkbox("Start disabled",&data.disabled))scene.document.SetTreasure(s.selected_treasure,data);
+                ImGui::TextWrapped("Apply gives one guaranteed stack. Existing pickup edits retain their collection flag; duplicated pickups get an independent flag. Export includes item parameters.");
+            }
             if(s.active_route>=0 && ImGui::CollapsingHeader("Active patrol",ImGuiTreeNodeFlags_DefaultOpen)) {
                 const auto& route=scene.document.Routes()[s.active_route];ImGui::TextWrapped("%s",route.name.c_str());
                 const char* labels[]={"Loop","Reverse route","Random point","Unknown (3)","Unknown (4)","Walk once","Wander between points"};
@@ -658,7 +715,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 s.camera.zoom=std::clamp(s.camera.zoom*std::pow(1.12f,io.MouseWheel),.05f,1000.f);
                 if(ImGui::IsMouseDragging(ImGuiMouseButton_Right)) {s.camera.yaw-=io.MouseDelta.x*.008f;s.camera.pitch=std::clamp(s.camera.pitch+io.MouseDelta.y*.008f,.08f,1.52f);}
                 if(ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {auto a=s.camera.Ground(0,0),b=s.camera.Ground(io.MouseDelta.x,io.MouseDelta.y);s.camera.x-=b[0]-a[0];s.camera.z-=b[1]-a[1];}
-                if(ImGui::IsKeyPressed(ImGuiKey_F)) {if(s.selected>=0)s.Select(s.selected,true);else if(s.selected_region>=0)s.SelectRegion(s.selected_region,true);}
+                if(ImGui::IsKeyPressed(ImGuiKey_F)) {if(s.selected_treasure>=0)s.SelectTreasure(s.selected_treasure,true);else if(s.selected>=0)s.Select(s.selected,true);else if(s.selected_region>=0)s.SelectRegion(s.selected_region,true);}
                 if(ImGui::IsMouseClicked(ImGuiMouseButton_Left)) pick=ImVec2(io.MousePos.x-top.x,io.MousePos.y-top.y);
             }
             if(s.show_regions && s.active_route>=0) {
@@ -716,7 +773,10 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 std::uint32_t id=0;
                 auto x=std::clamp(int(pick->x*io.DisplayFramebufferScale.x),0,int(_viewport->ids.width)-1),y=std::clamp(int(pick->y*io.DisplayFramebufferScale.y),0,int(_viewport->ids.height)-1);
                 [_viewport->ids getBytes:&id bytesPerRow:4 fromRegion:MTLRegionMake2D(x,y,1,1) mipmapLevel:0];
-                if(id&0x80000000u)s.SelectRegion(int((id&0x7fffffffu)-1),false);else s.Select(id?int(id)-1:-1,false);
+                if(id&0x80000000u)s.SelectRegion(int((id&0x7fffffffu)-1),false);else {
+                    s.Select(id?int(id)-1:-1,false);
+                    if(s.layer==6 && s.selected>=0){const auto& doc=s.scene->document;const auto& ts=doc.Treasures();const auto found=std::ranges::find(ts,doc.Parts()[s.selected].name,[](const auto& t){return t.data.part.name;});if(found!=ts.end())s.SelectTreasure(int(found-ts.begin()),false);}
+                }
             }
         }
     } catch(const std::exception& e) {
@@ -770,10 +830,11 @@ int main(int argc,char** argv) {
             else if(key=="--list")options.list=true;
             else if(key=="--list-regions")options.list_regions=true;
             else if(key=="--list-routes")options.list_routes=true;
+            else if(key=="--list-treasures")options.list_treasures=true;
             else if(key=="--list-param")options.list_param=value();
             else if(key=="--duplicate")options.duplicate=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
-            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes: inspect map records without opening the editor");return 0;}
+            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes / --list-treasures: inspect map records\n  --list-param NpcParam|NpcThinkParam|CharaInitParam|ItemLotParam|EquipParamGoods|TalkScripts");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
@@ -783,13 +844,14 @@ int main(int argc,char** argv) {
             if(!table)throw std::runtime_error("Unknown editor parameter table: "+options.list_param);
             for(const auto& row:table->rows)std::printf("%d\t%s\n",row.id,row.name.c_str());return 0;
         }
-        const bool inspect=options.list || options.list_regions || options.list_routes;
+        const bool inspect=options.list || options.list_regions || options.list_routes || options.list_treasures;
         if((options.translation || options.duplicate) && (!options.batch || inspect))throw std::runtime_error("Use --batch for command-line edits");
         if(options.batch || inspect) {
             auto doc=Document::Open(options.game/"dvdroot_ps4/map/MapStudio"/(options.map+".msb.dcx"));
             if(options.list) {for(const auto& o:doc.Parts()) std::printf("%s\t%s\t%.6f %.6f %.6f\t%s\t%d\n",o.name.c_str(),o.model.c_str(),o.transform.position[0],o.transform.position[1],o.transform.position[2],o.enemy?"enemy":"object",o.entity_id);return 0;}
             if(options.list_regions) {for(const auto& r:doc.Regions())std::printf("%s\t%.6f %.6f %.6f\t%u\t%d\n",r.name.c_str(),r.transform.position[0],r.transform.position[1],r.transform.position[2],r.shape,r.entity_id);return 0;}
             if(options.list_routes) {for(const auto& r:doc.Routes()){std::printf("%s\t%d\t%d",r.name.c_str(),r.key,r.data.type);for(const auto& p:r.data.points)if(p.index!=-1)std::printf("\t%s [%d]",p.name.c_str(),p.index);std::puts("");}return 0;}
+            if(options.list_treasures) {for(const auto& t:doc.Treasures())std::printf("%s\t%s\t%d %d %d\tchest=%d disabled=%d\n",t.name.c_str(),t.data.part.name.c_str(),t.data.lots[0],t.data.lots[1],t.data.lots[2],t.data.in_chest,t.data.disabled);return 0;}
             if(options.output.empty())throw std::runtime_error("--batch needs --export with a new mod folder");
             if(options.translation || options.duplicate) {
                 const auto& objects=doc.Parts();auto found=std::ranges::find(objects,options.select,&Part::name);

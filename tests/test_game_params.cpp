@@ -42,6 +42,21 @@ int main(int argc,char** argv){
         assert(ReadNpcInfo(*actual.Table("NpcParam"),263400)->hp==150);assert(ReadNpcInfo(*actual.Table("NpcParam"),263000)->hp==120);
         const auto talks=GameParams::TalkScripts(argv[1],"m24_01_00_01");assert(!talks.empty());std::cout<<"Central Yharnam talk scripts: "<<talks.size()<<"\n";
         auto npc=before;npc.npc_param=263400;npc.think_param=263400;npc.chara_init=-1;npc.talk_id=talks.begin()->first;ValidateCharacterReferences(before,npc,actual,talks);
+        const auto* item_table=actual.Table("ItemLotParam");auto lot=ReadItemLot(*item_table,2410360);assert(lot.Flag()==52410360);
+        lot.id=900000000;lot.SetFlag(52410900);actual.SetContents(lot,{4,1000,3});assert(lot.First()==ItemContents({4,1000,3}));
+        Reject([&]{actual.SetContents(lot,{4,1000,0});});Reject([&]{actual.SetContents(lot,{8,1000,1});});Reject([&]{actual.SetContents(lot,{4,2147483647,1});});
+        auto second=lot;second.id+=10;second.SetFlag(52410901);actual.SetContents(second,{4,1000,5});
+        const auto original=ReadFile(std::filesystem::path(argv[1])/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx");assert(actual.SaveLots({})==original);
+        const auto saved=actual.SaveLots({lot,second});const auto reopened=GameParams::Read(saved);const auto& rows=reopened.Table("ItemLotParam")->rows;
+        assert(rows.size()==item_table->rows.size()+2);std::size_t next=0;
+        for(const auto& row:rows) {
+            if(row.id==lot.id || row.id==second.id)continue;const auto& old=item_table->rows[next++];assert(row.id==old.id && row.name==old.name);
+            assert(std::ranges::equal(reopened.Table("ItemLotParam")->Data(row),item_table->Data(old)));
+        }
+        assert(next==item_table->rows.size());const auto old_files=ReadBinder(original),new_files=ReadBinder(saved);assert(old_files.size()==new_files.size());
+        for(std::size_t i=0;i<old_files.size();++i)if(old_files[i].name.find("ItemLotParam.param")==std::string::npos)assert(old_files[i].bytes==new_files[i].bytes && old_files[i].name==new_files[i].name && old_files[i].id==new_files[i].id);
+        auto bad_lot=lot;bad_lot.id=2410360;Reject([&]{actual.SaveLots({bad_lot});});
+        std::cout<<"PASS: custom item lots, exact stacks, independent flags, all original row payloads and other binder entries preserved\n";
     }
     std::cout<<"PASS: native binder/PARAM lookup, Unicode names, bounded parsing, missing row and ESD validation\n";
 }

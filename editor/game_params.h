@@ -34,6 +34,21 @@ struct ParamTable {
 };
 struct NpcInfo {std::uint32_t hp=0;std::uint8_t type=0,team=0;};
 std::optional<NpcInfo> ReadNpcInfo(const ParamTable& table,std::int32_t id);
+struct ItemContents {
+    std::int32_t category=4,item=0;
+    int count=1;
+    bool operator==(const ItemContents&) const = default;
+};
+struct ItemLot {
+    std::int32_t id=0,source_id=0;
+    std::string name;
+    std::vector<std::uint8_t> bytes;
+    std::int32_t Flag() const;
+    void SetFlag(std::int32_t flag);
+    ItemContents First() const;
+    bool operator==(const ItemLot&) const = default;
+};
+ItemLot ReadItemLot(const ParamTable& table,std::int32_t id);
 class GameParams {
 public:
     static GameParams Read(std::span<const std::uint8_t> binder);
@@ -42,8 +57,12 @@ public:
     const std::map<std::string,ParamTable>& Tables() const {return tables;}
     // TalkID references an ESD in the area's talk binder, not a TalkParam row.
     static std::map<std::int32_t,std::string> TalkScripts(const std::filesystem::path& game,const std::string& map);
+    void SetContents(ItemLot& lot,const ItemContents& contents) const;
+    std::vector<std::uint8_t> SaveLots(const std::vector<ItemLot>& lots) const;
+    std::vector<std::int32_t> UsedFlags(std::int32_t group) const;
 private:
     std::map<std::string,ParamTable> tables;
+    std::vector<std::uint8_t> source;
 };
 struct EnemyData;
 void ValidateCharacterReferences(const EnemyData& before,const EnemyData& after,const GameParams& params,

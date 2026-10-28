@@ -244,7 +244,9 @@ int main(int argc,char** argv) {
     assert(ReadFile(area/"m24_01_00_00.msb.dcx")==sibling.Save());
     std::filesystem::remove_all(area);
     Transform t;t.position={10,20,30};t.rotation={0,90,0};const float p[3]={1,0,0};auto q=WorldPoint(t,p);assert(std::abs(q[0]-10)<1e-5 && std::abs(q[2]-29)<1e-5);
-    for(int i=1;i<argc;++i) {auto real=ReadFile(argv[i]);auto map=Document::Read(real);assert(map.Save()==real);auto before=map.Inflated();
+    std::shared_ptr<const GameParams> params;
+    if(argc>1)params=std::make_shared<const GameParams>(GameParams::Open(std::filesystem::path(argv[1]).parent_path().parent_path().parent_path().parent_path()));
+    for(int i=1;i<argc;++i) {auto real=ReadFile(argv[i]);auto map=Document::Read(real);map.AttachParameters(params);assert(map.Save()==real);auto before=map.Inflated();
         bool object=false,enemy=false,dummy_enemy=false;
         for(std::size_t n=0;n<map.Parts().size();++n) {
             const auto& p=map.Parts()[n];bool& tested=p.enemy?(p.enemy->dummy?dummy_enemy:enemy):object;if(tested)continue;tested=true;
@@ -283,6 +285,27 @@ int main(int argc,char** argv) {
         if(character_index<count)assert(std::ranges::find(with_patrol.Parts(),map.Parts()[copy].name,&Part::name)->enemy->patrol.name==map.Routes()[r].name);
         PreservedRecords(before,with_patrol.Inflated(),character_index<count?1:0,2,1);
         while(map.Undo()){}assert(!map.Changed() && map.Save()==real);
+        const auto treasure_count=map.Treasures().size();
+        for(std::size_t item=0;item<treasure_count;++item) {
+            const auto t=map.Treasures()[item];const auto* table=params->Table("ItemLotParam");
+            if(t.data.in_chest || t.data.lots[1]!=-1 || t.data.lots[2]!=-1 || !table->Find(t.data.lots[0]))continue;
+            if(ReadItemLot(*table,t.data.lots[0]).Flag()<=0)continue;
+            const auto part=std::ranges::find(map.Parts(),t.data.part.name,&Part::name);if(part==map.Parts().end() || part->kind!=PartKind::Object)continue;
+            const auto copy=map.DuplicateTreasure(item);assert(map.Treasures().size()==treasure_count+1 && map.Parts().size()==count+1 && map.ItemLots().size()==1);
+            assert(map.ItemLots()[0].Flag()!=ReadItemLot(*table,t.data.lots[0]).Flag());map.SetItemContents(copy,{4,1000,3});
+            auto reopened=Document::Read(map.Save());assert(reopened.Treasures().size()==treasure_count+1);
+            assert(reopened.Treasures().back().data.part.name==map.Treasures()[copy].data.part.name);PreservedRecords(before,reopened.Inflated(),1,0,1);
+            const auto support=std::ranges::find(map.Parts(),map.Treasures()[copy].data.part.name,&Part::name);
+            assert(support->type==1); // dormant object templates become active pickup copies
+            Reject([&]{map.Remove(std::size_t(support-map.Parts().begin()));});
+            const auto second=map.DuplicateTreasure(copy);assert(map.ItemLots().size()==2 && map.ItemLots()[0].id!=map.ItemLots()[1].id && map.ItemLots()[0].Flag()!=map.ItemLots()[1].Flag());
+            map.RemoveTreasure(second);assert(map.Undo());assert(map.Undo());assert(map.ItemLots().size()==1);
+            map.RemoveTreasure(copy);assert(map.ItemLots().empty() && map.Parts().size()==count && map.Save()==real);
+            assert(map.Undo());assert(map.Treasures().size()==treasure_count+1 && map.ItemLots().size()==1);
+            assert(map.Undo());assert(map.Undo());assert(!map.Changed() && map.Save()==real); // content edit, then grouped creation
+            assert(map.Redo());assert(map.Treasures().size()==treasure_count+1 && map.Parts().size()==count+1 && map.ItemLots().size()==1);
+            while(map.Undo()){}assert(map.Save()==real);break;
+        }
         std::cout<<"Real map round-trip: "<<argv[i]<<" ("<<map.Parts().size()<<" placements; Enemy/DummyEnemy checked: "<<enemy<<"/"<<dummy_enemy<<")\n";
     }
     std::cout<<"PASS: unchanged bytes, prop/enemy duplication, region transforms, new waypoints/patrols, character settings, preserved references, identifier allocation, DCX, undo/remove/redo, malformed files, exclusive exports\n";

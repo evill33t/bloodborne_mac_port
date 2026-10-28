@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// MSBB layout checked against Smithbox/SoulsFormats MSBB/PartsParam.cs (MIT):
+// MSBB layout checked against Smithbox/SoulsFormats MSBB Parts/Point/EventParam (MIT):
 // https://github.com/vawser/Smithbox/blob/main/src/Andre/SoulsFormats/SoulsFormats/Formats/MSB/MSBB/PartsParam.cs
 #include "map_document.h"
 #include "miniz.h"
@@ -211,10 +211,22 @@ Document Document::Read(std::span<const std::uint8_t> file) {
         for(int i=0;i<32;++i)r.original.points[i]=ref(Get<std::int16_t>(b,data+16+i*2),lists.at("POINT_PARAM_ST"));
         r.data=r.original;d.routes.push_back(std::move(r));
     }
+    for(auto p:lists.at("EVENT_PARAM_ST"))if(Get<std::uint32_t>(b,p+12)==4) {
+        Treasure t;t.record=p;t.name=Name(b.first(end_of(p)),Offset(b,p,p));t.event_id=Get<std::int32_t>(b,p+8);
+        const auto data=Offset(b,p+0x20,p);if(data<p+0x28 || data>end_of(p) || end_of(p)-data<80)throw std::runtime_error("Invalid treasure data offset");
+        if(Get<std::int64_t>(b,p+0x18))t.entity_id=Get<std::int32_t>(b,Offset(b,p+0x18,p)+8);
+        t.data.part.index=Get<std::int32_t>(b,data+8);
+        if(t.data.part.index>=0 && std::size_t(t.data.part.index)<all_parts.size()) {
+            const auto part=all_parts[t.data.part.index];t.data.part.name=Name(b.first(end_of(part)),Offset(b,part+8,part));
+        }
+        for(int i=0;i<3;++i)t.data.lots[i]=Get<std::int32_t>(b,data+0x10+i*4);
+        t.data.action_button=Get<std::int32_t>(b,data+0x38);t.data.in_chest=Get<std::uint8_t>(b,data+0x40)!=0;t.data.disabled=Get<std::uint8_t>(b,data+0x41)!=0;
+        t.original=t.data;d.treasures.push_back(std::move(t));
+    }
     std::set<std::string> names;
     for(auto p:all_parts) {
         auto type=Get<std::uint32_t>(b,p+0x14);
-        if(type!=1 && type!=2 && type!=10) continue; // Existing Object, Enemy and DummyEnemy placements.
+        if(type!=1 && type!=2 && type!=9 && type!=10) continue; // Object/Enemy and their dormant variants.
         if(p>b.size() || b.size()-p<0xd0) throw std::runtime_error("Truncated object header");
         const auto end=end_of(p);
         if(end-p<0xd0) throw std::runtime_error("Overlapping object records");
@@ -224,7 +236,7 @@ Document Document::Read(std::span<const std::uint8_t> file) {
         auto model=Get<std::int32_t>(b,p+0x1c);
         if(model<0 || std::size_t(model)>=models.size() || !names.insert(name).second)
             throw std::runtime_error("Invalid or duplicate object reference");
-        Part o;o.name=name;o.model=models[model];o.record=p;
+        Part o;o.name=name;o.model=models[model];o.record=p;o.type=type;
         o.instance_id=Get<std::int32_t>(b,p+0x10);o.type_id=Get<std::int32_t>(b,p+0x18);
         if(Get<std::int64_t>(b,p+0xb0))o.entity_id=Get<std::int32_t>(b,local(p,0xb0,16));
         o.original.position=Get<BbMapArt::Vec3>(b,p+0x28);
@@ -279,6 +291,7 @@ void Document::ReserveIdentifiers() {
             entity(0xb0,0);
         } else if(s.name=="EVENT_PARAM_ST") {
             if(Get<std::uint32_t>(b,p+12)==14)reserved_route_names.insert(Name(b,Offset(b,p,p)));
+            reserved_treasure_names.insert(Name(b,Offset(b,p,p)));
             entity(0x18,8);
         } else if(s.name=="POINT_PARAM_ST") {reserved_region_names.insert(Name(b,Offset(b,p,p)));entity(0x48,0);}
     }
@@ -299,6 +312,7 @@ void Document::ReserveSiblings() {
             reserved_entities.insert(sibling.reserved_entities.begin(),sibling.reserved_entities.end());
             reserved_region_names.insert(sibling.reserved_region_names.begin(),sibling.reserved_region_names.end());
             reserved_route_names.insert(sibling.reserved_route_names.begin(),sibling.reserved_route_names.end());
+            reserved_treasure_names.insert(sibling.reserved_treasure_names.begin(),sibling.reserved_treasure_names.end());
             for(const auto& [model,ids]:sibling.reserved_instances)reserved_instances[model].insert(ids.begin(),ids.end());
         }
     }
@@ -307,7 +321,8 @@ void Document::ReserveSiblings() {
 bool Document::Changed() const {
     return std::ranges::any_of(parts,[](const Part& o){return o.added || o.transform!=o.original || o.enemy!=o.original_enemy;}) ||
         std::ranges::any_of(regions,[](const Region& r){return r.added || r.transform!=r.original;}) ||
-        std::ranges::any_of(routes,[](const Route& r){return r.added || r.data!=r.original;});
+        std::ranges::any_of(routes,[](const Route& r){return r.added || r.data!=r.original;}) ||
+        std::ranges::any_of(treasures,[](const Treasure& t){return t.added || t.data!=t.original;}) || !item_lots.empty();
 }
 bool Document::Set(std::size_t i,const Transform& t) {
     Check(t);auto& o=parts.at(i);
@@ -370,12 +385,96 @@ std::size_t Document::AddWaypoint(const BbMapArt::Vec3& position) {
 std::size_t Document::AddRoute() {
     if(routes.size()>=32767)throw std::runtime_error("Patrol route index limit reached");
     Route r;r.entity_id=NewEntityID();r.name=FreshName("Patrol_",reserved_route_names);reserved_route_names.insert(r.name);
+    r.event_id=NewEventID();r.key=next_route_key++;r.added=true;const auto index=routes.size();
+    history.resize(cursor);history.push_back({index,std::nullopt,r});++cursor;routes.push_back(r);return index;
+}
+std::int32_t Document::NewEventID() const {
     std::int32_t last=-1;
     for(const auto& s:sections)if(s.name=="EVENT_PARAM_ST")for(auto p:s.entries)last=std::max(last,Get<std::int32_t>(raw,p+8));
     for(const auto& route:routes)last=std::max(last,route.event_id);
+    for(const auto& treasure:treasures)last=std::max(last,treasure.event_id);
     if(last==std::numeric_limits<std::int32_t>::max())throw std::runtime_error("No free event identifier");
-    r.event_id=last+1;r.key=next_route_key++;r.added=true;const auto index=routes.size();
-    history.resize(cursor);history.push_back({index,std::nullopt,r});++cursor;routes.push_back(r);return index;
+    return last+1;
+}
+ItemLot Document::NewLot(std::int32_t source_id,bool independent) {
+    if(!parameters || !parameters->Table("ItemLotParam"))throw std::runtime_error("Load the game's item parameters first");
+    const auto& table=*parameters->Table("ItemLotParam");const auto current=std::ranges::find(item_lots,source_id,&ItemLot::id);
+    auto lot=current==item_lots.end()?ReadItemLot(table,source_id):*current;
+    for(lot.id=900000000;lot.id<1000000000;lot.id+=10)if(!table.Find(lot.id) && !reserved_lot_ids.contains(lot.id))break;
+    if(lot.id>=1000000000)throw std::runtime_error("Custom item lot range is full");
+    if(independent) {
+        const auto original=lot.Flag();if(original<=0)throw std::runtime_error("Choose a pickup with a persistent collection flag");
+        const auto group=original/1000*1000;
+        if(!reserved_pickup_flags.contains(group)) {
+            const auto used=parameters->UsedFlags(group);std::set<std::int32_t> flags(used.begin(),used.end());
+            auto reserve=[&](std::span<const std::uint8_t> bytes){for(std::size_t at=0;at+4<=bytes.size();++at){const auto value=Get<std::int32_t>(bytes,at);if(value>=group && value<group+1000)flags.insert(value);}};
+            if(!source_game.empty()) {
+                for(const auto& relative:{"event","script/talk"}) {
+                    const auto folder=source_game/"dvdroot_ps4"/relative;if(!std::filesystem::exists(folder))continue;
+                    for(const auto& f:std::filesystem::directory_iterator(folder))if(f.is_regular_file() && f.path().extension()==".dcx")reserve(UnpackAsset(ReadFile(f.path())));
+                }
+            }
+            reserved_pickup_flags.emplace(group,std::move(flags));
+        }
+        auto& flags=reserved_pickup_flags[group];auto flag=group+900;while(flag<group+1000 && flags.contains(flag))++flag;
+        if(flag>=group+1000)throw std::runtime_error("No unused pickup flag in this pickup's retail flag group");
+        // Per-slot flags must also be independent. Zero means inherit the common flag.
+        for(int n=0;n<8;++n)Put<std::int32_t>(lot.bytes,96+n*4,0);
+        lot.SetFlag(flag);flags.insert(flag);
+    }
+    reserved_lot_ids.insert(lot.id);lot.name="Editor item "+std::to_string(lot.id);return lot;
+}
+bool Document::SetTreasure(std::size_t i,const TreasureData& value) {
+    auto& t=treasures.at(i);auto data=value;
+    if(data.part!=t.data.part) {
+        const auto found=std::ranges::find(parts,data.part.name,&Part::name);
+        if(found==parts.end() || found->kind!=PartKind::Object)throw std::runtime_error("Treasure must reference an object in this map");
+    }
+    for(int n=0;n<3;++n)if(data.lots[n]!=t.data.lots[n] && data.lots[n]!=-1) {
+        if(std::ranges::find(item_lots,data.lots[n],&ItemLot::id)!=item_lots.end())continue;
+        if(!parameters || !parameters->Table("ItemLotParam") || !parameters->Table("ItemLotParam")->Find(data.lots[n]))throw std::runtime_error("Item lot not found");
+    }
+    if(data==t.data)return false;auto after=t;after.data=data;
+    history.resize(cursor);history.push_back({i,t,after});++cursor;t=std::move(after);return true;
+}
+bool Document::SetItemContents(std::size_t i,const ItemContents& contents) {
+    if(!parameters)throw std::runtime_error("Item parameter lookup is unavailable");
+    const auto first=cursor;const auto& t=treasures.at(i);
+    const auto found=std::ranges::find(item_lots,t.data.lots[0],&ItemLot::id);
+    if(found!=item_lots.end()) {
+        const auto index=std::size_t(found-item_lots.begin());auto after=*found;parameters->SetContents(after,contents);if(after==*found)return false;
+        history.resize(cursor);history.push_back({index,*found,after});++cursor;*found=std::move(after);return true;
+    }
+    auto lot=NewLot(t.data.lots[0],false);parameters->SetContents(lot,contents);auto data=t.data;data.lots={lot.id,-1,-1};
+    history.resize(cursor);history.push_back({item_lots.size(),std::nullopt,lot});++cursor;item_lots.push_back(lot);
+    SetTreasure(i,data);Group(first);return true;
+}
+std::size_t Document::DuplicateTreasure(std::size_t i) {
+    Treasure copy=treasures.at(i);
+    if(copy.data.in_chest || copy.data.lots[1]!=-1 || copy.data.lots[2]!=-1)throw std::runtime_error("Choose a ground pickup with one item lot");
+    const auto part=std::ranges::find(parts,copy.data.part.name,&Part::name);
+    if(part==parts.end() || part->kind!=PartKind::Object)throw std::runtime_error("Pickup's supporting object is unavailable");
+    const auto part_index=std::size_t(part-parts.begin());auto lot=NewLot(copy.data.lots[0],true);
+    copy.event_id=NewEventID();copy.name=FreshName("Treasure_",reserved_treasure_names);copy.entity_id=NewEntityID();copy.added=true;
+    const auto first=cursor;
+    try {
+        const auto new_part=Duplicate(part_index,true);copy.data.part={-1,parts[new_part].name};copy.data.lots={lot.id,-1,-1};copy.data.disabled=false;copy.original=copy.data;
+        history.resize(cursor);history.push_back({item_lots.size(),std::nullopt,lot});++cursor;item_lots.push_back(lot);
+        const auto index=treasures.size();history.push_back({index,std::nullopt,copy});++cursor;treasures.push_back(copy);
+        reserved_treasure_names.insert(copy.name);Group(first);return index;
+    }catch(...){while(cursor>first)Undo();history.resize(cursor);throw;}
+}
+bool Document::RemoveTreasure(std::size_t i) {
+    const auto t=treasures.at(i);if(!t.added)throw std::runtime_error("Only newly created pickups can be removed");
+    const auto first=cursor;history.resize(cursor);history.push_back({i,t,std::nullopt});++cursor;treasures.erase(treasures.begin()+std::ptrdiff_t(i));
+    const auto part=std::ranges::find(parts,t.data.part.name,&Part::name);
+    if(part!=parts.end() && part->added && std::ranges::none_of(treasures,[&](const auto& other){return other.data.part.name==part->name;}))Remove(std::size_t(part-parts.begin()));
+    for(const auto id:t.data.lots) {
+        const auto lot=std::ranges::find(item_lots,id,&ItemLot::id);if(lot==item_lots.end())continue;
+        if(std::ranges::any_of(treasures,[&](const auto& other){return std::ranges::find(other.data.lots,id)!=other.data.lots.end();}))continue;
+        const auto index=std::size_t(lot-item_lots.begin());history.push_back({index,*lot,std::nullopt});++cursor;item_lots.erase(lot);
+    }
+    Group(first);return true;
 }
 bool Document::RemoveRegion(std::size_t i) {
     const auto& region=regions.at(i);if(!region.added)throw std::runtime_error("Only new waypoints can be removed");
@@ -402,8 +501,9 @@ std::int32_t Document::NewEntityID(std::int32_t source_id) {
     if(allocated>=first+1000)throw std::runtime_error("The area's 9000-9999 entity identifier range is full");
     reserved_entities.insert(allocated);return allocated;
 }
-std::size_t Document::Duplicate(std::size_t i) {
+std::size_t Document::Duplicate(std::size_t i,bool activate_object) {
     Part copy=parts.at(i);ReserveSiblings();
+    if(activate_object && copy.type==9)copy.type=1;
     const char prefix=copy.kind==PartKind::Enemy?'c':'o';
     if(copy.model.size()<2 || copy.model[0]!=prefix || copy.model.find_first_not_of("0123456789",1)!=std::string::npos)
         throw std::runtime_error("Cannot duplicate this model identifier");
@@ -419,7 +519,7 @@ std::size_t Document::Duplicate(std::size_t i) {
         return used.empty()?0:std::max(0,*used.rbegin()+1);
     };
     copy.instance_id=next(reserved_instances[copy.model]);
-    const auto type=Get<std::uint32_t>(raw,copy.record+0x14);
+    const auto type=copy.type;
     copy.type_id=next(reserved_types[type]);
     copy.entity_id=NewEntityID(copy.entity_id);
     // Fail before creating a copy when the source cannot be relocated as one record.
@@ -436,6 +536,7 @@ std::size_t Document::Duplicate(std::size_t i) {
 }
 bool Document::Remove(std::size_t i) {
     if(!parts.at(i).added)throw std::runtime_error("Only copies created in this session can be removed");
+    for(const auto& t:treasures)if(t.data.part.name==parts[i].name)throw std::runtime_error("Remove the attached treasure before its part");
     history.resize(cursor);history.push_back({i,parts[i],std::nullopt});++cursor;
     parts.erase(parts.begin()+std::ptrdiff_t(i));return true;
 }
@@ -443,16 +544,31 @@ void Document::Apply(const Edit& e,bool forward) {
     const auto& from=forward?e.before:e.after;const auto& to=forward?e.after:e.before;
     std::visit([&](const auto& entry){
         using T=std::decay_t<decltype(entry)>;
-        auto& list=[&]() -> auto& {if constexpr(std::is_same_v<T,Part>)return parts;else if constexpr(std::is_same_v<T,Region>)return regions;else return routes;}();
+        auto& list=[&]() -> auto& {if constexpr(std::is_same_v<T,Part>)return parts;else if constexpr(std::is_same_v<T,Region>)return regions;else if constexpr(std::is_same_v<T,Route>)return routes;else if constexpr(std::is_same_v<T,Treasure>)return treasures;else return item_lots;}();
         if(from && to)list.at(e.index)=std::get<T>(*to);
         else if(to)list.insert(list.begin()+std::ptrdiff_t(e.index),std::get<T>(*to));
         else list.erase(list.begin()+std::ptrdiff_t(e.index));
     },from?*from:*to);
 }
-bool Document::Undo() {if(!cursor)return false;Apply(history[--cursor],false);return true;}
-bool Document::Redo() {if(cursor==history.size())return false;Apply(history[cursor++],true);return true;}
+void Document::Group(std::size_t first) {const auto group=++next_group;for(auto i=first;i<cursor;++i)history[i].group=group;}
+bool Document::Undo() {
+    if(!cursor)return false;const auto group=history[cursor-1].group;
+    do{Apply(history[--cursor],false);}while(group && cursor && history[cursor-1].group==group);return true;
+}
+bool Document::Redo() {
+    if(cursor==history.size())return false;const auto group=history[cursor].group;
+    do{Apply(history[cursor++],true);}while(group && cursor<history.size() && history[cursor].group==group);return true;
+}
 std::vector<std::uint8_t> Document::Inflated() const {
     auto b=raw;
+    const auto structural=std::ranges::any_of(parts,&Part::added) || std::ranges::any_of(regions,&Region::added) ||
+        std::ranges::any_of(routes,&Route::added) || std::ranges::any_of(treasures,&Treasure::added);
+    const auto& table=*std::ranges::find(sections,std::string("PARTS_PARAM_ST"),&Section::name);
+    struct FullPart {std::uint32_t type;std::string name;};std::vector<FullPart> full_parts;
+    for(const auto p:table.entries)full_parts.push_back({Get<std::uint32_t>(raw,p+0x14),Name(raw,Offset(raw,p+8,p))});
+    for(const auto& p:parts)if(p.added)full_parts.push_back({p.type,p.name});
+    if(structural)std::stable_sort(full_parts.begin(),full_parts.end(),[](const auto& a,const auto& b){return a.type<b.type;});
+    std::map<std::string,int> part_indices;for(std::size_t i=0;i<full_parts.size();++i)part_indices[full_parts[i].name]=int(i);
     std::map<int,int> region_indices,route_indices;
     for(std::size_t n=0;n<regions.size();++n)region_indices[regions[n].key]=int(n);
     for(std::size_t n=0;n<routes.size();++n)route_indices[routes[n].key]=int(n);
@@ -474,21 +590,29 @@ std::vector<std::uint8_t> Document::Inflated() const {
         const auto data=p+Get<std::int64_t>(bytes,p+0x20);Put(bytes,data,r.data.type);
         for(int n=0;n<32;++n)Put<std::int16_t>(bytes,data+16+n*2,index(r.data.points[n],region_indices));
     };
+    auto patch_treasure=[&](auto& bytes,std::size_t p,const Treasure& t) {
+        const auto data=p+Get<std::int64_t>(bytes,p+0x20);
+        const auto found=part_indices.find(t.data.part.name);
+        if(found!=part_indices.end())Put<std::int32_t>(bytes,data+8,found->second);
+        else if(structural && t.data.part.index!=-1)throw std::runtime_error("Treasure part reference is unresolved");
+        for(int n=0;n<3;++n)Put(bytes,data+0x10+n*4,t.data.lots[n]);
+        Put(bytes,data+0x38,t.data.action_button);Put<std::uint8_t>(bytes,data+0x40,t.data.in_chest);Put<std::uint8_t>(bytes,data+0x41,t.data.disabled);
+    };
     for(const auto& o:parts)if(!o.added)patch_part(b,o.record,o);
     for(const auto& r:regions)if(!r.added){Put(b,r.record+0x14,r.transform.position);Put(b,r.record+0x20,r.transform.rotation);}
     for(const auto& r:routes)if(!r.added)patch_route(b,r.record,r);
+    for(const auto& t:treasures)if(!t.added)patch_treasure(b,t.record,t);
     const auto count=std::ranges::count(parts,true,&Part::added);
-    if(!count && !std::ranges::any_of(regions,&Region::added) && !std::ranges::any_of(routes,&Route::added))return b;
-    const auto& table=*std::ranges::find(sections,std::string("PARTS_PARAM_ST"),&Section::name);
+    if(!structural)return b;
     if(table.entries.size()+count>=100000)throw std::runtime_error("Too many map placements");
-    struct Record { std::size_t source; const Part* copy=nullptr; const Region* region=nullptr; const Route* route=nullptr; };
+    struct Record { std::size_t source; const Part* copy=nullptr; const Region* region=nullptr; const Route* route=nullptr; const Treasure* treasure=nullptr; };
     std::vector<Record> ordered;
     for(auto p:table.entries)ordered.push_back({p});
     for(const auto& o:parts)if(o.added)ordered.push_back({o.record,&o});
     // Retail loading needs contiguous part type groups. Keep each original group's
     // order, append its copies, and remap all full-part indices to their new targets.
     std::stable_sort(ordered.begin(),ordered.end(),[&](const auto& a,const auto& b){
-        return Get<std::uint32_t>(raw,a.source+0x14)<Get<std::uint32_t>(raw,b.source+0x14);
+        return (a.copy?a.copy->type:Get<std::uint32_t>(raw,a.source+0x14))<(b.copy?b.copy->type:Get<std::uint32_t>(raw,b.source+0x14));
     });
     std::map<std::size_t,std::int32_t> new_indices;
     std::map<int,int> added_models;
@@ -514,6 +638,8 @@ std::vector<std::uint8_t> Document::Inflated() const {
     };
     std::vector<std::uint8_t> result(raw.begin(),raw.begin()+16);
     std::size_t previous_next=0;
+    std::int64_t next_treasure_id=0;
+    for(const auto& section:sections)if(section.name=="EVENT_PARAM_ST")for(const auto p:section.entries)if(Get<std::uint32_t>(raw,p+12)==4)next_treasure_id=std::max(next_treasure_id,std::int64_t(Get<std::int32_t>(raw,p+16))+1);
     for(const auto& s:sections) {
         if(s.name!="PARTS_PARAM_ST" && s.name!="MODEL_PARAM_ST" && s.name!="EVENT_PARAM_ST" && s.name!="POINT_PARAM_ST")
             throw std::runtime_error("Cannot duplicate maps with an unknown section");
@@ -523,8 +649,9 @@ std::vector<std::uint8_t> Document::Inflated() const {
         if(s.name=="POINT_PARAM_ST")for(const auto& r:regions)if(r.added)records.push_back({0,nullptr,&r});
         if(s.name=="EVENT_PARAM_ST") {
             for(const auto& r:routes)if(r.added)records.push_back({0,nullptr,nullptr,&r});
+            for(const auto& t:treasures)if(t.added)records.push_back({t.record,nullptr,nullptr,nullptr,&t});
             std::stable_sort(records.begin(),records.end(),[&](const auto& a,const auto& b){
-                return (a.route?14:Get<std::uint32_t>(raw,a.source+12))<(b.route?14:Get<std::uint32_t>(raw,b.source+12));
+                return (a.route?14:a.treasure?4:Get<std::uint32_t>(raw,a.source+12))<(b.route?14:b.treasure?4:Get<std::uint32_t>(raw,b.source+12));
             });
         }
         const auto at=result.size();if(previous_next)Put<std::int64_t>(result,previous_next,at);
@@ -538,11 +665,16 @@ std::vector<std::uint8_t> Document::Inflated() const {
             std::vector<std::uint8_t> data;
             if(record.region)data=PointRecord(*record.region,int(n));
             else if(record.route){data=PatrolRecord(*record.route,route_indices.at(record.route->key));patch_route(data,0,*record.route);}
-            else {const auto& bytes=record.copy?raw:b;data.assign(bytes.begin()+std::ptrdiff_t(p),bytes.begin()+std::ptrdiff_t(record_ends.at(p)));}
+            else {const auto& bytes=record.copy || record.treasure?raw:b;data.assign(bytes.begin()+std::ptrdiff_t(p),bytes.begin()+std::ptrdiff_t(record_ends.at(p)));}
+            if(record.treasure) {
+                const auto& t=*record.treasure;Put<std::int64_t>(data,0,data.size());AppendName(data,t.name);Put(data,8,t.event_id);
+                if(next_treasure_id>std::numeric_limits<std::int32_t>::max())throw std::runtime_error("Treasure type identifier limit reached");
+                Put<std::int32_t>(data,16,next_treasure_id++);Put(data,local(data,0x18,12)+8,t.entity_id);patch_treasure(data,0,t);
+            }
             if(record.copy) {
                 const auto& o=*record.copy;Put<std::int64_t>(data,8,data.size());
                 AppendName(data,o.name);Put(data,0x10,o.instance_id);
-                const auto type=Get<std::uint32_t>(data,0x14);const auto type_id=next_type_ids[type]++;
+                const auto type=o.type;Put<std::uint32_t>(data,0x14,type);const auto type_id=next_type_ids[type]++;
                 if(type_id>std::numeric_limits<std::int32_t>::max())throw std::runtime_error("Part type identifier limit reached");
                 Put<std::int32_t>(data,0x18,type_id);Put(data,local(data,0xb0,16),o.entity_id);patch_part(data,0,o);
             }
@@ -559,11 +691,10 @@ std::vector<std::uint8_t> Document::Inflated() const {
             } else if(s.name=="EVENT_PARAM_ST") {
                 if(Get<std::int64_t>(data,0x18))remap(data,local(data,0x18,12));
                 const auto type=Get<std::uint32_t>(data,12);
-                if(type==4)remap(data,local(data,0x20,12)+8); // Treasure
-                else if(type==5) {const auto t=local(data,0x20,0xd0);for(int i=0;i<32;++i)remap(data,t+0x50+i*4);}
+                if(type==5) {const auto t=local(data,0x20,0xd0);for(int i=0;i<32;++i)remap(data,t+0x50+i*4);}
                 else if(type==7)remap(data,local(data,0x20,8)+4); // ObjAct
                 else if(type==16) {const auto t=local(data,0x20,0x90);for(int i=0;i<32;++i)remap(data,t+0x10+i*4);}
-                else if(type!=1 && type!=2 && type!=6 && type!=8 && type!=9 && type!=10 && type!=11 && type!=13 && type!=14 && type!=15 && type!=17 && type!=0xffffffff)
+                else if(type!=1 && type!=2 && type!=4 && type!=6 && type!=8 && type!=9 && type!=10 && type!=11 && type!=13 && type!=14 && type!=15 && type!=17 && type!=0xffffffff)
                     throw std::runtime_error("Unknown event type while rebuilding references");
             } else if(s.name=="MODEL_PARAM_ST" && added_models.contains(int(n))) {
                 int instances=added_models.at(int(n));
@@ -598,12 +729,16 @@ std::filesystem::path Document::Export(const std::filesystem::path& folder,const
         if(result.first==source_game.end()) throw std::runtime_error("Export outside the original game folder");
     }
     const auto bytes=Save();
+    if(!item_lots.empty() && !parameters)throw std::runtime_error("Item parameters are unavailable");
+    const auto parameter_bytes=item_lots.empty()?std::vector<std::uint8_t>{}:parameters->SaveLots(item_lots);
     if(!folder.parent_path().empty()) fs::create_directories(folder.parent_path());
     if(!fs::create_directory(folder)) throw std::runtime_error("Choose a new export folder; an existing folder will not be replaced");
     try {
         auto relative=fs::path("dvdroot_ps4/map/MapStudio")/(map+(dcx?".msb.dcx":".msb"));
         fs::create_directories((folder/relative).parent_path());WriteExclusive(folder/relative,bytes);
-        const std::string note="Bloodborne map editor mod\nMap: "+map+"\nEnable this folder in Mods & Cheats. Reload the area to apply it.\n";
+        if(!parameter_bytes.empty()) {const auto path=folder/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx";fs::create_directories(path.parent_path());WriteExclusive(path,parameter_bytes);}
+        const std::string note="Bloodborne map editor mod\nMap: "+map+"\nEnable this folder in Mods & Cheats. Reload the area to apply it.\n"+
+            (parameter_bytes.empty()?std::string():"Includes a full gameparam binder with private item-lot rows. Combine parameter changes before using other gameparam mods.\n");
         WriteExclusive(folder/"README.txt",std::span(reinterpret_cast<const std::uint8_t*>(note.data()),note.size()));
         return folder/relative;
     } catch(...) {fs::remove_all(folder);throw;}

@@ -536,7 +536,7 @@ if(APPLE)
         "-framework MetalKit" "-framework QuartzCore" "-framework GameController")
     set_source_files_properties(../editor/map_editor.mm third_party/imgui/backends/imgui_impl_osx.mm
         PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
-    add_executable(map-editor-test EXCLUDE_FROM_ALL ../tests/test_map_editor.cpp ../editor/map_document.cpp)
+    add_executable(map-editor-test EXCLUDE_FROM_ALL ../tests/test_map_editor.cpp ../editor/map_document.cpp ../editor/game_params.cpp)
     target_include_directories(map-editor-test PRIVATE ../editor shim)
     target_compile_options(map-editor-test PRIVATE -UNDEBUG)
     target_link_libraries(map-editor-test PRIVATE miniz::miniz)

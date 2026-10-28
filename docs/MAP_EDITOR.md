@@ -45,8 +45,9 @@ Asset loading happens on a worker; the editor shows progress while reading terra
    Test against a copied save. The game's scripts, active display groups, animation and physics
    still determine what happens to an object after it loads.
 
-An export contains `README.txt` and only the edited
-`dvdroot_ps4/map/MapStudio/mAA_BB_00_00.msb.dcx`. It neither copies models/textures nor modifies
+An export contains `README.txt` and the edited
+`dvdroot_ps4/map/MapStudio/mAA_BB_00_00.msb.dcx`. Item-content changes also include
+`dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx`. It neither copies models/textures nor modifies
 source game files. Exports into the original game tree, including through a directory symlink,
 are refused. Source maps are never overwritten. Reopen an exported result by selecting a
 game view containing that mod; the port's existing mod overlay can produce such a view.
@@ -61,6 +62,57 @@ out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_01 \
   --batch --select c2630_0000 --duplicate --translate -1 0 2 --export /path/to/new-enemy-mod
 out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_00 \
   --batch --export /path/to/unchanged-mod
+```
+
+## Items and pickups
+
+Choose **Items / pickups** and select a treasure event. The editor selects its supporting
+object for the usual transform controls. The pickup inspector shows its item-lot references
+and collection flag. **Duplicate pickup** or **Command-D** creates an independent object,
+treasure event and private item lot, and selects the copy. Move it, choose a weapon, armor
+or consumable from the installed game's parameter rows, set the count, then **Apply item contents**.
+Apply replaces the lot's contents with one guaranteed stack: one equipment item or 1-99
+consumables. Existing multi-slot/random lots remain intact until explicitly replaced.
+
+Changing an existing pickup creates a private parameter row and retains its collection flag.
+Previously collected pickups remain collected in that save. Duplicates receive a fresh flag
+from the source pickup's existing retail flag group. Allocation reserves values found in
+the game's parameter binder and event/talk files, and the current edit session. Computed
+script flag ranges and other mods still require review when combining projects.
+
+**Remove pickup** removes a newly created pickup's object, event and unused private lot as
+one undoable action. Original pickups cannot be removed. Creation, transforms, contents and
+removal participate in undo/redo; parameter-only changes also mark an exported document dirty.
+Ground pickup duplication supports one source item lot with a persistent collection flag.
+Chest duplication and complex scripted reward chains are not implemented. A dormant
+`DummyObject` used as a pickup template becomes an active `Object` in the new copy; the
+original remains dormant. Ordinary prop duplication preserves its original MSB type.
+
+Item export includes a full gameparam binder with the private rows added. Existing row
+payloads, names and duplicate IDs are preserved, as are all other binder files. Combine
+parameter edits before enabling another mod that replaces the same binder. Original game
+files and saves are never changed by editor export.
+
+Validation is under ignored `out/map-editor/items-validation/`. All 24 maps pass structural
+pickup duplication and reference/opaque-record preservation checks, including grouped
+creation/removal undo and duplication of an already edited copy. Parameter tests preserve
+every original item-row payload and every other binder entry. SoulsFormats independently
+reads and rewrites the native map/PARAM output and verifies the unchanged originals.
+
+In the Dream, an exported active copy of a dormant pickup awards **Blood Vial x3** through
+ordinary walking and action-button input. A two-pickup export awards three, then five vials,
+and the HUD reaches eight. Reloading that private save retains eight; revisiting both pickups
+does not give more vials and their loot glows remain absent. No travel or player-placement
+helper runs in these collection tests. Earlier Central Yharnam test-warp sessions loaded the
+edited object and parameter binder but did not establish interaction; they are retained
+separately and are not counted as collection proof.
+
+For read-only inspection without the GUI:
+
+```sh
+out/map-editor/bbmap-editor --game /path/to/game --map m21_00_00_00 --list-treasures
+out/map-editor/bbmap-editor --game /path/to/game --list-param EquipParamGoods
+out/map-editor/bbmap-editor --game /path/to/game --map m24_01_00_00 --list-param TalkScripts
 ```
 
 ## Enemy placement
