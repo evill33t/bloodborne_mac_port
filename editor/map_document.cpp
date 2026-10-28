@@ -29,8 +29,20 @@ std::string Name(std::span<const std::uint8_t> b,std::size_t at) {
     std::string s;
     for(int i=0;i<512;++i,at+=2) {
         auto c=Get<std::uint16_t>(b,at); if(!c) return s;
-        if(c>127) throw std::runtime_error("Unsupported non-ASCII map identifier");
-        s+=char(c);
+        std::uint32_t cp=c;
+        if(c>=0xd800 && c<=0xdbff) {
+            auto low=Get<std::uint16_t>(b,at+2);
+            if(low<0xdc00 || low>0xdfff) throw std::runtime_error("Invalid UTF-16 map name");
+            cp=0x10000+((c-0xd800)<<10)+(low-0xdc00);at+=2;++i;
+        } else if(c>=0xdc00 && c<=0xdfff) throw std::runtime_error("Invalid UTF-16 map name");
+        if(cp<0x80) s+=char(cp);
+        else {
+            if(cp>=0x10000) {s+=char(0xf0|(cp>>18));s+=char(0x80|((cp>>12)&63));}
+            else if(cp>=0x800) s+=char(0xe0|(cp>>12));
+            if(cp>=0x800) s+=char(0x80|((cp>>6)&63));
+            else s+=char(0xc0|(cp>>6));
+            s+=char(0x80|(cp&63));
+        }
     }
     throw std::runtime_error("Unterminated map identifier");
 }
@@ -126,9 +138,28 @@ Document Document::Read(std::span<const std::uint8_t> file) {
         if(!lists.contains(name)) throw std::runtime_error("Incomplete map sections");
     std::vector<std::string> models;
     for(auto p:lists.at("MODEL_PARAM_ST")) models.push_back(Name(b,Offset(b,p,p)));
+    auto end_of=[&](std::size_t p) {auto next=record_offsets.upper_bound(p);return next==record_offsets.end()?b.size():*next;};
+    auto local=[&](std::size_t p,std::size_t field,std::size_t length) {
+        auto at=Offset(b,p+field,p),end=end_of(p);
+        if(at<p+0xd0 || at>end || length>end-at) throw std::runtime_error("Invalid enemy data offset");
+        return at;
+    };
+    const auto& all_parts=lists.at("PARTS_PARAM_ST");
+    auto ref=[&](int index,const std::vector<std::size_t>& entries,int required_type=-1) {
+        Reference r;r.index=index;
+        if(index>=0 && std::size_t(index)<entries.size()) {
+            auto p=entries[index];
+            if(required_type<0 || Get<std::uint32_t>(b,p+0x14)==std::uint32_t(required_type))
+                r.name=Name(b.first(end_of(p)),Offset(b,p+(required_type>=0?8:0),p));
+        }
+        return r;
+    };
+    std::vector<std::size_t> patrols;
+    for(auto p:lists.at("EVENT_PARAM_ST")) if(Get<std::uint32_t>(b,p+12)==14) patrols.push_back(p);
     std::set<std::string> names;
-    for(auto p:lists.at("PARTS_PARAM_ST")) {
-        if(Get<std::uint32_t>(b,p+0x14)!=1) continue; // existing Object parts only
+    for(auto p:all_parts) {
+        auto type=Get<std::uint32_t>(b,p+0x14);
+        if(type!=1 && type!=2 && type!=10) continue; // Existing Object, Enemy and DummyEnemy placements.
         if(p>b.size() || b.size()-p<0xd0) throw std::runtime_error("Truncated object header");
         auto next=record_offsets.upper_bound(p);
         const auto end=next==record_offsets.end()?b.size():*next;
@@ -139,26 +170,40 @@ Document Document::Read(std::span<const std::uint8_t> file) {
         auto model=Get<std::int32_t>(b,p+0x1c);
         if(model<0 || std::size_t(model)>=models.size() || !names.insert(name).second)
             throw std::runtime_error("Invalid or duplicate object reference");
-        Object o{name,models[model],p,{},{}};
+        Part o;o.name=name;o.model=models[model];o.record=p;
         o.original.position=Get<BbMapArt::Vec3>(b,p+0x28);
         o.original.rotation=Get<BbMapArt::Vec3>(b,p+0x34);
         o.original.scale=Get<BbMapArt::Vec3>(b,p+0x40);Check(o.original);o.transform=o.original;
-        d.objects.push_back(std::move(o));
+        if(type==2 || type==10) {
+            o.kind=PartKind::Enemy;EnemyData e;e.dummy=type==10;
+            const auto entity=local(p,0xb0,16),data=local(p,0xb8,64);
+            e.entity_id=Get<std::int32_t>(b,entity);e.instance_id=Get<std::int32_t>(b,p+0x10);
+            e.think_param=Get<std::int32_t>(b,data+8);e.npc_param=Get<std::int32_t>(b,data+12);
+            e.talk_id=Get<std::int32_t>(b,data+16);e.chara_init=Get<std::int32_t>(b,data+24);
+            e.collision=ref(Get<std::int32_t>(b,data+28),all_parts,5);
+            e.patrol=ref(Get<std::int16_t>(b,data+32),patrols);
+            for(int i=0;i<8;++i)e.move_points[i]=ref(Get<std::int16_t>(b,data+40+i*2),lists.at("POINT_PARAM_ST"));
+            e.init_anim=Get<std::int32_t>(b,data+56);e.damage_anim=Get<std::int32_t>(b,data+60);
+            o.enemy=std::move(e);
+        }
+        d.parts.push_back(std::move(o));
     }
     return d;
 }
 bool Document::Changed() const {
-    return std::ranges::any_of(objects,[](const Object& o){return o.transform!=o.original;});
+    return std::ranges::any_of(parts,[](const Part& o){return o.transform!=o.original;});
 }
 bool Document::Set(std::size_t i,const Transform& t) {
-    Check(t);auto& o=objects.at(i);if(o.transform==t) return false;
+    Check(t);auto& o=parts.at(i);
+    if(o.kind==PartKind::Enemy && t.scale!=o.original.scale) throw std::runtime_error("Enemy scale is preserved; edit position and rotation only");
+    if(o.transform==t) return false;
     history.resize(cursor);history.push_back({i,o.transform,t});++cursor;o.transform=t;return true;
 }
-bool Document::Undo() {if(!cursor) return false;auto& e=history[--cursor];objects[e.index].transform=e.before;return true;}
-bool Document::Redo() {if(cursor==history.size()) return false;auto& e=history[cursor++];objects[e.index].transform=e.after;return true;}
+bool Document::Undo() {if(!cursor) return false;auto& e=history[--cursor];parts[e.index].transform=e.before;return true;}
+bool Document::Redo() {if(cursor==history.size()) return false;auto& e=history[cursor++];parts[e.index].transform=e.after;return true;}
 std::vector<std::uint8_t> Document::Inflated() const {
     auto b=raw;
-    for(const auto& o:objects) {
+    for(const auto& o:parts) {
         std::memcpy(b.data()+o.record+0x28,o.transform.position.data(),12);
         std::memcpy(b.data()+o.record+0x34,o.transform.rotation.data(),12);
         std::memcpy(b.data()+o.record+0x40,o.transform.scale.data(),12);

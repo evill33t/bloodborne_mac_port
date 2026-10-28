@@ -2,12 +2,32 @@
 #include "map_scene.h"
 #include "bbport_game_art.h"
 #include <cstring>
+#include <cmath>
 #include <fstream>
 #include <set>
 #include <stdexcept>
 
 namespace BbMapEditor {
 namespace {
+// A character-sized capsule and a +Z facing arrow. These are placement proxies,
+// not character meshes; all enemies share one GPU mesh.
+std::shared_ptr<const BbMapArt::AreaMesh> EnemyMarker() {
+    BbMapArt::MeshBuilder builder(.01f);
+    auto triangle=[&](BbMapArt::Vec3 a,BbMapArt::Vec3 b,BbMapArt::Vec3 c) {
+        float v[9];std::copy(a.begin(),a.end(),v);std::copy(b.begin(),b.end(),v+3);std::copy(c.begin(),c.end(),v+6);
+        std::uint32_t colors[3]={0xff5588eeu,0xff5588eeu,0xff5588eeu};builder.Add(v,colors);
+    };
+    const float radii[]={0,.25f,.35f,.35f,.25f,0},heights[]={0,.10f,.35f,1.45f,1.7f,1.8f};
+    for(int ring=0;ring<5;++ring)for(int i=0;i<12;++i) {
+        auto point=[&](int r,int n) {float a=n*6.2831853f/12;return BbMapArt::Vec3{radii[r]*std::cos(a),heights[r],radii[r]*std::sin(a)};};
+        auto a=point(ring,i),b=point(ring,i+1),c=point(ring+1,i),d=point(ring+1,i+1);
+        triangle(a,b,c);triangle(b,d,c);
+    }
+    triangle({-.08f,.06f,0},{.08f,.06f,0},{.08f,.06f,1});
+    triangle({-.08f,.06f,0},{.08f,.06f,1},{-.08f,.06f,1});
+    triangle({-.32f,.06f,.8f},{.32f,.06f,.8f},{0,.06f,1.4f});
+    return std::make_shared<const BbMapArt::AreaMesh>(builder.Finish());
+}
 template<class T> T Get(std::span<const std::uint8_t> b,std::size_t at) {
     if(at>b.size() || sizeof(T)>b.size()-at) throw std::runtime_error("Truncated object archive");
     T v;std::memcpy(&v,b.data()+at,sizeof(T));return v;
@@ -72,6 +92,7 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
                 const std::function<void(std::string)>& progress,std::stop_token stop) {
     if(!ValidMapName(map)) throw std::runtime_error("Invalid map name");
     const auto root=game/"dvdroot_ps4";Scene result;
+    result.enemy_marker=EnemyMarker();
     progress("Reading map placements...");
     result.document=Document::Open(root/"map/MapStudio"/(map+".msb.dcx"));
     const auto base_map=map.substr(0,6)+"_00_00";
@@ -95,7 +116,7 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
     if(stop.stop_requested()) return result;
     if(!result.terrain || result.terrain->indices.empty()) throw std::runtime_error("No terrain geometry could be loaded");
     std::set<std::string> wanted;
-    for(const auto& o:result.document.Objects()) wanted.insert(o.model);
+    for(const auto& o:result.document.Parts()) if(o.kind==PartKind::Object) wanted.insert(o.model);
     std::size_t loaded=0;
     for(const auto& model:wanted) {
         if(stop.stop_requested()) return result;

@@ -82,7 +82,7 @@ public:
     }
     void Clear() {meshes.clear();}
     void Render(id<MTLCommandBuffer> command,const Scene& scene,const BbMapView::Camera& camera,
-                ImVec2 size,float dpi,int selected,const std::optional<Transform>& preview,float ceiling) {
+                ImVec2 size,float dpi,int selected,const std::optional<Transform>& preview,float ceiling,bool show_objects,bool show_enemies) {
         const NSUInteger width=std::clamp(int(size.x*dpi),1,8192),height=std::clamp(int(size.y*dpi),1,8192);
         if(!color || color.width!=width || color.height!=height) {
             auto d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:width height:height mipmapped:NO];
@@ -119,8 +119,14 @@ public:
             [encoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:gpu.count indexType:MTLIndexTypeUInt32 indexBuffer:gpu.indices indexBufferOffset:0];
         };
         draw(scene.terrain,{},0);
-        const auto& objects=scene.document.Objects();
+        const auto& objects=scene.document.Parts();
         for(std::size_t i=0;i<objects.size();++i) {
+            const auto& o=objects[i];
+            if(o.kind==PartKind::Enemy) {
+                if(show_enemies) draw(scene.enemy_marker,int(i)==selected && preview?*preview:o.transform,std::uint32_t(i+1));
+                continue;
+            }
+            if(!show_objects) continue;
             auto found=scene.models.find(objects[i].model);
             if(found!=scene.models.end()) draw(found->second,int(i)==selected && preview?*preview:objects[i].transform,std::uint32_t(i+1));
         }
@@ -139,6 +145,8 @@ struct State {
     int frames=0,selected=-1;
     bool fitted=false;
     bool cutaway=false;
+    bool show_objects=true,show_enemies=true;
+    int layer=0;
     float ceiling=10000;
     BbMapView::Camera camera{0,0,0,4,.45f,.85f};
     Transform fields;
@@ -175,7 +183,7 @@ struct State {
     void Select(int index,bool focus) {
         selected=index;drag.reset();drag_axis=-1;
         if(!scene || index<0) return;
-        const auto& object=scene->document.Objects().at(index);fields=object.transform;
+        const auto& object=scene->document.Parts().at(index);fields=object.transform;
         if(focus) {camera.x=fields.position[0];camera.y=fields.position[1]+1;camera.z=fields.position[2];camera.zoom=45;cutaway=true;ceiling=fields.position[1]+4;}
     }
     void Export(const fs::path& folder) {
@@ -192,12 +200,12 @@ struct State {
     }
     void Poll() {
         if(loading.valid() && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
-            try {scene=loading.get();std::printf("LOADED %s: %zu objects, %zu terrain triangles, %zu missing models\n",options.map.c_str(),scene->document.Objects().size(),scene->terrain->indices.size()/3,scene->missing_models);}
+            try {scene=loading.get();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
             catch(const std::exception& e) {error=e.what();if(!commands.empty()) {exit_code=1;Finish();}}
             frames=0;
             if(scene && !options.select.empty()) {
-                const auto& objects=scene->document.Objects();auto it=std::ranges::find(objects,options.select,&Object::name);
-                if(it==objects.end()) throw std::runtime_error("Selected object was not found");
+                const auto& objects=scene->document.Parts();auto it=std::ranges::find(objects,options.select,&Part::name);
+                if(it==objects.end()) throw std::runtime_error("Selected placement was not found");
                 Select(int(it-objects.begin()),true);fitted=true;
             }
         }
@@ -207,8 +215,8 @@ struct State {
         frames=0;std::istringstream line(commands[command++]);std::string verb;line>>verb;
         std::printf("EDITOR %s\n",commands[command-1].c_str());
         if(verb=="select") {
-            std::string name;line>>name;const auto& objects=scene->document.Objects();auto it=std::ranges::find(objects,name,&Object::name);
-            if(it==objects.end()) throw std::runtime_error("Script object not found: "+name);
+            std::string name;line>>name;const auto& objects=scene->document.Parts();auto it=std::ranges::find(objects,name,&Part::name);
+            if(it==objects.end()) throw std::runtime_error("Script placement not found: "+name);
             Select(int(it-objects.begin()),true);fitted=true;
         } else if(verb=="deselect") Select(-1,false);
         else if(verb=="click" || verb=="drag") {
@@ -219,20 +227,27 @@ struct State {
             input_drag=p;input_frame=0;
         } else if(verb=="assert-selected") {
             std::string name;line>>name;
-            if(selected<0 || scene->document.Objects()[selected].name!=name) throw std::runtime_error("Viewport selected the wrong object");
-        } else if(verb=="assert-position") {
+            if(selected<0 || scene->document.Parts()[selected].name!=name) throw std::runtime_error("Viewport selected the wrong placement");
+        } else if(verb=="assert-position" || verb=="assert-rotation") {
             if(selected<0) throw std::runtime_error("Nothing selected");
             BbMapArt::Vec3 expected;for(float& v:expected)if(!(line>>v))throw std::runtime_error("assert-position needs x y z tolerance");
             float tolerance;if(!(line>>tolerance))throw std::runtime_error("Missing position tolerance");
-            for(int i=0;i<3;++i)if(std::abs(scene->document.Objects()[selected].transform.position[i]-expected[i])>tolerance)throw std::runtime_error("Unexpected edited position");
+            const auto& t=scene->document.Parts()[selected].transform;
+            const auto& actual=verb=="assert-position"?t.position:t.rotation;
+            for(int i=0;i<3;++i)if(std::abs(actual[i]-expected[i])>tolerance)throw std::runtime_error("Unexpected edited transform");
         } else if(verb=="move") {
-            if(selected<0) throw std::runtime_error("Select an object before moving it");
-            auto t=scene->document.Objects()[selected].transform;
+            if(selected<0) throw std::runtime_error("Select a placement before moving it");
+            auto t=scene->document.Parts()[selected].transform;
             for(auto& v:t.position) {float delta;if(!(line>>delta)) throw std::runtime_error("move needs three numbers");v+=delta;}
+            scene->document.Set(selected,t);fields=t;
+        } else if(verb=="rotate") {
+            if(selected<0) throw std::runtime_error("Select a placement before rotating it");
+            auto t=scene->document.Parts()[selected].transform;
+            for(auto& v:t.rotation) {float delta;if(!(line>>delta)) throw std::runtime_error("rotate needs three degrees");v+=delta;}
             scene->document.Set(selected,t);fields=t;
         } else if(verb=="undo" || verb=="redo") {
             if(!(verb=="undo"?scene->document.Undo():scene->document.Redo())) throw std::runtime_error("Empty undo/redo history");
-            if(selected>=0) fields=scene->document.Objects()[selected].transform;
+            if(selected>=0) fields=scene->document.Parts()[selected].transform;
         } else if(verb=="export" || verb=="capture") {
             std::string path;std::getline(line>>std::ws,path);if(path.empty()) throw std::runtime_error("Missing script path");
             if(verb=="export") Export(path);else capture=path;
@@ -300,25 +315,29 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             }
             ImGui::EndCombo();
         }
-        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Different game phases can load different map variants. Export the variant used by your test save.");
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("An area can load several variants together. Export the variant that owns this placement and verify it after reloading.");
         ImGui::EndDisabled();ImGui::SameLine();
         ImGui::BeginDisabled(!s.scene);
         if(ImGui::Button("Export mod...  Cmd+Shift+E") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_E)) s.Action([&]{s.ExportDialog();});
         ImGui::SameLine();
-        if(ImGui::Button("Undo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_Z)) {s.scene->document.Undo();if(s.selected>=0)s.fields=s.scene->document.Objects()[s.selected].transform;}
+        if(ImGui::Button("Undo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiKey_Z)) {s.scene->document.Undo();if(s.selected>=0)s.fields=s.scene->document.Parts()[s.selected].transform;}
         ImGui::SameLine();
-        if(ImGui::Button("Redo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_Z)) {s.scene->document.Redo();if(s.selected>=0)s.fields=s.scene->document.Objects()[s.selected].transform;}
+        if(ImGui::Button("Redo") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_Z)) {s.scene->document.Redo();if(s.selected>=0)s.fields=s.scene->document.Parts()[s.selected].transform;}
         ImGui::EndDisabled();
         if(!s.error.empty()) ImGui::TextWrapped("%s",s.error.c_str());
         if(!s.scene) {std::scoped_lock lock(s.mutex);ImGui::TextWrapped("%s",s.progress.c_str());ImGui::TextDisabled("Loading your game assets. The window remains responsive.");}
         std::optional<ImVec2> pick;
         if(s.scene) {
-            auto& scene=*s.scene;const auto& objects=scene.document.Objects();
+            auto& scene=*s.scene;const auto& objects=scene.document.Parts();
             ImGui::BeginChild("Objects and transform",{300,-42},ImGuiChildFlags_Borders);
-            ImGui::Text("Objects (%zu)",objects.size());ImGui::InputTextWithHint("##filter","Filter by object or model",s.filter,sizeof(s.filter));
-            ImGui::BeginChild("Object list",{0,235},ImGuiChildFlags_Borders);
+            const auto enemies=std::ranges::count(objects,PartKind::Enemy,&Part::kind);
+            ImGui::Text("%zu objects / %zu enemies",objects.size()-enemies,std::size_t(enemies));
+            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"All placements\0Objects\0Enemies / characters\0");
+            ImGui::InputTextWithHint("##filter","Filter by name or model",s.filter,sizeof(s.filter));
+            ImGui::BeginChild("Placement list",{0,190},ImGuiChildFlags_Borders);
             for(std::size_t i=0;i<objects.size();++i) {
                 const auto& o=objects[i];if(s.filter[0] && o.name.find(s.filter)==std::string::npos && o.model.find(s.filter)==std::string::npos) continue;
+                if((s.layer==1 && o.kind!=PartKind::Object) || (s.layer==2 && o.kind!=PartKind::Enemy)) continue;
                 if(ImGui::Selectable(o.name.c_str(),int(i)==s.selected)) s.Select(int(i),true);
             }
             ImGui::EndChild();ImGui::Separator();
@@ -326,17 +345,43 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 const auto& o=objects[s.selected];ImGui::TextWrapped("%s",o.name.c_str());ImGui::TextDisabled("Model: %s",o.model.c_str());
                 ImGui::TextUnformatted("Position (metres)");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##position",s.fields.position.data(),"%.3f");
                 ImGui::TextUnformatted("Rotation (degrees)");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##rotation",s.fields.rotation.data(),"%.2f");
-                ImGui::TextUnformatted("Scale");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##scale",s.fields.scale.data(),"%.3f");
+                if(o.kind==PartKind::Object) {ImGui::TextUnformatted("Scale");ImGui::SetNextItemWidth(-1);ImGui::InputFloat3("##scale",s.fields.scale.data(),"%.3f");}
                 if(ImGui::Button("Apply transform")) s.Action([&]{scene.document.Set(s.selected,s.fields);});
                 ImGui::SameLine();if(ImGui::Button("Reset")) {scene.document.Set(s.selected,o.original);s.fields=o.original;}
                 if(ImGui::Button("Frame selected  F")) s.Select(s.selected,true);
-                auto model=scene.models.find(o.model);
-                if(model==scene.models.end() || !model->second) ImGui::TextWrapped("Model unavailable. This object's placement can still be edited.");
-            } else ImGui::TextWrapped("Select an object in the list or click its geometry.");
+                if(o.enemy) {
+                    const auto& e=*o.enemy;
+                    ImGui::TextWrapped("Enemy proxy: capsule and facing arrow. Character models are not loaded.");
+                    if(ImGui::CollapsingHeader("Enemy references",ImGuiTreeNodeFlags_DefaultOpen)) {
+                        ImGui::TextDisabled("Read only");
+                        ImGui::Text("MSB type: %s",e.dummy?"DummyEnemy":"Enemy");
+                        ImGui::Text("Entity ID: %d",e.entity_id);ImGui::Text("Instance ID: %d",e.instance_id);
+                        ImGui::Text("NPC: %d / AI: %d",e.npc_param,e.think_param);
+                        ImGui::Text("Talk: %d / CharaInit: %d",e.talk_id,e.chara_init);
+                        ImGui::Text("Initial / damage anim: %d / %d",e.init_anim,e.damage_anim);
+                        auto reference=[](const char* label,const Reference& r) {
+                            if(r.index==-1) ImGui::TextDisabled("%s: none",label);
+                            else if(r.Missing()) ImGui::TextWrapped("%s: UNRESOLVED index %d",label,r.index);
+                            else ImGui::TextWrapped("%s: %s [%d]",label,r.name.c_str(),r.index);
+                        };
+                        reference("Loading collision",e.collision);reference("Patrol",e.patrol);
+                        for(int i=0;i<8;++i) if(e.move_points[i].index!=-1) {const auto label="Move point "+std::to_string(i+1);reference(label.c_str(),e.move_points[i]);}
+                        ImGui::TextWrapped("Patrol points stay in place. Events may control activation or override placement. Reload to test.");
+                    }
+                } else {
+                    auto model=scene.models.find(o.model);
+                    if(model==scene.models.end() || !model->second) ImGui::TextWrapped("Model unavailable. This object's placement can still be edited.");
+                }
+            } else ImGui::TextWrapped("Select a placement in the list or click its geometry or enemy marker.");
             ImGui::Spacing();ImGui::TextWrapped("Drag the colored axis handles to move. Position is in metres; rotation is in degrees.");
             ImGui::Checkbox("Cut away roofs",&s.cutaway);
             if(s.cutaway) {ImGui::SetNextItemWidth(-1);ImGui::DragFloat("##ceiling",&s.ceiling,.25f,-1000,1000,"Ceiling: %.2f m");}
-            ImGui::TextDisabled("Existing object placements only.");
+            const bool changed_objects=ImGui::Checkbox("Show objects",&s.show_objects);
+            const bool changed_enemies=ImGui::Checkbox("Show enemies",&s.show_enemies);
+            if(changed_objects || changed_enemies) {
+                if(s.selected>=0 && ((objects[s.selected].kind==PartKind::Enemy && !s.show_enemies) || (objects[s.selected].kind==PartKind::Object && !s.show_objects))) s.Select(-1,false);
+            }
+            ImGui::TextDisabled("Existing placements only.");
             if(scene.missing_models) ImGui::TextWrapped("%zu object models unavailable.",scene.missing_models);
             ImGui::EndChild();ImGui::SameLine();
             ImGui::BeginChild("Metal viewport",{0,-42},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
@@ -349,7 +394,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 s.camera.zoom=BbMapView::FitZoom(s.camera,x0,z0,x1,z1,size.x,size.y,y0,y1);s.fitted=true;
             }
             const float dpi=std::max(1.f,io.DisplayFramebufferScale.x);
-            _viewport->Render(command,scene,s.camera,size,dpi,s.selected,s.drag,s.cutaway?s.ceiling:1000000.f);
+            _viewport->Render(command,scene,s.camera,size,dpi,s.selected,s.drag,s.cutaway?s.ceiling:1000000.f,s.show_objects,s.show_enemies);
             ImGui::Image((ImTextureID)(__bridge void*)_viewport->color,size);
             const bool hovered=ImGui::IsItemHovered();
             if(hovered) {
@@ -377,7 +422,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                         s.drag->position[axis]=s.drag_start.position[axis]+amount;
                     }
                 }
-                if(s.drag && !ImGui::IsMouseDown(0)) {s.Action([&]{scene.document.Set(s.selected,*s.drag);});s.fields=scene.document.Objects()[s.selected].transform;s.drag.reset();s.drag_axis=-1;}
+                if(s.drag && !ImGui::IsMouseDown(0)) {s.Action([&]{scene.document.Set(s.selected,*s.drag);});s.fields=scene.document.Parts()[s.selected].transform;s.drag.reset();s.drag_axis=-1;}
             }
             ImGui::EndChild();
             ImGui::TextUnformatted(s.Unsaved()?"Unexported changes":"Map ready");ImGui::SameLine();ImGui::TextDisabled("%zu terrain triangles",scene.terrain->indices.size()/3);
@@ -454,18 +499,18 @@ int main(int argc,char** argv) {
             else if(key=="--script")options.script=value();else if(key=="--batch")options.batch=true;
             else if(key=="--list")options.list=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
-            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select object] [--script file]\n  --batch --select object --translate X Y Z --export new-mod-folder\n  --list: inspect existing object placements without opening the editor");return 0;}
+            else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part --translate X Y Z --export new-mod-folder\n  --list: inspect existing object and enemy placements without opening the editor");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
-        if(options.translation && !options.batch) throw std::runtime_error("Use --batch for a command-line translation, or move the object in the editor");
+            if(options.translation && !options.batch) throw std::runtime_error("Use --batch for a command-line translation, or move the placement in the editor");
         if(options.batch || options.list) {
             auto doc=Document::Open(options.game/"dvdroot_ps4/map/MapStudio"/(options.map+".msb.dcx"));
-            if(options.list) {for(const auto& o:doc.Objects()) std::printf("%s\t%s\t%.6f %.6f %.6f\n",o.name.c_str(),o.model.c_str(),o.transform.position[0],o.transform.position[1],o.transform.position[2]);return 0;}
+            if(options.list) {for(const auto& o:doc.Parts()) std::printf("%s\t%s\t%.6f %.6f %.6f\t%s\t%d\n",o.name.c_str(),o.model.c_str(),o.transform.position[0],o.transform.position[1],o.transform.position[2],o.enemy?"enemy":"object",o.enemy?o.enemy->entity_id:-1);return 0;}
             if(options.output.empty())throw std::runtime_error("--batch needs --export with a new mod folder");
             if(options.translation) {
-                const auto& objects=doc.Objects();auto found=std::ranges::find(objects,options.select,&Object::name);
-                if(found==objects.end())throw std::runtime_error("Object not found");
+                const auto& objects=doc.Parts();auto found=std::ranges::find(objects,options.select,&Part::name);
+                if(found==objects.end())throw std::runtime_error("Placement not found");
                 auto t=found->transform;for(int i=0;i<3;++i)t.position[i]+=(*options.translation)[i];doc.Set(found-objects.begin(),t);
             }
             std::printf("EXPORTED %s\n",doc.Export(fs::absolute(options.output),options.map).c_str());return 0;
