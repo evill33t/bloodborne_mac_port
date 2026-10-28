@@ -584,8 +584,8 @@ their Havok fixups, and model-table insertion remaps existing model references.
 This imports **appearance onto a native rig**. Animations, AI, hitboxes and effects use the
 chosen Bloodborne template. Cloth bindings for the old vertex buffers are removed, so cloth
 uses ordinary skinning. Source-specific shaders are approximated by the native shader;
-sound banks are not copied. Foreign animation/behavior conversion and playable whole-map
-conversion remain separate work.
+sound banks are not copied. Foreign animation/behavior conversion remains separate work.
+The experimental Majula map replacement below uses a separate CLI workflow.
 
 The managed converter can also produce an independent package:
 
@@ -617,6 +617,61 @@ The same native workflow also imports DS1 Remastered's Butcher (`c2660` → `c69
 with 150 HP beside the original character and runs native attack behavior in a separate
 private-save test. A project containing all three imports reopens and exports identical
 assets; removing unused characters omits their asset packages from that mod.
+
+### Majula as a Bloodborne mod
+
+The optional managed adapter can convert DS2 Scholar's Majula (`m10_04_00_00`) into a
+static replacement for Central Yharnam's `m24_01_00_01` variant. This produces a normal
+mod folder; it runs in Bloodborne through the existing mod loader. It is currently a
+CLI export, separate from the editor's placement-transfer and project-export controls.
+
+```sh
+SMITHBOX_DIR=/path/to/built/Smithbox bash scripts/macos/build_souls_import.sh
+dotnet out/map-editor/souls-import/SoulsImport.dll bake-map \
+  --profile DS2S --root '/path/to/Dark Souls II Scholar of the First Sin/Game' \
+  --map m10_04_00_00 --native-root /path/to/CUSA00900 \
+  --target-map m24_01_00_01 \
+  --source-anchor '9,6,-16' --target-anchor '-195.6,-40.53,220.33' \
+  --output /path/to/private-test-data/mods/Majula
+```
+
+Choose a new output directory outside both game installations. `BB_MODS_DIR` points to
+its parent `mods` directory. Use a separate `BB_SAVE_DIR` containing a copied test save;
+this replaces a campaign area and is not a campaign-compatible installation. Existing
+saved positions in Yharnam may be over empty space after enabling the replacement.
+The edited native player/spawn regions place a subsequent respawn near the Majula hub.
+The converted lantern's interaction and travel from the Hunter's Dream are not verified.
+
+The local export contains 143 static models, 524 placements and 227 converted textures.
+Geometry uses native Bloodborne FLVER/material layouts, source texture tiling, converted
+DS2 alpha/green normal channels, and native fallback surface textures. Source skies,
+alpha cards and unsupported shaders are omitted or approximated; Bloodborne's sky and
+lighting remain. Multi-layer terrain uses its first texture layer. Distant scenery,
+water, lighting and material fidelity still need work.
+
+Collision is rebuilt from opaque render triangles and divided among 99 distinct native
+Havok bodies. Its BVHs use native fixups, shape keys, section codecs and the disabled
+edge-welding sentinel. This supports a bounded walk on the hub terrain; it does not
+establish complete traversability, correct physical materials or navigation. DS2 enemies,
+NPCs, items, quests, scripts, audio and animated/breakable object behavior are not imported.
+
+Unused Yharnam scenery is removed while referenced/scripted pieces and sky records remain.
+Retained scenery and props are moved outside the play area. Original enemies become dummy
+records retaining their names and IDs, preventing the old population from falling through
+the replacement level and awarding echoes in the tested runs. Native campaign scripts
+remain, so extended play and quest compatibility are not established.
+
+`SMITHBOX_DIR=... bash tests/test_map_import.sh /path/to/CUSA00900` checks the independent
+Smithbox collision codec, multi-section trees, welding sentinel, shape/body references,
+scenery-reference preservation, parked actors, normal channels and mip preservation.
+Local gameplay evidence is under ignored `out/map-editor/majula-validation/`: visible
+Majula terrain/buildings, a 4.6-metre walk with unchanged HP, and native respawn onto the
+hub without player-placement or travel requests. Original asset/seed hash checks cover
+26 files. These are bounded checks, not a finished map port.
+
+Imported texture loading also exposed a staging-buffer alignment error. Tile/detile
+allocations now request shader storage alignment explicitly; the Metal host-kernel suite
+and the mod run pass with Metal validation enabled.
 
 The importer is also available from the command line:
 

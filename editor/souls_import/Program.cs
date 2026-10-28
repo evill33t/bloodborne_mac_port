@@ -44,6 +44,7 @@ internal static partial class Program {
             if(args[0]=="maps")return ListMaps(profile,root,Get("--smithbox"));
             if(args[0]=="character")return PreviewCharacter(values,profile,root);
             if(args[0]=="bake-skin")return BakeSkin(values,profile,root);
+            if(args[0]=="bake-map")return BakeMap(values,profile,root);
             if(args[0]!="import")throw new ArgumentException("Expected profiles, self-test, maps or import");
             var map=Get("--map");
             if(!Regex.IsMatch(map,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid map identifier");

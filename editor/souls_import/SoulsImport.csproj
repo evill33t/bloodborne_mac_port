@@ -9,5 +9,6 @@
     <Compile Include="$(SmithboxRoot)/src/Andre/Andre.Core/Game.cs" Link="Smithbox/Game.cs" />
     <Compile Include="$(SmithboxRoot)/src/Andre/Andre.Formats/Util/ArchiveKeys.cs" Link="Smithbox/ArchiveKeys.cs" />
     <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
+    <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

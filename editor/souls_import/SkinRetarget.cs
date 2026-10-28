@@ -47,7 +47,7 @@ internal static class SkinRetarget {
     static string TextureSlot(string name)=>name.EndsWith("Texture",StringComparison.Ordinal)?name[..^7]:name;
     // TPF's format byte is game-specific. Preserve the DDS pixel representation
     // and select the Bloodborne/PS4 format instead of copying that source byte.
-    static byte Ps4Format(DDS dds)=>(int)dds.GetDXGIFormat() switch {
+    internal static byte Ps4Format(DDS dds)=>(int)dds.GetDXGIFormat() switch {
         28=>105,87=>9,71=>0,72=>108,74=>3,77=>5,78=>110,80=>103,83=>104,95=>100,98=>102,99=>112,
         var format=>throw new InvalidDataException("Unsupported DDS pixel format for PS4 conversion: "+format)
     };
