@@ -523,3 +523,21 @@ add_executable(bbmap-prepare ../host/map_prepare.cpp shim/bbport_map_charts.cpp
 target_include_directories(bbmap-prepare PRIVATE shim)
 target_compile_features(bbmap-prepare PRIVATE cxx_std_20)
 target_link_libraries(bbmap-prepare PRIVATE miniz::miniz)
+
+if(APPLE)
+    # Independent editor: dev's read-only terrain/model pipeline plus byte-preserving MSB edits.
+    add_executable(bbmap-editor ../editor/map_editor.mm ../editor/map_document.cpp ../editor/map_scene.cpp
+        shim/bbport_map_art.cpp shim/bbport_map_collision.cpp shim/bbport_game_art.cpp
+        third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
+        third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
+        third_party/imgui/backends/imgui_impl_metal.mm third_party/imgui/backends/imgui_impl_osx.mm)
+    target_include_directories(bbmap-editor PRIVATE ../editor shim third_party/imgui third_party/imgui/backends)
+    target_link_libraries(bbmap-editor PRIVATE miniz::miniz "-framework AppKit" "-framework Metal"
+        "-framework MetalKit" "-framework QuartzCore" "-framework GameController")
+    set_source_files_properties(../editor/map_editor.mm third_party/imgui/backends/imgui_impl_osx.mm
+        PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    add_executable(map-editor-test EXCLUDE_FROM_ALL ../tests/test_map_editor.cpp ../editor/map_document.cpp)
+    target_include_directories(map-editor-test PRIVATE ../editor shim)
+    target_compile_options(map-editor-test PRIVATE -UNDEBUG)
+    target_link_libraries(map-editor-test PRIVATE miniz::miniz)
+endif()
