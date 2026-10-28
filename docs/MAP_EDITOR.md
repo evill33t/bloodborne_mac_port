@@ -512,3 +512,36 @@ An isolated runtime check loaded a DS2 generator layout transferred to a Bloodbo
 original entity 2410015 and new entity 2419000 were observed at their exported positions with
 150 HP. The test used native travel to the Central Yharnam lamp and read-only enemy observers.
 This proves the native placement export loaded; it does not prove foreign enemy asset conversion.
+
+## Collision floors and snapping
+
+The editor loads the selected variant's static collision placements and its area's high-detail
+Havok archives, including patch entries. **Show collision floors** draws their floor/ramp
+surfaces in green; turn off **Show terrain** to inspect them clearly. The display mesh is
+thinned, while snapping queries the original triangles through a spatial index.
+
+Select a prop, enemy/NPC, pickup object or waypoint and click **Snap down to floor**. It
+chooses the highest loaded collision surface below that placement, within **Max drop**.
+**Pivot offset** places the object's origin that distance above the floor. Position X/Z,
+rotation, scale and parameter/event references stay unchanged. One Undo restores the old
+height; no surface in range leaves the placement unchanged.
+
+Snapping uses static collision surfaces with slopes within about 63 degrees of horizontal.
+It does not test navigation connectivity, rebuild collision, account for moving/animated
+object collision, or guarantee that a character can walk to that point. Unavailable collision
+models are reported in the inspector; snapping then queries the loaded subset. Match the
+object's pivot and the game's contact margin with **Pivot offset**, and test the exported mod.
+
+`bash tests/test_collision_scene.sh /path/to/CUSA00900` covers stacked floors, ramps, edges,
+range/offset limits, malformed input, the spatial index and real archive/placement decoding.
+An optional second argument chooses another map variant. All 24 local Bloodborne MSBs pass
+loading/query checks; maps with unavailable models retain that diagnostic.
+
+In **Source maps**, **Far scenery** controls the shared map renderer's numeric backdrop
+ranges. They are hidden by default to make the playable area easier to frame. Alphanumeric
+model identifiers are left visible. This display filter does not change source data or exports.
+
+A copied enemy snapped to static collision was exported and loaded in the game on an isolated
+save. Original and copy remained at 150 HP and moved under game AI during a nine-second live
+observation. The test used native lamp travel and player-only placement to bring them within loading
+range; it never wrote enemy transforms, health or AI.

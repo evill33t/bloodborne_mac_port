@@ -2,6 +2,7 @@
 #pragma once
 #include "map_document.h"
 #include "game_params.h"
+#include "collision_scene.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -11,7 +12,8 @@ struct Scene {
     Document document;
     GameParams params;
     std::map<std::int32_t,std::string> talk_scripts;
-    std::string param_error,talk_error,event_error;
+    std::string param_error,talk_error,event_error,collision_error;
+    std::shared_ptr<const CollisionScene> collision;
     std::shared_ptr<const BbMapArt::AreaMesh> terrain;
     std::shared_ptr<const BbMapArt::AreaMesh> enemy_marker;
     std::shared_ptr<const BbMapArt::AreaMesh> region_marker;

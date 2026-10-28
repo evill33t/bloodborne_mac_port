@@ -134,6 +134,14 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
         result.terrain=std::make_shared<const BbMapArt::AreaMesh>(std::move(*mesh));
     if(stop.stop_requested()) return result;
     if(!result.terrain || result.terrain->indices.empty()) throw std::runtime_error("No terrain geometry could be loaded");
+    progress("Loading static collision floors...");
+    try {
+        const auto studio=BbMapArt::ReadMapStudio(result.document.Inflated());
+        if(!studio)throw std::runtime_error("Map collision placements could not be read");
+        result.collision=std::make_shared<const CollisionScene>(CollisionScene::Read(*studio,base_map,read,range,stop));
+        if(!result.collision->Triangles())result.collision_error="No supported static collision floors were loaded";
+    }catch(const std::exception& e){result.collision_error=e.what();}
+    if(stop.stop_requested())return result;
     std::set<std::string> wanted;
     for(const auto& o:result.document.Parts()) if(o.kind==PartKind::Object) wanted.insert(o.model);
     std::size_t loaded=0;

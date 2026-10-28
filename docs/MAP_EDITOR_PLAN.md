@@ -54,3 +54,11 @@ See [MAP_EDITOR.md](MAP_EDITOR.md) for shipped controls and validation boundarie
 Ignored per-milestone evidence lives under `out/map-editor/`. The first duplication attempt
 and its loader fault are retained separately from the corrected grouped exports and
 subsequent gameplay checks. No cross-game conversion is claimed by those checks.
+
+## Collision placement checkpoint
+
+Static collision-floor decoding and vertical snapping are available for parts, pickup objects
+and waypoints, with bounded drop distance, pivot offset and shared undo/redo. All 24 local map
+variants load collision floors; missing models are reported. Queries use the original
+triangles, while a thinned overlay supports visual inspection. Navigation connectivity and
+moving-object collision remain separate from this operation.

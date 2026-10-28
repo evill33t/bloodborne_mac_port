@@ -11,6 +11,7 @@
 #include "imgui_impl_osx.h"
 #include <algorithm>
 #include <chrono>
+#include <charconv>
 #include <cctype>
 #include <cstdio>
 #include <fstream>
@@ -61,6 +62,12 @@ void ParamChooser(const char* label,int* value,const ParamTable* table) {
     ImGui::PopID();
 }
 
+bool SourceScenery(const SourcePlacement& p) {
+    if(p.kind!=0 || p.model.size()<2 || p.model[0]!='m')return false;
+    int number=0;const auto end=p.model.data()+p.model.size();const auto parsed=std::from_chars(p.model.data()+1,end,number);
+    // The same numeric backdrop ranges used by the shared in-game map renderer.
+    return parsed.ec==std::errc{} && parsed.ptr==end && (number>=900000 || (number>=8000 && number<10000));
+}
 struct GpuMesh {id<MTLBuffer> positions,colors,indices;std::size_t count=0;};
 class Viewport {
     id<MTLDevice> device;
@@ -108,7 +115,7 @@ public:
     void Clear() {meshes.clear();}
     void Render(id<MTLCommandBuffer> command,const Scene& scene,const BbMapView::Camera& camera,
                 ImVec2 size,float dpi,int selected,int selected_region,const std::optional<Transform>& preview,float ceiling,
-                bool show_objects,bool show_enemies,bool show_regions,int active_route,bool route_only,const SourceScene* source=nullptr,bool isolate=false,const std::set<std::string>* hidden=nullptr) {
+                bool show_objects,bool show_enemies,bool show_regions,int active_route,bool route_only,bool terrain=true,bool floors=false,const SourceScene* source=nullptr,bool isolate=false,const std::set<std::string>* hidden=nullptr,bool scenery=false) {
         const NSUInteger width=std::clamp(int(size.x*dpi),1,8192),height=std::clamp(int(size.y*dpi),1,8192);
         if(!color || color.width!=width || color.height!=height) {
             auto d=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:width height:height mipmapped:NO];
@@ -146,7 +153,7 @@ public:
         };
         if(source) {
             for(std::size_t i=0;i<source->placements.size();++i) {
-                const auto& p=source->placements[i];if(p.kind>2 || (isolate && int(i)!=selected) || (hidden && hidden->contains(p.model)))continue;
+                const auto& p=source->placements[i];if(p.kind>2 || (isolate && int(i)!=selected) || (hidden && hidden->contains(p.model)) || (!scenery && !isolate && int(i)!=selected && SourceScenery(p)))continue;
                 const auto model=source->models.find(p.model);
                 if(model!=source->models.end())draw(model->second,p.transform,std::uint32_t(i+1));
                 else if(p.kind==2)draw(scene.enemy_marker,p.transform,std::uint32_t(i+1));
@@ -154,7 +161,8 @@ public:
             }
             [encoder endEncoding];return;
         }
-        draw(scene.terrain,{},0);
+        if(terrain)draw(scene.terrain,{},0);
+        if(floors && scene.collision){Transform lift;lift.position[1]=.025f;draw(scene.collision->preview,lift,0);}
         const auto& objects=scene.document.Parts();
         for(std::size_t i=0;i<objects.size();++i) {
             const auto& o=objects[i];
@@ -182,7 +190,7 @@ struct State {
     std::future<std::shared_ptr<Scene>> loading;
     std::shared_ptr<SourceScene> source;
     std::future<std::shared_ptr<SourceScene>> source_loading;
-    bool show_source=false,source_fitted=false,source_characters_only=false,source_isolate=false,source_cutaway=false;
+    bool show_source=false,source_fitted=false,source_characters_only=false,source_isolate=false,source_cutaway=false,source_scenery=false;
     int source_selected=-1,source_profile=4,native_template=-1;
     BbMapArt::Vec3 source_anchor{},target_anchor{};
     float source_yaw=0;
@@ -234,7 +242,8 @@ struct State {
     std::string treasure_name;
     bool fitted=false,clear_meshes=false;
     bool cutaway=false;
-    bool show_objects=true,show_enemies=true;
+    bool show_objects=true,show_enemies=true,show_terrain=true,show_collision=false;
+    float snap_range=10,snap_offset=0;
     bool show_regions=false,route_only=true;
     int layer=0;
     float ceiling=10000;
@@ -321,6 +330,13 @@ struct State {
     void SetTransform(const Transform& t) {
         if(selected>=0)scene->document.Set(selected,t);else if(selected_region>=0)scene->document.SetRegion(selected_region,t);
         else throw std::runtime_error("Select a placement or waypoint first");fields=t;
+    }
+    void Snap() {
+        if(!Current())throw std::runtime_error("Select a placement or waypoint first");
+        if(!scene->collision || !scene->collision->Triangles())throw std::runtime_error("Static collision floors are unavailable");
+        auto t=*Current();const auto height=scene->collision->Below(t.position,snap_range,snap_offset);
+        if(!height)throw std::runtime_error("No collision floor below this point within the selected range");
+        t.position[1]=*height;SetTransform(t);status="Snapped to loaded static collision. Check navigation and loading-area references in-game.";
     }
     void SelectRoute(int index,bool focus) {
         active_route=index;if(index<0)return;const auto& route=scene->document.Routes().at(index);route_key=route.key;show_regions=true;
@@ -448,7 +464,9 @@ struct State {
         if(!scene || source_loading.valid() || command>=commands.size() || ++frames<12) return;
         frames=0;std::istringstream line(commands[command++]);std::string verb;line>>verb;
         std::printf("EDITOR %s\n",commands[command-1].c_str());
-        if(verb=="source-config") {std::string profile,map,path;line>>profile>>map;std::getline(line>>std::ws,path);const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles)||!ValidMapName(map)||path.empty())throw std::runtime_error("Invalid source configuration");source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",map.c_str());std::snprintf(source_root,sizeof(source_root),"%s",path.c_str());show_source=true;
+        if(verb=="snap") {if(line>>snap_range){if(!(line>>snap_offset))snap_offset=0;}Snap();
+        } else if(verb=="collision") {show_collision=true;show_terrain=false;
+        } else if(verb=="source-config") {std::string profile,map,path;line>>profile>>map;std::getline(line>>std::ws,path);const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles)||!ValidMapName(map)||path.empty())throw std::runtime_error("Invalid source configuration");source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",map.c_str());std::snprintf(source_root,sizeof(source_root),"%s",path.c_str());show_source=true;
         } else if(verb=="source-prepare") {PrepareSource();
         } else if(verb=="source-open") {std::string path;std::getline(line>>std::ws,path);OpenSource(path);
         } else if(verb=="source-select") {std::string name;line>>name;if(!source)throw std::runtime_error("No source scene");const auto it=std::ranges::find(source->placements,name,&SourcePlacement::name);if(it==source->placements.end())throw std::runtime_error("Source placement not found");source_selected=int(it-source->placements.begin());
@@ -723,16 +741,16 @@ std::optional<ImVec2> SourceTools(State& s,Viewport& viewport,id<MTLCommandBuffe
         ImGui::EndChild();ImGui::SameLine();
         ImGui::BeginChild("Source Metal preview",{0,0},ImGuiChildFlags_Borders,ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
         if(ImGui::Button("Frame map")){s.source_fitted=false;s.source_isolate=false;}
-        ImGui::SameLine();ImGui::Checkbox("Cutaway",&s.source_cutaway);ImGui::SameLine();if(ImGui::Checkbox("Isolate selected",&s.source_isolate))s.source_fitted=false;
+        ImGui::SameLine();ImGui::Checkbox("Cutaway",&s.source_cutaway);ImGui::SameLine();if(ImGui::Checkbox("Isolate selected",&s.source_isolate))s.source_fitted=false;ImGui::SameLine();if(ImGui::Checkbox("Far scenery",&s.source_scenery))s.source_fitted=false;
         if(!s.source_hidden.empty()){ImGui::SameLine();if(ImGui::Button("Restore hidden")){s.source_hidden.clear();s.source_fitted=false;}}
         const auto top=ImGui::GetCursorScreenPos();auto size=ImGui::GetContentRegionAvail();size.x=std::max(1.f,size.x);size.y=std::max(1.f,size.y);
         if(!s.source_fitted) {
             BbMapArt::Vec3 lo{FLT_MAX,FLT_MAX,FLT_MAX},hi{-FLT_MAX,-FLT_MAX,-FLT_MAX};
-            for(const auto& p:source.placements)if(p.kind<=2){if(s.source_hidden.contains(p.model) || (s.source_isolate && s.source_selected>=0 && &p!=&source.placements[s.source_selected]))continue;const auto model=source.models.find(p.model);if(model==source.models.end())continue;const auto& v=model->second->positions;for(std::size_t i=0;i+2<v.size();i+=3){auto w=WorldPoint(p.transform,v.data()+i);for(int c=0;c<3;++c){lo[c]=std::min(lo[c],w[c]);hi[c]=std::max(hi[c],w[c]);}}}
+            for(const auto& p:source.placements)if(p.kind<=2){if((!s.source_scenery && !s.source_isolate && SourceScenery(p)) || s.source_hidden.contains(p.model) || (s.source_isolate && s.source_selected>=0 && &p!=&source.placements[s.source_selected]))continue;const auto model=source.models.find(p.model);if(model==source.models.end())continue;const auto& v=model->second->positions;for(std::size_t i=0;i+2<v.size();i+=3){auto w=WorldPoint(p.transform,v.data()+i);for(int c=0;c<3;++c){lo[c]=std::min(lo[c],w[c]);hi[c]=std::max(hi[c],w[c]);}}}
             if(lo[0]<=hi[0]){s.source_camera.x=(lo[0]+hi[0])*.5f;s.source_camera.y=(lo[1]+hi[1])*.5f;s.source_camera.z=(lo[2]+hi[2])*.5f;s.source_camera.zoom=BbMapView::FitZoom(s.source_camera,lo[0],lo[2],hi[0],hi[2],size.x,size.y,lo[1],hi[1]);}s.source_fitted=true;
         }
         const auto ceiling=s.source_cutaway && s.source_selected>=0?source.placements[s.source_selected].transform.position[1]+4:1000000.f;
-        viewport.Render(command,*s.scene,s.source_camera,size,std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.x),s.source_selected,-1,{},ceiling,true,true,false,-1,false,&source,s.source_isolate,&s.source_hidden);
+        viewport.Render(command,*s.scene,s.source_camera,size,std::max(1.f,ImGui::GetIO().DisplayFramebufferScale.x),s.source_selected,-1,{},ceiling,true,true,false,-1,false,true,false,&source,s.source_isolate,&s.source_hidden,s.source_scenery);
         ImGui::Image((ImTextureID)(__bridge void*)viewport.color,size);
         if(ImGui::IsItemHovered()) {
             const auto& io=ImGui::GetIO();s.source_camera.zoom=std::clamp(s.source_camera.zoom*std::pow(1.12f,io.MouseWheel),.05f,1000.f);
@@ -973,6 +991,14 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 if(route.added && ImGui::Button("Remove patrol"))s.pending=State::Pending::RemoveRoute;
                 ImGui::TextWrapped("Routes use existing navigation. Keep points on connected walkable ground in the character's loading area.");
             }
+            ImGui::BeginDisabled(!s.Current() || !scene.collision || !scene.collision->Triangles());
+            if(ImGui::Button("Snap down to floor"))s.Action([&]{s.Snap();});
+            ImGui::SetNextItemWidth(-1);ImGui::DragFloat("##snap-range",&s.snap_range,.25f,.01f,1000,"Max drop: %.2f m");
+            ImGui::SetNextItemWidth(-1);ImGui::DragFloat("##snap-offset",&s.snap_offset,.01f,-1000,1000,"Pivot offset: %.3f m");
+            ImGui::EndDisabled();
+            ImGui::Checkbox("Show terrain",&s.show_terrain);ImGui::Checkbox("Show collision floors",&s.show_collision);
+            if(!scene.collision_error.empty())ImGui::TextWrapped("Collision: %s",scene.collision_error.c_str());
+            if(scene.collision && scene.collision->missing_models)ImGui::TextWrapped("%zu collision models unavailable; snapping uses loaded surfaces only.",scene.collision->missing_models);
             ImGui::Spacing();ImGui::TextWrapped("Drag the colored axis handles to move. Position is in metres; rotation is in degrees.");
             ImGui::Checkbox("Cut away roofs",&s.cutaway);
             if(s.cutaway) {ImGui::SetNextItemWidth(-1);ImGui::DragFloat("##ceiling",&s.ceiling,.25f,-1000,1000,"Ceiling: %.2f m");}
@@ -997,7 +1023,7 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             }
             const float dpi=std::max(1.f,io.DisplayFramebufferScale.x);
             _viewport->Render(command,scene,s.camera,size,dpi,s.selected,s.selected_region,s.drag,s.cutaway?s.ceiling:1000000.f,
-                              s.show_objects,s.show_enemies,s.show_regions,s.active_route,s.route_only);
+                              s.show_objects,s.show_enemies,s.show_regions,s.active_route,s.route_only,s.show_terrain,s.show_collision);
             ImGui::Image((ImTextureID)(__bridge void*)_viewport->color,size);
             const bool hovered=ImGui::IsItemHovered();
             if(hovered) {
