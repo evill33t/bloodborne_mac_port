@@ -24,7 +24,7 @@ using namespace BbMapEditor;
 namespace fs=std::filesystem;
 struct Options {
     fs::path game,output,script;
-    std::string map="m24_01_00_00",select;
+    std::string map="m24_01_00_00",select,list_param;
     std::optional<BbMapArt::Vec3> translation;
     bool batch=false,list=false,list_regions=false,list_routes=false,duplicate=false;
 };
@@ -34,6 +34,26 @@ void Finish() {
     [NSApp stop:nil];
     [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint
         modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0] atStart:NO];
+}
+void ParamChooser(const char* label,int* value,const ParamTable* table) {
+    ImGui::PushID(label);ImGui::TextUnformatted(label);ImGui::SetNextItemWidth(-1);ImGui::InputInt("##id",value);
+    const auto* row=table?table->Find(*value):nullptr;
+    const auto preview=row?std::to_string(row->id)+" "+row->name:*value==-1?std::string("None"):std::string("Row not found");
+    ImGui::SetNextItemWidth(-1);
+    if(ImGui::BeginCombo("##rows",preview.c_str())) {
+        static char search[128]={};if(ImGui::IsWindowAppearing()){search[0]=0;ImGui::SetKeyboardFocusHere();}
+        ImGui::InputText("Search ID or name",search,sizeof(search));
+        if(ImGui::Selectable("None (-1)",*value==-1))*value=-1;
+        std::vector<const ParamRow*> matches;
+        if(table)for(const auto& r:table->rows)if(std::to_string(r.id).find(search)!=std::string::npos || r.name.find(search)!=std::string::npos)matches.push_back(&r);
+        ImGuiListClipper clipper;clipper.Begin(int(matches.size()));
+        while(clipper.Step())for(int n=clipper.DisplayStart;n<clipper.DisplayEnd;++n) {
+            const auto& r=*matches[n];const auto text=std::to_string(r.id)+" "+r.name;
+            if(ImGui::Selectable(text.c_str(),*value==r.id))*value=r.id;
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::PopID();
 }
 
 struct GpuMesh {id<MTLBuffer> positions,colors,indices;std::size_t count=0;};
@@ -251,6 +271,11 @@ struct State {
         data.patrol={r.key,r.name};data.patrol_type=std::int16_t(r.data.type);data.move_points.fill({});
         scene->document.SetEnemy(selected,data);enemy_fields=*scene->document.Parts()[selected].enemy;
     }
+    void Character(const EnemyData& data) {
+        if(selected<0 || !scene->document.Parts()[selected].enemy)throw std::runtime_error("Select a character first");
+        ValidateCharacterReferences(*scene->document.Parts()[selected].enemy,data,scene->params,scene->talk_scripts);
+        scene->document.SetEnemy(selected,data);enemy_fields=data;
+    }
     void Duplicate() {
         if(!scene || selected<0)return;
         const auto index=scene->document.Duplicate(selected);Select(int(index),false);
@@ -328,6 +353,12 @@ struct State {
         } else if(verb=="waypoint") {
             BbMapArt::Vec3 p;for(auto& f:p)if(!(line>>f))throw std::runtime_error("waypoint needs x y z");
             SelectRegion(int(scene->document.AddWaypoint(p)),true);layer=3;
+        } else if(verb=="character" || verb=="assert-character") {
+            if(selected<0 || !scene->document.Parts()[selected].enemy)throw std::runtime_error("Select a character first");
+            auto data=*scene->document.Parts()[selected].enemy;
+            if(!(line>>data.npc_param>>data.think_param>>data.talk_id>>data.chara_init>>data.init_anim>>data.damage_anim))throw std::runtime_error("character needs NPC AI Talk CharaInit IdleAnim DamageAnim");
+            if(verb=="character")Character(data);
+            else if(data!=*scene->document.Parts()[selected].enemy)throw std::runtime_error("Unexpected character settings");
         } else if(verb=="new-route") NewRoute();
         else if(verb=="route-add") AppendWaypoint();
         else if(verb=="assign-route") AssignRoute();
@@ -471,14 +502,15 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
             const auto enemies=std::ranges::count(objects,PartKind::Enemy,&Part::kind);
             ImGui::Text("%zu objects / %zu enemies",objects.size()-enemies,std::size_t(enemies));
             ImGui::Text("%zu regions / %zu patrols",scene.document.Regions().size(),scene.document.Routes().size());
-            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"Objects and characters\0Objects\0Enemies / NPCs\0Regions / waypoints\0Patrol routes\0");
+            ImGui::SetNextItemWidth(-1);ImGui::Combo("##layer",&s.layer,"Objects and characters\0Objects\0Enemies / NPCs\0Regions / waypoints\0Patrol routes\0NPCs with talk scripts\0");
             if(ImGui::Button("New waypoint"))s.pending=State::Pending::Waypoint;
             ImGui::SameLine();if(ImGui::Button("New patrol"))s.pending=State::Pending::Route;
             ImGui::InputTextWithHint("##filter","Filter by name or model",s.filter,sizeof(s.filter));
             ImGui::BeginChild("Placement list",{0,190},ImGuiChildFlags_Borders);
-            if(s.layer<=2)for(std::size_t i=0;i<objects.size();++i) {
+            if(s.layer<=2 || s.layer==5)for(std::size_t i=0;i<objects.size();++i) {
                 const auto& o=objects[i];if(s.filter[0] && o.name.find(s.filter)==std::string::npos && o.model.find(s.filter)==std::string::npos) continue;
                 if((s.layer==1 && o.kind!=PartKind::Object) || (s.layer==2 && o.kind!=PartKind::Enemy)) continue;
+                if(s.layer==5 && (!o.enemy || o.enemy->talk_id<=0))continue;
                 if(ImGui::Selectable(o.name.c_str(),int(i)==s.selected)) s.Select(int(i),true);
             }
             if(s.layer==3)for(std::size_t i=0;i<scene.document.Regions().size();++i) {
@@ -504,18 +536,34 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
                 if(o.enemy) {
                     const auto& e=*o.enemy;
                     ImGui::TextWrapped("Enemy proxy: capsule and facing arrow. Character models are not loaded.");
+                    if(const auto* table=scene.params.Table("NpcParam"))if(const auto info=ReadNpcInfo(*table,e.npc_param)) {
+                        ImGui::Text("Base HP: %u / NPC type: %u",info->hp,unsigned(info->type));ImGui::Text("Team: %u",unsigned(info->team));
+                        if(const auto* row=table->Find(e.npc_param))ImGui::TextWrapped("%s",row->name.c_str());
+                    }
+                    if(e.talk_id>0)ImGui::TextWrapped("Talk script assigned: %d. Events and saved quest state govern interaction and allegiance.",e.talk_id);
                     if(ImGui::CollapsingHeader("Character settings")) {
                         auto integer=[](const char* label,int* value){ImGui::TextUnformatted(label);ImGui::SetNextItemWidth(-1);const auto id="##"+std::string(label);ImGui::InputInt(id.c_str(),value);};
-                        integer("NPC param",&s.enemy_fields.npc_param);integer("AI param",&s.enemy_fields.think_param);
-                        integer("Talk script",&s.enemy_fields.talk_id);integer("Character init",&s.enemy_fields.chara_init);
+                        ParamChooser("NPC param",&s.enemy_fields.npc_param,scene.params.Table("NpcParam"));
+                        ParamChooser("AI param",&s.enemy_fields.think_param,scene.params.Table("NpcThinkParam"));
+                        integer("Talk script",&s.enemy_fields.talk_id);
+                        const auto talk=scene.talk_scripts.find(s.enemy_fields.talk_id);
+                        ImGui::TextWrapped("%s",talk==scene.talk_scripts.end()?(s.enemy_fields.talk_id<=0?"No talk script":"ESD not found in this area"):talk->second.c_str());
+                        if(ImGui::BeginCombo("Area talk scripts",talk==scene.talk_scripts.end()?"Choose ESD":talk->second.c_str())) {
+                            if(ImGui::Selectable("None",s.enemy_fields.talk_id<=0))s.enemy_fields.talk_id=0;
+                            for(const auto& [id,name]:scene.talk_scripts)if(ImGui::Selectable(name.c_str(),id==s.enemy_fields.talk_id))s.enemy_fields.talk_id=id;
+                            ImGui::EndCombo();
+                        }
+                        ParamChooser("Character init",&s.enemy_fields.chara_init,scene.params.Table("CharaInitParam"));
                         integer("Idle animation",&s.enemy_fields.init_anim);integer("Damage animation",&s.enemy_fields.damage_anim);
                         if(ImGui::Button("Apply character settings"))s.Action([&]{
                             auto data=*scene.document.Parts()[s.selected].enemy;
                             data.npc_param=s.enemy_fields.npc_param;data.think_param=s.enemy_fields.think_param;data.talk_id=s.enemy_fields.talk_id;
                             data.chara_init=s.enemy_fields.chara_init;data.init_anim=s.enemy_fields.init_anim;data.damage_anim=s.enemy_fields.damage_anim;
-                            scene.document.SetEnemy(s.selected,data);
+                            s.Character(data);
                         });
-                        ImGui::TextWrapped("Use IDs from this game's parameters and scripts. Quest events can override these settings.");
+                        if(!scene.param_error.empty())ImGui::TextWrapped("Parameter lookup unavailable: %s",scene.param_error.c_str());
+                        if(!scene.talk_error.empty())ImGui::TextWrapped("Talk lookup unavailable: %s",scene.talk_error.c_str());
+                        ImGui::TextWrapped("New references must exist in this game's tables or area scripts. Model/AI and animation compatibility still require an in-game test. Quest events can override settings.");
                     }
                     if(ImGui::Button("Show assigned patrol") && e.patrol.index>=0) {
                         const auto& routes=scene.document.Routes();const auto found=std::ranges::find(routes,e.patrol.index,&Route::key);
@@ -722,12 +770,19 @@ int main(int argc,char** argv) {
             else if(key=="--list")options.list=true;
             else if(key=="--list-regions")options.list_regions=true;
             else if(key=="--list-routes")options.list_routes=true;
+            else if(key=="--list-param")options.list_param=value();
             else if(key=="--duplicate")options.duplicate=true;
             else if(key=="--translate") {BbMapArt::Vec3 v;for(auto& f:v) {const auto text=value();std::size_t used;f=std::stof(text,&used);if(used!=text.size())throw std::runtime_error("Invalid translation");}options.translation=v;}
             else if(key=="--help") {std::puts("bbmap-editor [--game folder] [--map m24_01_00_00] [--select part] [--script file]\n  --batch --select part [--duplicate] --translate X Y Z --export new-mod-folder\n  --list / --list-regions / --list-routes: inspect map records without opening the editor");return 0;}
             else throw std::runtime_error("Unknown option: "+key);
         }
         if(!ValidMapName(options.map)) throw std::runtime_error("Expected a map name such as m24_01_00_00");
+        if(!options.list_param.empty()) {
+            if(options.list_param=="TalkScripts") {for(const auto& [id,name]:GameParams::TalkScripts(options.game,options.map))std::printf("%d\t%s\n",id,name.c_str());return 0;}
+            const auto params=GameParams::Open(options.game);const auto* table=params.Table(options.list_param);
+            if(!table)throw std::runtime_error("Unknown editor parameter table: "+options.list_param);
+            for(const auto& row:table->rows)std::printf("%d\t%s\n",row.id,row.name.c_str());return 0;
+        }
         const bool inspect=options.list || options.list_regions || options.list_routes;
         if((options.translation || options.duplicate) && (!options.batch || inspect))throw std::runtime_error("Use --batch for command-line edits");
         if(options.batch || inspect) {

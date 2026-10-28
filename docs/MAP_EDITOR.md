@@ -82,9 +82,26 @@ placement. Keep the first moves local, test the exact map phase, and check behav
 reloading using a copied save. The editor does not validate walkability or rebuild navigation.
 
 The **Character settings** section edits NPC/AI, talk, initialization and animation IDs with
-undo/redo. These are numeric references at this stage; the editor does not yet look up their
-parameter rows or establish that a different AI or animation is compatible with the model.
+undo/redo. NPC/AI and character-init pickers search the installed game's parameter IDs and
+row names. Talk choices come from the area's talk ESD binder, which is separate from
+TalkParam. Changed references must exist, or use the supported none value. Existing unresolved
+references remain intact when editing unrelated fields. Animation IDs are numeric and require
+runtime testing for model compatibility.
+
+The inspector shows the selected NPC row's base HP, NPC type and team for the supported retail
+layout. Runtime effects and events can change those values. **NPCs with talk scripts** filters
+characters with a positive Talk ID. A talk assignment does not establish friendliness or a
+working quest: allegiance, interaction, animations and saved quest state still need testing.
 The inspector identifies each enemy's MSB type; Player parts remain untouched.
+
+Parameter validation is under ignored `out/map-editor/params-validation/`. Native tests read
+all eight supported parameter tables and the area's 32 talk scripts. All 20,735 row IDs and
+Unicode names match an independent SoulsFormats catalog, including duplicate IDs present in
+retail data. Native replay tests NPC settings, undo/redo and export; SoulsFormats verifies the
+edited NPC/AI references and existing placements. In `modified-npc-streamed-observed`, a copied
+character using NPC/AI 263000 streams with 306 runtime HP while the original remains at 150.
+The selected row has 120 base HP; this test includes the game's effects and does not equate
+base HP with runtime HP. It does not establish a complete friendly-NPC dialogue or quest.
 
 ## Regions and patrols
 

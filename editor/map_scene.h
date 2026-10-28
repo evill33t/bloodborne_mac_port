@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "map_document.h"
+#include "game_params.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -8,6 +9,9 @@
 namespace BbMapEditor {
 struct Scene {
     Document document;
+    GameParams params;
+    std::map<std::int32_t,std::string> talk_scripts;
+    std::string param_error,talk_error;
     std::shared_ptr<const BbMapArt::AreaMesh> terrain;
     std::shared_ptr<const BbMapArt::AreaMesh> enemy_marker;
     std::shared_ptr<const BbMapArt::AreaMesh> region_marker;

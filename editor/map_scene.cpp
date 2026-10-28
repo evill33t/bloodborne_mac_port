@@ -105,6 +105,9 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
     result.region_marker=RegionMarker();
     progress("Reading map placements...");
     result.document=Document::Open(root/"map/MapStudio"/(map+".msb.dcx"));
+    progress("Reading character and item parameters...");
+    try{result.params=GameParams::Open(game);}catch(const std::exception& e){result.param_error=e.what();}
+    try{result.talk_scripts=GameParams::TalkScripts(game,map);}catch(const std::exception& e){result.talk_error=e.what();}
     const auto base_map=map.substr(0,6)+"_00_00";
     const auto read=[&](const std::string& relative) {
         if(stop.stop_requested()) return std::vector<std::uint8_t>{};
