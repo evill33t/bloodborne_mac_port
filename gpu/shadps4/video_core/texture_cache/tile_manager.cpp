@@ -168,7 +168,11 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
         }
     }
 
-    const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
+    // The host kernels use uint4 blocks for 128-bit formats. Other staging users
+    // can leave the ring cursor at an 8-byte boundary, so request shader alignment
+    // explicitly rather than relying on the preceding image's byte size.
+    const auto staging = runtime.GetStagingPool().Request(
+        info.guest_size, MemoryType::DeviceLocal, device.GetLimits().storage_alignment);
 
     scheduler.EndRendering();
 
@@ -207,7 +211,8 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         }
     }
 
-    const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
+    const auto staging = runtime.GetStagingPool().Request(
+        info.guest_size, MemoryType::DeviceLocal, device.GetLimits().storage_alignment);
     for (auto& copy : buffer_copies) {
         copy.bufferOffset += staging.offset;
     }
