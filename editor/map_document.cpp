@@ -5,6 +5,7 @@
 #include "miniz.h"
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -77,8 +78,9 @@ bool ValidMapName(const std::string& s) {
 }
 Document Document::Open(const std::filesystem::path& p) {
     auto d=Read(ReadFile(p));const auto path=std::filesystem::canonical(p);
-    if(path.parent_path().filename()=="MapStudio" && path.parent_path().parent_path().filename()=="map" &&
-       path.parent_path().parent_path().parent_path().filename()=="dvdroot_ps4")
+    auto lower=[](const auto& p) {auto name=p.filename().string();for(char& c:name)c=char(std::tolower(static_cast<unsigned char>(c)));return name;};
+    if(lower(path.parent_path())=="mapstudio" && lower(path.parent_path().parent_path())=="map" &&
+       lower(path.parent_path().parent_path().parent_path())=="dvdroot_ps4")
         d.source_game=path.parent_path().parent_path().parent_path().parent_path();
     return d;
 }

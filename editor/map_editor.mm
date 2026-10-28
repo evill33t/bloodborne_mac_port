@@ -294,12 +294,13 @@ void SaveImage(const fs::path& path,id<MTLBuffer> pixels,NSUInteger width,NSUInt
         auto& s=*state;
         ImGui::SetNextItemWidth(190);
         ImGui::BeginDisabled(s.loading.valid());
-        if(ImGui::BeginCombo("Area",options.map.c_str())) {
+        if(ImGui::BeginCombo("Map variant",options.map.c_str())) {
             for(std::size_t i=0;i<s.maps.size();++i) if(ImGui::Selectable(s.maps[i].c_str(),s.maps[i]==options.map) && s.maps[i]!=options.map && s.Discard()) {
                 options.map=s.maps[i];options.select.clear();_viewport->Clear();s.Load();
             }
             ImGui::EndCombo();
         }
+        if(ImGui::IsItemHovered()) ImGui::SetTooltip("Different game phases can load different map variants. Export the variant used by your test save.");
         ImGui::EndDisabled();ImGui::SameLine();
         ImGui::BeginDisabled(!s.scene);
         if(ImGui::Button("Export mod...  Cmd+Shift+E") || ImGui::Shortcut(ImGuiMod_Super|ImGuiMod_Shift|ImGuiKey_E)) s.Action([&]{s.ExportDialog();});

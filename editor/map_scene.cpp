@@ -74,9 +74,13 @@ Scene LoadScene(const std::filesystem::path& game,const std::string& map,
     const auto root=game/"dvdroot_ps4";Scene result;
     progress("Reading map placements...");
     result.document=Document::Open(root/"map/MapStudio"/(map+".msb.dcx"));
+    const auto base_map=map.substr(0,6)+"_00_00";
     const auto read=[&](const std::string& relative) {
         if(stop.stop_requested()) return std::vector<std::uint8_t>{};
-        try {return ReadFile(root/relative);} catch(const std::exception&) {return std::vector<std::uint8_t>{};}
+        // The in-game atlas uses base layouts. An editor must render the exact selected phase
+        // layout while continuing to resolve terrain models/textures from the area's base folder.
+        const auto path=relative=="map/MapStudio/"+base_map+".msb.dcx"?"map/MapStudio/"+map+".msb.dcx":relative;
+        try {return ReadFile(root/path);} catch(const std::exception&) {return std::vector<std::uint8_t>{};}
     };
     const auto range=[&](const std::string& relative,std::uint64_t offset,std::uint64_t size) {
         std::vector<std::uint8_t> b;if(stop.stop_requested() || size>512*1024*1024) return b;

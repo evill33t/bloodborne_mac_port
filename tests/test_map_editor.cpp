@@ -63,7 +63,7 @@ int main(int argc,char** argv) {
     auto folder=std::filesystem::path(temp)/"mod";auto path=d.Export(folder,"m24_01_00_00");assert(ReadFile(path)==packed);
     Reject([&]{d.Export(folder,"m24_01_00_00");});assert(ReadFile(path)==packed);
     Reject([&]{d.Export(std::filesystem::path(temp)/"bad","../x");});
-    auto source=std::filesystem::path(temp)/"game/dvdroot_ps4/map/MapStudio/map.msb.dcx";
+    auto source=std::filesystem::path(temp)/"game/dvdroot_ps4/map/mapstudio/map.msb.dcx";
     std::filesystem::create_directories(source.parent_path());
     {std::ofstream f(source,std::ios::binary);f.write(reinterpret_cast<const char*>(packed.data()),packed.size());}
     auto guarded=Document::Open(source);

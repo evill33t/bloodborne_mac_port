@@ -25,7 +25,11 @@ Asset loading happens on a worker; the editor shows progress while reading terra
 
 ## Edit and export
 
-1. Choose an area. Filter the object list by part or model name, or click an object's geometry.
+1. Choose the **map variant**. Game phases can use different MSBs: Central Yharnam has
+   `m24_01_00_00`, `m24_01_00_01` and `m24_01_00_11`, for example. The edited/exported filename
+   must match the file loaded for your test save. The viewport uses the selected variant's
+   placements and the area's shared terrain models. Filter the object list by part or model
+   name, or click an object's geometry.
 2. Drag an X/Y/Z handle to move it. The inspector also accepts position in metres, rotation in
    degrees, and scale; click **Apply transform** after typing. **Reset** restores that object's
    original transform. Undo/redo covers both inspector changes and complete handle drags.
@@ -107,3 +111,23 @@ for all those areas.
 The viewport input test exercised real Metal picking, a Y handle drag, undo and redo. Metal
 API validation was enabled during real-asset captures. Test artifacts and exported mods live
 under the worktree's ignored `out/map-editor/validation/` directory.
+
+### In-game check (2026-10-28)
+
+The editor exported a 3-metre +X move of `o240080_1020` in `m24_01_00_01`. An offline game
+loaded the export through the existing loose-file mod overlay. File-open tracing identified
+that exact phase file; changing only `m24_01_00_00` had left this save's active layout unchanged.
+
+A temporary read-only observer in an isolated test runtime compared the named object's loaded
+MSB position and world-matrix translation against an unmodified control using the same frozen
+runtime binaries. X changed from -200.476074 to -197.476074; Y (-40.5836182) and Z (220.234894)
+were unchanged. The observer only read game memory and is absent from the editor and normal
+runtime. The compressed export reopened successfully; its inflated MSB differed at one byte
+inside that object's X field, with every other byte preserved.
+
+Metal API validation was enabled, with no validation assertion or GPU fault in the successful
+phase test. Original assets and seed saves matched all 42 tracked hashes after testing. Tests
+used private save copies and were stopped after evidence capture. This verifies the bounded
+clinic placement/export/reload workflow, not every object type, area, time phase or game script.
+Evidence is in `out/map-editor/validation/validation.json`, the per-session logs/coordinate
+records and native screenshots. The usable single-file mod is `mods-phase/phase-01/` there.
