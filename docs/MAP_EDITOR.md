@@ -482,9 +482,22 @@ the source folder. The native editor validates this bounded scene format, owns i
 and renders/picks them in Metal. The adapter is a separate process; it does not load any
 foreign game's executable or run its scripts. No source-game assets are added to this repo.
 
-Open **Source maps…**, choose the game profile and folder, enter its map ID, then click
-**Prepare preview**. Source loading runs on a worker. DS2/Scholar's installed `Game` folder
-can be read directly: the reader decrypts the BHD index using its shipped public PEM,
+Open **Source maps…** and choose the game profile. Steam installations are detected from
+local manifests, including additional Steam libraries; detected profiles are marked
+**installed** and their asset folder is filled automatically. Bloodborne uses the current
+game folder. **Detect installed games** refreshes discovery after another game is installed.
+For other dumps, use **Choose source folder…** or type the asset folder and press Enter.
+
+The **Source map** menu lists readable maps with Smithbox's names and unused/test labels;
+filter by map ID or name. The catalog reads and parses each available MSB without extracting
+archives or decoding geometry. Choose a map and click **Prepare preview**. Manual **Map ID**
+entry remains available, and **Refresh maps** rebuilds the list. Catalog and preview loading
+run on workers. `SoulsImport.dll maps --profile DS3 --root /path/to/Game --smithbox /path/to/Smithbox`
+also prints the map ID, name and MSB part count as tab-separated columns. DS2 generator
+placements are joined during preview preparation, so the catalog's MSB-only count excludes
+them.
+
+DS2/Scholar's installed `Game` folder can be read directly: the reader decrypts the BHD index using its shipped public PEM,
 reads individual BDT entries, and joins generator location/registration/enemy parameters.
 DS3 installed archives are also read directly using Smithbox's archive key definitions.
 Other profiles currently require **loose, unpacked game files**. Compression codecs
@@ -506,6 +519,16 @@ Collision and other nonvisual parts are retained as metadata rather than drawn.
 The profile list follows [Smithbox's project types](https://github.com/vawser/Smithbox/blob/main/src/Smithbox.Program/Editors/Project%20Editor/Enums/ProjectType.cs).
 Format fixtures do not establish real-game asset compatibility. Newer game readers and
 platform-specific decompression libraries may require a newer compatible Smithbox build.
+
+Catalog validation under ignored `out/map-editor/source-catalog-validation/` parses 35
+installed DS1 Remastered MSBs (18 gameplay layouts and 17 developer/test layouts), 28 DS2
+Scholar MSBs, 26 DS3 MSBs including DLC/test layouts, and 24 Bloodborne MSBs. This catalog
+coverage does not establish complete geometry or gameplay conversion. Native replay detects
+all three installed Steam games, prepares DS1 Firelink from the detected folder, checks
+DS3's Cemetery and Ringed City entries, opens the Cemetery preview, and returns to Bloodborne
+without modifying the document. `tests/test_source_catalog.sh` also covers escaped and
+legacy library paths, duplicate library symlinks, incomplete/unsafe manifests and bounded
+map-list parsing.
 
 Source navigation uses the same orbit/pan/zoom controls. Select a part in the list or click
 its geometry. **Frame map** fits the available geometry; **Cutaway** removes geometry above

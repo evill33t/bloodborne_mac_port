@@ -7,6 +7,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 
 internal record Profile(string Id, string Name, string Reader);
 internal record Placement(string Name, string Model, uint Kind, Vector3 Position, Vector3 Rotation, Vector3 Scale, int SourceId=-1);
@@ -39,7 +40,10 @@ internal static class Program {
             var values=new Dictionary<string,string>();
             for(int i=1;i<args.Length;i+=2){if(i+1==args.Length)throw new ArgumentException("Missing value for "+args[i]);values.Add(args[i],args[i+1]);}
             string Get(string key)=>values.TryGetValue(key,out var v)?v:throw new ArgumentException("Missing "+key);
-            var profile=Profiles.Single(p=>p.Id==Get("--profile"));var root=Canonical(Get("--root"));var map=Get("--map");
+            var profile=Profiles.Single(p=>p.Id==Get("--profile"));var root=Canonical(Get("--root"));
+            if(args[0]=="maps")return ListMaps(profile,root,Get("--smithbox"));
+            if(args[0]!="import")throw new ArgumentException("Expected profiles, self-test, maps or import");
+            var map=Get("--map");
             if(!Regex.IsMatch(map,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid map identifier");
             var smithbox=Get("--smithbox");
             var type=Reader(profile)??throw new NotSupportedException("Update Smithbox: installed SoulsFormats has no reader for "+profile.Name);
@@ -82,6 +86,40 @@ internal static class Program {
             foreach(var n in Notices)Console.WriteLine(n);
             return 0;
         } catch(Exception e) {Console.Error.WriteLine("Souls import: "+e.GetBaseException().Message);return 1;}
+    }
+    static int ListMaps(Profile profile,string root,string smithbox) {
+        var type=Reader(profile)??throw new NotSupportedException("Update Smithbox: installed SoulsFormats has no reader for "+profile.Name);
+        var names=new SortedDictionary<string,string>(StringComparer.Ordinal);
+        var aliases=Path.Combine(smithbox,"src/Smithbox.Data/Assets/Aliases",profile.Id,"MapNames.json");
+        if(File.Exists(aliases)){
+            if(new FileInfo(aliases).Length>4*1024*1024)throw new InvalidDataException("Map alias catalog exceeds size limit");
+            using var json=JsonDocument.Parse(File.ReadAllBytes(aliases));
+            foreach(var entry in json.RootElement.EnumerateArray()){
+                var id=entry.GetProperty("ID").GetString()??"";if(!Regex.IsMatch(id,@"\Am\d\d_\d\d_\d\d_\d\d\z"))continue;
+                var label=entry.GetProperty("Name").GetString()??id;
+                if(entry.TryGetProperty("Tags",out var tags) && tags.EnumerateArray().Any(t=>t.GetString()=="unused"))label+=" [unused]";
+                names[id]=label.Replace('\t',' ').Replace('\r',' ').Replace('\n',' ');
+            }
+        }
+        foreach(var prefix in new[]{root,Path.Combine(root,"dvdroot_ps4")}){
+            var folder=Path.Combine(prefix,"map","MapStudio");
+            if(Directory.Exists(folder))foreach(var file in Directory.EnumerateFiles(folder,"*.msb*")){
+                var id=Path.GetFileName(file).Split('.')[0];if(Regex.IsMatch(id,@"\Am\d\d_\d\d_\d\d_\d\d\z"))names.TryAdd(id,id);
+                if(names.Count>10000)throw new InvalidDataException("Too many source maps");
+            }
+            folder=Path.Combine(prefix,"map");if(profile.Id is "DS2" or "DS2S" && Directory.Exists(folder))foreach(var child in Directory.EnumerateDirectories(folder)){
+                var id=Path.GetFileName(child);if(Regex.IsMatch(id,@"\Am\d\d_\d\d_\d\d_\d\d\z"))names.TryAdd(id,id);
+            }
+        }
+        using var assets=new Assets(root,profile.Id);
+        var method=type.GetMethods(BindingFlags.Public|BindingFlags.Static|BindingFlags.FlattenHierarchy).Single(m=>m.Name=="Read" && m.GetParameters().Length==1 && m.GetParameters()[0].ParameterType==typeof(Memory<byte>));
+        foreach(var (id,name) in names){
+            var path=profile.Id is "DS2" or "DS2S"?$"map/{id}/{id}.msb":$"map/MapStudio/{id}.msb.dcx";
+            var bytes=assets.Read(path)??assets.Read(path.Replace(".dcx",""));if(bytes==null)continue;
+            var msb=(IMsb)method.Invoke(null,[new Memory<byte>(bytes)])!;
+            Console.WriteLine($"{id}\t{name}\t{msb.Parts.GetEntries().Count}");
+        }
+        return 0;
     }
     static string Canonical(string path) {
         var full=Path.GetFullPath(path);var prefix=Path.GetPathRoot(full)!;

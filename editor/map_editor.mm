@@ -6,6 +6,7 @@
 #include "map_scene.h"
 #include "project_file.h"
 #include "source_scene.h"
+#include "source_catalog.h"
 #include "bbport_map_view.h"
 #include "imgui.h"
 #include "imgui_impl_metal.h"
@@ -186,6 +187,28 @@ public:
     }
 };
 
+struct SourceAdapter {
+    fs::path helper,dotnet;std::string smithbox;
+    SourceAdapter(){
+        helper=fs::path(NSBundle.mainBundle.resourcePath.UTF8String)/"souls-import";
+        if(!fs::exists(helper/"SoulsImport.dll"))helper=fs::path(NSBundle.mainBundle.executablePath.UTF8String).parent_path()/"souls-import";
+        if(!fs::exists(helper/"SoulsImport.dll"))throw std::runtime_error("Build the optional source adapter with scripts/macos/build_souls_import.sh, then rebuild this app");
+        for(const auto* p:{"/usr/local/share/dotnet/dotnet","/opt/homebrew/bin/dotnet","/usr/local/bin/dotnet"})if(fs::exists(p)){dotnet=p;break;}
+        if(dotnet.empty())throw std::runtime_error("The source adapter requires the .NET 10 runtime");
+        std::ifstream config(helper/"smithbox-path.txt");std::getline(config,smithbox);
+    }
+    std::string Run(const std::vector<std::string>& arguments)const {
+      @autoreleasepool {
+        auto string=[](const std::string& v){return [NSString stringWithUTF8String:v.c_str()];};auto args=[NSMutableArray new];[args addObject:string((helper/"SoulsImport.dll").string())];
+        for(const auto& argument:arguments)[args addObject:string(argument)];auto task=[NSTask new];task.executableURL=[NSURL fileURLWithPath:string(dotnet.string())];task.arguments=args;
+        auto pipe=[NSPipe pipe];task.standardOutput=pipe;task.standardError=pipe;NSError* error=nil;
+        if(![task launchAndReturnError:&error])throw std::runtime_error(error.localizedDescription.UTF8String);
+        auto log=[pipe.fileHandleForReading readDataToEndOfFile];[task waitUntilExit];auto message=[[NSString alloc]initWithData:log encoding:NSUTF8StringEncoding];
+        if(task.terminationStatus)throw std::runtime_error(message?message.UTF8String:"Source adapter failed");
+        if(!message)throw std::runtime_error("Source adapter returned invalid text");return message.UTF8String;
+      }
+    }
+};
 struct State {
     std::shared_ptr<Scene> scene;
     std::shared_ptr<Project> loading_project;
@@ -194,6 +217,30 @@ struct State {
     std::future<std::shared_ptr<Scene>> loading;
     std::shared_ptr<SourceScene> source;
     std::future<std::shared_ptr<SourceScene>> source_loading;
+    std::future<std::vector<SourceMap>> source_maps_loading;
+    std::vector<SourceInstall> source_installs;
+    std::vector<SourceMap> source_maps;
+    std::map<std::string,fs::path> source_folders;
+    std::string source_catalog_root,source_catalog_profile;
+    bool source_maps_attempted=false;
+    char source_map_filter[128]={};
+    State(){DiscoverSourceInstalls();ChooseSourceProfile(source_profile);}
+    void DiscoverSourceInstalls(){
+        source_installs=DiscoverSources(fs::path(NSHomeDirectory().UTF8String)/"Library/Application Support/Steam",options.game);
+        for(const auto& install:source_installs)source_folders.try_emplace(install.profile,install.root);
+    }
+    void ChooseSourceProfile(int profile){
+        if(source_root[0])source_folders[source_profiles[source_profile]]=source_root;
+        source_profile=profile;source_root[0]=0;const auto it=source_folders.find(source_profiles[profile]);
+        if(it!=source_folders.end())std::snprintf(source_root,sizeof(source_root),"%s",it->second.c_str());
+        source_maps.clear();source_maps_attempted=false;source_map_filter[0]=0;
+    }
+    void RefreshSourceMaps(){
+        if(source_maps_loading.valid() || source_loading.valid())return;
+        if(!source_root[0])throw std::runtime_error("Choose a source game folder first");source_maps_attempted=true;const auto adapter=SourceAdapter();
+        source_maps.clear();source_catalog_root=source_root;source_catalog_profile=source_profiles[source_profile];source_status="Reading installed source maps...";
+        source_maps_loading=std::async(std::launch::async,[adapter,root=source_catalog_root,profile=source_catalog_profile]{return ParseSourceMaps(adapter.Run({"maps","--profile",profile,"--root",root,"--smithbox",adapter.smithbox}));});
+    }
     bool show_source=false,source_fitted=false,source_characters_only=false,source_isolate=false,source_cutaway=false,source_scenery=false;
     int source_selected=-1,source_profile=4,native_template=-1;
     BbMapArt::Vec3 source_anchor{},target_anchor{};
@@ -202,28 +249,16 @@ struct State {
     char source_root[2048]={},source_map[32]="m10_02_00_00",source_filter[128]={};
     std::string source_status,native_template_name;
     std::set<std::string> source_hidden;
-    void OpenSource(const fs::path& path) {source=std::make_shared<SourceScene>(SourceScene::Open(path));show_source=true;source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};native_template=-1;native_template_name.clear();const auto it=std::ranges::find(source_profiles,source->game);if(it!=std::end(source_profiles))source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",source->map.c_str());}
+    void OpenSource(const fs::path& path) {source=std::make_shared<SourceScene>(SourceScene::Open(path));show_source=true;source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};native_template=-1;native_template_name.clear();const auto it=std::ranges::find(source_profiles,source->game);if(it!=std::end(source_profiles) && source_profile!=int(it-std::begin(source_profiles)))ChooseSourceProfile(int(it-std::begin(source_profiles)));std::snprintf(source_map,sizeof(source_map),"%s",source->map.c_str());}
     void PrepareSource() {
         if(!ValidMapName(source_map) || !source_root[0])throw std::runtime_error("Choose the source game folder and a valid map ID");
-        fs::path helper=fs::path(NSBundle.mainBundle.resourcePath.UTF8String)/"souls-import";
-        if(!fs::exists(helper/"SoulsImport.dll"))helper=fs::path(NSBundle.mainBundle.executablePath.UTF8String).parent_path()/"souls-import";
-        if(!fs::exists(helper/"SoulsImport.dll"))throw std::runtime_error("Build the optional source adapter with scripts/macos/build_souls_import.sh, then rebuild this app");
-        fs::path dotnet;for(const auto* p:{"/usr/local/share/dotnet/dotnet","/opt/homebrew/bin/dotnet","/usr/local/bin/dotnet"})if(fs::exists(p)){dotnet=p;break;}
-        if(dotnet.empty())throw std::runtime_error("The source adapter requires the .NET 10 runtime");
-        std::ifstream config(helper/"smithbox-path.txt");std::string smithbox;std::getline(config,smithbox);
-        const auto game=std::string(source_root),map=std::string(source_map),profile=std::string(source_profiles[source_profile]);const bool characters=source_characters_only;
+        const auto adapter=SourceAdapter();const auto game=std::string(source_root),map=std::string(source_map),profile=std::string(source_profiles[source_profile]);const bool characters=source_characters_only;
         source_status="Reading source archives and geometry...";
-        source_loading=std::async(std::launch::async,[helper,dotnet,game,map,profile,smithbox,characters] {
+        source_loading=std::async(std::launch::async,[adapter,game,map,profile,characters] {
           @autoreleasepool {
-            const auto output=fs::path(NSTemporaryDirectory().UTF8String)/(std::string(NSUUID.UUID.UUIDString.UTF8String)+".bbsource");
-            auto string=[](const std::string& v){return [NSString stringWithUTF8String:v.c_str()];};
-            auto task=[NSTask new];task.executableURL=[NSURL fileURLWithPath:string(dotnet.string())];
-            task.arguments=@[string((helper/"SoulsImport.dll").string()),@"import",@"--profile",string(profile),@"--root",string(game),@"--map",string(map),@"--smithbox",string(smithbox),@"--output",string(output.string()),@"--characters-only",characters?@"1":@"0"];
-            auto pipe=[NSPipe pipe];task.standardOutput=pipe;task.standardError=pipe;NSError* error=nil;
-            if(![task launchAndReturnError:&error])throw std::runtime_error(error.localizedDescription.UTF8String);
-            auto log=[pipe.fileHandleForReading readDataToEndOfFile];[task waitUntilExit];
-            if(task.terminationStatus){auto message=[[NSString alloc]initWithData:log encoding:NSUTF8StringEncoding];throw std::runtime_error(message?message.UTF8String:"Source adapter failed");}
-            try{auto source=std::make_shared<SourceScene>(SourceScene::Open(output));fs::remove(output);return source;}catch(...){fs::remove(output);throw;}
+            const auto folder=fs::path(NSTemporaryDirectory().UTF8String)/("bbmap-source-"+std::string(NSUUID.UUID.UUIDString.UTF8String));
+            if(!fs::create_directory(folder))throw std::runtime_error("Cannot create a private source preview folder");const auto output=folder/"preview.bbsource";
+            try{adapter.Run({"import","--profile",profile,"--root",game,"--map",map,"--smithbox",adapter.smithbox,"--output",output.string(),"--characters-only",characters?"1":"0"});auto source=std::make_shared<SourceScene>(SourceScene::Open(output));fs::remove_all(folder);return source;}catch(...){fs::remove_all(folder);throw;}
           }
         });
     }
@@ -277,7 +312,7 @@ struct State {
     std::vector<PickupQuest> exported_quests;
     mutable std::uint64_t unsaved_version=UINT64_MAX;
     mutable bool unsaved_cached=false;
-    ~State() {stop.request_stop();if(loading.valid()) loading.wait();if(source_loading.valid())source_loading.wait();}
+    ~State() {stop.request_stop();if(loading.valid()) loading.wait();if(source_loading.valid())source_loading.wait();if(source_maps_loading.valid())source_maps_loading.wait();}
     bool Unsaved() const {
         if(!scene)return false;const auto& doc=scene->document;
         if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.EventEdits()!=exported_events || doc.Quests()!=exported_quests || doc.Inflated()!=exported);unsaved_version=doc.Version();}
@@ -496,6 +531,11 @@ struct State {
         if([panel runModal]==NSModalResponseOK) Export(panel.URL.fileSystemRepresentation);
     }
     void Poll() {
+        if(source_maps_loading.valid() && source_maps_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            Action([&]{source_maps=source_maps_loading.get();if(!source_maps.empty() && std::ranges::find(source_maps,std::string(source_map),&SourceMap::id)==source_maps.end())std::snprintf(source_map,sizeof(source_map),"%s",source_maps.front().id.c_str());});
+            source_status=!error.empty()?"Source map list failed":source_maps.empty()?"No readable maps found. Choose a loose dump, or an installed DS2/DS3 Game folder.":"Found "+std::to_string(source_maps.size())+" source maps";
+            if(!error.empty() && !commands.empty()){exit_code=1;Finish();}
+        }
         if(source_loading.valid() && source_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){Action([&]{source=source_loading.get();source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};});source_status=error.empty()?"Source preview ready":"Source preview failed";if(!error.empty() && !commands.empty()){exit_code=1;Finish();}}
         const auto action=pending;pending=Pending::None;
         if(action!=Pending::None)Action([&]{
@@ -515,14 +555,17 @@ struct State {
         }
     }
     void Script() {
-        if(!scene || source_loading.valid() || command>=commands.size() || ++frames<12) return;
+        if(!scene || source_loading.valid() || source_maps_loading.valid() || command>=commands.size() || ++frames<12) return;
         frames=0;std::istringstream line(commands[command++]);std::string verb;line>>verb;
         std::printf("EDITOR %s\n",commands[command-1].c_str());
         if(verb=="save-project" || verb=="open-project") {std::string path;std::getline(line>>std::ws,path);if(path.empty())throw std::runtime_error("Missing project path");if(verb=="save-project")SaveProject(path);else OpenProject(path);
         } else if(verb=="assert-project-dirty"){int expected;if(!(line>>expected) || ProjectDirty()!=bool(expected))throw std::runtime_error("Unexpected project state");
         } else if(verb=="snap") {if(line>>snap_range){if(!(line>>snap_offset))snap_offset=0;}Snap();
         } else if(verb=="collision") {show_collision=true;show_terrain=false;
-        } else if(verb=="source-config") {std::string profile,map,path;line>>profile>>map;std::getline(line>>std::ws,path);const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles)||!ValidMapName(map)||path.empty())throw std::runtime_error("Invalid source configuration");source_profile=int(it-std::begin(source_profiles));std::snprintf(source_map,sizeof(source_map),"%s",map.c_str());std::snprintf(source_root,sizeof(source_root),"%s",path.c_str());show_source=true;
+        } else if(verb=="source-installed") {std::string profile;line>>profile;const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles))throw std::runtime_error("Unknown source profile");DiscoverSourceInstalls();ChooseSourceProfile(int(it-std::begin(source_profiles)));if(!source_root[0])throw std::runtime_error("Source game was not detected");show_source=true;RefreshSourceMaps();
+        } else if(verb=="source-maps"){RefreshSourceMaps();
+        } else if(verb=="source-map" || verb=="assert-source-map"){std::string id;line>>id;const auto it=std::ranges::find(source_maps,id,&SourceMap::id);if(it==source_maps.end())throw std::runtime_error("Source map is not in the catalog: "+id);if(verb=="source-map")std::snprintf(source_map,sizeof(source_map),"%s",id.c_str());
+        } else if(verb=="source-config") {std::string profile,map,path;line>>profile>>map;std::getline(line>>std::ws,path);const auto it=std::ranges::find(source_profiles,profile);if(it==std::end(source_profiles)||!ValidMapName(map)||path.empty())throw std::runtime_error("Invalid source configuration");ChooseSourceProfile(int(it-std::begin(source_profiles)));std::snprintf(source_map,sizeof(source_map),"%s",map.c_str());std::snprintf(source_root,sizeof(source_root),"%s",path.c_str());show_source=true;
         } else if(verb=="source-prepare") {PrepareSource();
         } else if(verb=="source-open") {std::string path;std::getline(line>>std::ws,path);OpenSource(path);
         } else if(verb=="source-select") {std::string name;line>>name;if(!source)throw std::runtime_error("No source scene");const auto it=std::ranges::find(source->placements,name,&SourcePlacement::name);if(it==source->placements.end())throw std::runtime_error("Source placement not found");source_selected=int(it-source->placements.begin());
@@ -736,20 +779,39 @@ void EventTools(State& s) {
 }
 std::optional<ImVec2> SourceTools(State& s,Viewport& viewport,id<MTLCommandBuffer> command) {
     if(!s.show_source || !s.scene)return {};
-    ImGui::SetNextWindowSize({1130,750},ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({1130,750},ImGuiCond_FirstUseEver);ImGui::SetNextWindowBgAlpha(1.f);
     if(!ImGui::Begin("Source maps and placement transfer",&s.show_source)){ImGui::End();return {};}
-    ImGui::SetNextItemWidth(100);ImGui::Combo("Game",&s.source_profile,source_profiles,int(std::size(source_profiles)));ImGui::SameLine();
-    if(ImGui::Button("Choose source folder...")) {
-        auto panel=[NSOpenPanel openPanel];panel.canChooseDirectories=YES;panel.canChooseFiles=NO;panel.title=@"Choose a loose game dump or DS2 Game folder";
-        if([panel runModal]==NSModalResponseOK)std::snprintf(s.source_root,sizeof(s.source_root),"%s",panel.URL.fileSystemRepresentation);
+    const bool busy=s.source_loading.valid() || s.source_maps_loading.valid();
+    ImGui::BeginDisabled(busy);ImGui::SetNextItemWidth(170);
+    if(ImGui::BeginCombo("Game",source_profiles[s.source_profile])){
+        for(int i=0;i<int(std::size(source_profiles));++i){const bool installed=std::ranges::any_of(s.source_installs,[&](const auto& entry){return entry.profile==source_profiles[i];});const auto label=std::string(source_profiles[i])+(installed?" (installed)":"");if(ImGui::Selectable(label.c_str(),i==s.source_profile)){s.ChooseSourceProfile(i);if(s.source_root[0])s.Action([&]{s.RefreshSourceMaps();});}}
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();if(ImGui::Button("Detect installed games"))s.Action([&]{s.DiscoverSourceInstalls();if(!s.source_root[0])s.ChooseSourceProfile(s.source_profile);s.status="Detected "+std::to_string(s.source_installs.size())+" source installations";});
+    ImGui::SameLine();if(ImGui::Button("Choose source folder...")) {
+        auto panel=[NSOpenPanel openPanel];panel.canChooseDirectories=YES;panel.canChooseFiles=NO;panel.title=@"Choose a source game folder";
+        if([panel runModal]==NSModalResponseOK){std::snprintf(s.source_root,sizeof(s.source_root),"%s",panel.URL.fileSystemRepresentation);s.Action([&]{s.RefreshSourceMaps();});}
     }
     ImGui::SameLine();if(ImGui::Button("Open prepared preview..."))s.Action([&]{auto panel=[NSOpenPanel openPanel];panel.title=@"Choose a .bbsource scene";if([panel runModal]==NSModalResponseOK){viewport.Clear();s.OpenSource(panel.URL.fileSystemRepresentation);}});
-    ImGui::SetNextItemWidth(-1);ImGui::InputTextWithHint("##source-folder","Source game folder",s.source_root,sizeof(s.source_root));
-    ImGui::SetNextItemWidth(170);ImGui::InputText("Map",s.source_map,sizeof(s.source_map));ImGui::SameLine();
-    ImGui::BeginDisabled(s.source_loading.valid());
+    ImGui::SetNextItemWidth(-1);if(ImGui::InputTextWithHint("##source-folder","Source game folder (Enter to list maps)",s.source_root,sizeof(s.source_root),ImGuiInputTextFlags_EnterReturnsTrue))s.Action([&]{s.RefreshSourceMaps();});
+    if(s.source_catalog_root!=s.source_root || s.source_catalog_profile!=source_profiles[s.source_profile])s.source_maps.clear();
+    if(!s.source_maps_attempted && s.source_root[0] && !busy)s.Action([&]{s.RefreshSourceMaps();});
+    const auto chosen=std::ranges::find(s.source_maps,std::string(s.source_map),&SourceMap::id);const auto label=chosen==s.source_maps.end()?"Choose a map":(chosen->id+"  "+chosen->name);
+    ImGui::SetNextItemWidth(470);if(ImGui::BeginCombo("Source map",label.c_str())){
+        ImGui::InputTextWithHint("##map-search","Filter map ID or name",s.source_map_filter,sizeof(s.source_map_filter));
+        auto lower=[](std::string text){for(char& c:text)if(static_cast<unsigned char>(c)<128)c=char(std::tolower(static_cast<unsigned char>(c)));return text;};const auto needle=lower(s.source_map_filter);
+        for(const auto& map:s.source_maps)if(needle.empty() || lower(map.id+" "+map.name).find(needle)!=std::string::npos){
+            const auto entry=map.id+"  "+map.name;if(ImGui::Selectable(entry.c_str(),map.id==s.source_map))std::snprintf(s.source_map,sizeof(s.source_map),"%s",map.id.c_str());
+            if(ImGui::IsItemHovered())ImGui::SetTooltip("%zu MSB parts",map.parts);
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SameLine();if(ImGui::Button("Refresh maps"))s.Action([&]{s.RefreshSourceMaps();});
+    ImGui::SetNextItemWidth(150);ImGui::InputText("Map ID",s.source_map,sizeof(s.source_map));ImGui::SameLine();
     if(ImGui::Button("Prepare preview"))s.Action([&]{s.PrepareSource();});
-    ImGui::EndDisabled();ImGui::SameLine();ImGui::Checkbox("Characters only",&s.source_characters_only);if(!s.source_status.empty())ImGui::TextWrapped("%s",s.source_status.c_str());
-    ImGui::TextDisabled("DS2/DS3 installed archives or loose files. Source geometry and IDs stay separate from Bloodborne exports.");
+    ImGui::SameLine();ImGui::Checkbox("Characters only",&s.source_characters_only);ImGui::EndDisabled();
+    if(!s.source_status.empty())ImGui::TextWrapped("%s",s.source_status.c_str());
+    ImGui::TextDisabled("Source geometry and IDs stay separate from Bloodborne exports.");
     if(!s.error.empty())ImGui::TextWrapped("%s",s.error.c_str());
     std::optional<ImVec2> pick;
     if(s.source) {
