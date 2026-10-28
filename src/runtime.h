@@ -124,6 +124,8 @@ int runtime_install_exit_menu(unsigned char *image, uint64_t image_size);
 void runtime_mac_settings_pad(uint32_t *buttons);
 /* Reject patches that change active hook prologues or the retained timed wait. */
 const char *runtime_patch_conflict(uint64_t offset, const unsigned char *data, size_t size);
+/* Guard 1.09's deferred graphics bind against an absent resource record (#99). */
+int runtime_install_render_guard(unsigned char *image, uint64_t image_size);
 void runtime_context_lock_stats(void);
 /* The hook name while another thread holds the context lock, else NULL (diagnostics). */
 const char *runtime_context_lock_other(void);

@@ -144,6 +144,8 @@ if [[ ${1:-} == --test ]]; then
     out/pad-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test
     out/runtime-test
+    "$CC" "${cflags[@]}" -I. -Isrc tests/test_render_guard.c src/runtime_render_guard.c -o out/render-guard-test
+    out/render-guard-test
     "$CC" "${cflags[@]}" -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
     "$CC" "${cflags[@]}" -DBB_SAVE_TXN_TESTING -Isrc tests/test_save_txn.c src/runtime_save_txn.c -o out/save-txn-test
