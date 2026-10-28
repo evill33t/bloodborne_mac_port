@@ -13,6 +13,7 @@
 #include "imgui_impl_osx.h"
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <charconv>
 #include <cctype>
 #include <cstdio>
@@ -209,6 +210,13 @@ struct SourceAdapter {
       }
     }
 };
+struct PreparedCharacter {
+    std::weak_ptr<Scene> scene;
+    std::string native_part;
+    Transform transform;
+    CharacterImport assets;
+    std::shared_ptr<const BbMapArt::AreaMesh> preview;
+};
 struct State {
     std::shared_ptr<Scene> scene;
     std::shared_ptr<Project> loading_project;
@@ -218,6 +226,10 @@ struct State {
     std::shared_ptr<SourceScene> source;
     std::future<std::shared_ptr<SourceScene>> source_loading;
     std::future<std::vector<SourceMap>> source_maps_loading;
+    std::future<PreparedCharacter> character_loading;
+    fs::path source_scene_root,preparing_source_root;
+    char character_masks[128]="0";
+    char source_character[32]="c2660";
     std::vector<SourceInstall> source_installs;
     std::vector<SourceMap> source_maps;
     std::map<std::string,fs::path> source_folders;
@@ -249,11 +261,11 @@ struct State {
     char source_root[2048]={},source_map[32]="m10_02_00_00",source_filter[128]={};
     std::string source_status,native_template_name;
     std::set<std::string> source_hidden;
-    void OpenSource(const fs::path& path) {source=std::make_shared<SourceScene>(SourceScene::Open(path));show_source=true;source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};native_template=-1;native_template_name.clear();const auto it=std::ranges::find(source_profiles,source->game);if(it!=std::end(source_profiles) && source_profile!=int(it-std::begin(source_profiles)))ChooseSourceProfile(int(it-std::begin(source_profiles)));std::snprintf(source_map,sizeof(source_map),"%s",source->map.c_str());}
+    void OpenSource(const fs::path& path) {source_scene_root.clear();source=std::make_shared<SourceScene>(SourceScene::Open(path));show_source=true;source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};native_template=-1;native_template_name.clear();const auto it=std::ranges::find(source_profiles,source->game);if(it!=std::end(source_profiles) && source_profile!=int(it-std::begin(source_profiles)))ChooseSourceProfile(int(it-std::begin(source_profiles)));std::snprintf(source_map,sizeof(source_map),"%s",source->map.c_str());}
     void PrepareSource() {
         if(!ValidMapName(source_map) || !source_root[0])throw std::runtime_error("Choose the source game folder and a valid map ID");
         const auto adapter=SourceAdapter();const auto game=std::string(source_root),map=std::string(source_map),profile=std::string(source_profiles[source_profile]);const bool characters=source_characters_only;
-        source_status="Reading source archives and geometry...";
+        preparing_source_root=game;source_folders[profile]=game;source_status="Reading source archives and geometry...";
         source_loading=std::async(std::launch::async,[adapter,game,map,profile,characters] {
           @autoreleasepool {
             const auto folder=fs::path(NSTemporaryDirectory().UTF8String)/("bbmap-source-"+std::string(NSUUID.UUID.UUIDString.UTF8String));
@@ -262,11 +274,49 @@ struct State {
           }
         });
     }
+    void PrepareCharacter() {
+        if(!source_root[0])throw std::runtime_error("Choose a source game folder first");const auto adapter=SourceAdapter();const auto game=std::string(source_root),profile=std::string(source_profiles[source_profile]),model=std::string(source_character);
+        preparing_source_root=game;source_folders[profile]=game;source_status="Reading source character geometry...";
+        source_loading=std::async(std::launch::async,[adapter,game,profile,model]{
+          @autoreleasepool {
+            const auto folder=fs::path(NSTemporaryDirectory().UTF8String)/("bbmap-source-"+std::string(NSUUID.UUID.UUIDString.UTF8String));
+            if(!fs::create_directory(folder))throw std::runtime_error("Cannot create a private character preview folder");const auto output=folder/"character.bbsource";
+            try{adapter.Run({"character","--profile",profile,"--root",game,"--model",model,"--output",output.string()});auto source=std::make_shared<SourceScene>(SourceScene::Open(output));fs::remove_all(folder);return source;}catch(...){fs::remove_all(folder);throw;}
+          }
+        });
+    }
     void TransferSource() {
         const auto& parts=scene->document.Parts();const auto native=std::ranges::find(parts,native_template_name,&Part::name);native_template=native==parts.end()?-1:int(native-parts.begin());
         if(!source || source_selected<0 || native_template<0)throw std::runtime_error("Select a source placement and a Bloodborne template");
         const auto copy=source->Transfer(scene->document,native_template,source_selected,source_anchor,target_anchor,source_yaw);
         Select(int(copy),true);status="Transferred "+source->placements[source_selected].name+" using Bloodborne "+scene->document.Parts()[copy].model+". Source AI and assets were not converted.";
+    }
+    void ImportSourceCharacter() {
+        if(character_loading.valid())throw std::runtime_error("A character import is already running");
+        if(!scene || !source || source_selected<0)throw std::runtime_error("Choose a source character and native template first");
+        const auto& parts=scene->document.Parts();const auto native=std::ranges::find(parts,native_template_name,&Part::name);
+        if(native==parts.end() || !native->enemy || scene->document.CharacterImports().contains(native->model))throw std::runtime_error("Choose an original Bloodborne character as the animation and behavior template");
+        const auto& placement=source->placements.at(source_selected);if(placement.kind!=2)throw std::runtime_error("Choose a character in the source map");
+        auto root=source_scene_root;if(root.empty()){const auto folder=source_folders.find(source->game);if(folder!=source_folders.end())root=folder->second;}
+        if(root.empty())throw std::runtime_error("Choose this source game's folder and prepare its preview first");
+        std::string model;
+        for(int n=6900;n<7900;++n){const auto id="c"+std::to_string(n<7000?n:n-1000);if(scene->document.CanImportCharacterModel(id)){model=id;break;}}
+        if(model.empty())throw std::runtime_error("No free imported character model ID");
+        auto transform=native->transform;const float angle=source_yaw*.017453292519943295f,x=placement.transform.position[0]-source_anchor[0],z=placement.transform.position[2]-source_anchor[2];
+        transform.position={target_anchor[0]+x*std::cos(angle)+z*std::sin(angle),target_anchor[1]+placement.transform.position[1]-source_anchor[1],target_anchor[2]-x*std::sin(angle)+z*std::cos(angle)};transform.rotation=placement.transform.rotation;transform.rotation[1]+=source_yaw;
+        const auto adapter=SourceAdapter();PreparedCharacter pending{scene,native->name,transform,{},nullptr};pending.assets.model=model;pending.assets.native_model=native->model;pending.assets.source_game=source->game;pending.assets.source_model=placement.model;
+        source_status="Converting character geometry, textures and native rig assets...";
+        character_loading=std::async(std::launch::async,[adapter,pending=std::move(pending),root,game=options.game,masks=std::string(character_masks)]()mutable{
+          @autoreleasepool {
+            const auto folder=fs::path(NSTemporaryDirectory().UTF8String)/("bbmap-character-"+std::string(NSUUID.UUID.UUIDString.UTF8String));
+            if(!fs::create_directory(folder))throw std::runtime_error("Cannot create a private character conversion folder");const auto output=folder/"converted";
+            try{
+                auto& a=pending.assets;adapter.Run({"bake-skin","--profile",a.source_game,"--root",root.string(),"--model",a.source_model,"--native-root",game.string(),"--template",a.native_model,"--target",a.model,"--mask",masks,"--output",output.string()});
+                for(const auto& relative:{"chr/"+a.model+".chrbnd.dcx","chr/"+a.model+".anibnd.dcx","action/script/"+a.model+".hks"})a.files[relative]=ReadFile(output/"dvdroot_ps4"/relative);
+                const auto report=ReadFile(output/"conversion.json");a.report.assign(report.begin(),report.end());a.preview=ReadFile(output/"preview.bbsource");const auto preview=SourceScene::Read(a.preview);pending.preview=preview.models.at(a.model);Document::ValidateCharacterImport(a);fs::remove_all(folder);return pending;
+            }catch(...){fs::remove_all(folder);throw;}
+          }
+        });
     }
     std::stop_source stop;
     std::mutex mutex;
@@ -312,7 +362,7 @@ struct State {
     std::vector<PickupQuest> exported_quests;
     mutable std::uint64_t unsaved_version=UINT64_MAX;
     mutable bool unsaved_cached=false;
-    ~State() {stop.request_stop();if(loading.valid()) loading.wait();if(source_loading.valid())source_loading.wait();if(source_maps_loading.valid())source_maps_loading.wait();}
+    ~State() {stop.request_stop();if(loading.valid()) loading.wait();if(source_loading.valid())source_loading.wait();if(source_maps_loading.valid())source_maps_loading.wait();if(character_loading.valid())character_loading.wait();}
     bool Unsaved() const {
         if(!scene)return false;const auto& doc=scene->document;
         if(unsaved_version!=doc.Version()) {unsaved_cached=doc.Changed() && (doc.ItemLots()!=exported_lots || doc.EventEdits()!=exported_events || doc.Quests()!=exported_quests || doc.Inflated()!=exported);unsaved_version=doc.Version();}
@@ -531,12 +581,16 @@ struct State {
         if([panel runModal]==NSModalResponseOK) Export(panel.URL.fileSystemRepresentation);
     }
     void Poll() {
+        if(character_loading.valid() && character_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){
+            Action([&]{auto result=character_loading.get();if(!scene || result.scene.lock()!=scene)throw std::runtime_error("The map changed during conversion; import the character again in the desired map");const auto& parts=scene->document.Parts();const auto native=std::ranges::find(parts,result.native_part,&Part::name);if(native==parts.end())throw std::runtime_error("Native character template is no longer available");const auto model=result.assets.model;const auto copy=scene->document.ImportCharacter(std::size_t(native-parts.begin()),result.transform,std::move(result.assets));scene->models[model]=result.preview;clear_meshes=true;Select(int(copy),true);status="Imported "+model+" with source geometry/textures and native Bloodborne animation, AI and hitboxes. Export and reload to test.";std::printf("IMPORTED CHARACTER %s entity=%d\n",model.c_str(),scene->document.Parts()[copy].entity_id);});
+            source_status=error.empty()?"Character import ready":"Character import failed";if(!error.empty() && !commands.empty()){exit_code=1;Finish();}
+        }
         if(source_maps_loading.valid() && source_maps_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){
             Action([&]{source_maps=source_maps_loading.get();if(!source_maps.empty() && std::ranges::find(source_maps,std::string(source_map),&SourceMap::id)==source_maps.end())std::snprintf(source_map,sizeof(source_map),"%s",source_maps.front().id.c_str());});
             source_status=!error.empty()?"Source map list failed":source_maps.empty()?"No readable maps found. Choose a loose dump, or an installed DS2/DS3 Game folder.":"Found "+std::to_string(source_maps.size())+" source maps";
             if(!error.empty() && !commands.empty()){exit_code=1;Finish();}
         }
-        if(source_loading.valid() && source_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){Action([&]{source=source_loading.get();source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};});source_status=error.empty()?"Source preview ready":"Source preview failed";if(!error.empty() && !commands.empty()){exit_code=1;Finish();}}
+        if(source_loading.valid() && source_loading.wait_for(std::chrono::seconds(0))==std::future_status::ready){Action([&]{source=source_loading.get();source_scene_root=preparing_source_root;source_selected=-1;source_fitted=false;source_isolate=source_cutaway=false;source_hidden.clear();source_anchor={};});source_status=error.empty()?"Source preview ready":"Source preview failed";if(!error.empty() && !commands.empty()){exit_code=1;Finish();}}
         const auto action=pending;pending=Pending::None;
         if(action!=Pending::None)Action([&]{
             if(action==Pending::Duplicate)Duplicate();else if(action==Pending::Remove)Remove();
@@ -544,7 +598,7 @@ struct State {
             else if(active_route>=0){scene->document.RemoveRoute(active_route);active_route=-1;}
         });
         if(loading.valid() && loading.wait_for(std::chrono::seconds(0))==std::future_status::ready) {
-            try {scene=loading.get();RestoreProjectView();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
+            try {scene=loading.get();for(const auto& [model,assets]:scene->document.CharacterImports())scene->models[model]=SourceScene::Read(assets.preview).models.at(model);RestoreProjectView();std::printf("LOADED %s: %zu placements, %zu terrain triangles, %zu missing object models\n",options.map.c_str(),scene->document.Parts().size(),scene->terrain->indices.size()/3,scene->missing_models);}
             catch(const std::exception& e) {error=e.what();if(!commands.empty()) {exit_code=1;Finish();}}
             frames=0;
             if(scene && !options.select.empty()) {
@@ -555,7 +609,7 @@ struct State {
         }
     }
     void Script() {
-        if(!scene || source_loading.valid() || source_maps_loading.valid() || command>=commands.size() || ++frames<12) return;
+        if(!scene || source_loading.valid() || source_maps_loading.valid() || character_loading.valid() || command>=commands.size() || ++frames<12) return;
         frames=0;std::istringstream line(commands[command++]);std::string verb;line>>verb;
         std::printf("EDITOR %s\n",commands[command-1].c_str());
         if(verb=="save-project" || verb=="open-project") {std::string path;std::getline(line>>std::ws,path);if(path.empty())throw std::runtime_error("Missing project path");if(verb=="save-project")SaveProject(path);else OpenProject(path);
@@ -579,6 +633,10 @@ struct State {
         } else if(verb=="source-target") {if(!(line>>target_anchor[0]>>target_anchor[1]>>target_anchor[2]))throw std::runtime_error("Invalid target anchor");
         } else if(verb=="source-template") {native_template=selected;native_template_name=scene->document.Parts().at(selected).name;
         } else if(verb=="source-transfer") {TransferSource();
+        } else if(verb=="source-import-character") {ImportSourceCharacter();
+        } else if(verb=="source-character") {std::string model;line>>model;if(model.size()>=sizeof(source_character))throw std::runtime_error("Invalid source character ID");std::snprintf(source_character,sizeof(source_character),"%s",model.c_str());PrepareCharacter();
+        } else if(verb=="source-masks") {std::string masks;line>>masks;if(masks.size()>=sizeof(character_masks))throw std::runtime_error("Too many render masks");std::snprintf(character_masks,sizeof(character_masks),"%s",masks.c_str());
+        } else if(verb=="assert-character-model") {std::string model;line>>model;if(selected<0 || scene->document.Parts().at(selected).model!=model || !scene->document.CharacterImports().contains(model))throw std::runtime_error("Unexpected imported character model");
         } else if(verb=="select") {
             std::string name;line>>name;const auto& objects=scene->document.Parts();auto it=std::ranges::find(objects,name,&Part::name);
             if(it==objects.end()) throw std::runtime_error("Script placement not found: "+name);
@@ -781,7 +839,7 @@ std::optional<ImVec2> SourceTools(State& s,Viewport& viewport,id<MTLCommandBuffe
     if(!s.show_source || !s.scene)return {};
     ImGui::SetNextWindowSize({1130,750},ImGuiCond_FirstUseEver);ImGui::SetNextWindowBgAlpha(1.f);
     if(!ImGui::Begin("Source maps and placement transfer",&s.show_source)){ImGui::End();return {};}
-    const bool busy=s.source_loading.valid() || s.source_maps_loading.valid();
+    const bool busy=s.source_loading.valid() || s.source_maps_loading.valid() || s.character_loading.valid();
     ImGui::BeginDisabled(busy);ImGui::SetNextItemWidth(170);
     if(ImGui::BeginCombo("Game",source_profiles[s.source_profile])){
         for(int i=0;i<int(std::size(source_profiles));++i){const bool installed=std::ranges::any_of(s.source_installs,[&](const auto& entry){return entry.profile==source_profiles[i];});const auto label=std::string(source_profiles[i])+(installed?" (installed)":"");if(ImGui::Selectable(label.c_str(),i==s.source_profile)){s.ChooseSourceProfile(i);if(s.source_root[0])s.Action([&]{s.RefreshSourceMaps();});}}
@@ -809,7 +867,8 @@ std::optional<ImVec2> SourceTools(State& s,Viewport& viewport,id<MTLCommandBuffe
     ImGui::SameLine();if(ImGui::Button("Refresh maps"))s.Action([&]{s.RefreshSourceMaps();});
     ImGui::SetNextItemWidth(150);ImGui::InputText("Map ID",s.source_map,sizeof(s.source_map));ImGui::SameLine();
     if(ImGui::Button("Prepare preview"))s.Action([&]{s.PrepareSource();});
-    ImGui::SameLine();ImGui::Checkbox("Characters only",&s.source_characters_only);ImGui::EndDisabled();
+    ImGui::SameLine();ImGui::Checkbox("Characters only",&s.source_characters_only);
+    ImGui::SetNextItemWidth(130);ImGui::InputText("Character ID",s.source_character,sizeof(s.source_character));ImGui::SameLine();if(ImGui::Button("Preview character"))s.Action([&]{s.PrepareCharacter();});ImGui::EndDisabled();
     if(!s.source_status.empty())ImGui::TextWrapped("%s",s.source_status.c_str());
     ImGui::TextDisabled("Source geometry and IDs stay separate from Bloodborne exports.");
     if(!s.error.empty())ImGui::TextWrapped("%s",s.error.c_str());
@@ -854,6 +913,11 @@ std::optional<ImVec2> SourceTools(State& s,Viewport& viewport,id<MTLCommandBuffe
             ImGui::BeginDisabled(s.native_template<0 || (p.kind!=1 && p.kind!=2));
             if(ImGui::Button("Create Bloodborne placement"))s.Action([&]{s.TransferSource();});ImGui::EndDisabled();
             ImGui::TextWrapped("Uses the chosen Bloodborne model, AI and collision. Copies relative position and rotation. Undo removes the copy.");
+            if(p.kind==2){
+                ImGui::Separator();ImGui::TextUnformatted("Import character appearance");ImGui::SetNextItemWidth(-1);ImGui::InputText("Render masks",s.character_masks,sizeof(s.character_masks));
+                ImGui::BeginDisabled(busy || s.native_template<0);if(ImGui::Button("Import character as new model"))s.Action([&]{s.ImportSourceCharacter();});ImGui::EndDisabled();
+                ImGui::TextWrapped("Converts source geometry and textures onto the chosen native rig. Creates an independent character. Uses Bloodborne animations, AI and hitboxes; cloth uses ordinary skinning. Render masks select variants (for example 0 or 0,1).");
+            }
         }
         if(ImGui::CollapsingHeader("Conversion report"))ImGui::TextWrapped("%s",source.notice.c_str());
         ImGui::EndChild();ImGui::SameLine();

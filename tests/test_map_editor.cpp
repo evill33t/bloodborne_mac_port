@@ -107,6 +107,24 @@ int main(int argc,char** argv) {
         t.scale[0]=2;Reject([&]{d.Set(1,t);});
     }
     auto invalid_enemy=enemies;Put<std::int64_t>(invalid_enemy,0x6b8,0x2e0);Reject([&]{Document::Read(invalid_enemy);});
+    {
+        auto input=EnemyFixture();Put<std::uint32_t>(input,0x308,1);Put<std::uint32_t>(input,0x388,2);Put<std::int32_t>(input,0x398,1);
+        // A following collision model must retain its target when the new enemy
+        // model is inserted into the earlier, contiguous enemy group.
+        Put<std::uint32_t>(input,0x14,4);Put<std::int64_t>(input,0x30,0xf00);Put<std::int64_t>(input,0x38,0x50);
+        Put<std::int64_t>(input,0xf00,40);Put<std::uint32_t>(input,0xf08,5);Text(input,0xf28,"h0000");Put<std::int32_t>(input,0x91c,2);
+        auto d=Document::Read(input);auto t=d.Parts()[1].transform;t.position[2]+=2;auto a=CharacterFixture();const auto copy=d.ImportCharacter(1,t,a);
+        assert(d.Parts()[copy].model=="c6900" && d.Parts()[1].model=="c3030" && d.Parts()[copy].enemy->collision.name=="h0000");
+        const auto saved=d.Save();const auto reopened=Document::Read(saved);assert(reopened.Parts().back().model=="c6900");
+        const auto tables=Tables(d.Inflated());const auto& models=*std::ranges::find(tables,std::string("MODEL_PARAM_ST"),&Table::name);assert(models.entries.size()==4);
+        const auto bytes=d.Inflated();for(std::size_t n=1;n<models.entries.size();++n)assert(Get<std::uint32_t>(bytes,models.entries[n-1]+8)<=Get<std::uint32_t>(bytes,models.entries[n]+8));
+        const auto& pt=*std::ranges::find(tables,std::string("PARTS_PARAM_ST"),&Table::name);for(const auto p:pt.entries)if(RecordName(bytes,p,true)==u"h0000")assert(Get<std::int32_t>(bytes,p+0x1c)==3);
+        assert(Get<std::int32_t>(bytes,models.entries[1]+0x18)==1 && Get<std::int32_t>(bytes,models.entries[2]+0x18)==1);
+        assert(d.Undo() && d.Save()==input && !d.Changed());assert(d.CharacterImports().size()==1 && d.Redo() && d.Save()==saved);
+        d.Remove(copy);assert(d.Save()==input && d.Undo() && d.Save()==saved);const auto again=d.Duplicate(copy);assert(d.Parts()[again].model=="c6900");assert(Document::Read(d.Save()).Parts().back().model=="c6900");
+        Reject([&]{d.ImportCharacter(1,t,a);});auto bad=a;bad.model="../../bad";Reject([&]{Document::ValidateCharacterImport(bad);});bad=a;bad.files["../notes"]={1};Reject([&]{Document::ValidateCharacterImport(bad);});Reject([&]{d.ImportCharacter(0,t,CharacterFixture("c6901"));});
+        std::cout<<"PASS: independent character model groups, original model references and loading collision, imported duplication, grouped undo/redo and package guards\n";
+    }
     invalid_enemy=enemies;Put<std::int64_t>(invalid_enemy,0x6b0,0x28);Reject([&]{Document::Read(invalid_enemy);});
     auto unicode=enemies;Put<std::uint16_t>(unicode,0xd80,0x65e5);Put<std::uint16_t>(unicode,0xd82,0);assert(Document::Read(unicode).Parts()[1].enemy->move_points[0].name=="\xe6\x97\xa5");
     for(auto input:{raw,packed,enemies,Pack(enemies),dummy,Pack(dummy)}) {

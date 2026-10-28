@@ -35,7 +35,8 @@ have not been exported.
 Projects retain the original map, parameter and event baselines, newly created prop/enemy
 and pickup ownership, private item lots, regions, routes, NPC settings, event arguments,
 pickup reward quests, identifier reservations, full grouped undo/redo history including its
-redo tail, the last export state, camera and selection. Undo can still return to the exact
+redo tail, the last export state, camera and selection. Imported character packages and their
+bind-pose previews are embedded, including assets needed by undone or removed imports. Undo can still return to the exact
 original MSB bytes after reopening. Source previews can be opened again separately; their
 large mesh caches are not embedded in projects. Terrain, object models, textures and display
 labels continue to load from your game folder. If the folder moves, the open dialog offers a
@@ -50,6 +51,9 @@ exported mod when distributing changes. Saves use a bounded, checksummed format 
 file replacement; an unrelated file, damaged existing project, directory symlink into the
 game folder, or file symlink is refused as a save destination. Loading validates history
 against its embedded source before replacing the document.
+Version 2 projects support imported assets and a 512 MiB file limit (256 MiB of character
+assets). Existing version 1 projects still open. Character imports are exported only while
+their models are used by map placements.
 
 `bash tests/test_project_file.sh /path/to/CUSA00900` checks ownership, allocator reservations,
 source-baseline independence, grouped history and redo tails, malformed records, path guards,
@@ -552,11 +556,67 @@ To reuse a foreign spawn/prop arrangement:
 
 Transfer preserves the chosen Bloodborne template's model, AI, parameter, scale and
 collision references; source positions and rotations supply the layout. It never treats
-foreign IDs as Bloodborne IDs. Original source data remains unchanged. This is a **layout
-transfer**, not a playable port of foreign character assets or a whole map. Foreign models,
-textures, rigs, animations, AI, collision, navigation, item tables and event/quest logic are
-not exported into Bloodborne. Preparing a source scene does not establish that those systems
-can run in Bloodborne.
+foreign IDs as Bloodborne IDs. Original source data remains unchanged. This button performs
+**layout transfer**. Character appearance conversion uses the separate workflow below;
+preparing a scene or transferring a layout does not convert foreign animations, AI,
+collision, navigation, item tables or event/quest logic.
+
+### Import a character appearance
+
+Select a source character and an original Bloodborne character as the native template.
+You can also enter a **Character ID** and click **Preview character** to load a model directly
+from the chosen game folder, without finding a map that places it. Some humanoid models
+assemble separate equipment parts and contain no mesh; those are reported as unavailable.
+Set the source and target anchors as above, choose the source's **Render masks** (for example
+`0` or `0,1`), then click **Import character as new model**. Conversion runs on a worker.
+It matches named bones, preserves bind-pose offsets when falling back to an ancestor,
+retargets geometry, maps material slots to a native shader and converts DDS images to PS4
+textures. The report records bone mappings, direct weight coverage and texture fallbacks;
+missing diffuse textures and incompatible skeletons fail without adding a placement.
+
+The result is a separate character model with a fresh placement/entity ID. Original
+Bloodborne characters keep their original mesh. The editor shows the converted bind pose;
+move, rotate, duplicate, remove, undo, save/reopen a project and export it normally. The
+mod contains the new mesh/embedded texture bank, copied native animation/behavior binder,
+native action script and edited MSB. Native behavior paths are renamed without relocating
+their Havok fixups, and model-table insertion remaps existing model references.
+
+This imports **appearance onto a native rig**. Animations, AI, hitboxes and effects use the
+chosen Bloodborne template. Cloth bindings for the old vertex buffers are removed, so cloth
+uses ordinary skinning. Source-specific shaders are approximated by the native shader;
+sound banks are not copied. Foreign animation/behavior conversion and playable whole-map
+conversion remain separate work.
+
+The managed converter can also produce an independent package:
+
+```sh
+dotnet out/map-editor/souls-import/SoulsImport.dll bake-skin \
+  --profile DS3 --root /path/to/DS3/Game --model c1430 \
+  --native-root /path/to/CUSA00900 --template c2630 --target c6900 \
+  --mask 0 --output /path/to/new-character-package
+```
+
+Omitting `--target` creates a replacement-skin package for the native template; the editor
+always allocates a separate unused model. CLI output folders are exclusive and must be
+outside both game folders, including through symlinks. Game assets remain local and are
+never added to the repository.
+
+`SMITHBOX_DIR=... bash tests/test_skin_retarget.sh` checks bone palettes/global indices,
+bind transforms and ancestor offsets, masks, image payload preservation, legacy texture
+slots, malformed imports, behavior path renaming and source/output guards.
+Native replay and gameplay evidence are under ignored `out/map-editor/asset-import-validation/`.
+The DS3 Cemetery hollow (`c1430`, mask 0) imported as `c6900` beside original `c2630` in active
+Central Yharnam phase `m24_01_00_01`: both entities had 150 HP, active loading state and moved
+over five metres. Screenshots show the textured hollow and original enemy together using
+native attack animations. The game check used a copied save and player-only placement;
+no enemy memory was changed. Project reload produced six identical exported files, and
+126 distinct original asset/seed hashes stayed unchanged. This is bounded coexistence and
+attack evidence; it does not establish every source character or campaign compatibility.
+The same native workflow also imports DS1 Remastered's Butcher (`c2660` → `c6901`,
+100% direct bone weight) and DS2 Scholar's Kobold (`c1010` → `c6902`, 79.2%). Each loads
+with 150 HP beside the original character and runs native attack behavior in a separate
+private-save test. A project containing all three imports reopens and exports identical
+assets; removing unused characters omits their asset packages from that mod.
 
 The importer is also available from the command line:
 

@@ -53,3 +53,8 @@ std::vector<std::uint8_t> EnemyFixture() {
     Put<std::int64_t>(b,0xb18,0x48);Put<std::int32_t>(b,0xb50,2409002);
     return b;
 }
+BbMapEditor::CharacterImport CharacterFixture(const std::string& model="c6900") {
+    BbMapEditor::CharacterImport a;a.model=model;a.native_model="c3030";a.source_game="DS3";a.source_model="c1430";a.report="Fixture conversion";
+    a.files["chr/"+model+".chrbnd.dcx"]={1,2,3};a.files["chr/"+model+".anibnd.dcx"]={4,5,6};a.files["action/script/"+model+".hks"]={7,8,9};
+    const std::string magic="BBMSRC01";a.preview.assign(magic.begin(),magic.end());return a;
+}

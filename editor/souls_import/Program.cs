@@ -12,7 +12,7 @@ using System.Text.Json;
 internal record Profile(string Id, string Name, string Reader);
 internal record Placement(string Name, string Model, uint Kind, Vector3 Position, Vector3 Rotation, Vector3 Scale, int SourceId=-1);
 internal record Mesh(Vector3[] Positions, int[] Indices, uint Color);
-internal static class Program {
+internal static partial class Program {
     static readonly Profile[] Profiles = [
         new("DES","Demon's Souls","MSBD"),new("DS1","Dark Souls","MSB1"),new("DS1R","Dark Souls Remastered","MSB1"),
         new("DS2","Dark Souls II","MSB2"),new("DS2S","Dark Souls II Scholar","MSB2"),new("DS3","Dark Souls III","MSB3"),
@@ -42,6 +42,8 @@ internal static class Program {
             string Get(string key)=>values.TryGetValue(key,out var v)?v:throw new ArgumentException("Missing "+key);
             var profile=Profiles.Single(p=>p.Id==Get("--profile"));var root=Canonical(Get("--root"));
             if(args[0]=="maps")return ListMaps(profile,root,Get("--smithbox"));
+            if(args[0]=="character")return PreviewCharacter(values,profile,root);
+            if(args[0]=="bake-skin")return BakeSkin(values,profile,root);
             if(args[0]!="import")throw new ArgumentException("Expected profiles, self-test, maps or import");
             var map=Get("--map");
             if(!Regex.IsMatch(map,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid map identifier");
@@ -121,11 +123,12 @@ internal static class Program {
         }
         return 0;
     }
-    static string Canonical(string path) {
+    static string Canonical(string path,int links=0) {
+        if(links>40)throw new IOException("Too many source/output symlinks");
         var full=Path.GetFullPath(path);var prefix=Path.GetPathRoot(full)!;
         foreach(var part in full.Substring(prefix.Length).Split(Path.DirectorySeparatorChar,StringSplitOptions.RemoveEmptyEntries)) {
             prefix=Path.Combine(prefix,part);FileSystemInfo info=Directory.Exists(prefix)?new DirectoryInfo(prefix):new FileInfo(prefix);
-            if(info.Exists)prefix=info.ResolveLinkTarget(true)?.FullName??prefix;
+            if(info.LinkTarget!=null){var target=info.ResolveLinkTarget(true)??throw new IOException("Unresolved source/output symlink");prefix=Canonical(target.FullName,links+1);}
         }return prefix;
     }
     static uint Kind(string type)=>type.Contains("Enemy")?2u:type.Contains("Object")||type=="Asset"?1u:type=="MapPiece"?0u:3u;

@@ -14,7 +14,7 @@
 
 namespace BbMapEditor {
 namespace {
-constexpr std::size_t Limit=128*1024*1024,CountLimit=1000000;
+constexpr std::size_t Limit=512*1024*1024,CountLimit=1000000;
 constexpr char Magic[]="BBPROJ01";
 constexpr const char* Params="param/gameparam/gameparam.parambnd.dcx";
 constexpr const char* Definitions="event/common.emedf.dcx";
@@ -45,6 +45,7 @@ F(Treasure,v.name,v.record,v.event_id,v.entity_id,v.added,v.original,v.data)
 F(ItemLot,v.id,v.source_id,v.name,v.bytes)
 F(ScriptOperand,v.script,v.at,v.width,v.type,v.original,v.value)
 F(PickupQuest,v.script,v.treasure,v.event_id,v.trigger_flag,v.completion_flag,v.reward_lot)
+F(CharacterImport,v.model,v.native_model,v.source_game,v.source_model,v.report,v.files,v.preview)
 #undef F
 // Explicit fields only: never serialize C++ padding, pointers, or string internals.
 // Version 1 is little endian and uses 64-bit sizes on the native macOS target.
@@ -111,6 +112,7 @@ void SourceKeys(const std::map<std::string,std::vector<std::uint8_t>>& sources,c
 
 Project Project::Capture(const std::filesystem::path& root,const std::string& name,const Document& d){
     Project result;result.game=std::filesystem::weakly_canonical(std::filesystem::absolute(root));result.map=name;
+    result.character_imports=d.character_imports;
     result.sources[MapSource(name)]=d.source;
     if(d.parameters){const auto b=d.parameters->OriginalSource();result.sources[Params]={b.begin(),b.end()};}
     for(const auto& [key,file]:d.scripts){
@@ -131,6 +133,10 @@ std::vector<std::string> Project::EventNames()const{std::vector<std::string> nam
 
 void Project::Restore(Document& document)const{
     auto d=OriginalDocument();d.parameters=document.parameters;d.scripts=document.scripts;
+    std::size_t import_size=0;
+    for(const auto& [name,assets]:character_imports){Document::ValidateCharacterImport(assets);if(name!=assets.model || !d.CanImportCharacterModel(name))Fail("import conflicts with an original model");import_size+=assets.preview.size();for(const auto& [_,b]:assets.files)import_size+=b.size();}
+    if(import_size>256*1024*1024)Fail("character import asset budget");
+    d.character_imports=character_imports;
     // Contexts must match the embedded baseline before any history can be applied.
     if(sources.contains(Params) && (!d.parameters || !std::ranges::equal(d.parameters->OriginalSource(),Source(Params))))Fail("item parameter baseline unavailable");
     for(const auto& name:EventNames())if(!d.scripts.contains(name) || !std::ranges::equal(d.scripts.at(name)->OriginalSource(),Source("event/"+name)))Fail("event baseline unavailable");
@@ -173,7 +179,9 @@ void Project::Restore(Document& document)const{
                 if constexpr(std::is_same_v<T,Part>){
                     CheckName(v.name);CheckTransform(v.original);CheckTransform(v.transform);
                     const auto base=std::ranges::find(original.parts,v.record,&Part::record);
-                    if(base==original.parts.end() || v.model!=base->model || v.kind!=base->kind || !(v.type==base->type || (v.added && base->type==9 && v.type==1)) || v.original_enemy!=base->original_enemy || bool(v.enemy)!=bool(base->enemy))Fail("invalid placement source");
+                    if(base==original.parts.end())Fail("invalid placement source");
+                    const bool imported=v.added && bool(v.enemy) && character_imports.contains(v.model) && character_imports.at(v.model).native_model==base->model;
+                    if((v.model!=base->model && !imported) || v.kind!=base->kind || !(v.type==base->type || (v.added && base->type==9 && v.type==1)) || v.original_enemy!=base->original_enemy || bool(v.enemy)!=bool(base->enemy))Fail("invalid placement source");
                     if(!v.added && (v.name!=base->name || v.entity_id!=base->entity_id || v.instance_id!=base->instance_id || v.type_id!=base->type_id || v.original!=base->original))Fail("changed original placement identity");
                     if(v.enemy && (v.enemy->entity_id!=v.entity_id || v.enemy->instance_id!=v.instance_id || v.enemy->dummy!=base->enemy->dummy || v.transform.scale!=v.original.scale))Fail("invalid character identity");
                     if(!d.reserved_names.contains(v.name) || (v.entity_id>0 && !d.reserved_entities.contains(v.entity_id)))Fail("unreserved placement identifier");
@@ -212,15 +220,17 @@ void Project::Restore(Document& document)const{
 }
 
 std::vector<std::uint8_t> Project::Bytes()const{
-    SourceKeys(sources,map);Archive<false> io;const auto path=game.string();const std::uint32_t version=1;
+    SourceKeys(sources,map);Archive<false> io;const auto path=game.string();const std::uint32_t version=2;
     io.Raw(const_cast<char*>(Magic),8);io(version,path,map,selected_name,selected_kind,route_key,camera,exported,exported_msb,exported_lots,exported_events,exported_quests,sources,session);
+    io(character_imports);
     const auto crc=std::uint32_t(mz_crc32(0,io.bytes.data(),io.bytes.size()));io(crc);return std::move(io.bytes);
 }
 Project Project::Read(std::span<const std::uint8_t> bytes){
     if(bytes.size()<16 || bytes.size()>Limit || std::memcmp(bytes.data(),Magic,8))Fail("file header");std::uint32_t crc;std::memcpy(&crc,bytes.data()+bytes.size()-4,4);
     if(mz_crc32(0,bytes.data(),bytes.size()-4)!=crc)Fail("checksum mismatch");Archive<true> io(bytes.subspan(8,bytes.size()-12));Project p;std::uint32_t version;std::string game;
-    io(version,game,p.map,p.selected_name,p.selected_kind,p.route_key,p.camera,p.exported,p.exported_msb,p.exported_lots,p.exported_events,p.exported_quests,p.sources,p.session);io.End();
-    p.game=game;if(version!=1 || !p.game.is_absolute() || p.selected_kind<0 || p.selected_kind>3 || p.route_key< -1 || p.camera[3]<=0 || p.camera[3]>10000)Fail("unsupported metadata");SourceKeys(p.sources,p.map);if(!p.exported_msb.empty())Document::Read(p.exported_msb);return p;
+    io(version,game,p.map,p.selected_name,p.selected_kind,p.route_key,p.camera,p.exported,p.exported_msb,p.exported_lots,p.exported_events,p.exported_quests,p.sources,p.session);
+    if(version==2)io(p.character_imports);io.End();
+    p.game=game;if((version!=1 && version!=2) || !p.game.is_absolute() || p.selected_kind<0 || p.selected_kind>3 || p.route_key< -1 || p.camera[3]<=0 || p.camera[3]>10000)Fail("unsupported metadata");SourceKeys(p.sources,p.map);if(!p.exported_msb.empty())Document::Read(p.exported_msb);return p;
 }
 Project Project::Open(const std::filesystem::path& path){std::error_code ec;const auto n=std::filesystem::file_size(path,ec);if(ec || n>Limit)Fail("file size limit or unreadable file");return Read(ReadFile(path));}
 void Project::Save(const std::filesystem::path& target)const{

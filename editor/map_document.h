@@ -82,6 +82,14 @@ struct Treasure {
     bool added=false;
     TreasureData original,data;
 };
+// Immutable converted assets are retained through undo so a removed import can
+// be restored. Exports include only models still used by placements.
+struct CharacterImport {
+    std::string model,native_model,source_game,source_model,report;
+    std::map<std::string,std::vector<std::uint8_t>> files;
+    std::vector<std::uint8_t> preview;
+    bool operator==(const CharacterImport&) const = default;
+};
 // Copies retain uninterpreted record data, with fresh identifiers. Structural exports
 // keep part type groups contiguous and remap references to preserve their targets.
 class Project;
@@ -119,6 +127,10 @@ public:
     bool RemoveRoute(std::size_t index);
     std::size_t Duplicate(std::size_t index,bool activate_object=false);
     std::size_t DuplicateAt(std::size_t index,const Transform& transform);
+    std::size_t ImportCharacter(std::size_t index,const Transform& transform,CharacterImport assets);
+    const std::map<std::string,CharacterImport>& CharacterImports() const {return character_imports;}
+    static void ValidateCharacterImport(const CharacterImport& assets);
+    bool CanImportCharacterModel(const std::string& model) const;
     // Only editor-created copies can be removed; existing reference targets stay valid.
     bool Remove(std::size_t index);
     bool Undo();
@@ -133,6 +145,7 @@ private:
     std::filesystem::path source_game;
     std::filesystem::path source_map;
     std::vector<Part> parts;
+    std::map<std::string,CharacterImport> character_imports;
     std::vector<Region> regions;
     std::vector<Route> routes;
     std::vector<Treasure> treasures;
@@ -162,6 +175,7 @@ private:
     ItemLot NewLot(std::int32_t source,bool independent);
     std::int32_t NewPickupFlag(std::int32_t source);
     void Group(std::size_t first);
+    std::size_t DuplicateModel(std::size_t index,bool activate_object,const std::string& model);
     using Entry=std::variant<Part,Region,Route,Treasure,ItemLot,ScriptOperand,PickupQuest>;
     struct Edit {
         std::size_t index;std::optional<Entry> before,after;std::size_t group=0;

@@ -567,7 +567,11 @@ std::int32_t Document::NewEntityID(std::int32_t source_id) {
     reserved_entities.insert(allocated);return allocated;
 }
 std::size_t Document::Duplicate(std::size_t i,bool activate_object) {
+    return DuplicateModel(i,activate_object,parts.at(i).model);
+}
+std::size_t Document::DuplicateModel(std::size_t i,bool activate_object,const std::string& model) {
     Part copy=parts.at(i);ReserveSiblings();
+    copy.model=model;
     if(activate_object && copy.type==9)copy.type=1;
     const char prefix=copy.kind==PartKind::Enemy?'c':'o';
     if(copy.model.size()<2 || copy.model[0]!=prefix || copy.model.find_first_not_of("0123456789",1)!=std::string::npos)
@@ -603,6 +607,32 @@ std::size_t Document::DuplicateAt(std::size_t i,const Transform& transform) {
     Check(transform);const auto& p=parts.at(i);if(p.kind==PartKind::Enemy && transform.scale!=p.original.scale)throw std::runtime_error("Enemy scale is preserved; edit position and rotation only");
     const auto first=cursor;const auto copy=Duplicate(i);Set(copy,transform);Group(first);return copy;
 }
+void Document::ValidateCharacterImport(const CharacterImport& a) {
+    auto valid=[](const std::string& s){return s.size()==5 && s[0]=='c' && s.find_first_not_of("0123456789",1)==std::string::npos;};
+    if(!valid(a.model) || !valid(a.native_model) || a.model==a.native_model || a.source_game.empty() || a.source_game.size()>32 || a.source_model.empty() || a.source_model.size()>32 || a.report.size()>1048576)
+        throw std::runtime_error("Invalid imported character metadata");
+    const std::set<std::string> allowed={"chr/"+a.model+".chrbnd.dcx","chr/"+a.model+".anibnd.dcx","action/script/"+a.model+".hks"};
+    if(a.files.size()!=allowed.size() || a.preview.size()<8 || a.preview.size()>32*1024*1024 || std::memcmp(a.preview.data(),"BBMSRC01",8))throw std::runtime_error("Incomplete imported character package");
+    std::size_t total=a.preview.size();
+    for(const auto& [path,bytes]:a.files){if(!allowed.contains(path) || bytes.empty() || bytes.size()>64*1024*1024)throw std::runtime_error("Invalid imported character asset");total+=bytes.size();}
+    if(total>128*1024*1024)throw std::runtime_error("Imported character exceeds the asset budget");
+}
+std::size_t Document::ImportCharacter(std::size_t i,const Transform& t,CharacterImport assets) {
+    ValidateCharacterImport(assets);Check(t);const auto& part=parts.at(i);
+    if(!part.enemy || part.model!=assets.native_model || t.scale!=part.original.scale)throw std::runtime_error("Choose an original Bloodborne character matching the import's native rig");
+    if(!CanImportCharacterModel(assets.model))throw std::runtime_error("Imported character model is already in use");
+    std::size_t total=assets.preview.size();for(const auto& [_,b]:assets.files)total+=b.size();for(const auto& [_,a]:character_imports){total+=a.preview.size();for(const auto& [__,b]:a.files)total+=b.size();}
+    if(total>256*1024*1024)throw std::runtime_error("Character imports exceed the project asset budget");
+    const auto model=assets.model;const auto first=cursor;const auto copy=DuplicateModel(i,false,model);
+    Set(copy,t);Group(first);character_imports.emplace(model,std::move(assets));return copy;
+}
+bool Document::CanImportCharacterModel(const std::string& model) const {
+    if(model.size()!=5 || model[0]!='c' || model.find_first_not_of("0123456789",1)!=std::string::npos || character_imports.contains(model))return false;
+    const auto& table=*std::ranges::find(sections,std::string("MODEL_PARAM_ST"),&Section::name);
+    for(const auto p:table.entries)if(Name(raw,Offset(raw,p,p))==model)return false;
+    if(!source_game.empty())for(const auto& path:{"chr/"+model+".chrbnd.dcx","chr/"+model+".anibnd.dcx","action/script/"+model+".hks"})if(std::filesystem::exists(source_game/"dvdroot_ps4"/path))return false;
+    return true;
+}
 bool Document::Remove(std::size_t i) {
     if(!parts.at(i).added)throw std::runtime_error("Only copies created in this session can be removed");
     for(const auto& t:treasures)if(t.data.part.name==parts[i].name)throw std::runtime_error("Remove the attached treasure before its part");
@@ -633,6 +663,18 @@ std::vector<std::uint8_t> Document::Inflated() const {
     const auto structural=std::ranges::any_of(parts,&Part::added) || std::ranges::any_of(regions,&Region::added) ||
         std::ranges::any_of(routes,&Route::added) || std::ranges::any_of(treasures,&Treasure::added);
     const auto& table=*std::ranges::find(sections,std::string("PARTS_PARAM_ST"),&Section::name);
+    const auto& model_table=*std::ranges::find(sections,std::string("MODEL_PARAM_ST"),&Section::name);
+    struct FullModel {std::size_t source;std::string name;std::uint32_t type;};std::vector<FullModel> full_models;
+    for(const auto p:model_table.entries)full_models.push_back({p,Name(raw,Offset(raw,p,p)),Get<std::uint32_t>(raw,p+8)});
+    std::map<std::string,int> model_instances;std::set<std::string> added_models,copied_models;
+    std::int64_t next_model_id=0;for(const auto& m:full_models)if(m.type==2)next_model_id=std::max(next_model_id,std::int64_t(Get<std::int32_t>(raw,m.source+12))+1);
+    for(const auto& p:parts)if(p.added){++model_instances[p.model];copied_models.insert(p.model);if(character_imports.contains(p.model))added_models.insert(p.model);}
+    for(const auto& name:added_models)full_models.push_back({0,name,2});
+    if(!added_models.empty())std::stable_sort(full_models.begin(),full_models.end(),[](const auto& a,const auto& b){return a.type<b.type;});
+    std::map<std::string,int> model_indices;for(std::size_t n=0;n<full_models.size();++n)if(!model_indices.emplace(full_models[n].name,int(n)).second)throw std::runtime_error("Duplicate map model name");
+    std::map<int,int> model_remap;
+    for(std::size_t n=0;n<model_table.entries.size();++n)model_remap[int(n)]=model_indices.at(Name(raw,Offset(raw,model_table.entries[n],model_table.entries[n])));
+    for(const auto p:table.entries){const auto index=Get<std::int32_t>(raw,p+0x1c);if(index>=0 && std::size_t(index)<model_table.entries.size())++model_instances[Name(raw,Offset(raw,model_table.entries[index],model_table.entries[index]))];}
     struct FullPart {std::uint32_t type;std::string name;};std::vector<FullPart> full_parts;
     for(const auto p:table.entries)full_parts.push_back({Get<std::uint32_t>(raw,p+0x14),Name(raw,Offset(raw,p+8,p))});
     for(const auto& p:parts)if(p.added)full_parts.push_back({p.type,p.name});
@@ -674,7 +716,7 @@ std::vector<std::uint8_t> Document::Inflated() const {
     const auto count=std::ranges::count(parts,true,&Part::added);
     if(!structural)return b;
     if(table.entries.size()+count>=100000)throw std::runtime_error("Too many map placements");
-    struct Record { std::size_t source; const Part* copy=nullptr; const Region* region=nullptr; const Route* route=nullptr; const Treasure* treasure=nullptr; };
+    struct Record { std::size_t source; const Part* copy=nullptr; const Region* region=nullptr; const Route* route=nullptr; const Treasure* treasure=nullptr; const FullModel* model=nullptr; };
     std::vector<Record> ordered;
     for(auto p:table.entries)ordered.push_back({p});
     for(const auto& o:parts)if(o.added)ordered.push_back({o.record,&o});
@@ -684,7 +726,6 @@ std::vector<std::uint8_t> Document::Inflated() const {
         return (a.copy?a.copy->type:Get<std::uint32_t>(raw,a.source+0x14))<(b.copy?b.copy->type:Get<std::uint32_t>(raw,b.source+0x14));
     });
     std::map<std::size_t,std::int32_t> new_indices;
-    std::map<int,int> added_models;
     std::map<std::uint32_t,std::int64_t> next_type_ids;
     for(auto p:table.entries) {
         const auto type=Get<std::uint32_t>(raw,p+0x14);
@@ -692,7 +733,6 @@ std::vector<std::uint8_t> Document::Inflated() const {
     }
     for(std::size_t n=0;n<ordered.size();++n) {
         if(!ordered[n].copy)new_indices[ordered[n].source]=std::int32_t(n);
-        else ++added_models[Get<std::int32_t>(raw,ordered[n].source+0x1c)];
     }
     auto remap=[&](std::vector<std::uint8_t>& data,std::size_t field) {
         auto index=Get<std::int32_t>(data,field);if(index==-1)return;
@@ -714,6 +754,7 @@ std::vector<std::uint8_t> Document::Inflated() const {
             throw std::runtime_error("Cannot duplicate maps with an unknown section");
         std::vector<Record> records;
         if(s.name=="PARTS_PARAM_ST")records=ordered;
+        else if(s.name=="MODEL_PARAM_ST")for(const auto& model:full_models)records.push_back({model.source,nullptr,nullptr,nullptr,nullptr,&model});
         else for(auto p:s.entries)records.push_back({p});
         if(s.name=="POINT_PARAM_ST")for(const auto& r:regions)if(r.added)records.push_back({0,nullptr,&r});
         if(s.name=="EVENT_PARAM_ST") {
@@ -732,7 +773,8 @@ std::vector<std::uint8_t> Document::Inflated() const {
         for(std::size_t n=0;n<records.size();++n) {
             const auto& record=records[n];const auto p=record.source;
             std::vector<std::uint8_t> data;
-            if(record.region)data=PointRecord(*record.region,int(n));
+            if(record.model && !p){if(next_model_id>INT32_MAX)throw std::runtime_error("Model identifier limit reached");data.resize(40);Put<std::int64_t>(data,0,40);Put<std::uint32_t>(data,8,2);Put<std::int32_t>(data,12,next_model_id++);AppendName(data,record.model->name);Put<std::int64_t>(data,16,data.size());AppendName(data,"");Align(data,8);}
+            else if(record.region)data=PointRecord(*record.region,int(n));
             else if(record.route){data=PatrolRecord(*record.route,route_indices.at(record.route->key));patch_route(data,0,*record.route);}
             else {const auto& bytes=record.copy || record.treasure?raw:b;data.assign(bytes.begin()+std::ptrdiff_t(p),bytes.begin()+std::ptrdiff_t(record_ends.at(p)));}
             if(record.treasure) {
@@ -748,6 +790,9 @@ std::vector<std::uint8_t> Document::Inflated() const {
                 Put<std::int32_t>(data,0x18,type_id);Put(data,local(data,0xb0,16),o.entity_id);patch_part(data,0,o);
             }
             if(s.name=="PARTS_PARAM_ST") {
+                const auto model=Get<std::int32_t>(data,0x1c);
+                if(record.copy)Put<std::int32_t>(data,0x1c,model_indices.at(record.copy->model));
+                else if(model!=-1){if(!model_remap.contains(model))throw std::runtime_error("Cannot import a map with an unresolved model reference");Put<std::int32_t>(data,0x1c,model_remap.at(model));}
                 const auto type=Get<std::uint32_t>(data,0x14);
                 switch(type) {
                     case 1:case 9: if(Get<std::int64_t>(data,0xb8))remap(data,local(data,0xb8,12)+8);break;
@@ -765,10 +810,9 @@ std::vector<std::uint8_t> Document::Inflated() const {
                 else if(type==16) {const auto t=local(data,0x20,0x90);for(int i=0;i<32;++i)remap(data,t+0x10+i*4);}
                 else if(type!=1 && type!=2 && type!=4 && type!=6 && type!=8 && type!=9 && type!=10 && type!=11 && type!=13 && type!=14 && type!=15 && type!=17 && type!=0xffffffff)
                     throw std::runtime_error("Unknown event type while rebuilding references");
-            } else if(s.name=="MODEL_PARAM_ST" && added_models.contains(int(n))) {
-                int instances=added_models.at(int(n));
-                for(auto part:table.entries)if(Get<std::int32_t>(raw,part+0x1c)==int(n))++instances;
-                Put<std::int32_t>(data,0x18,instances);
+            } else if(s.name=="MODEL_PARAM_ST") {
+                const auto& name=record.model->name;
+                if(copied_models.contains(name))Put<std::int32_t>(data,0x18,model_instances.at(name));
             }
             Put<std::int64_t>(result,at+16+n*8,result.size());result.insert(result.end(),data.begin(),data.end());
             result.resize((result.size()+7)&~std::size_t(7),0);
@@ -813,6 +857,10 @@ std::filesystem::path Document::Export(const std::filesystem::path& folder,const
         fs::create_directories((folder/relative).parent_path());WriteExclusive(folder/relative,bytes);
         if(!parameter_bytes.empty()) {const auto path=folder/"dvdroot_ps4/param/gameparam/gameparam.parambnd.dcx";fs::create_directories(path.parent_path());WriteExclusive(path,parameter_bytes);}
         for(const auto& [name,data]:event_files){const auto path=folder/"dvdroot_ps4/event"/name;fs::create_directories(path.parent_path());WriteExclusive(path,data);}
+        for(const auto& [model,assets]:character_imports)if(std::ranges::any_of(parts,[&](const auto& p){return p.model==model;})){
+            for(const auto& [relative,data]:assets.files){const auto path=folder/"dvdroot_ps4"/relative;fs::create_directories(path.parent_path());WriteExclusive(path,data);}
+            const auto report=folder/(model+"-conversion.txt");WriteExclusive(report,std::span(reinterpret_cast<const std::uint8_t*>(assets.report.data()),assets.report.size()));
+        }
         const std::string note="Bloodborne map editor mod\nMap: "+map+"\nEnable this folder in Mods & Cheats. Reload the area to apply it.\n"+
             (parameter_bytes.empty()?std::string():"Includes a full gameparam binder with private item-lot rows. Combine parameter changes before using other gameparam mods.\n");
         WriteExclusive(folder/"README.txt",std::span(reinterpret_cast<const std::uint8_t*>(note.data()),note.size()));

@@ -60,7 +60,15 @@ int main(int argc,char** argv){
         }
         assert(found);Checksum(bad);
         Reject([&]{auto p=Project::Read(bad);Loaded(p);});
-        auto invalid_cursor=bytes;Put<std::uint64_t>(invalid_cursor,invalid_cursor.size()-12,2);Checksum(invalid_cursor);Reject([&]{Loaded(Project::Read(invalid_cursor));}); // inside a grouped duplicate+move
+        auto invalid_cursor=bytes;Put<std::uint64_t>(invalid_cursor,invalid_cursor.size()-16,2);Checksum(invalid_cursor);Reject([&]{Loaded(Project::Read(invalid_cursor));}); // inside a grouped duplicate+move
+        auto legacy=bytes;legacy.erase(legacy.end()-8,legacy.end()-4);Put<std::uint32_t>(legacy,8,1);Checksum(legacy);Same(d,Loaded(Project::Read(legacy))); // version 1 has no asset registry
+        {
+            auto imported=Document::Open(path);const auto a=CharacterFixture();const auto index=imported.ImportCharacter(1,Transform{{5,6,9},{0,90,0},{1,1,1}},a);
+            const auto p=Project::Read(Project::Capture(game,map,imported).Bytes());auto r=Loaded(p);Same(imported,r);History(imported,r);assert(r.CharacterImports()==imported.CharacterImports());
+            r.Remove(index);auto removed=Loaded(Project::Read(Project::Capture(game,map,r).Bytes()));assert(removed.Undo() && removed.Parts().back().model=="c6900");
+            r=Loaded(p);r.Export(root/"imported",map);for(const auto& [relative,data]:a.files)assert(ReadFile(root/"imported/dvdroot_ps4"/relative)==data);
+            assert(r.Undo());r.Export(root/"import-undone",map);assert(!fs::exists(root/"import-undone/dvdroot_ps4/chr"));
+        }
         // Failure leaves the caller's document intact.
         auto original=Document::Open(path);const auto untouched=original.Save();Reject([&]{Project::Read(bad).Restore(original);});assert(original.Save()==untouched && !original.Changed());
         std::cout<<"PASS: project ownership, grouped undo/redo and redo tail, baseline independence, allocator reservations, atomic replacement and malformed/path guards\n";

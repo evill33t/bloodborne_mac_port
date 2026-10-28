@@ -1,0 +1,5 @@
+<Project><PropertyGroup>
+  <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../../out/map-editor/skin-test-obj/</BaseIntermediateOutputPath>
+  <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  <BaseOutputPath>$(MSBuildThisFileDirectory)../../out/map-editor/skin-test-bin/</BaseOutputPath>
+</PropertyGroup></Project>

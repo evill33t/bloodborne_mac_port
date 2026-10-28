@@ -28,6 +28,7 @@ public:
     void Save(const std::filesystem::path& path) const;
 private:
     std::map<std::string,std::vector<std::uint8_t>> sources;
+    std::map<std::string,CharacterImport> character_imports;
     std::vector<std::uint8_t> session;
 };
 }
