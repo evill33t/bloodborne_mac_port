@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Issue #97: vertex sharps bypassed the SRT walker's guest-fault recovery.
+// Non-null stale vertex sharps recover locally only without an enclosing worker recovery.
 #include <array>
 #include <cassert>
 #include <csignal>
@@ -41,6 +41,24 @@ void ExpectZero(const AmdGpu::Buffer& buffer) {
     const AmdGpu::Buffer zero{};
     assert(std::memcmp(&buffer, &zero, sizeof(buffer)) == 0);
 }
+
+// Match GetProgram's draw-preparation worker: a guest fault abandons preparation,
+// and the GPU thread retries the draw. Keep the callable and locals trivial so
+// recovery does not skip destructors in this fixture.
+template <typename Read>
+bool PreparedRead(Read&& read) {
+    assert(runtime_fault_recover == nullptr);
+    BbRecoverBuf recover;
+    if (BB_RECOVER_SET(recover)) {
+        assert(runtime_fault_recover == nullptr);
+        return false;
+    }
+    runtime_fault_recover = &recover;
+    read();
+    assert(runtime_fault_recover == &recover);
+    runtime_fault_recover = nullptr;
+    return true;
+}
 } // namespace
 
 int main() {
@@ -66,8 +84,8 @@ int main() {
         return Shader::StageSpecialization(info, Shader::RuntimeInfo{}, profile, {});
     };
 
-    // A null vertex table reproduces the near-null read during StageSpecialization.
-    std::puts("specialize a null vertex descriptor table");
+    // Preserve master's null-table behavior from 0.5.10 (#74/#97).
+    std::puts("specialize null and non-null stale vertex descriptor tables");
     std::fflush(stdout);
     auto null_spec = specialize();
     assert(null_spec.fetch_shader_data && null_spec.fetch_shader_data->attributes.size() == 1);
@@ -100,6 +118,17 @@ int main() {
     ExpectZero(info.ReadUdReg<AmdGpu::Buffer>(15, 0));
     ExpectZero(info.ReadUdReg<AmdGpu::Buffer>(std::numeric_limits<u32>::max(), 0));
 
+    // Check the base before adding the offset, including tagged low pointers. No
+    // signal/recovery is needed for these even on speculative workers.
+    for (uintptr_t base : {uintptr_t{0}, uintptr_t{8},
+                           uintptr_t{Shader::Info::MinTableAddress - 1}}) {
+        SetPointer(ud, 2, reinterpret_cast<const void*>(base | (0xabcdULL << 48)));
+        const auto before = faults;
+        ExpectZero(info.ReadUdReg<AmdGpu::Buffer>(2, std::numeric_limits<u32>::max()));
+        assert(PreparedRead([&] { ExpectZero(info.ReadUdReg<AmdGpu::Buffer>(2, 0)); }));
+        assert(faults == before);
+    }
+
     const auto page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     auto* pages = static_cast<u8*>(mmap(nullptr, page_size * 2, PROT_READ | PROT_WRITE,
                                       MAP_ANON | MAP_PRIVATE, -1, 0));
@@ -109,13 +138,20 @@ int main() {
     // A stale non-null pointer, and a descriptor straddling a readable page and a hole.
     for (const void* address : {pages + page_size, pages + page_size - 8}) {
         SetPointer(ud, 2, address);
-        BbRecoverBuf outer;
-        runtime_fault_recover = &outer;
         ExpectZero(info.ReadUdReg<AmdGpu::Buffer>(2, 0));
-        assert(runtime_fault_recover == &outer);
-        runtime_fault_recover = nullptr;
+        assert(runtime_fault_recover == nullptr);
     }
     assert(faults == 2);
+
+    // Stale descriptor reads must reach the worker's recovery, rather than
+    // returning a zero V# and continuing with the wrong permutation/format.
+    for (const void* address : {pages + page_size, pages + page_size - 8}) {
+        SetPointer(ud, 2, address);
+        auto observed = descriptor;
+        assert(!PreparedRead([&] { observed = info.ReadUdReg<AmdGpu::Buffer>(2, 0); }));
+        assert(observed == descriptor);
+    }
+    assert(faults == 4);
     SetPointer(ud, 2, pages + page_size);
     auto stale_spec = specialize();
     assert(stale_spec.vs_attribs.size() == 1);
@@ -123,6 +159,14 @@ int main() {
     // Recovery is per read: replacing the stale pointer with a valid table works next draw.
     SetPointer(ud, 2, table.data());
     assert(specialize().vs_attribs == valid_spec.vs_attribs);
+    assert(PreparedRead([&] { assert(info.ReadUdReg<AmdGpu::Buffer>(2, 0) == descriptor); }));
+    // The same stale address works again once its memory is readable.
+    assert(mprotect(pages + page_size, page_size, PROT_READ | PROT_WRITE) == 0);
+    std::memcpy(pages + page_size, &descriptor, sizeof(descriptor));
+    SetPointer(ud, 2, pages + page_size);
+    assert(PreparedRead([&] { assert(info.ReadUdReg<AmdGpu::Buffer>(2, 0) == descriptor); }));
+    assert(mprotect(pages + page_size, page_size, PROT_NONE) == 0);
+    SetPointer(ud, 2, table.data());
 
     // The second guest read used by tessellation specialization is guarded too.
     Shader::TessellationDataConstantBuffer constants{};
@@ -139,6 +183,20 @@ int main() {
     info.ReadTessConstantBuffer(readback);
     const Shader::TessellationDataConstantBuffer zero_constants{};
     assert(std::memcmp(&readback, &zero_constants, sizeof(readback)) == 0);
+    assert(!PreparedRead([&] { info.ReadTessConstantBuffer(readback); }));
+    // Check the pointer to the descriptor itself, not just its constant data.
+    SetPointer(ud, 2, pages + page_size);
+    assert(!PreparedRead([&] { info.ReadTessConstantBuffer(readback); }));
+    SetPointer(ud, 2, table.data());
+    for (uintptr_t base : {uintptr_t{0}, uintptr_t{8},
+                           uintptr_t{Shader::Info::MinTableAddress - 1}}) {
+        descriptor.base_address = base;
+        std::memcpy(table.data(), &descriptor, sizeof(descriptor));
+        const auto before = faults;
+        assert(PreparedRead([&] { info.ReadTessConstantBuffer(readback); }));
+        assert(std::memcmp(&readback, &zero_constants, sizeof(readback)) == 0);
+        assert(faults == before);
+    }
     SetPointer(ud, 2, nullptr);
     info.ReadTessConstantBuffer(readback);
     assert(std::memcmp(&readback, &zero_constants, sizeof(readback)) == 0);
@@ -154,5 +212,5 @@ int main() {
     assert(info.ReadUdReg<AmdGpu::Buffer>(2, 0) == descriptor);
     Shader::Info::num_ud_snapshots = 0;
     assert(munmap(pages, page_size * 2) == 0);
-    std::puts("PASS: shader specialization null/stale descriptors, bounds, valid/tagged reads, snapshots and recovery");
+    std::puts("PASS: shader userdata low/null fast paths, GPU recovery, worker fallback, bounds, tagged reads, snapshots and tessellation");
 }
