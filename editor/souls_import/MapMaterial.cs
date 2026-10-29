@@ -2,6 +2,24 @@
 using SoulsFormats;
 
 internal static class MapMaterial {
+    internal static bool Cutout(string mtd,string profile)=>profile is "DS1" or "DS1R" &&
+        (mtd.Contains("_Edge",StringComparison.OrdinalIgnoreCase)||mtd.Contains("Foliage",StringComparison.OrdinalIgnoreCase)||mtd.Contains("Ivy",StringComparison.OrdinalIgnoreCase));
+
+    internal static bool NonSolidFoliage(string mtd,string diffuse,string profile)=>profile is "DS1" or "DS1R" &&
+        (mtd.Contains("Foliage",StringComparison.OrdinalIgnoreCase)||mtd.Contains("Ivy",StringComparison.OrdinalIgnoreCase)||
+         diffuse.Contains("_grass_",StringComparison.OrdinalIgnoreCase)||diffuse.Contains("_ivy_",StringComparison.OrdinalIgnoreCase));
+
+    // Authored effect cards need additive rendering and must never form solid collision.
+    internal static bool LightShaft(string mtd,string profile)=>profile is "DS1" or "DS1R" &&
+        mtd.Contains("BG_shaft",StringComparison.OrdinalIgnoreCase)&&mtd.Contains("_Add",StringComparison.OrdinalIgnoreCase);
+
+    internal static bool SameSlot(string source,string native) {
+        string Key(string value)=>value.EndsWith("Texture",StringComparison.Ordinal)?value[..^7]:value;
+        return Key(source)==Key(native);
+    }
+
+    internal static byte[] Normal(byte[] dds,string profile)=>profile is "DS2" or "DS2S"?Normal(dds):dds;
+
     // DS2 BC3 normals store X in alpha and Y in green. Bloodborne expects X in
     // red. Preserve the blue surface channel and every mip while repacking.
     internal static byte[] Normal(byte[] dds) {

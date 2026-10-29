@@ -7,6 +7,7 @@ static class CollisionTests {
     static void Reject(Action action){try{action();}catch(InvalidDataException){return;}throw new Exception("Malformed input accepted");}
     static void Main(string[] args){
         MapReplacementTests.Run();
+        StaticMapGeometryTests.Run();
         string path=Path.Combine(args[0],"dvdroot_ps4/map/m24_01_00_00/h24_01_00_00.hkx");using var archive=new BXF4Reader(path+"bhd",path+"bdt");var template=archive.ReadFile(archive.Files.Single(f=>f.Name.EndsWith("000010.hkx.dcx"))).ToArray();var before=System.Security.Cryptography.SHA256.HashData(template);
         var triangles=new List<MapCollision.Triangle>();for(int x=0;x<10;++x)for(int z=0;z<10;++z){triangles.Add(new(new(x,0,z),new(x,0,z+1),new(x+1,0,z)));triangles.Add(new(new(x+1,0,z),new(x,0,z+1),new(x+1,0,z+1)));}
         var b=MapCollision.Bake(template,triangles);uint U(int o)=>BitConverter.ToUInt32(b,o);int start=BitConverter.ToInt16(b,62)+64,names=(int)U(start+20),h=start+128,data=(int)U(h+20),local=(int)U(h+24),global=(int)U(h+28),virt=(int)U(h+32),end=(int)U(h+36);var fix=new Dictionary<int,int>();for(int o=data+local;o+8<=data+global;o+=8)if(U(o)!=uint.MaxValue)fix.Add((int)U(o),(int)U(o+4));

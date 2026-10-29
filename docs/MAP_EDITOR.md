@@ -585,7 +585,7 @@ This imports **appearance onto a native rig**. Animations, AI, hitboxes and effe
 chosen Bloodborne template. Cloth bindings for the old vertex buffers are removed, so cloth
 uses ordinary skinning. Source-specific shaders are approximated by the native shader;
 sound banks are not copied. Foreign animation/behavior conversion remains separate work.
-The experimental Majula map replacement below uses a separate CLI workflow.
+The experimental map replacements below use a separate CLI workflow.
 
 The managed converter can also produce an independent package:
 
@@ -672,6 +672,59 @@ hub without player-placement or travel requests. Original asset/seed hash checks
 Imported texture loading also exposed a staging-buffer alignment error. Tile/detile
 allocations now request shader storage alignment explicitly; the Metal host-kernel suite
 and the mod run pass with Metal validation enabled.
+
+### Firelink Shrine as a Bloodborne mod
+
+`bake-map` also accepts `DS1` and `DS1R` for Firelink Shrine (`m10_02_00_00`), replacing
+the same Central Yharnam variant. The installed source asset checks use **Dark Souls
+Remastered**; original Dark Souls is an adapter profile, not a separately verified game run.
+After building the optional adapter as above:
+
+```sh
+dotnet out/map-editor/souls-import/SoulsImport.dll bake-map \
+  --profile DS1R --root '/path/to/DARK SOULS REMASTERED' \
+  --map m10_02_00_00 --native-root /path/to/CUSA00900 \
+  --target-map m24_01_00_01 \
+  --source-anchor '-51.8,-60.6,55.7' --target-anchor '-195.6,-40.53,220.33' \
+  --output /path/to/private-test-data/firelink-mods/Firelink
+```
+
+Point `BB_MODS_DIR` at `firelink-mods` and use an isolated copied save through
+`BB_SAVE_DIR`. Firelink and Majula replace the same native area; enable one replacement
+at a time. The source anchor is Firelink's bonfire. By default, the exported native player
+and respawn regions use the source map's first player position, translated by the anchor
+offset and raised one metre. `--spawn-offset 'x,y,z'` overrides that position relative to
+the target anchor. Existing saves keep their saved coordinates until a native respawn.
+
+DS1 rigid bone palettes and legacy texture slot names are converted to native Bloodborne
+geometry/materials. Foliage and edge materials use the native alpha-test material while preserving diffuse
+alpha. Only foliage cards are excluded from generated collision; opaque trunks and
+physical alpha-tested props retain collision. The two source light-shaft meshes use a
+verified native additive material with original texture and vertex alpha, and have no
+collision. Source angular fading and texture scrolling are not reproduced.
+
+The export adds an independent Bloodborne daytime sky, keeps the original scripted sky
+records invisible, and removes unused distant city geometry. This approximates the
+backdrop; DS1's sky, distant scenery, water surfaces and lighting are not transplanted.
+
+This remains a static map replacement with the same NPC, item, quest, navigation and
+campaign limitations as Majula. Local Firelink evidence under ignored
+`out/map-editor/firelink-validation/` covers 72 models, 117 placements, 160 textures,
+93 non-solid meshes (91 foliage and two light shafts), and 376,245 collision triangles
+in both native collision archives. Independent readback checks native references, all
+texture slots, preserved source ray alpha/mips, and original scripted sky identities.
+
+A normal Hunter's Mark respawn landed on the imported floor with full HP, and the copied
+save resumed above the floor with the production runtime. Native save-and-quit and later
+reload were checked. The user confirmed foliage/sky and restored additive rays during
+play. This is a bounded gameplay check; collision is still derived from render geometry
+and is not yet equivalent to the source game's dedicated collision.
+
+The DS2 regression also exposed a preexisting vertex-copy issue: SoulsFormats' vertex
+copy omits `NormalW`, so rigid source bone selection now reads the original vertex. This
+corrects 5,710 positions across nine Majula models; 27 triangles move across the existing
+collision clipping bounds. Model/placement/texture counts, base triangle indices, the MSB
+and texture archives remain unchanged. The previous local Majula demo is preserved.
 
 The importer is also available from the command line:
 
