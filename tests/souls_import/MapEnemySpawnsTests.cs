@@ -46,9 +46,17 @@ static class MapEnemySpawnsTests {
             Check(goals.Goals.Any(g=>g.ID==261010)&&goals.Goals.Any(g=>g.ID==261000),"Imported rig lacks native logic/battle goal registration");
             Check(MapNativeAi.Merge(result.Files[aiPath],donorAi).SequenceEqual(result.Files[aiPath]),"Native AI composition is not idempotent");
             Check(afterAi.Files.Count(f=>Leaf(f.Name).StartsWith("2610")&&Leaf(f.Name).EndsWith(".lua"))==6,"Native rig AI companion scripts were omitted");
-            Check(result.Spawns.Count==(id=="m10_02_00_00"?6:86),"Ordinary hollow selection changed or conditional populations were included");
+            Check(result.Spawns.Count==(id=="m10_02_00_00"?19:86),"Enemy selection changed or conditional populations were included");
             Check(result.Skipped.Count+result.Spawns.Count==source.Parts.Enemies.Count,"Source actors were not completely accounted for");
-            Check(result.Spawns.All(p=>source.Parts.Enemies.Single(s=>s.Name==p.SourceName).InitAnimID==-1),"A hanging/special-pose actor was spawned in a standing pose");
+            Check(result.Spawns.All(p=>p.SourceInitAnimID==source.Parts.Enemies.Single(s=>s.Name==p.SourceName).InitAnimID&&
+                (p.SourceInitAnimID==-1||id=="m10_02_00_00"&&p.SourceInitAnimID==9001&&p.SourceModel is "c2900" or "c2910")),"An unadapted hanging/special-pose actor was spawned standing");
+            var skeletons=result.Spawns.Where(p=>p.SourceModel is "c2900" or "c2910").ToArray();
+            Check(skeletons.Length==(id=="m10_02_00_00"?13:0),"Cemetery skeleton population changed");
+            if(skeletons.Length>0) {
+                Check(skeletons.Count(p=>p.SourceModel=="c2910")==2&&skeletons.All(p=>p.TargetModel.StartsWith("c97")&&p.EntityID is >=2419900 and <2420000&&!p.HasSourceTorch&&p.DirectWeightShare>.99),"Skeleton rig, population or reserved identity changed");
+                Check(skeletons.Where(p=>p.SourceModel=="c2910").All(p=>p.ProportionScale>1.5f&&p.ProportionScale<2.5f),"Giant skeleton stature was lost");
+                Check(skeletons.Where(p=>p.SourceNPCParamID==290000).All(p=>p.DisplayMasks.SequenceEqual(new[]{0,1}))&&skeletons.Where(p=>p.SourceNPCParamID==290002).All(p=>p.DisplayMasks.SequenceEqual(new[]{3})),"Skeleton sword/shield or greatsword loadout was lost");
+            }
             var old=BND4.Read(composed);composed=result.Files["param/gameparam/gameparam.parambnd.dcx"];var game=BND4.Read(composed);
             foreach(var f in old.Files.Where(f=>Leaf(f.Name)!="NpcParam.param"))Check(game.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Enemy export overwrote an unrelated parameter entry");
             var oldNpcs=MapCharacters.NativeRows(old.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes,false);
@@ -127,7 +135,7 @@ static class MapEnemySpawnsTests {
         }
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
-        Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other hollows omit only four native torch events, retaining combat/status data and every other animation event");
-        Console.WriteLine($"PASS: {total} ordinary hollow placements, source masks/shared textures, independent native rigs, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data and every other animation event");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons), source masks/shared textures, independent native rigs, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

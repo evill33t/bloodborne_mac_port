@@ -106,10 +106,10 @@ internal static class MapCharacters {
     }
 
     internal static SkinBake Package(byte[] sourceModel,List<TPF.Texture> textures,string profile,string template,string target,
-        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null) {
+        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false) {
         int id=int.Parse(target[1..]);
         var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
-        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610");visual.Bytes=bake.Model.Write();
+        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610",allowLargeHumanoid:allowLargeHumanoid);visual.Bytes=bake.Model.Write();
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
         if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native actor template reserves texture binder ID 100");
         character.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,100,@"N:\SPRJ\data\INTERROOT_ps4\chr\"+target+@"\"+target+".tpf",bake.Textures.Write(DCX.Type.None)));
@@ -122,7 +122,7 @@ internal static class MapCharacters {
             else if(file.ID>=7000000&&file.ID<8000000)file.Bytes=SkinRetarget.RenameBehavior(file.Bytes,template,target);
         }
         files.Add("chr/"+target+".anibnd.dcx",animation.Write(DCX.Type.DCX_DFLT_10000_44_9));files.Add("action/script/"+target+".hks",nativeScript.ToArray());
-        return bake with {ProportionScale=SkinRetarget.HumanoidScale(FLVER2.Read(sourceModel).Nodes,bake.Model.Nodes)};
+        return bake with {ProportionScale=SkinRetarget.HumanoidScale(FLVER2.Read(sourceModel).Nodes,bake.Model.Nodes,allowLargeHumanoid)};
     }
 
     // Pure in-memory staging: callers compose the returned map entries and files

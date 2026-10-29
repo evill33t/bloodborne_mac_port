@@ -829,8 +829,18 @@ has a reason in `enemySpawns.Skipped`. Source bosses, quest NPCs, patrols, navig
 gates/lifts and event conditions are not ported. The source map includes the Parish, but
 its separate sub-area banner is not yet assigned. Imported hollow pursuit across source
 navigation and complete route traversal still require validation.
-Firelink's cemetery skeletons are also unconverted; they are not included in the 92
-ordinary hollow placements across the two maps.
+Firelink also instantiates eleven ordinary cemetery skeletons (`c2900`, sword/shield
+and greatsword loadouts) and two giant skeletons (`c2910`). The adapter accepts only
+the three identified cemetery NPC/Think combinations and their source initial pose
+`9001`; it starts them in native standing combat rather than copying that incompatible
+animation ID. Their meshes, textures, equipment masks, positions and stature are
+retained, with all weighted bones directly matched to the native rig. Giant stature
+uses an explicit larger scale allowance; ordinary imports retain their original
+proportion bounds. Separate `c9700` model and `2419900` entity reservations preserve
+existing hollow identities. There are 105 imported enemies across the two maps.
+Skeletons still use the native donor's health, attacks, hitboxes and effects. Source
+bone-pile awakening, disassembly/reassembly, original movesets and giant attack reach
+are not converted.
 
 The secondary area uses complete native environment templates with independently
 converted Burg light/fog/tone rows. Appending rows to Cathedral Ward's sparse overrides
@@ -867,8 +877,20 @@ other non-torch variants omit only the four `610250` spawn events in the donor's
 torch animation set. Installed-asset checks cover seven torch carriers and 85
 other hollows, preserve every other animation event (apart from zero alignment
 padding), and retain the native combat/status parameters. Torch placement and
-source fire damage remain approximate. This filter has export/asset validation;
-a new in-game visual check is pending.
+source fire damage remain approximate. Subsequent skeleton gameplay captures show
+non-torch actors without the donor's idle flames.
+
+Skeleton validation is under ignored `out/map-editor/skeleton-review/`. Installed-asset
+checks cover 105 placements, all three skeleton loadouts, giant proportions, equipment
+attachments, native AI dependencies, loot references and source preservation. The full
+script export adds nine skeleton asset files and changes only the target Firelink MSB
+and composed game-parameter binder; existing hollow/NPC assets remain byte-identical.
+In native gameplay all thirteen skeleton actors instantiated. Bounded close-up checks
+show ordinary and giant source appearances, pursuit and attacks; a giant reduced player
+HP from 444 to 245, and a player punch reduced an ordinary skeleton from 195 to 192 HP
+with a visible hit reaction. An earlier test was knocked off a cemetery ledge after
+taking damage. These checks do not establish death/loot behavior, source combat fidelity,
+complete cemetery traversal or the original awakening/reassembly behavior.
 
 Each export includes `import-job.json`, `source-plan.json`, `import-manifest.json` and
 `conversion.json`. The job can be rerun into a new folder:
