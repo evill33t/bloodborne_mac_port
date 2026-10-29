@@ -16,6 +16,12 @@ internal static class MapCollisionBindingsTests {
         }
         Reject(()=>MapCollisionBindings.Partition(source,1));
         Reject(()=>MapCollisionBindings.Partition(new([Part("exterior","h",12,0),Part("interior","l",10,100)]),7));
+        // Fine/coarse layers have opposite triangle densities along this ramp.
+        // Separate median cuts used to pair opposite ends of the same placement.
+        var ramp=new SourceCollision.Result([new("ramp","h",8,"h",[new(1,Part("ramp","h",20,0).Surfaces[0].Triangles.Concat(Part("ramp","h",2,100).Surfaces[0].Triangles).ToArray())]),
+            new("ramp","l",8,"l",[new(1,Part("ramp","l",2,0).Surfaces[0].Triangles.Concat(Part("ramp","l",20,100).Surfaces[0].Triangles).ToArray())])]);
+        var paired=MapCollisionBindings.Partition(ramp,2);
+        Check(paired[0].High.Concat(paired[0].Low).All(t=>t.A.X<50)&&paired[1].High.Concat(paired[1].Low).All(t=>t.A.X>50),"Fine/coarse ramp sections occupy different ends of a native collision record");
         Console.WriteLine("PASS: native collision chunks retain paired source H/L lighting regions and all triangles");
     }
 }

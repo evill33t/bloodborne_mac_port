@@ -707,6 +707,15 @@ The export reads the original source high/low collision independently, preservin
 player-solid filter and excluding camera, death and trigger surfaces from player collision.
 Firelink has 51,090 high-layer and 35,293 low-layer solid triangles. Native chunks retain
 their source placement identity, so the source lighting bindings follow collision regions.
+Fine and coarse layers now use the same world-space cutting planes within a source
+placement. Independent median splits previously assigned two disjoint Firelink H/L
+sections to the same native collision records. Section boundaries also use a shared
+native vertex pool; the same source vertex is no longer quantized separately on either
+side of a seam. Neither layer is replaced with render geometry or merged into the other.
+Generated triangle keys also reserve the native low bit for a quad's second triangle.
+Numbering triangular primitives consecutively used that bit incorrectly and could give
+the wrong key range/width. The regression check decodes every generated key back to its
+section and primitive, including the duplicated fourth index of a triangular primitive.
 DS2 Scholar's adapter likewise uses its original Havok layers; vanilla 32-bit DS2 collision
 and original DS1 collision remain separate compatibility work.
 
@@ -746,7 +755,15 @@ human NPCs and 0.904 for Anastacia). Source albedo uses sRGB views; normal/data 
 linear. Native proportions and idle animation still differ from the source.
 
 The ordinary-hollow adapter instantiates six Firelink enemies with source meshes,
-textures, equipment display masks and placements on independent native Huntsman rigs.
+textures, equipment display masks and placements on independent native Hemwick humanoid
+rigs (`c2610`, native parameter/AI donor `261010`). The previous `c2630` donor has asymmetric
+reference arm lengths. Segment fitting now aligns both ends of a limb, compensates skin
+thickness for the actor's height scale, and binds source weapons/shields to the native
+hand attachments. The resulting animation and body proportions remain approximations.
+The adapter also composes the six native rig AI scripts and their goal/global-name
+registries into each destination map's Lua binder. Existing destination scripts remain
+unchanged. Copying the character and animation binders alone left this donor standing
+idle because its map-local battle/logic scripts were unavailable in Yharnam.
 Other source actors are explicitly reported as unconverted. This adapter uses native
 combat, health and hitboxes; native donor loot remains the default unless the experimental
 item adapter is enabled. It does not reproduce DS1 combat or source AI.
@@ -812,6 +829,8 @@ has a reason in `enemySpawns.Skipped`. Source bosses, quest NPCs, patrols, navig
 gates/lifts and event conditions are not ported. The source map includes the Parish, but
 its separate sub-area banner is not yet assigned. Imported hollow pursuit across source
 navigation and complete route traversal still require validation.
+Firelink's cemetery skeletons are also unconverted; they are not included in the 92
+ordinary hollow placements across the two maps.
 
 The secondary area uses complete native environment templates with independently
 converted Burg light/fog/tone rows. Appending rows to Cathedral Ward's sparse overrides
@@ -827,9 +846,20 @@ Burg is unopened after setup and opens after crossing the shared source collisio
 with HP 444 before and after. That control removes imported enemies only from its private
 mod copy. Separate combat-enabled runs show a source hollow animating and attacking the
 player, both maps streaming without a crash, and ordinary movement on a Burg floor with
-unchanged HP. The final export's 427 game-file overrides match the tested candidate byte
-for byte. These checks do not establish a complete Firelink-to-Burg walk, return-trip
+unchanged HP. That earlier export's 427 game-file overrides matched its tested candidate
+byte for byte. These checks do not establish a complete Firelink-to-Burg walk, return-trip
 traversal, source gate interactions, or original NPC poses and dialogue.
+
+The subsequent collision/rig checks are under ignored `out/map-editor/rig-collision-review/`.
+The original six native H/L files confirm the reserved triangle-key bit; regressions
+check generated keys, shared section vertices, paired cuts and unequal-length weighted
+joints. Installed-asset checks cover all 92 hollows, 32 item pickups, native Lua composition,
+preserved existing scripts/goals/global names and unchanged source character assets.
+The rebuilt rig was viewed and tested in native combat: the adjacent hollow attacked,
+moved and reduced player HP from 444 to 245 after its native map-local AI was included.
+Separate collision controls exercised short approach segments and loaded Burg. Automated
+steering also left the narrow path or hit adjacent rocks, so these runs do not establish
+a complete clear stair route or that every reported snag is resolved.
 
 Each export includes `import-job.json`, `source-plan.json`, `import-manifest.json` and
 `conversion.json`. The job can be rerun into a new folder:

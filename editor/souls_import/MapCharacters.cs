@@ -109,7 +109,7 @@ internal static class MapCharacters {
         byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null) {
         int id=int.Parse(target[1..]);
         var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
-        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile);visual.Bytes=bake.Model.Write();
+        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610");visual.Bytes=bake.Model.Write();
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
         if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native actor template reserves texture binder ID 100");
         character.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,100,@"N:\SPRJ\data\INTERROOT_ps4\chr\"+target+@"\"+target+".tpf",bake.Textures.Write(DCX.Type.None)));

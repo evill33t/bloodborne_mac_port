@@ -21,10 +21,32 @@ internal static class MapCollisionBindings {
         }
         var chunks=new List<Chunk>();
         foreach(string name in names) {
-            var h=MapCollision.Partition(high[name].Surfaces.SelectMany(s=>s.Triangles).ToList(),counts[name]);
-            var l=MapCollision.Partition(low[name].Surfaces.SelectMany(s=>s.Triangles).ToList(),counts[name]);
-            for(int i=0;i<counts[name];i++)chunks.Add(new(name,h[i],l[i]));
+            Split(name,high[name].Surfaces.SelectMany(s=>s.Triangles).ToList(),low[name].Surfaces.SelectMany(s=>s.Triangles).ToList(),counts[name]);
         }
         return chunks;
+
+        // A native collision record owns both layers. Independent medians can
+        // pair a fine stair section with a coarse section on another floor.
+        // Use one world-space cutting plane for the two layers at every split.
+        void Split(string name,List<MapCollision.Triangle> h,List<MapCollision.Triangle> l,int count) {
+            if(count==1){chunks.Add(new(name,h,l));return;}
+            int left=count/2,right=count-left;
+            float Key(MapCollision.Triangle t,int axis){var p=(t.A+t.B+t.C)/3;return axis==0?p.X:axis==1?p.Y:p.Z;}
+            (int axis,float cut,float score)? best=null;
+            for(int axis=0;axis<3;axis++) {
+                var hs=h.Select(t=>Key(t,axis)).Order().ToArray();var ls=l.Select(t=>Key(t,axis)).Order().ToArray();
+                float lo=Math.Max(hs[left-1],ls[left-1]),hi=Math.Min(hs[^right],ls[^right]);
+                if(lo>=hi)continue;
+                float desired=(hs[(int)((long)hs.Length*left/count)]+ls[(int)((long)ls.Length*left/count)])*.5f;
+                float cut=Math.Clamp(desired,MathF.BitIncrement(lo),hi);
+                int nh=hs.Count(v=>v<cut),nl=ls.Count(v=>v<cut);
+                if(nh<left||nl<left||hs.Length-nh<right||ls.Length-nl<right)continue;
+                float score=Math.Abs((float)nh/hs.Length-(float)left/count)+Math.Abs((float)nl/ls.Length-(float)left/count);
+                if(best==null||score<best.Value.score)best=(axis,cut,score);
+            }
+            if(best is not {} plane)throw new InvalidDataException("Source H/L collision cannot share the requested spatial partitions: "+name);
+            Split(name,h.Where(t=>Key(t,plane.axis)<plane.cut).ToList(),l.Where(t=>Key(t,plane.axis)<plane.cut).ToList(),left);
+            Split(name,h.Where(t=>Key(t,plane.axis)>=plane.cut).ToList(),l.Where(t=>Key(t,plane.axis)>=plane.cut).ToList(),right);
+        }
     }
 }

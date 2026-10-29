@@ -23,7 +23,18 @@ static class MapEnemySpawnsTests {
             var map=MSBB.Read(File.ReadAllBytes(Path.Combine(native,"map/MapStudio/m24_01_00_01.msb.dcx")));MapReplacement.ParkActors(map);
             var slots=map.Parts.Collisions.DistinctBy(p=>p.ModelName).ToArray();var chunks=slots.Select(p=>new MapCollisionBindings.Chunk(source.Parts.Collisions.First().Name,[],[])).ToArray();
             var offset=new Vector3(-143.8f,20.07f,164.63f);
-            var result=MapEnemySpawns.Bake(Read,source,id,defs,native,map,offset,chunks,slots,composed);
+            var result=MapEnemySpawns.Bake(Read,source,id,defs,native,map,offset,chunks,slots,composed,readNative:Native);
+            string aiPath="script/"+(id=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00")+".luabnd.dcx";
+            var beforeAi=BND4.Read(Native(aiPath)!);var afterAi=BND4.Read(result.Files[aiPath]);var donorAi=File.ReadAllBytes(Path.Combine(native,"script/m22_00_00_00.luabnd.dcx"));
+            foreach(var f in beforeAi.Files.Where(f=>Leaf(f.Name).EndsWith(".lua")))Check(afterAi.Files.Single(n=>n.ID==f.ID&&n.Name==f.Name).Bytes.Span.SequenceEqual(f.Bytes.Span),"Native AI export changed an existing destination script");
+            var goals=LUAINFO.Read(afterAi.Files.Single(f=>Leaf(f.Name).EndsWith(".luainfo")).Bytes);
+            var beforeGoals=LUAINFO.Read(beforeAi.Files.Single(f=>Leaf(f.Name).EndsWith(".luainfo")).Bytes);
+            Check(beforeGoals.Goals.All(g=>goals.Goals.Any(n=>n.ID==g.ID&&n.Name==g.Name&&n.BattleInterrupt==g.BattleInterrupt&&n.LogicInterrupt==g.LogicInterrupt&&n.LogicInterruptName==g.LogicInterruptName)),"Native AI export changed an existing goal");
+            var oldNames=LUAGNL.Read(beforeAi.Files.Single(f=>Leaf(f.Name).EndsWith(".luagnl")).Bytes);var newNames=LUAGNL.Read(afterAi.Files.Single(f=>Leaf(f.Name).EndsWith(".luagnl")).Bytes);
+            Check(newNames.Globals.Take(oldNames.Globals.Count).SequenceEqual(oldNames.Globals),"Native AI export reordered existing global names");
+            Check(goals.Goals.Any(g=>g.ID==261010)&&goals.Goals.Any(g=>g.ID==261000),"Imported rig lacks native logic/battle goal registration");
+            Check(MapNativeAi.Merge(result.Files[aiPath],donorAi).SequenceEqual(result.Files[aiPath]),"Native AI composition is not idempotent");
+            Check(afterAi.Files.Count(f=>Leaf(f.Name).StartsWith("2610")&&Leaf(f.Name).EndsWith(".lua"))==6,"Native rig AI companion scripts were omitted");
             Check(result.Spawns.Count==(id=="m10_02_00_00"?6:86),"Ordinary hollow selection changed or conditional populations were included");
             Check(result.Skipped.Count+result.Spawns.Count==source.Parts.Enemies.Count,"Source actors were not completely accounted for");
             Check(result.Spawns.All(p=>source.Parts.Enemies.Single(s=>s.Name==p.SourceName).InitAnimID==-1),"A hanging/special-pose actor was spawned in a standing pose");
@@ -37,13 +48,14 @@ static class MapEnemySpawnsTests {
                 var bnd=BND4.Read(result.Files["chr/"+group.Key+".chrbnd.dcx"]);var flver=FLVER2.Read(bnd.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);
                 var bank=TPF.Read(bnd.Files.Single(f=>TPF.Is(f.Bytes.ToArray())).Bytes);
                 Check(bank.Textures.All(t=>t.Header.Unk2==0xD),"PS4 texture lacks native tiling metadata");
-                Check(flver.Meshes.Count>0&&group.All(p=>p.DirectWeightShare>.6&&p.Bones.Where(b=>new[]{"head","pelvis","lfoot","rfoot","lhand","rhand"}.Contains(new string(b.Source.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray()))).All(b=>b.Direct)),"Hollow skin was substituted or poorly matched");
-                var param=npcs.Rows.Single(r=>r.ID==group.First().NPCParamID);var expected=MapCharacters.Payload(oldNpcs.Rows.Single(r=>r.ID==263400));foreach(int i in new[]{0x146,0x147,0x14A,0x14B})expected[i]=255;
+                Check(flver.Meshes.Count>0&&group.All(p=>p.DirectWeightShare>.6&&p.Bones.Where(b=>new[]{"head","pelvis","lfoot","rfoot","lhand","rhand"}.Contains(new string(b.Source.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray()))).All(b=>b.Direct)),"Hollow skin was substituted or poorly matched: "+group.First().SourceModel+"/"+group.First().SourceNPCParamID+" weight="+group.First().DirectWeightShare+" fallback="+string.Join(",",group.First().Bones.Where(b=>!b.Direct).Select(b=>b.Source+"->"+b.Target)));
+                Check(group.All(p=>p.Bones.Where(b=>new[]{"rweapon","lshield","sword","bpw00"}.Contains(new string(b.Source.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray()))).All(b=>b.Direct)),"Source weapon/shield fell back to an arm bone");
+                var param=npcs.Rows.Single(r=>r.ID==group.First().NPCParamID);var expected=MapCharacters.Payload(oldNpcs.Rows.Single(r=>r.ID==261010));foreach(int i in new[]{0x146,0x147,0x14A,0x14B})expected[i]=255;
                 Check(MapCharacters.Payload(param).SequenceEqual(expected),"Native combat/AI donor changed beyond display masks");
                 foreach(var spawn in group) {
                     var actor=map.Parts.Enemies.Single(p=>p.EntityID==spawn.EntityID);var original=source.Parts.Enemies.Single(p=>p.Name==spawn.SourceName);
                     Check(actor.Position==original.Position+offset&&actor.Rotation==original.Rotation&&Vector3.Distance(actor.Scale,original.Scale*spawn.ProportionScale)<.0001f,"Enemy source transform changed");
-                    Check(actor.ThinkParamID==263400&&actor.TalkID==-1&&actor.InitAnimID==-1&&actor.CharaInitID==-1,"Enemy retained incompatible source behavior IDs");
+                    Check(actor.ThinkParamID==261010&&actor.TalkID==-1&&actor.InitAnimID==-1&&actor.CharaInitID==-1,"Enemy retained incompatible source behavior IDs");
                     Check(spawn.DisplayMasks.Length>0,"Source equipment masks were omitted");
                 }
             }

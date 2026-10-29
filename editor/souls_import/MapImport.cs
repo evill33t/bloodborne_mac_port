@@ -192,7 +192,7 @@ internal static partial class Program {
             MapEnemySpawns.Result? enemySpawns=null;
             if(profile.Id=="DS1R"&&legacyMap!=null&&boundCollision!=null) {
                 enemySpawns=MapEnemySpawns.Bake(sourceMap.ReadAsset,legacyMap,map,definitions!,nativeRoot,msb,offset,boundCollision,slots,
-                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!);
+                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,nativeMap:baseMap,readNative:ReadNative);
                 foreach(var spawnReport in enemySpawns.Spawns){var actor=msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID);actor.GparamConfigStruct=Lighting(spawnReport.SourceName);SourceGroups(actor,spawnReport.SourceName);}
                 foreach(var (path,bytes) in enemySpawns.Files)Write(path,bytes);
             }

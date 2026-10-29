@@ -30,6 +30,27 @@ static class CollisionTests {
         Check((nodes[0].m_hiData&128)!=0,"Root must decode as a branch in the native codec");var seen=new HashSet<int>();
         void Walk(int index){Check(index>=0&&index<nodes.Count,"Tree child index out of range");var n=nodes[index];if((n.m_hiData&128)!=0){Walk(index+1);Walk(index+(((n.m_hiData&127)<<8)|n.m_loData)*2);}else{int section=(n.m_hiData<<8)|n.m_loData;Check(section<sections&&seen.Add(section),"Invalid/duplicate section leaf");int sectionAt=data+fix[tree+64]+section*96;Check(BitConverter.ToUInt16(b,sectionAt+90)==index,"Section's reverse leaf reference is wrong");Check((U(sectionAt+76)&255)==b[sectionAt+88],"Packed vertex cutoff must match the packed vertex count");}}
         Walk(0);Check(seen.Count==sections,"Tree omitted sections");
+        int keyBits=(int)U(data+tree+52),keyCount=(int)U(data+shape+168);var decodedKeys=new HashSet<uint>();
+        Check(keyCount==triangles.Count,"A generated triangle lost its native shape key");
+        for(int i=0;i<keyCount;i++) {
+            uint key=U(data+fix[shape+160]+i*4)>>(32-keyBits);int sectionIndex=(int)(key>>8),primitiveIndex=(int)(key&255)>>1;
+            Check((key&1)==0&&decodedKeys.Add(key),"A triangular primitive uses a quad's second triangle or a duplicate key");
+            Check(sectionIndex<sections,"Shape key addresses a nonexistent collision section");
+            int sectionAt=data+fix[tree+64]+sectionIndex*96,primitiveCount=(int)(U(sectionAt+80)&255),firstPrimitive=(int)(U(sectionAt+80)>>8);
+            Check(primitiveIndex<primitiveCount,"Shape key addresses a nonexistent primitive");
+            int primitive=data+fix[tree+80]+(firstPrimitive+primitiveIndex)*4;
+            Check(b[primitive+2]==b[primitive+3],"A generated triangular primitive became a quad");
+        }
+        Check(decodedKeys.Max()==U(data+tree+56),"Collision key width/range does not describe its actual triangles");
+        var singleSection=MapCollision.Bake(template,triangles.Take(2).ToArray());
+        Check(BitConverter.ToUInt32(singleSection,data+tree+52)==2&&BitConverter.ToUInt32(singleSection,data+tree+56)==2,"Two triangular primitives require native keys 0 and 2, including two key bits");
+        Check(U(data+tree+104)>0&&U(data+tree+136)>0,"Joined floor sections need a shared vertex pool");
+        var sharedUses=new Dictionary<ushort,int>();
+        for(int s=0;s<sections;s++) {
+            int sectionAt=data+fix[tree+64]+s*96,firstShared=(int)(U(sectionAt+76)>>8),sharedCount=b[sectionAt+89];
+            for(int v=0;v<sharedCount;v++){ushort index=BitConverter.ToUInt16(b,data+fix[tree+96]+(firstShared+v)*2);Check(index<U(data+tree+136),"Shared vertex index is outside its pool");sharedUses[index]=sharedUses.GetValueOrDefault(index)+1;}
+        }
+        Check(sharedUses.Values.All(n=>n>1),"A shared floor vertex was independently quantized at a section seam");
         var groups=MapCollision.Partition(triangles,7);Check(groups.Count==7&&groups.Sum(g=>g.Count)==triangles.Count,"Partition lost triangles");
         Check(MapCollision.RenameBody(b,"h000010","h600000").Length==b.Length,"Body rename changed fixup offsets");Reject(()=>MapCollision.RenameBody(b,"h000010","bad"));Reject(()=>MapCollision.Bake(template,[]));Reject(()=>MapCollision.Bake(new byte[1],triangles));Reject(()=>MapCollision.Bake(template,[new(new(float.NaN,0,0),Vector3.Zero,Vector3.One)]));
         Check(before.SequenceEqual(System.Security.Cryptography.SHA256.HashData(template)),"Native template was modified");Check(MapCollision.Translate(b,Vector3.Zero).SequenceEqual(b),"Zero body translation changed bytes");

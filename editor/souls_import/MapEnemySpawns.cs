@@ -14,7 +14,7 @@ internal static class MapEnemySpawns {
     static string Leaf(string path)=>path.Replace('\\','/').Split('/').Last();
     internal static Result Bake(Func<string,byte[]?> sourceRead,MSB1 source,string sourceMap,string definitions,string nativeRoot,
         MSBB destination,Vector3 offset,IReadOnlyList<MapCollisionBindings.Chunk> chunks,IReadOnlyList<MSBB.Part.Collision> slots,
-        byte[] gameParamBytes) {
+        byte[] gameParamBytes,string? nativeMap=null,Func<string,byte[]?>? readNative=null) {
         var selected=source.Parts.Enemies.Where(p=>SupportedParams.Contains(p.NPCParamID)&&p.ModelName=="c"+(p.NPCParamID/100)&&p.TalkID<=0&&p.CharaInitID<0&&p.InitAnimID==-1).ToArray();
         var names=selected.Select(p=>p.Name).ToHashSet(StringComparer.Ordinal);
         var skipped=source.Parts.Enemies.Where(p=>!names.Contains(p.Name)).Select(p=>new Omitted(p.Name,p.ModelName,p.NPCParamID,p.InitAnimID,SupportedParams.Contains(p.NPCParamID)&&p.InitAnimID!=-1?"Unsupported initial pose/ambush animation; not instantiated.":"No ordinary-hollow adapter for this actor; source conditions or interactions are not converted.")).ToArray();
@@ -26,10 +26,12 @@ internal static class MapEnemySpawns {
         var sourceParams=BND3.Read(sourceRead("param/GameParam/GameParam.parambnd.dcx")??throw new FileNotFoundException("Source NPC parameters unavailable"));
         var sourceNpcs=PARAM.Read(sourceParams.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes);
         sourceNpcs.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitions,"NpcParam.xml")));
-        var donorMap=MSBB.Read(File.ReadAllBytes(Path.Combine(nativeRoot,"map/MapStudio/m24_01_00_01.msb.dcx")));
-        const string template="c2630";const int templateParam=263400;
+        var donorMap=MSBB.Read(File.ReadAllBytes(Path.Combine(nativeRoot,"map/MapStudio/m22_00_00_00.msb.dcx")));
+        // c2630's reference arms have substantially different lengths. Use the
+        // symmetric Hemwick humanoid rig for ordinary human-sized hollows.
+        const string template="c2610";const int templateParam=261010;
         var donor=donorMap.Parts.Enemies.First(p=>p.ModelName==template&&p.NPCParamID==templateParam&&p.ThinkParamID==templateParam);
-        byte[] Native(string path)=>File.ReadAllBytes(Path.Combine(nativeRoot,path));
+        byte[] Native(string path)=>readNative?.Invoke(path)??File.ReadAllBytes(Path.Combine(nativeRoot,path));
         var nativeCharacter=Native("chr/"+template+".chrbnd.dcx");var nativeAnimation=Native("chr/"+template+".anibnd.dcx");var nativeScript=Native("action/script/"+template+".hks");
         var game=BND4.Read(gameParamBytes);var npcFile=game.Files.Single(f=>Leaf(f.Name)=="NpcParam.param");var npcs=MapCharacters.NativeRows(npcFile.Bytes,false);
         var paramDonor=npcs.Rows.Single(r=>r.ID==templateParam);var used=npcs.Rows.Select(r=>r.ID).ToHashSet();
@@ -58,7 +60,9 @@ internal static class MapEnemySpawns {
             }
         }
         npcFile.Bytes=MapCharacters.WriteRows(npcs);files.Add("param/gameparam/gameparam.parambnd.dcx",game.Write(DCX.Type.DCX_DFLT_10000_44_9));
-        return new(files,reports,skipped,["Source hollow appearance, display masks and placements use native Huntsman animation, attack/hitbox, AI and health. The item adapter replaces native donor loot where enabled. Source combat and weapon behavior are not reproduced.",
+        string aiPath="script/"+(nativeMap??(sourceMap=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00"))+".luabnd.dcx";
+        files.Add(aiPath,MapNativeAi.Merge(Native(aiPath),Native("script/m22_00_00_00.luabnd.dcx")));
+        return new(files,reports,skipped,["Source hollow appearance, display masks and placements use native Hemwick humanoid animation, attack/hitbox, AI and health. Segment fitting preserves joint continuity and compensates skin thickness for the actor's height scale. The item adapter replaces native donor loot where enabled. Source combat and weapon behavior are not reproduced.",
             "Only explicitly supported ordinary hollow parameter rows are instantiated. Source quest actors, bosses, multiplayer phantoms and other unsupported actors remain disabled.",
             "Source navigation, patrols and event activation are not converted. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation; native navigation is not source navigation."]);
     }

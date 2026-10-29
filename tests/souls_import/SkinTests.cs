@@ -78,6 +78,17 @@ static class Tests {
         Reject(()=>SkinRetarget.HumanoidScale(shortRig.Take(2).ToList(),tallRig));
         var scaledSource=Fixture("L_Forearm",1);var scaledTarget=Fixture("L Forearm",1);scaledTarget.Nodes[1].Scale=new(2,1,1);foreach(var v in scaledSource.Meshes[0].Vertices){v.Normal=Vector3.Normalize(new Vector3(1,1,0));v.Tangents=[new(1,-1,0,1),new(1,-1,0,1)];}
         var scaled=SkinRetarget.Bake(scaledSource.Write(),scaledTarget.Write(),textures).Model.Meshes[0].Vertices[1];Near(scaled.Position,new(2,1,0));Near(scaled.Normal,Vector3.Normalize(new Vector3(.5f,1,0)));Check(Math.Abs(Vector3.Dot(scaled.Normal,new(scaled.Tangents[0].X,scaled.Tangents[0].Y,scaled.Tangents[0].Z)))<.0001,"Nonuniform scale broke tangent orthogonality");
+        var shortArm=Fixture("L Forearm",1);shortArm.Nodes.Add(new FLVER.Node{Name="L Hand",ParentIndex=1,Translation=Vector3.UnitX,Scale=Vector3.One});
+        var longArm=Fixture("L Forearm",2);longArm.Nodes.Add(new FLVER.Node{Name="L Hand",ParentIndex=1,Translation=new(3,0,0),Scale=Vector3.One});
+        for(int i=0;i<3;i++) {var v=shortArm.Meshes[0].Vertices[i];v.Position=new(1+(i-1)*.001f,1,i==0?0:.01f);v.BoneIndices[0]=1;v.BoneIndices[1]=2;v.BoneWeights[0]=i*.5f;v.BoneWeights[1]=1-i*.5f;}
+        var joined=SkinRetarget.Bake(shortArm.Write(),longArm.Write(),textures,fitSegments:true).Model.Meshes[0].Vertices;
+        Check(joined.All(v=>Vector3.Distance(v.Position,new(3,2,0))<.02f),"Unequal limb lengths tear skin across a weighted joint");
+        foreach(var rig in new[]{shortArm,longArm}) {
+            rig.Nodes.Add(new FLVER.Node{Name="Head",ParentIndex=-1,Translation=new(0,rig==shortArm?2:4,0),Scale=Vector3.One});
+            foreach(string side in new[]{"L","R"})rig.Nodes.Add(new FLVER.Node{Name=side+" Foot",ParentIndex=-1,Scale=Vector3.One});
+        }
+        var scaledWidth=SkinRetarget.Bake(shortArm.Write(),longArm.Write(),textures,fitSegments:true).Model.Meshes[0].Vertices;
+        Check(Math.Abs((scaledWidth[2].Position.Z-scaledWidth[0].Position.Z)*.5f-.01f)<.00001f,"Height compensation thinned the imported limb");
         source.Meshes[0].BoneIndices=[1];foreach(var v in source.Meshes[0].Vertices)v.BoneIndices[0]=0;
         Near(SkinRetarget.Bake(source.Write(),b,textures).Model.Meshes[0].Vertices[1].Position,new(0,3,0));
         // Falling back to a parent retains the unmatched child's bind offset.

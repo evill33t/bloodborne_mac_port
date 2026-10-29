@@ -155,7 +155,18 @@ internal static class SkinRetarget {
         if(mesh is FLVER2.Mesh f){if(f.BoneIndices.Count==0)return index;if(index<0 || index>=f.BoneIndices.Count)throw new InvalidDataException("Invalid mesh bone palette index");return f.BoneIndices[index];}
         var palette=((FLVER0.Mesh)mesh).BoneIndices;if(palette.Length==0)return index;if(index<0 || index>=palette.Length)throw new InvalidDataException("Invalid mesh bone palette index");return palette[index];
     }
-    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null){
+    // Fit a whole bone segment, including its distal joint. A rigid bind-pose
+    // delta aligns only the proximal joint and tears differently weighted skin
+    // when the two skeletons have different limb lengths.
+    internal static Matrix4x4 FitSegment(Matrix4x4 rigid,Vector3 sourceStart,Vector3 sourceEnd,Vector3 targetStart,Vector3 targetEnd) {
+        var from=Vector3.TransformNormal(sourceEnd-sourceStart,rigid);var to=targetEnd-targetStart;
+        float a=from.Length(),b=to.Length();if(a<1e-5f||b<1e-5f)return rigid;
+        var u=from/a;var v=to/b;float ratio=b/a,dot=Math.Clamp(Vector3.Dot(u,v),-1,1);
+        Quaternion rotation=dot<-.99999f?Quaternion.CreateFromAxisAngle(Vector3.Normalize(Vector3.Cross(u,Math.Abs(u.X)<.9f?Vector3.UnitX:Vector3.UnitY)),MathF.PI):Quaternion.Normalize(new Quaternion(Vector3.Cross(u,v),1+dot));
+        float s=ratio-1;var stretch=new Matrix4x4(1+s*u.X*u.X,s*u.X*u.Y,s*u.X*u.Z,0,s*u.Y*u.X,1+s*u.Y*u.Y,s*u.Y*u.Z,0,s*u.Z*u.X,s*u.Z*u.Y,1+s*u.Z*u.Z,0,0,0,0,1);
+        return rigid*Matrix4x4.CreateTranslation(-targetStart)*stretch*Matrix4x4.CreateFromQuaternion(rotation)*Matrix4x4.CreateTranslation(targetStart);
+    }
+    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false){
         if(!Regex.IsMatch(textureOwner,@"\Ac\d{4,5}\z"))throw new ArgumentException("Invalid texture owner");
         string OwnedTexture(string name)=>textureOwner+"_import_"+name;
         IFlver source=FLVER2.Is(sourceBytes.ToArray())?FLVER2.Read(sourceBytes):FLVER0.Is(sourceBytes.ToArray())?FLVER0.Read(sourceBytes):throw new InvalidDataException("Unsupported source FLVER");
@@ -164,10 +175,15 @@ internal static class SkinRetarget {
         var sw=World(source.Nodes);var tw=World(native.Nodes);var targets=native.Nodes.Select((n,i)=>(key:BoneName(n.Name),i)).GroupBy(v=>v.key).ToDictionary(g=>g.Key,g=>g.First().i);
         var names=native.Nodes.Select((n,i)=>(n.Name,i)).GroupBy(v=>v.Name).ToDictionary(g=>g.Key,g=>g.First().i);var mapping=Enumerable.Repeat(-1,source.Nodes.Count).ToArray();var direct=new bool[mapping.Length];var bindSource=Enumerable.Repeat(-1,mapping.Length).ToArray();
         var aliases=new Dictionary<string,string>{{"lforearmtwist","lforetwist"},{"rforearmtwist","rforetwist"},{"lforearmtwist1","lforetwist"},{"rforearmtwist1","rforetwist"},{"luparmtwist1","luparmtwist"},{"ruparmtwist1","ruparmtwist"}};
+        var attachments=new Dictionary<string,string>{{"rweapon","weapon00"},{"sword","weapon00"},{"lweapon","weapon01"},{"lshield","weapon01"},{"bpw00","weapon01"}};
         for(int i=0;i<mapping.Length;++i){
             var name=source.Nodes[i].Name;var key=BoneName(name);
             if(overrides?.TryGetValue(name,out var target)==true){if(!names.TryGetValue(target,out mapping[i]))throw new InvalidDataException("Mapped target bone does not exist: "+target);}
-            else {if(aliases.TryGetValue(key,out var alias))key=alias;if(targets.TryGetValue(key,out var n))mapping[i]=n;}
+            else {
+                if(aliases.TryGetValue(key,out var alias))key=alias;
+                if(targets.TryGetValue(key,out var n))mapping[i]=n;
+                else if(fitSegments&&sourceProfile=="DS1R"&&attachments.TryGetValue(key,out var attachment)&&targets.TryGetValue(attachment,out n))mapping[i]=n;
+            }
             direct[i]=mapping[i]>=0;if(direct[i])bindSource[i]=i;
         }
         int Match(int i){
@@ -176,9 +192,18 @@ internal static class SkinRetarget {
         }
         // Resolve every referenced bone lazily: unreferenced source helper nodes need no mapping.
         var changed=new Matrix4x4[mapping.Length];var normals=new Matrix4x4[mapping.Length];var ready=new bool[mapping.Length];
+        var sourceNames=source.Nodes.Select((n,i)=>(key:BoneName(n.Name),i)).GroupBy(v=>v.key).ToDictionary(g=>g.Key,g=>g.First().i);
+        float thicknessScale=fitSegments&&new[]{"head","lfoot","rfoot"}.All(sourceNames.ContainsKey)?1/HumanoidScale(source.Nodes,native.Nodes):1;
+        var endpoints=new Dictionary<string,string>{{"pelvis","spine"},{"spine","spine1"},{"spine1","neck"},{"neck","head"}};
+        foreach(string side in new[]{"l","r"})foreach(var (start,end) in new[]{("clavicle","upperarm"),("upperarm","forearm"),("forearm","hand"),("foretwist","hand"),("thigh","calf"),("calf","foot"),("calftwist","foot"),("foot","toe0"),("finger0","finger01"),("finger1","finger11"),("finger2","finger21")})endpoints.Add(side+start,side+end);
         int Target(int i){
             var target=Match(i);if(target>255)throw new InvalidDataException("Destination bone index exceeds the template's byte layout");
-            if(!ready[i]){if(!Matrix4x4.Invert(sw[bindSource[i]],out var inverse))throw new InvalidDataException("Singular source bind pose");changed[i]=inverse*tw[target];if(!Matrix4x4.Invert(changed[i],out var inv))throw new InvalidDataException("Singular retarget transform");normals[i]=Matrix4x4.Transpose(inv);ready[i]=true;}return target;
+            if(!ready[i]){
+                int anchor=bindSource[i];if(!Matrix4x4.Invert(sw[anchor],out var inverse))throw new InvalidDataException("Singular source bind pose");changed[i]=inverse*Matrix4x4.CreateScale(thicknessScale)*tw[target];
+                if(fitSegments&&endpoints.TryGetValue(BoneName(source.Nodes[anchor].Name),out var end)&&sourceNames.TryGetValue(end,out int child)&&direct[child])
+                    changed[i]=FitSegment(changed[i],sw[anchor].Translation,sw[child].Translation,tw[target].Translation,tw[mapping[child]].Translation);
+                if(!Matrix4x4.Invert(changed[i],out var inv))throw new InvalidDataException("Singular retarget transform");normals[i]=Matrix4x4.Transpose(inv);ready[i]=true;
+            }return target;
         }
         var template=native.Meshes.FirstOrDefault(m=>m.UseBoneWeights && native.Materials[m.MaterialIndex].MTD.EndsWith("C[ARSN].mtd",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("The native template has no supported skinned C[ARSN] material");
         var material=native.Materials[template.MaterialIndex];var buffers=template.VertexBuffers.Select(b=>new FLVER2.VertexBuffer(b.LayoutIndex){BufferIndex=b.BufferIndex}).ToArray();
