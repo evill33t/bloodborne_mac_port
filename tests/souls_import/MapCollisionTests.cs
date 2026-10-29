@@ -9,8 +9,10 @@ static class CollisionTests {
         MapReplacementTests.Run();
         MapAreaNameTests.Run();
         MapEnvironmentTests.Run();
+        if(args.Length>1&&Directory.Exists(args[1]))MapEnvironmentTests.RunAssets(args[0],args[1]);
         MapCollisionBindingsTests.Run();
         MapConnectionsTests.Run();
+        MapRuntimeLinksTests.Run();
         SourceFlverTests.Run(args.Length>1?args[1]:null);
         SourceCollisionTests.Run();
         LegacySourceCollisionTests.Run();

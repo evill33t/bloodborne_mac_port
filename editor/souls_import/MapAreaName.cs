@@ -8,9 +8,10 @@ internal static class MapAreaName {
     // The imported level receives a new name entry. Keeping native name IDs intact
     // also preserves lantern menus and other maps that still refer to Yharnam.
     internal static Result Export(MSBB map,string profile,string sourceMap,string nativeRoot,
-        Func<string,byte[]?> readSource,Action<string,byte[]> write) {
+        Func<string,byte[]?> readSource,Action<string,byte[]> write,Func<string,byte[]?>? readNative=null) {
         var sourceId=(profile,sourceMap) switch {
             ("DS1" or "DS1R","m10_02_00_00")=>1020,
+            ("DS1" or "DS1R","m10_01_00_00")=>1010,
             ("DS2" or "DS2S","m10_04_00_00")=>10040000,
             _=>throw new NotSupportedException("No imported area-name mapping for "+profile+" "+sourceMap)
         };
@@ -38,7 +39,8 @@ internal static class MapAreaName {
         foreach(var directory in Directory.EnumerateDirectories(folder).Order(StringComparer.Ordinal)) {
             var path=Path.Combine(directory,"item.msgbnd.dcx");
             if(!File.Exists(path))continue;
-            var binder=BND4.Read(path);var file=binder.Files.Single(f=>f.ID==19);
+            var relative=$"msg/{Path.GetFileName(directory)}/item.msgbnd.dcx";
+            var binder=BND4.Read(readNative?.Invoke(relative)??File.ReadAllBytes(path));var file=binder.Files.Single(f=>f.ID==19);
             native.Add((Path.GetFileName(directory),binder,file,FMG.Read(file.Bytes)));
         }
         if(native.Count==0)throw new InvalidDataException("No native location-name message binders found");

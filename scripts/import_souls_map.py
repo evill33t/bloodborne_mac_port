@@ -47,6 +47,7 @@ def main(argv=None):
     parser.add_argument("--native-root", type=Path, help="Read-only Bloodborne game root")
     parser.add_argument("--map", dest="source_map")
     parser.add_argument("--target-map")
+    parser.add_argument("--attach-undead-burg", action="store_true", help="Compose Firelink and Undead Burg with native collision-triggered loading")
     parser.add_argument("--source-anchor")
     parser.add_argument("--target-anchor")
     parser.add_argument("--spawn-offset")
@@ -84,6 +85,14 @@ def main(argv=None):
     if output.exists() or output.is_symlink():
         raise FileExistsError("Choose a new output folder: " + str(output))
     target = job.setdefault("target_map", "m24_01_00_01")
+    if args.attach_undead_burg:
+        if job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or target != "m24_01_00_01":
+            raise ValueError("--attach-undead-burg requires DS1R Firelink into m24_01_00_01")
+        job["connected_maps"] = [{"source_map": "m10_01_00_00", "target_map": "m24_00_00_00"}]
+    connected = job.get("connected_maps", [])
+    if connected and (job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or
+                      connected != [{"source_map": "m10_01_00_00", "target_map": "m24_00_00_00"}]):
+        raise ValueError("Only the verified Firelink/Undead Burg connected-world allocation is supported")
     dotnet = job.get("dotnet") or shutil.which("dotnet") or "/usr/local/share/dotnet/dotnet"
     helper = Path(job.get("helper", str(REPO / "out/map-editor/souls-import/SoulsImport.dll"))).expanduser().resolve()
     env = dict(os.environ, DOTNET_CLI_HOME=str(REPO / "out/map-editor/dotnet-home"))
@@ -99,8 +108,17 @@ def main(argv=None):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".bbmap-import-", dir=output.parent) as temporary:
         staging = Path(temporary) / "mod"
+        connections = Path(temporary) / "connections.json"
+        connections.write_text(json.dumps({job["source_map"]: target, **{m["source_map"]: m["target_map"] for m in connected}}))
         if args.plan_only:
             staging.mkdir()
+            for attached in connected:
+                next_source = list(source)
+                next_source[next_source.index("--map") + 1] = attached["source_map"]
+                next_plan = json.loads(run(common + ["plan-map"] + next_source, env, capture=True))
+                metadata = staging / "maps" / attached["source_map"]
+                metadata.mkdir(parents=True)
+                (metadata / "source-plan.json").write_text(json.dumps(next_plan, indent=2) + "\n")
         else:
             anchor = job.get("source_anchor") or PRESETS.get((job["profile"], job["source_map"]))
             if not anchor:
@@ -117,13 +135,49 @@ def main(argv=None):
                 command += ["--smithbox", job["smithbox"]]
             if job.get("spawn_offset"):
                 command += ["--spawn-offset", job["spawn_offset"]]
+            if connected:
+                command += ["--connection-targets", str(connections)]
             run(command, env)
+            connected_reports = []
+            for index, attached in enumerate(connected):
+                next_output = Path(temporary) / ("map-" + str(index))
+                next_source = list(source)
+                next_source[next_source.index("--map") + 1] = attached["source_map"]
+                next_plan = json.loads(run(common + ["plan-map"] + next_source, env, capture=True))
+                next_command = list(command)
+                if "--spawn-offset" in next_command:
+                    position = next_command.index("--spawn-offset")
+                    del next_command[position:position + 2]
+                for key, value in (("--map", attached["source_map"]), ("--target-map", attached["target_map"]),
+                                   ("--output", str(next_output))):
+                    next_command[next_command.index(key) + 1] = value
+                next_command += ["--native-overlay", str(staging)]
+                run(next_command, env)
+                # Shared binders were composed against the preceding stage. Only
+                # those composed outputs replace files; independent exports cannot
+                # be combined with a blind copy of whole game-parameter binders.
+                shutil.copytree(next_output / "dvdroot_ps4", staging / "dvdroot_ps4", dirs_exist_ok=True)
+                metadata = staging / "maps" / attached["source_map"]
+                metadata.mkdir(parents=True)
+                shutil.copy2(next_output / "conversion.json", metadata / "conversion.json")
+                (metadata / "source-plan.json").write_text(json.dumps(next_plan, indent=2) + "\n")
+                connected_reports.append({**attached, "conversion": str(metadata.relative_to(staging) / "conversion.json")})
+            if connected_reports:
+                conversion_path = staging / "conversion.json"
+                conversion = json.loads(conversion_path.read_text())
+                conversion["connectedMaps"] = connected_reports
+                conversion["connectedLoadingValidation"] = "Native links exported; consult gameplay evidence for validation."
+                conversion_path.write_text(json.dumps(conversion, indent=2) + "\n")
         job.update(schema="bbmap-import-job-1", root=str(root), native_root=str(native), output=str(output), helper=str(helper))
         (staging / "import-job.json").write_text(json.dumps(job, indent=2) + "\n")
         (staging / "source-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
         conversion = json.loads((staging / "conversion.json").read_text()) if (staging / "conversion.json").is_file() else {}
         pending = ["source AI/quests/dialogue", "source items", "source music/ambience", "source water rendering/physics",
-                   "source navigation", "connected-map loading"]
+                   "source navigation"]
+        if not connected:
+            pending.append("connected-map loading")
+        else:
+            pending.append("additional area connections beyond Firelink/Undead Burg")
         pending.append("exact source fog/tonemap/cubemaps" if conversion.get("environmentRows") else "source sky/lighting")
         manifest = {"schema": "bbmap-import-manifest-1", "source": job["profile"], "map": job["source_map"],
                     "target": target, "plan_only": args.plan_only,

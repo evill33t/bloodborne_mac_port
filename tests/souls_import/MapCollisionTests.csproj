@@ -7,6 +7,8 @@
     <Compile Include="MapCollisionBindingsTests.cs"/>
     <Compile Include="SourceFlverTests.cs"/>
     <Compile Include="MapConnectionsTests.cs"/>
+    <Compile Include="MapRuntimeLinksTests.cs"/>
+    <Compile Include="../../editor/souls_import/MapRuntimeLinks.cs" Link="MapRuntimeLinks.cs"/>
     <Compile Include="../../editor/souls_import/SourceFlver.cs" Link="SourceFlver.cs"/>
     <Compile Include="../../editor/souls_import/MapConnections.cs" Link="MapConnections.cs"/>
     <Compile Include="../../editor/souls_import/MapEnvironment.cs" Link="MapEnvironment.cs"/>

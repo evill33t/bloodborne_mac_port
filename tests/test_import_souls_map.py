@@ -26,8 +26,13 @@ from pathlib import Path
 command=sys.argv[1];args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 if command=='plan-map': print(json.dumps({'sourceMapSha256':'fixture'}))
 else:
-    out=Path(args['--output']);out.mkdir();(out/'conversion.json').write_text('{}')
+    out=Path(args['--output']);out.mkdir();(out/'conversion.json').write_text(json.dumps({'spawnOffset':args.get('--spawn-offset')}))
     (out/'artifact').write_text('complete')
+    data=out/'dvdroot_ps4';data.mkdir()
+    previous=Path(args['--native-overlay'])/'dvdroot_ps4/shared' if '--native-overlay' in args else None
+    before=previous.read_text() if previous else ''
+    (data/'shared').write_text(before+args['--map']+';')
+    if args['--map']=='m10_01_00_00' and (Path(args['--root'])/'fail-burg').exists():sys.exit(10)
     if (Path(args['--root'])/'fail').exists():sys.exit(9)
 ''')
         self.output = self.base / "Mods" / "TestMap"
@@ -48,10 +53,10 @@ else:
         job = json.loads((self.output / "import-job.json").read_text())
         self.assertEqual(job["source_anchor"], "-51.8,-60.6,55.7")
         self.assertEqual(json.loads((self.output / "import-manifest.json").read_text())["source_map_sha256"], "fixture")
-        before = {p.name: p.read_bytes() for p in self.output.iterdir()}
+        before = {str(p.relative_to(self.output)): p.read_bytes() for p in self.output.rglob("*") if p.is_file()}
         second = self.run_job()
         self.assertNotEqual(second.returncode, 0)
-        self.assertEqual(before, {p.name: p.read_bytes() for p in self.output.iterdir()})
+        self.assertEqual(before, {str(p.relative_to(self.output)): p.read_bytes() for p in self.output.rglob("*") if p.is_file()})
 
     def test_backend_failure_does_not_publish_partial_output(self):
         (self.source / "fail").touch()
@@ -88,12 +93,37 @@ else:
         job = json.loads((self.output / "import-job.json").read_text())
         self.assertEqual(job["smithbox"], str(Path.cwd().resolve()))
 
+    def test_connected_maps_compose_shared_outputs(self):
+        result = self.run_job("--attach-undead-burg", "--spawn-offset=1,2,3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.output / "dvdroot_ps4/shared").read_text(), "m10_02_00_00;m10_01_00_00;")
+        conversion = json.loads((self.output / "conversion.json").read_text())
+        self.assertEqual(conversion["connectedMaps"][0]["target_map"], "m24_00_00_00")
+        self.assertEqual(conversion["spawnOffset"], "1,2,3")
+        secondary = json.loads((self.output / "maps/m10_01_00_00/conversion.json").read_text())
+        self.assertIsNone(secondary["spawnOffset"])
+        self.assertTrue((self.output / "maps/m10_01_00_00/source-plan.json").is_file())
+
+    def test_secondary_failure_does_not_publish_primary(self):
+        (self.source / "fail-burg").touch()
+        result = self.run_job("--attach-undead-burg")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(list(self.output.parent.iterdir()), [])
+
     def test_plan_only_avoids_conversion(self):
         (self.source / "fail").touch()
         result = self.run_job("--plan-only")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.output / "source-plan.json").is_file())
         self.assertFalse((self.output / "conversion.json").exists())
+
+    def test_connected_plan_inventories_both_maps_without_conversion(self):
+        (self.source / "fail").touch()
+        result = self.run_job("--plan-only", "--attach-undead-burg")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.output / "maps/m10_01_00_00/source-plan.json").is_file())
+        self.assertFalse((self.output / "dvdroot_ps4").exists())
 
 
 if __name__ == "__main__":

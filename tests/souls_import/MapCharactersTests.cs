@@ -42,7 +42,7 @@ static class MapCharactersTests {
             string target=report.TargetModel!;int id=int.Parse(target[1..]);var actor=result.Actors.Single(a=>a.ModelName==target);var original=source.Parts.Enemies.Single(p=>p.Name==report.SourceName);
             Check(actor.EntityID==report.EntityID&&actor.NPCParamID==id*100&&actor.ThinkParamID==-1,"Actor is not bound to its unique native parameters");
             Check(actor.TalkID==-1&&actor.CharaInitID==-1&&actor.InitAnimID==-1&&actor.DamageAnimID==-1&&actor.PatrolInfoName==null&&actor.MovePointNames.All(p=>p==null),"Actor retained source/native quest, initial animation or patrol references");
-            Check(actor.CollisionName==collision&&actor.Position==original.Position+offset&&actor.Rotation==original.Rotation&&actor.Scale==original.Scale,"Source placement transform was not retained");
+            Check(actor.CollisionName==collision&&actor.Position==original.Position+offset&&actor.Rotation==original.Rotation&&Vector3.Distance(actor.Scale,original.Scale*report.ProportionScale)<.0001f,"Source placement transform was not retained");
             Check(report.SourcePosition==original.Position&&report.SourceRotation==original.Rotation&&report.SourceScale==original.Scale&&report.SourceEntityID==original.EntityID&&report.SourceTalkID==original.TalkID,"Report lost source placement/quest metadata");
             Check(actor.DrawGroups.Concat(actor.DispGroups).Concat(actor.BackreadGroups).All(v=>v==uint.MaxValue),"Source/native actor masks hide imported geometry");
             var character=BND4.Read(result.Files[$"chr/{target}.chrbnd.dcx"]);var animation=BND4.Read(result.Files[$"chr/{target}.anibnd.dcx"]);
@@ -59,6 +59,10 @@ static class MapCharactersTests {
             var flver=FLVER2.Read(character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);var textureEntry=character.Files.Single(f=>TPF.Is(f.Bytes.ToArray()));
             Check(!DCX.Is(textureEntry.Bytes.ToArray()),"Character's inner TPF has an invalid DCX wrapper");var tpf=TPF.Read(textureEntry.Bytes);Check(tpf.Platform==TPF.TPFPlatform.PS4&&tpf.Textures.Count>0,"Character lacks converted PS4 textures");
             var names=tpf.Textures.Select(t=>t.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach(var diffuse in flver.Materials.SelectMany(m=>m.Textures).Where(t=>t.ParamName=="g_DiffuseTexture")) {
+                var color=tpf.Textures.Single(t=>t.Name==Leaf(diffuse.Path).Split('.')[0]);Check(new[]{29,91,72,75,78,99}.Contains(color.Header.DXGIFormat),"NPC diffuse texture is not tagged sRGB");
+            }
+            Check(report.ProportionScale is >.7f and <1&&actor.Scale.X<original.Scale.X,"Native rig still inflates source NPC stature");
             Check(flver.Materials.SelectMany(m=>m.Textures).Where(t=>t.ParamName is "g_DiffuseTexture" or "g_SpecularTexture" or "g_ShininessTexture" or "g_BumpmapTexture").All(t=>names.Contains(Leaf(t.Path).Split('.')[0])||t.Path.StartsWith(@"N:\SPRJ\data\Other\SysTex\",StringComparison.OrdinalIgnoreCase)&&systemTextures.Contains(Leaf(t.Path).Split('.')[0])),"Converted character has missing material texture bindings");
             Check(flver.Nodes.Select(n=>n.Name).SequenceEqual(nativeVisual.Nodes.Select(n=>n.Name)),"Imported model is incompatible with its native skeleton");
             Check(report.Vertices==flver.Meshes.Sum(m=>m.Vertices.Count)&&report.Vertices>10000&&report.Triangles>10000&&report.DirectWeightShare>.99,"Real source geometry was lost or replaced by a placeholder");

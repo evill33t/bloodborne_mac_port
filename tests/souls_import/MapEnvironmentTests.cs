@@ -4,6 +4,25 @@ using System.Numerics;
 
 internal static class MapEnvironmentTests {
     static void Check(bool value,string message){if(!value)throw new Exception(message);}
+    internal static void RunAssets(string game,string sourceRoot) {
+        string native=Path.Combine(game,"dvdroot_ps4"),smithbox=Environment.GetEnvironmentVariable("SMITHBOX_DIR")??throw new Exception("Missing Smithbox directory");
+        byte[]? Native(string path)=>File.Exists(Path.Combine(native,path))?File.ReadAllBytes(Path.Combine(native,path)):null;
+        byte[]? SourceRead(string path)=>File.Exists(Path.Combine(sourceRoot,path))?File.ReadAllBytes(Path.Combine(sourceRoot,path)):null;
+        var map=MSB1.Read(SourceRead("map/MapStudio/m10_01_00_00.msb")!);
+        var bindings=map.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Collision)
+            .Select(p=>new EnvironmentBinding(p.Name,p.LightID,p.FogID,p.ScatterID,p.ShadowID,p is MSB1.Part.Collision,p.ToneMapID,p.ToneCorrectID)).ToArray();
+        Reject(()=>MapEnvironment.Load(SourceRead,Native,"DS1R","m10_01_00_00","m24_00_00_00",Path.Combine(smithbox,"src/Smithbox.Data/Assets/PARAM/DS1R/Defs"),bindings));
+        var complete=MapEnvironment.Load(SourceRead,Native,"DS1R","m10_01_00_00","m24_00_00_00",Path.Combine(smithbox,"src/Smithbox.Data/Assets/PARAM/DS1R/Defs"),bindings,nativeTemplateMap:"m24_01_00_00");
+        Check(complete.Files.All(f=>f.Path.StartsWith("param/drawparam/m24_00_",StringComparison.Ordinal)),"Complete template escaped the target map namespace");
+        foreach(var file in complete.Files.Where(f=>f.Path.EndsWith("gparambnd.dcx"))) {
+            var binder=BND4.Read(file.Bytes);Check(binder.Files.All(f=>f.Name.Contains("m24_00_",StringComparison.Ordinal)&&!f.Name.Contains("m24_01_",StringComparison.Ordinal)),"Template binder retained the donor namespace");
+            foreach(var entry in binder.Files) {
+                var g=GPARAM.Read(entry.Bytes);
+                foreach(var row in complete.Rows.Where(r=>r.NativeID!=null))Check(g.Params.SelectMany(p=>p.Fields).Any(f=>f.Values.Any(v=>v.ID==row.NativeID)),"Complete-template import lost a converted row");
+            }
+        }
+        Console.WriteLine("PASS: Burg lighting uses a complete native template in the destination namespace; unsafe sparse templates are rejected");
+    }
     static void Near(float a,float b)=>Check(Math.Abs(a-b)<.0001f,$"Unexpected environment value: {a} != {b}");
     static void Reject(Action action){try{action();}catch(InvalidDataException){return;}throw new Exception("Invalid environment accepted");}
     static GPARAM.IField F<T>(GPARAM.Field<T> field,string key,T value){field.Key=key;field.Capacity=1;field.Values=[new(){ID=0,Value=value}];return field;}

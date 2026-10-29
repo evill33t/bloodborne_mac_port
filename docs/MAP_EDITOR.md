@@ -740,8 +740,15 @@ animation clips place 16 source corpses in their original poses; loot and ragdol
 are not transferred. Crestfallen, Petrus and Anastacia use their source appearances on
 native friendly animation wrappers. Human appearances include the source armor, FaceGen
 head and hair. These three actors have AI and dialogue disabled; source quests, combat,
-idle poses and availability conditions are not implemented. Other source actors are
-explicitly reported as unconverted rather than spawned without their quest conditions.
+idle poses and availability conditions are not implemented. Their source head-to-foot
+skeletal height now corrects the native wrapper's stature (approximately 0.839 for the two
+human NPCs and 0.904 for Anastacia). Source albedo uses sRGB views; normal/data maps remain
+linear. Native proportions and idle animation still differ from the source.
+
+The ordinary-hollow adapter instantiates six Firelink enemies with source meshes,
+textures, equipment display masks and placements on independent native Huntsman rigs.
+Other source actors are explicitly reported as unconverted. This adapter uses native
+combat, health, hitboxes and loot; it does not reproduce DS1 combat or source AI.
 
 The earlier normal Hunter's Mark respawn, native save-and-quit and reload checks landed
 above the imported floor. A later bounded walk with original source collision covered
@@ -776,6 +783,53 @@ syntax for negative comma-separated coordinates. `--plan-only` inventories witho
 converting or writing assets. Game folders and existing outputs are refused as destinations.
 A failed stage leaves no published partial mod.
 
+Add `--attach-undead-burg` to a DS1R Firelink job to compose the adjacent Undead
+Burg/Parish source map (`m10_01_00_00`) into Cathedral Ward (`m24_00_00_00` and its
+`_01` story variant):
+
+```sh
+python3 scripts/import_souls_map.py \
+  --config /path/to/private-test-data/Mods/FirelinkShrine/import-job.json \
+  --attach-undead-burg \
+  --output /path/to/private-test-data/Mods/FirelinkAndBurg
+```
+
+Both maps retain one source coordinate frame. Ten player-solid Firelink connection
+chunks load Burg, and eight Burg chunks load Firelink through native `ConnectCollision`
+records. Runtime destinations use base map IDs; the game selects story variants.
+Unsupported connections are left disconnected. This allocation replaces both native
+areas and composes their shared game parameters, message binders and texture archive
+before publishing a single mod. Do not enable independently exported replacements of
+those files together. Connected-map plans and conversion reports are under `maps/`;
+`--plan-only` inventories both maps without converting assets.
+
+Burg accounts for all 670 source scenery placements: 640 static placements, 29 records
+with no render geometry and one filtered placement. It adds 116 paired player-solid H/L collision placements
+and 86 supported ordinary hollows. Nine hanging/special-pose hollows are deliberately
+skipped until their pose and activation behavior can be converted. Every omitted actor
+has a reason in `enemySpawns.Skipped`. Source bosses, quest NPCs, patrols, navigation,
+gates/lifts and event conditions are not ported. The source map includes the Parish, but
+its separate sub-area banner is not yet assigned. Imported hollow pursuit across source
+navigation and complete route traversal still require validation.
+
+The secondary area uses complete native environment templates with independently
+converted Burg light/fog/tone rows. Appending rows to Cathedral Ward's sparse overrides
+passed serialization checks but crashed the native environment cache in gameplay;
+that approach is rejected. Unrelated native sounds, generators and the secondary local
+event script are disabled because they reference the replaced Cathedral Ward scene.
+Source music and event behavior remain unconverted.
+
+Bounded gameplay evidence is under ignored `out/map-editor/burg-validation/` and
+`out/map-editor/firelink-validation/modified-firelink-burg-*`. The walking control
+places the player on a non-connection Firelink floor, then uses ordinary stick movement:
+Burg is unopened after setup and opens after crossing the shared source collision edge,
+with HP 444 before and after. That control removes imported enemies only from its private
+mod copy. Separate combat-enabled runs show a source hollow animating and attacking the
+player, both maps streaming without a crash, and ordinary movement on a Burg floor with
+unchanged HP. The final export's 427 game-file overrides match the tested candidate byte
+for byte. These checks do not establish a complete Firelink-to-Burg walk, return-trip
+traversal, source gate interactions, or original NPC poses and dialogue.
+
 Each export includes `import-job.json`, `source-plan.json`, `import-manifest.json` and
 `conversion.json`. The job can be rerun into a new folder:
 
@@ -789,10 +843,11 @@ The plan inventories actors, objects, collision filters, sound events and enviro
 DS1/DS2 topology also retains source region/arrival references and numeric wildcard map
 IDs, resolving destinations only when the available map catalog gives an unambiguous
 match. Stable target reservations prevent maps from silently sharing the same native asset
-family. This is planning groundwork: source links, lifts, crow travel and other loading
-transitions are not activated by the importer.
+family. The explicit Firelink/Burg allocation activates ordinary collision loading;
+lifts, crow travel and scripted transitions remain planning information.
 
-Current runtime conversion remains limited to Firelink/Majula into `m24_01_00_01`.
+Current runtime conversion supports Firelink/Majula into `m24_01_00_01`, plus the
+explicit connected DS1R Burg allocation above.
 Supported preview/reader profiles do not imply full map conversion for every game. Source
 music/ambience, items, navigation, quests and complete NPC/enemy behavior remain work in
 progress; the manifest records missing stages. Test against copied saves and enable only
@@ -802,7 +857,8 @@ one replacement for this native area.
 read-only source guards and backend failure cleanup using an asset-free backend fixture.
 The installed-asset checks include `tests/test_map_import.sh` (native game root, optional
 DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
-`tests/test_npc_face.sh`, `tests/test_map_characters.sh` and `tests/test_skin_hair_alpha.sh`.
+`tests/test_npc_face.sh`, `tests/test_map_characters.sh`, `tests/test_map_enemy_spawns.sh`
+and `tests/test_skin_hair_alpha.sh`.
 Their serialization/asset assertions are separate from the bounded gameplay evidence above.
 
 The importer is also available from the command line:

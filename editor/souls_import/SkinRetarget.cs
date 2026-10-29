@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 
 internal record BoneMatch(string Source,string Target,bool Direct);
-internal record SkinBake(FLVER2 Model,TPF Textures,List<BoneMatch> Bones,int Vertices,int Triangles,double DirectWeightShare,List<string> TextureFallbacks);
+internal record SkinBake(FLVER2 Model,TPF Textures,List<BoneMatch> Bones,int Vertices,int Triangles,double DirectWeightShare,List<string> TextureFallbacks) {public float ProportionScale {get;init;}=1;}
 internal static class SkinRetarget {
     const int VertexLimit=2000000;
     static string Leaf(string name)=>name.Replace('\\','/').Split('/').Last();
@@ -63,6 +63,32 @@ internal static class SkinRetarget {
         28 or 29=>105,87 or 91=>9,71=>0,72=>108,74 or 75=>3,77=>5,78=>110,80=>103,83=>104,95=>100,98=>102,99=>112,
         var format=>throw new InvalidDataException("Unsupported DDS pixel format for PS4 conversion: "+format)
     };
+    // SoulsFormats' DDS splitter quarters byte counts instead of clamping each
+    // mip dimension. That truncates the tail of rectangular weapon textures.
+    internal static List<Headerizer.Image> DdsMipImages(byte[] bytes) {
+        var h=new DDS(bytes);
+        if(h.dwWidth<1||h.dwHeight<1||h.dwWidth>8192||h.dwHeight>8192||h.dwDepth>1||h.dwCaps2!=0||
+            h.header10 is {} dx&&(dx.arraySize!=1||dx.resourceDimension!=DDS.DIMENSION.TEXTURE2D))throw new InvalidDataException("Expected a bounded two-dimensional texture");
+        var (block,size)=(int)h.GetDXGIFormat() switch {
+            28 or 29 or 87 or 91=>(1,4),71 or 72 or 80=>(4,8),74 or 75 or 77 or 78 or 83 or 95 or 98 or 99=>(4,16),
+            _=>throw new InvalidDataException("Unsupported mip pixel format")
+        };
+        int levels=Math.Max(1,h.dwMipMapCount),width=h.dwWidth,height=h.dwHeight,offset=h.DataOffset;
+        if(levels>1+BitOperations.Log2((uint)Math.Max(width,height)))throw new InvalidDataException("Invalid texture mip count");
+        var image=new Headerizer.Image();
+        for(int i=0;i<levels;i++) {
+            int count=checked(((width+block-1)/block)*((height+block-1)/block)*size);
+            if(count>bytes.Length-offset)throw new InvalidDataException("Truncated texture mip");
+            image.subImages.Add(bytes.AsSpan(offset,count).ToArray());offset+=count;width=Math.Max(1,width/2);height=Math.Max(1,height/2);
+        }
+        return [image];
+    }
+    internal static TPF.Texture NativeTexture(string name,byte[] bytes) {
+        var h=new DDS(bytes);var images=DdsMipImages(bytes);
+        return new TPF.Texture(TPF.TPFPlatform.PS4){Name=name,Format=Ps4Format(h),Flags1=0,Type=TPF.TexType.Texture,
+            Mipmaps=checked((byte)images[0].subImages.Count),Header=new(){DXGIFormat=(int)h.GetDXGIFormat(),Width=checked((short)h.dwWidth),Height=checked((short)h.dwHeight),TextureCount=1,Unk2=0xD},
+            Bytes=Headerizer.WritePS4Images(images,h,TPF.TexType.Texture)};
+    }
     // Legacy DDS FourCCs do not encode sRGB. Native Bloodborne albedo/sky
     // textures do; tagging their color view preserves every block, mip and
     // alpha bit while preventing nonlinear source RGB being lit as linear RGB.
@@ -113,6 +139,17 @@ internal static class SkinRetarget {
         output.ddspf.dwFlags=DDS.DDPF.RGB|DDS.DDPF.ALPHAPIXELS;output.ddspf.dwRGBBitCount=32;
         output.ddspf.dwRBitMask=0xff;output.ddspf.dwGBitMask=0xff00;output.ddspf.dwBBitMask=0xff0000;output.ddspf.dwABitMask=0xff000000;return output.Write(pixels.ToArray());
     }
+    internal static float HumanoidScale(IReadOnlyList<FLVER.Node> source,IReadOnlyList<FLVER.Node> native) {
+        float Height(IReadOnlyList<FLVER.Node> nodes) {
+            var world=World(nodes);int Find(string name)=>Enumerable.Range(0,nodes.Count).SingleOrDefault(i=>BoneName(nodes[i].Name)==name,-1);
+            int head=Find("head"),left=Find("lfoot"),right=Find("rfoot");
+            if(head<0||left<0||right<0)throw new InvalidDataException("Humanoid proportions require unique head and foot bones");
+            float height=world[head].Translation.Y-(world[left].Translation.Y+world[right].Translation.Y)*.5f;
+            if(!float.IsFinite(height)||height is <.5f or >4)throw new InvalidDataException("Unsupported humanoid skeletal height");return height;
+        }
+        float scale=Height(source)/Height(native);
+        if(scale is <.5f or >1.5f)throw new InvalidDataException("Incompatible humanoid proportions");return scale;
+    }
     // With an empty palette, FromSoftware's weighted meshes use global node indices.
     internal static int Bone(IFlverMesh mesh,int index){
         if(mesh is FLVER2.Mesh f){if(f.BoneIndices.Count==0)return index;if(index<0 || index>=f.BoneIndices.Count)throw new InvalidDataException("Invalid mesh bone palette index");return f.BoneIndices[index];}
@@ -145,7 +182,7 @@ internal static class SkinRetarget {
         }
         var template=native.Meshes.FirstOrDefault(m=>m.UseBoneWeights && native.Materials[m.MaterialIndex].MTD.EndsWith("C[ARSN].mtd",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("The native template has no supported skinned C[ARSN] material");
         var material=native.Materials[template.MaterialIndex];var buffers=template.VertexBuffers.Select(b=>new FLVER2.VertexBuffer(b.LayoutIndex){BufferIndex=b.BufferIndex}).ToArray();
-        var textureSource=textures.GroupBy(t=>t.Name,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.OrdinalIgnoreCase);var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var normalTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var fallbacks=new List<string>();
+        var textureSource=textures.GroupBy(t=>t.Name,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.OrdinalIgnoreCase);var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var normalTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var colorTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var fallbacks=new List<string>();
         bool packedShininess=sourceProfile is "DS1R" or "DS2" or "DS2S";
         var result=FLVER2.Read(nativeBytes);result.Meshes.Clear();result.Materials.Clear();
         var low=new Vector3(float.MaxValue);var high=new Vector3(float.MinValue);double exact=0,total=0;int vertices=0,triangles=0;
@@ -163,6 +200,9 @@ internal static class SkinRetarget {
                 var from=src.Textures.FirstOrDefault(t=>TextureSlot(t.ParamName)==TextureSlot(texture.ParamName));
                 if(packedShininess&&texture.ParamName=="g_ShininessTexture")from??=src.Textures.FirstOrDefault(t=>TextureSlot(t.ParamName)=="g_Specular");
                 var name=from==null?"":TextureName(from.Path);
+                if(sourceProfile=="DS1R"&&texture.ParamName=="g_DiffuseTexture"&&textureSource.TryGetValue(name,out var colorSource)) {
+                    name+="_srgb";textureSource.TryAdd(name,colorSource);colorTextures.Add(name);
+                }
                 if(textureSource.ContainsKey(name)){texture.Path=@"N:\SPRJ\data\Model\chr\"+textureOwner+@"\tex\"+OwnedTexture(name)+".tif";used.Add(name);if(texture.ParamName=="g_BumpmapTexture")normalTextures.Add(name);}
                 else if(texture.ParamName=="g_DiffuseTexture")throw new InvalidDataException("Source diffuse texture is unavailable: "+name);
                 else if(texture.ParamName is "g_SpecularTexture" or "g_ShininessTexture" or "g_BumpmapTexture"){
@@ -208,10 +248,11 @@ internal static class SkinRetarget {
             if(packedShininess&&normalTextures.Contains(name)&&header.GetDXGIFormat()==DDS.DXGI_FORMAT.BC5_UNORM) {
                 dds=NativeBc5Normal(dds);header=new DDS(dds);fallbacks.Add(name+": BC5 normal RG retained; native gloss modulation B=255");
             }
-            var texture=new TPF.Texture(OwnedTexture(name),Ps4Format(header),0,dds,TPF.TPFPlatform.PS4);textureBytes+=texture.Bytes.Length;if(textureBytes>256*1024*1024)throw new InvalidDataException("Converted textures exceed import budget");
+            if(colorTextures.Contains(name)){dds=NativeSrgbColor(dds);header=new DDS(dds);}
+            var texture=NativeTexture(OwnedTexture(name),dds);textureBytes+=texture.Bytes.Length;if(textureBytes>256*1024*1024)throw new InvalidDataException("Converted textures exceed import budget");
             // A PS4 write/read must preserve every compressed image and mip payload.
-            var before=Headerizer.GetDDSTextureBuffers(header,dds);var round=texture.HeaderizeExt(out _);List<Headerizer.Image> after;
-            try{after=Headerizer.GetDDSTextureBuffers(new DDS(round),round);}catch(Exception e){throw new InvalidDataException("PS4 texture payload cannot be read: "+name+" (source format "+sourceTexture.Format+", DXGI "+texture.Header.DXGIFormat+")",e);}
+            var before=DdsMipImages(dds);var round=texture.HeaderizeExt(out _);List<Headerizer.Image> after;
+            try{after=DdsMipImages(round);}catch(Exception e){throw new InvalidDataException("PS4 texture payload cannot be read: "+name+" (source format "+sourceTexture.Format+", DXGI "+texture.Header.DXGIFormat+")",e);}
             if(before.Count!=after.Count || before.Where((image,i)=>image.subImages.Count!=after[i].subImages.Count || image.subImages.Where((mip,m)=>!mip.SequenceEqual(after[i].subImages[m])).Any()).Any())throw new InvalidDataException("PS4 texture round-trip verification failed: "+name);
             tpf.Textures.Add(texture);
         }

@@ -11,7 +11,7 @@ internal static class MapCharacters {
         int SourceNPCParamID,int SourceThinkParamID,int SourceTalkID,int SourceInitAnimID,
         Vector3 SourcePosition,Vector3 SourceRotation,Vector3 SourceScale,string Status,string? TargetModel,
         int? EntityID,int? NPCParamID,int? ThinkParamID,int Vertices,int Triangles,double DirectWeightShare,
-        IReadOnlyList<string> SourceParts,IReadOnlyList<string> Limitations,IReadOnlyList<string> TextureFallbacks);
+        IReadOnlyList<string> SourceParts,IReadOnlyList<string> Limitations,IReadOnlyList<string> TextureFallbacks,float ProportionScale=1);
     internal record Export(IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<MSBB.Model.Enemy> Models,
         IReadOnlyList<MSBB.Part.Enemy> Actors,IReadOnlyList<CharacterReport> Reports,byte[] GameParamBytes);
 
@@ -36,18 +36,18 @@ internal static class MapCharacters {
         def.Fields.Add(new PARAMDEF.Field(def,PARAMDEF.DefType.dummy8,"payload"){ArrayLength=size});rows.ApplyParamdef(def);return rows;
     }
     internal static byte[] Payload(PARAM.Row row)=>((byte[])row.Cells.Single().Value).ToArray();
-    static byte[] WriteRows(PARAM rows) {
+    internal static byte[] WriteRows(PARAM rows) {
         // SoulsFormats normally normalizes null names to empty strings. Keep the
         // original null name offsets in Bloodborne's 64-bit row-header layout.
         var nulls=rows.Rows.Select((row,index)=>(row.Name,index)).Where(p=>p.Name==null).Select(p=>p.index).ToArray();
         var bytes=rows.Write();foreach(int i in nulls)Array.Clear(bytes,64+i*24+16,8);return bytes;
     }
-    static void CloneRow(PARAM rows,PARAM.Row donor,int id,string name,byte[] payload) {
+    internal static void CloneRow(PARAM rows,PARAM.Row donor,int id,string name,byte[] payload) {
         if(rows.Rows.Any(r=>r.ID==id))throw new InvalidDataException("Character parameter ID collision");
         var row=new PARAM.Row(donor){ID=id,Name=name};row.Cells.Single().Value=payload.ToArray();rows.Rows.Add(row);
     }
 
-    static (byte[] Model,List<TPF.Texture> Textures,List<string> Paths) Authored(Func<string,byte[]?> read,string model) {
+    internal static (byte[] Model,List<TPF.Texture> Textures,List<string> Paths) Authored(Func<string,byte[]?> read,string model) {
         string sourcePath=$"chr/{model}.chrbnd.dcx";var files=Binder(read(sourcePath)??Required(read,$"chr/{model}.chrbnd"));
         var visual=files.SingleOrDefault(f=>IsModel(f.Name))??throw new InvalidDataException("Authored source character has no unique FLVER");
         if(!FLVER2.Is(visual.Bytes.ToArray()))throw new InvalidDataException("Authored source character requires FLVER2");
@@ -72,6 +72,27 @@ internal static class MapCharacters {
         foreach(var suffix in new[]{"_2.tpf.dcx",".tpf.dcx",".tpf"})if(read($"chr/{model}{suffix}") is {} bytes) {
             paths.Add($"chr/{model}{suffix}");Add(TPF.Read(bytes));
         }
+        // Some hollow equipment references a shared character texture owner
+        // (for example c2509). Read its texture resources without instantiating
+        // its model or behavior, and retain provenance for each dependency.
+        var referenced=FLVER2.Read(visual.Bytes).Materials.SelectMany(m=>m.Textures).Select(t=>t.Path.Replace('\\','/'))
+            .Select(path=>System.Text.RegularExpressions.Regex.Match(path,@"(?:^|/)chr/(c\d{4})/",System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            .Where(m=>m.Success).Select(m=>m.Groups[1].Value).Where(id=>!id.Equals(model,StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if(referenced.Length>16)throw new InvalidDataException("Too many shared character texture owners");
+        foreach(var owner in referenced) {
+            string path=$"chr/{owner}.chrbnd.dcx";
+            var shared=read(path)??read(path[..^4]);if(shared==null)continue;paths.Add(path);
+            var dependencies=Binder(shared);
+            foreach(var entry in dependencies)if(TPF.Is(entry.Bytes.ToArray()))Add(TPF.Read(entry.Bytes));
+            foreach(var header in dependencies.Where(f=>Leaf(f.Name).EndsWith(".chrtpfbhd",StringComparison.OrdinalIgnoreCase))) {
+                string dataPath=$"chr/{owner}.chrtpfbdt";var data=Required(read,dataPath);paths.Add(dataPath);
+                using var split=new BXF3Reader(header.Bytes,data);
+                foreach(var entry in split.Files) {
+                    if(entry.CompressedSize>128L*1024*1024||entry.UncompressedSize>128L*1024*1024)throw new InvalidDataException("Shared character texture exceeds the import budget");
+                    Add(TPF.Read(split.ReadFile(entry)));
+                }
+            }
+        }
         // Anastacia's authored mesh reuses the original common female face map.
         foreach(var path in new[]{"parts/Common_Body.tpf","parts/Common_Body_M.tpf"})if(read(path) is {} bytes) {
             paths.Add(path);foreach(var texture in TPF.Read(bytes).Textures)if(!textures.ContainsKey(TextureName(texture.Name)))textures.Add(TextureName(texture.Name),texture);
@@ -82,6 +103,26 @@ internal static class MapCharacters {
             if(diffuse==null||!textures.ContainsKey(TextureName(diffuse.Path)))throw new InvalidDataException("Authored character diffuse texture is unavailable: "+(diffuse?.Path??material.Name));
         }
         return(visual.Bytes.ToArray(),textures.Values.ToList(),paths);
+    }
+
+    internal static SkinBake Package(byte[] sourceModel,List<TPF.Texture> textures,string profile,string template,string target,
+        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null) {
+        int id=int.Parse(target[1..]);
+        var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
+        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile);visual.Bytes=bake.Model.Write();
+        character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
+        if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native actor template reserves texture binder ID 100");
+        character.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,100,@"N:\SPRJ\data\INTERROOT_ps4\chr\"+target+@"\"+target+".tpf",bake.Textures.Write(DCX.Type.None)));
+        foreach(var file in character.Files)file.Name=file.Name.Replace(template,target,StringComparison.OrdinalIgnoreCase);
+        character.Files.Sort((a,b)=>a.ID.CompareTo(b.ID));files.Add("chr/"+target+".chrbnd.dcx",character.Write(DCX.Type.DCX_DFLT_10000_44_9));
+        var animation=BND4.Read(nativeAnimation);
+        foreach(var file in animation.Files) {
+            file.Name=file.Name.Replace(template,target,StringComparison.OrdinalIgnoreCase);
+            if(TAE.Is(file.Bytes.ToArray())){var tae=TAE.Read(file.Bytes);tae.ID=200000+id;file.Bytes=tae.Write();}
+            else if(file.ID>=7000000&&file.ID<8000000)file.Bytes=SkinRetarget.RenameBehavior(file.Bytes,template,target);
+        }
+        files.Add("chr/"+target+".anibnd.dcx",animation.Write(DCX.Type.DCX_DFLT_10000_44_9));files.Add("action/script/"+target+".hks",nativeScript.ToArray());
+        return bake with {ProportionScale=SkinRetarget.HumanoidScale(FLVER2.Read(sourceModel).Nodes,bake.Model.Nodes)};
     }
 
     // Pure in-memory staging: callers compose the returned map entries and files
@@ -132,20 +173,7 @@ internal static class MapCharacters {
                 var appearance=Authored(readSource,p.ModelName);sourceModel=appearance.Model;textures=appearance.Textures;parts=appearance.Paths;
                 limitations=["Authored source c2750 appearance retained; source cloth simulation and source shader behavior are not reproduced."];
             }
-            var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
-            var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:null,textureOwner:target,sourceProfile:profile);visual.Bytes=bake.Model.Write();
-            character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
-            if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native actor template reserves texture binder ID 100");
-            character.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,100,@"N:\SPRJ\data\INTERROOT_ps4\chr\"+target+@"\"+target+".tpf",bake.Textures.Write(DCX.Type.None)));
-            foreach(var file in character.Files)file.Name=file.Name.Replace(TemplateModel,target,StringComparison.OrdinalIgnoreCase);
-            character.Files.Sort((a,b)=>a.ID.CompareTo(b.ID));files.Add("chr/"+target+".chrbnd.dcx",character.Write(DCX.Type.DCX_DFLT_10000_44_9));
-            var animation=BND4.Read(nativeAnimation);
-            foreach(var file in animation.Files) {
-                file.Name=file.Name.Replace(TemplateModel,target,StringComparison.OrdinalIgnoreCase);
-                if(TAE.Is(file.Bytes.ToArray())){var tae=TAE.Read(file.Bytes);tae.ID=200000+id;file.Bytes=tae.Write();}
-                else if(file.ID>=7000000&&file.ID<8000000)file.Bytes=SkinRetarget.RenameBehavior(file.Bytes,TemplateModel,target);
-            }
-            files.Add("chr/"+target+".anibnd.dcx",animation.Write(DCX.Type.DCX_DFLT_10000_44_9));files.Add("action/script/"+target+".hks",nativeScript.ToArray());
+            var bake=Package(sourceModel,textures,profile,TemplateModel,target,nativeCharacter,nativeAnimation,nativeScript,files);
             // The original Doll logic is area-local and changes native quest flags.
             // An AI-disabled actor still owns its native animation/behavior rig.
             var param=npcBytes.ToArray();BitConverter.GetBytes(-1).CopyTo(param,4);
@@ -155,11 +183,11 @@ internal static class MapCharacters {
             CloneRow(npcs,npcDonor,paramID,"Imported Firelink "+p.Name,param);
             var model=(MSBB.Model.Enemy)donorModel.DeepCopy();model.Name=target;model.SibPath=model.SibPath.Replace(TemplateModel,target,StringComparison.OrdinalIgnoreCase);models.Add(model);
             var actor=(MSBB.Part.Enemy)donor.DeepCopy();actor.Name=target+"_0000";actor.ModelName=target;actor.EntityID=entityID;actor.NPCParamID=paramID;actor.ThinkParamID=-1;
-            actor.TalkID=-1;actor.CharaInitID=-1;actor.Position=p.Position+offset;actor.Rotation=p.Rotation;actor.Scale=p.Scale;actor.CollisionName=collisionName;actor.PatrolInfoName=null!;
+            actor.TalkID=-1;actor.CharaInitID=-1;actor.Position=p.Position+offset;actor.Rotation=p.Rotation;actor.Scale=p.Scale*bake.ProportionScale;actor.CollisionName=collisionName;actor.PatrolInfoName=null!;
             Array.Clear(actor.MovePointNames);actor.InitAnimID=-1;actor.DamageAnimID=-1;actor.PatrolType=0;actor.FallbackPlatoonID=0;
             Array.Fill(actor.DrawGroups,uint.MaxValue);Array.Fill(actor.DispGroups,uint.MaxValue);Array.Fill(actor.BackreadGroups,uint.MaxValue);usedNames.Add(actor.Name);actors.Add(actor);
             limitations.Add("Friendly native Bloodborne Doll animation, hitbox and physics are an approximation. AI is explicitly disabled (ThinkParamID and NPC aiThinkId -1); no native Doll AI or quest logic is packaged. Source idle poses, combat, weapons, dialogue and quest events are not ported. Talk and source quest interactions are disabled. Runtime animation/appearance require gameplay validation.");
-            reports.Add(p.Name,Report(p,"placed-native-idle-ai-disabled",target,entityID,paramID,bake.Vertices,bake.Triangles,bake.DirectWeightShare,parts,limitations,bake.TextureFallbacks));
+            reports.Add(p.Name,Report(p,"placed-native-idle-ai-disabled",target,entityID,paramID,bake.Vertices,bake.Triangles,bake.DirectWeightShare,parts,limitations,bake.TextureFallbacks,bake.ProportionScale));
         }
         npcFile.Bytes=WriteRows(npcs);var paramBundle=gameParams.Write(DCX.Type.DCX_DFLT_10000_44_9);files.Add("param/gameparam/gameparam.parambnd.dcx",paramBundle);
         foreach(var p in source.Parts.Enemies.Where(p=>!reports.ContainsKey(p.Name))) {
@@ -169,6 +197,6 @@ internal static class MapCharacters {
         return new(files,models,actors,source.Parts.Enemies.Select(p=>reports[p.Name]).ToArray(),paramBundle);
     }
     static CharacterReport Report(MSB1.Part.Enemy p,string status,string? target,int? entity,int? param,int vertices,int triangles,double share,
-        IReadOnlyList<string> parts,IReadOnlyList<string> limitations,IReadOnlyList<string> fallbacks)=>
-        new(p.Name,p.ModelName,p.EntityID,p.CharaInitID,p.NPCParamID,p.ThinkParamID,p.TalkID,p.InitAnimID,p.Position,p.Rotation,p.Scale,status,target,entity,param,target==null?null:-1,vertices,triangles,share,parts,limitations,fallbacks);
+        IReadOnlyList<string> parts,IReadOnlyList<string> limitations,IReadOnlyList<string> fallbacks,float proportionScale=1)=>
+        new(p.Name,p.ModelName,p.EntityID,p.CharaInitID,p.NPCParamID,p.ThinkParamID,p.TalkID,p.InitAnimID,p.Position,p.Rotation,p.Scale,status,target,entity,param,target==null?null:-1,vertices,triangles,share,parts,limitations,fallbacks,proportionScale);
 }

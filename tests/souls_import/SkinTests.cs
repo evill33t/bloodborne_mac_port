@@ -63,6 +63,19 @@ static class Tests {
         Check(a.SequenceEqual(source.Write()) && b.SequenceEqual(native.Write()),"Input FLVER changed");
         var compressed=new DDS{dwWidth=4,dwHeight=4,dwMipMapCount=1,dwPitchOrLinearSize=8};compressed.ddspf.dwFlags=DDS.DDPF.FOURCC;compressed.ddspf.dwFourCC="DXT1";
         var legacyTexture=new TPF.Texture("source",38,0,compressed.Write(new byte[8]),TPF.TPFPlatform.PC);var legacyBake=SkinRetarget.Bake(a,b,[legacyTexture]);Check(legacyBake.Textures.Textures[0].Format==0 && legacyBake.Textures.Textures[0].Header.DXGIFormat==71,"Legacy TPF format byte was not translated by pixel format");
+        // A rectangular chain reaches 1x4, 1x2 and 1x1: byte counts must
+        // halve after the shorter dimension reaches one, rather than quarter.
+        var rectangle=new DDS(SkinRetarget.RgbaTexture([0,0,0,255]));rectangle.dwWidth=8;rectangle.dwHeight=32;rectangle.dwMipMapCount=6;
+        rectangle.dwPitchOrLinearSize=32;rectangle.dwFlags|=DDS.DDSD.MIPMAPCOUNT;rectangle.dwCaps|=DDS.DDSCAPS.COMPLEX|DDS.DDSCAPS.MIPMAP;
+        byte[] rectangularPixels=Enumerable.Range(0,1372).Select(i=>(byte)(i*37)).ToArray();
+        var rectangularTexture=SkinRetarget.NativeTexture("rectangle",rectangle.Write(rectangularPixels));
+        var rectangularDds=rectangularTexture.HeaderizeExt(out _);var rectangularHeader=new DDS(rectangularDds);
+        Check(rectangularTexture.Header.Unk2==0xD&&rectangularTexture.Mipmaps==6,"Native PS4 tiling header or rectangular mip count is wrong");
+        Check(rectangularDds.AsSpan(rectangularHeader.DataOffset).SequenceEqual(rectangularPixels),"Rectangular mip tail was truncated or reordered");
+        var shortRig=new List<FLVER.Node>{new(){Name="Head",ParentIndex=-1,Translation=new(0,2,0),Scale=Vector3.One},new(){Name="L Foot",ParentIndex=-1,Scale=Vector3.One},new(){Name="R Foot",ParentIndex=-1,Scale=Vector3.One}};
+        var tallRig=shortRig.Select(n=>new FLVER.Node(n)).ToList();tallRig[0].Translation=new(0,3,0);
+        Check(Math.Abs(SkinRetarget.HumanoidScale(shortRig,tallRig)-2f/3)<.00001,"Humanoid stature compensation changed");
+        Reject(()=>SkinRetarget.HumanoidScale(shortRig.Take(2).ToList(),tallRig));
         var scaledSource=Fixture("L_Forearm",1);var scaledTarget=Fixture("L Forearm",1);scaledTarget.Nodes[1].Scale=new(2,1,1);foreach(var v in scaledSource.Meshes[0].Vertices){v.Normal=Vector3.Normalize(new Vector3(1,1,0));v.Tangents=[new(1,-1,0,1),new(1,-1,0,1)];}
         var scaled=SkinRetarget.Bake(scaledSource.Write(),scaledTarget.Write(),textures).Model.Meshes[0].Vertices[1];Near(scaled.Position,new(2,1,0));Near(scaled.Normal,Vector3.Normalize(new Vector3(.5f,1,0)));Check(Math.Abs(Vector3.Dot(scaled.Normal,new(scaled.Tangents[0].X,scaled.Tangents[0].Y,scaled.Tangents[0].Z)))<.0001,"Nonuniform scale broke tangent orthogonality");
         source.Meshes[0].BoneIndices=[1];foreach(var v in source.Meshes[0].Vertices)v.BoneIndices[0]=0;

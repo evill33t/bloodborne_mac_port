@@ -46,7 +46,7 @@ internal static class MapEnvironment {
     static void Set<T>(GPARAM.Param group,string key,int id,T value){var f=Field<T>(group,key);f.Values.Single(v=>v.ID==id).Value=value;}
     static void Append<T>(GPARAM.Field<T> field,int template,int id) {
         if(field.Values.Count>=255||field.Values.Any(v=>v.ID==id))throw new InvalidDataException("Native GPARAM field exceeds its row budget or repeats a row ID");
-        var source=field.Values.SingleOrDefault(v=>v.ID==template)??throw new InvalidDataException("Native GPARAM template row is missing");
+        var source=field.Values.SingleOrDefault(v=>v.ID==template)??throw new InvalidDataException("Native GPARAM requires a complete template row: "+field.Key);
         field.Values.Add(new(){ID=id,TimeOfDay=source.TimeOfDay,Value=source.Value});field.Capacity=(short)field.Values.Count;
     }
     static GPARAM.Param Append(GPARAM g,string key,int id) {
@@ -195,18 +195,22 @@ internal static class MapEnvironment {
             SceneBindings=bindings.Where(b=>b.BindScene&&tones.ContainsKey((b.ToneMapID,toneCorrect==null?0:b.ToneCorrectID))).ToDictionary(b=>b.Name,b=>new EnvironmentSceneBinding(tones[(b.ToneMapID,toneCorrect==null?0:b.ToneCorrectID)],neutralGrade),StringComparer.Ordinal),Calibration=calibration
         };
     }
-    internal static EnvironmentResult Load(Func<string,byte[]?> sourceRead,Func<string,byte[]?> nativeRead,string profile,string sourceMap,string targetMap,string definitionsDirectory,IReadOnlyList<EnvironmentBinding> bindings,EnvironmentCalibration? calibration=null) {
+    internal static EnvironmentResult Load(Func<string,byte[]?> sourceRead,Func<string,byte[]?> nativeRead,string profile,string sourceMap,string targetMap,string definitionsDirectory,IReadOnlyList<EnvironmentBinding> bindings,EnvironmentCalibration? calibration=null,string? nativeTemplateMap=null) {
         if(profile is not("DS1" or "DS1R"))throw new NotSupportedException("No source environment adapter for "+profile);
         foreach(var map in new[]{sourceMap,targetMap})if(!Regex.IsMatch(map,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid environment map identifier");
         var sourceFiles=BND3.Read(Required(sourceRead,$"param/DrawParam/a{sourceMap.Substring(1,2)}_DrawParam.parambnd.dcx")).Files;
         PARAM Source(string kind){var p=PARAM.Read(sourceFiles.Single(f=>Leaf(f.Name)==sourceMap[..3]+"_"+kind+".param").Bytes);p.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitionsDirectory,kind+".xml")));return p;}
         var profiles=new Dictionary<string,byte[]>(StringComparer.Ordinal);var binders=new Dictionary<string,BND4>(StringComparer.Ordinal);
         var stem="param/drawparam/"+targetMap[..6];
+        if(nativeTemplateMap!=null&&!Regex.IsMatch(nativeTemplateMap,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid native environment template map");
+        var templateStem="param/drawparam/"+(nativeTemplateMap??targetMap)[..6];
+        byte[]? ReadTemplate(string path)=>nativeRead(path.Replace(stem,templateStem,StringComparison.Ordinal));
         for(int phase=0;phase<4;phase++) {
-            var binderPath=stem+"_"+phase.ToString("D4")+".gparambnd.dcx";var binder=BND4.Read(Required(nativeRead,binderPath));binders.Add(binderPath,binder);
+            var binderPath=stem+"_"+phase.ToString("D4")+".gparambnd.dcx";var bytes=ReadTemplate(binderPath);if(bytes==null&&phase>0)continue;var binder=BND4.Read(bytes??throw new FileNotFoundException("Native environment phase zero unavailable",binderPath));binders.Add(binderPath,binder);
             foreach(var file in binder.Files) {
+                if(nativeTemplateMap!=null)file.Name=file.Name.Replace(nativeTemplateMap[..6],targetMap[..6],StringComparison.Ordinal);
                 if(!Leaf(file.Name).EndsWith(".gparam",StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("Unexpected native gparam binder entry");
-                var path="param/drawparam/"+Leaf(file.Name)+".dcx";var loose=nativeRead(path);
+                var path="param/drawparam/"+Leaf(file.Name)+".dcx";var loose=ReadTemplate(path);
                 if(!profiles.TryAdd(path,loose??file.Bytes.ToArray()))throw new InvalidDataException("Repeated native environment profile: "+path);
                 profiles.Add(binderPath+"::"+file.Name,file.Bytes.ToArray());
             }
@@ -215,6 +219,7 @@ internal static class MapEnvironment {
         var converted=result.Files.ToDictionary(f=>f.Path,f=>f.Bytes,StringComparer.Ordinal);
         result.Files.RemoveAll(f=>f.Path.Contains("::",StringComparison.Ordinal));
         foreach(var (path,binder) in binders){foreach(var file in binder.Files)file.Bytes=DCX.Decompress(converted[path+"::"+file.Name]);result.Files.Add(new(path,binder.Write(DCX.Type.DCX_DFLT_10000_44_9)));}
+        if(nativeTemplateMap!=null)result.Limitations.Add("Complete native environment template "+nativeTemplateMap+" cloned for "+targetMap+"; target sparse override profiles are bypassed. Source lighting, fog and tone rows are converted independently; native environment maps and shader response remain approximations.");
         return result;
     }
     internal static EnvironmentSky BakeSky(FLVER2 source,FLVER2 native,Func<string,MTD> sourceDefinition,Func<string,MTD> nativeDefinition,Func<string,string> texturePath,string materialPrefix) {
