@@ -45,18 +45,67 @@ internal static class SkinRetarget {
         }return result;
     }
     static string TextureSlot(string name)=>name.EndsWith("Texture",StringComparison.Ordinal)?name[..^7]:name;
+    // These native variants use the same Bloody character shader, texture slots
+    // and vertex inputs as C[ARSN]. Their MTD selects alpha-test/blend behavior;
+    // both also explicitly disable adaptive tessellation.
+    // Source material labels are unreliable: an "_Alp" label may use an Edge MTD.
+    static string CharacterMtd(string sourceMtd,string nativeMtd) {
+        string suffix=Leaf(sourceMtd).ToLowerInvariant() switch {
+            "ps_hair[ds]_edge.mtd"=>"_e",
+            "ps_hair[ds]_alp.mtd"=>"_al",
+            _=>""
+        };
+        return suffix.Length==0?nativeMtd:nativeMtd[..^4]+suffix+".mtd";
+    }
     // TPF's format byte is game-specific. Preserve the DDS pixel representation
     // and select the Bloodborne/PS4 format instead of copying that source byte.
     internal static byte Ps4Format(DDS dds)=>(int)dds.GetDXGIFormat() switch {
         28=>105,87=>9,71=>0,72=>108,74=>3,77=>5,78=>110,80=>103,83=>104,95=>100,98=>102,99=>112,
         var format=>throw new InvalidDataException("Unsupported DDS pixel format for PS4 conversion: "+format)
     };
+    // BC5 supplies tangent-normal RG only. Bloodborne reconstructs direction
+    // from RG; its normal-map B also modulates gloss. Preserve RG and supply a
+    // neutral B=1 instead of allowing BC5's implicit B=0 to erase shininess.
+    internal static byte[] NativeBc5Normal(byte[] bytes) {
+        var header=new DDS(bytes);
+        if(header.GetDXGIFormat()!=DDS.DXGI_FORMAT.BC5_UNORM||header.dwWidth<1||header.dwHeight<1||
+            header.dwWidth>8192||header.dwHeight>8192||header.dwDepth>1||header.dwCaps2!=0||
+            header.header10 is {} h&&(h.arraySize!=1||h.resourceDimension!=DDS.DIMENSION.TEXTURE2D))
+            throw new InvalidDataException("Expected a two-dimensional BC5_UNORM normal map");
+        int levels=Math.Max(1,header.dwMipMapCount);
+        if(levels>1+System.Numerics.BitOperations.Log2((uint)Math.Max(header.dwWidth,header.dwHeight)))throw new InvalidDataException("Invalid BC5 mip count");
+        static byte Channel(ReadOnlySpan<byte> block,int texel) {
+            Span<int> values=stackalloc int[8];values[0]=block[0];values[1]=block[1];
+            if(values[0]>values[1])for(int i=1;i<=6;i++)values[i+1]=((7-i)*values[0]+i*values[1])/7;
+            else {for(int i=1;i<=4;i++)values[i+1]=((5-i)*values[0]+i*values[1])/5;values[6]=0;values[7]=255;}
+            ulong indices=0;for(int i=0;i<6;i++)indices|=(ulong)block[i+2]<<(8*i);return (byte)values[(int)(indices>>(3*texel)&7)];
+        }
+        using var pixels=new MemoryStream();int width=header.dwWidth,height=header.dwHeight,offset=header.DataOffset;
+        for(int level=0;level<levels;level++) {
+            int blocksX=(width+3)/4,blocksY=(height+3)/4,size=checked(blocksX*blocksY*16);
+            if(bytes.Length-offset<size||(long)pixels.Length+(long)width*height*4>128*1024*1024)throw new InvalidDataException("BC5 normal is truncated or exceeds the conversion budget");
+            var mip=bytes.AsSpan(offset,size);offset+=size;
+            var rgba=new byte[checked(width*height*4)];
+            for(int by=0;by<blocksY;by++)for(int bx=0;bx<blocksX;bx++) {
+                var block=mip.Slice((by*blocksX+bx)*16,16);
+                for(int y=0;y<4;y++)for(int x=0;x<4;x++) {
+                    int px=bx*4+x,py=by*4+y;if(px>=width||py>=height)continue;int dest=(py*width+px)*4,texel=y*4+x;
+                    rgba[dest]=Channel(block[..8],texel);rgba[dest+1]=Channel(block[8..],texel);rgba[dest+2]=255;rgba[dest+3]=255;
+                }
+            }
+            pixels.Write(rgba);width=Math.Max(1,width/2);height=Math.Max(1,height/2);
+        }
+        var output=new DDS{dwWidth=header.dwWidth,dwHeight=header.dwHeight,dwMipMapCount=levels,dwPitchOrLinearSize=header.dwWidth*4};
+        output.dwFlags|=DDS.DDSD.PITCH;if(levels>1){output.dwFlags|=DDS.DDSD.MIPMAPCOUNT;output.dwCaps|=DDS.DDSCAPS.COMPLEX|DDS.DDSCAPS.MIPMAP;}
+        output.ddspf.dwFlags=DDS.DDPF.RGB|DDS.DDPF.ALPHAPIXELS;output.ddspf.dwRGBBitCount=32;
+        output.ddspf.dwRBitMask=0xff;output.ddspf.dwGBitMask=0xff00;output.ddspf.dwBBitMask=0xff0000;output.ddspf.dwABitMask=0xff000000;return output.Write(pixels.ToArray());
+    }
     // With an empty palette, FromSoftware's weighted meshes use global node indices.
     internal static int Bone(IFlverMesh mesh,int index){
         if(mesh is FLVER2.Mesh f){if(f.BoneIndices.Count==0)return index;if(index<0 || index>=f.BoneIndices.Count)throw new InvalidDataException("Invalid mesh bone palette index");return f.BoneIndices[index];}
         var palette=((FLVER0.Mesh)mesh).BoneIndices;if(palette.Length==0)return index;if(index<0 || index>=palette.Length)throw new InvalidDataException("Invalid mesh bone palette index");return palette[index];
     }
-    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998"){
+    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null){
         if(!Regex.IsMatch(textureOwner,@"\Ac\d{4,5}\z"))throw new ArgumentException("Invalid texture owner");
         string OwnedTexture(string name)=>textureOwner+"_import_"+name;
         IFlver source=FLVER2.Is(sourceBytes.ToArray())?FLVER2.Read(sourceBytes):FLVER0.Is(sourceBytes.ToArray())?FLVER0.Read(sourceBytes):throw new InvalidDataException("Unsupported source FLVER");
@@ -83,16 +132,25 @@ internal static class SkinRetarget {
         }
         var template=native.Meshes.FirstOrDefault(m=>m.UseBoneWeights && native.Materials[m.MaterialIndex].MTD.EndsWith("C[ARSN].mtd",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("The native template has no supported skinned C[ARSN] material");
         var material=native.Materials[template.MaterialIndex];var buffers=template.VertexBuffers.Select(b=>new FLVER2.VertexBuffer(b.LayoutIndex){BufferIndex=b.BufferIndex}).ToArray();
-        var textureSource=textures.GroupBy(t=>t.Name,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.OrdinalIgnoreCase);var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var fallbacks=new List<string>();
+        var textureSource=textures.GroupBy(t=>t.Name,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.OrdinalIgnoreCase);var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var normalTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var fallbacks=new List<string>();
+        bool packedShininess=sourceProfile is "DS1R" or "DS2" or "DS2S";
         var result=FLVER2.Read(nativeBytes);result.Meshes.Clear();result.Materials.Clear();
         var low=new Vector3(float.MaxValue);var high=new Vector3(float.MinValue);double exact=0,total=0;int vertices=0,triangles=0;
         foreach(var mesh in source.Meshes){
             if(mesh.MaterialIndex<0 || mesh.MaterialIndex>=source.Materials.Count)throw new InvalidDataException("Invalid source material index");var src=source.Materials[mesh.MaterialIndex];
             var mask=Regex.Match(src.Name,@"#(\d+)#");if(masks!=null && mask.Success && !masks.Contains(int.Parse(mask.Groups[1].Value)))continue;
-            var mat=new FLVER2.Material("Imported_"+result.Materials.Count,material.MTD,material.Index){GXIndex=material.GXIndex,Textures=material.Textures.Select(Copy).ToList()};
+            var mat=new FLVER2.Material("Imported_"+result.Materials.Count,CharacterMtd(src.MTD,material.MTD),material.Index){GXIndex=material.GXIndex,Textures=material.Textures.Select(Copy).ToList()};
             foreach(var texture in mat.Textures){
-                var from=src.Textures.FirstOrDefault(t=>TextureSlot(t.ParamName)==TextureSlot(texture.ParamName));var name=from==null?"":TextureName(from.Path);
-                if(textureSource.ContainsKey(name)){texture.Path=@"N:\SPRJ\data\Model\chr\"+textureOwner+@"\tex\"+OwnedTexture(name)+".tif";used.Add(name);}
+                // Remastered/DS2 g_Specular is packed shininess, not native RGB
+                // reflectance (the same distinction is made by Smithbox).
+                if(packedShininess&&texture.ParamName=="g_SpecularTexture") {
+                    texture.Path=@"N:\SPRJ\data\Other\SysTex\SYSTEX_DummyReflectance.tga";
+                    fallbacks.Add(src.Name+": "+sourceProfile+" packed g_Specular -> shininess; native neutral reflectance approximation");continue;
+                }
+                var from=src.Textures.FirstOrDefault(t=>TextureSlot(t.ParamName)==TextureSlot(texture.ParamName));
+                if(packedShininess&&texture.ParamName=="g_ShininessTexture")from??=src.Textures.FirstOrDefault(t=>TextureSlot(t.ParamName)=="g_Specular");
+                var name=from==null?"":TextureName(from.Path);
+                if(textureSource.ContainsKey(name)){texture.Path=@"N:\SPRJ\data\Model\chr\"+textureOwner+@"\tex\"+OwnedTexture(name)+".tif";used.Add(name);if(texture.ParamName=="g_BumpmapTexture")normalTextures.Add(name);}
                 else if(texture.ParamName=="g_DiffuseTexture")throw new InvalidDataException("Source diffuse texture is unavailable: "+name);
                 else if(texture.ParamName is "g_SpecularTexture" or "g_ShininessTexture" or "g_BumpmapTexture"){
                     var fallback=texture.ParamName=="g_BumpmapTexture"?"__bbimport_normal":texture.ParamName=="g_SpecularTexture"?"__bbimport_black":"__bbimport_white";
@@ -134,6 +192,9 @@ internal static class SkinRetarget {
         foreach(var name in used.Order(StringComparer.OrdinalIgnoreCase)){
             var sourceTexture=textureSource[name];var dds=sourceTexture.HeaderizeExt(out var extension);if(extension!=".dds")throw new InvalidDataException("Unsupported source texture container: "+extension);
             var header=new DDS(dds);if(header.dwWidth<1 || header.dwHeight<1 || header.dwWidth>8192 || header.dwHeight>8192 || dds.Length>128*1024*1024)throw new InvalidDataException("Source texture exceeds import limits");
+            if(packedShininess&&normalTextures.Contains(name)&&header.GetDXGIFormat()==DDS.DXGI_FORMAT.BC5_UNORM) {
+                dds=NativeBc5Normal(dds);header=new DDS(dds);fallbacks.Add(name+": BC5 normal RG retained; native gloss modulation B=255");
+            }
             var texture=new TPF.Texture(OwnedTexture(name),Ps4Format(header),0,dds,TPF.TPFPlatform.PS4);textureBytes+=texture.Bytes.Length;if(textureBytes>256*1024*1024)throw new InvalidDataException("Converted textures exceed import budget");
             // A PS4 write/read must preserve every compressed image and mip payload.
             var before=Headerizer.GetDDSTextureBuffers(header,dds);var round=texture.HeaderizeExt(out _);List<Headerizer.Image> after;

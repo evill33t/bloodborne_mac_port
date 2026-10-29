@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="MapBreakablesTests.cs"/>
+    <Compile Include="../../editor/souls_import/MapBreakables.cs" Link="MapBreakables.cs"/>
+    <Compile Include="../../editor/souls_import/StaticMapGeometry.cs" Link="StaticMapGeometry.cs"/>
+    <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
+    <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
+    <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

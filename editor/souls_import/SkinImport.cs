@@ -28,13 +28,20 @@ internal static partial class Program {
         if(Directory.Exists(output) || File.Exists(output))throw new IOException("Choose a new output folder");
         using var assets=new Assets(root,profile.Id);var character=assets.Read($"chr/{model}.chrbnd.dcx")??assets.Read($"chr/{model}.chrbnd")??assets.Read($"model/chr/{model}.bnd")??throw new FileNotFoundException("Source character binder unavailable");
         List<BinderFile> Binder(byte[] b){var raw=Unpack(b).ToArray();return BND4.Is(raw)?BND4.Read(raw).Files:BND3.Is(raw)?BND3.Read(raw).Files:throw new InvalidDataException("Unsupported source binder");}
-        var files=Binder(character);var sourceModel=files.FirstOrDefault(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".flv",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("Source binder has no FLVER");
-        var textures=new List<TPF.Texture>();foreach(var file in files)if(TPF.Is(file.Bytes.ToArray()))textures.AddRange(TPF.Read(file.Bytes).Textures);
+        NpcAppearanceResult? npcAppearance=null;
+        if(values.TryGetValue("--chara-init",out var init)) {
+            if(profile.Id is not("DS1" or "DS1R")||model!="c0000")throw new NotSupportedException("Human appearance composition requires DS1 c0000");
+            var smithbox=values.GetValueOrDefault("--smithbox")??Environment.GetEnvironmentVariable("SMITHBOX_DIR")??throw new ArgumentException("NPC appearance requires --smithbox or SMITHBOX_DIR");
+            npcAppearance=NpcAppearance.Load(assets.Read,Path.Combine(smithbox,"src/Smithbox.Data/Assets/PARAM",profile.Id,"Defs"),int.Parse(init));
+        }
+        var files=npcAppearance==null?Binder(character):new List<BinderFile>{new(SoulsFormats.Binder.FileFlags.Flag1,0,model+".flver",npcAppearance.Model.Write())};
+        var sourceModel=files.FirstOrDefault(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".flv",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("Source binder has no FLVER");
+        var textures=npcAppearance?.Textures.ToList()??new List<TPF.Texture>();foreach(var file in files)if(TPF.Is(file.Bytes.ToArray()))textures.AddRange(TPF.Read(file.Bytes).Textures);
         if((assets.Read($"chr/{model}.texbnd.dcx")??assets.Read($"model/chr/{model}.texbnd")) is {} tex)foreach(var file in Binder(tex))if(TPF.Is(file.Bytes.ToArray()))textures.AddRange(TPF.Read(file.Bytes).Textures);
         foreach(var suffix in new[]{"_2.tpf.dcx",".tpf.dcx",".tpf"})if(assets.Read($"chr/{model}{suffix}") is {} bytes)textures.AddRange(TPF.Read(bytes).Textures);
         var target=BND4.Read(File.ReadAllBytes(Path.Combine(native,"dvdroot_ps4/chr",template+".chrbnd.dcx")));var targetModel=target.Files.Single(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase));
-        var masks=Get("--mask").Split(',').Select(int.Parse).ToHashSet();if(masks.Any(i=>i<0 || i>31))throw new ArgumentException("Render masks must be between 0 and 31");
-        var bake=SkinRetarget.Bake(sourceModel.Bytes,targetModel.Bytes,textures,masks,textureOwner:destination);targetModel.Bytes=bake.Model.Write();
+        var maskText=Get("--mask");var masks=maskText=="all"?null:maskText.Split(',').Select(int.Parse).ToHashSet();if(masks?.Any(i=>i<0 || i>31)==true)throw new ArgumentException("Render masks must be between 0 and 31, or all");
+        var bake=SkinRetarget.Bake(sourceModel.Bytes,targetModel.Bytes,textures,masks,textureOwner:destination,sourceProfile:profile.Id);targetModel.Bytes=bake.Model.Write();
         // Cloth bindings address the template's old vertex buffers. Converted meshes use
         // ordinary skinning, so retaining those bindings would write into unrelated meshes.
         target.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase));
@@ -59,7 +66,7 @@ internal static partial class Program {
         try{
             foreach(var (relative,data) in package){var path=Path.Combine(stage.FullName,"dvdroot_ps4",relative);Directory.CreateDirectory(Path.GetDirectoryName(path)!);File.WriteAllBytes(path,data);}
             CharacterPreview(Path.Combine(stage.FullName,"preview.bbsource"),profile.Id,destination,Decode(bake.Model.Write(),destination),"Converted character in Bloodborne bind pose");
-            File.WriteAllText(Path.Combine(stage.FullName,"conversion.json"),JsonSerializer.Serialize(new{source=profile.Id,model,template,destination,masks,bake.Vertices,bake.Triangles,bake.DirectWeightShare,bake.Bones,bake.TextureFallbacks,textures=bake.Textures.Textures.Count,behavior="Native Bloodborne template animation, AI and hitbox assets; foreign cloth is skinned without cloth simulation"},new JsonSerializerOptions{WriteIndented=true}));
+            File.WriteAllText(Path.Combine(stage.FullName,"conversion.json"),JsonSerializer.Serialize(new{source=profile.Id,model,template,destination,masks,npcAppearance=npcAppearance==null?null:new{npcAppearance.CharaInitID,npcAppearance.Sex,npcAppearance.FaceGenID,npcAppearance.Parts,npcAppearance.Limitations},bake.Vertices,bake.Triangles,bake.DirectWeightShare,bake.Bones,bake.TextureFallbacks,textures=bake.Textures.Textures.Count,behavior="Native Bloodborne template animation, AI and hitbox assets; foreign cloth is skinned without cloth simulation"},new JsonSerializerOptions{WriteIndented=true}));
             File.WriteAllText(Path.Combine(stage.FullName,"README.txt"),$"Converted {profile.Id} {model} geometry and textures onto Bloodborne {template}. "+(destination==template?$"This skin test replaces every instance of {template}. ":$"Independent model {destination}. ")+"Uses native template animations, AI and hitboxes. Original game files remain unchanged.\n");Directory.CreateDirectory(Path.GetDirectoryName(output)!);Directory.Move(stage.FullName,output);
         }catch{if(stage.Exists)stage.Delete(true);throw;}
         Console.WriteLine($"BAKED SKIN {profile.Id} {model} -> {template}: {bake.Vertices} vertices, {bake.Triangles} triangles, {bake.Textures.Textures.Count} PS4 textures, {bake.DirectWeightShare:P1} direct skin weight -> {output}");return 0;

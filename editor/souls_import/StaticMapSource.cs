@@ -4,7 +4,7 @@ using System.Numerics;
 using System.Text.RegularExpressions;
 
 internal static partial class Program {
-    internal record StaticPlacement(string Name,string Model,Vector3 Position,Vector3 Rotation,Vector3 Scale);
+    internal record StaticPlacement(string Name,string Model,Vector3 Position,Vector3 Rotation,Vector3 Scale,int InitAnimID=-1,byte LightID=0,byte FogID=0,byte ScatterID=0,bool? ShadowSource=null,bool? ShadowDest=null,bool? ShadowOnly=null);
 
     // Read-only, on-demand access to the two static-map layouts currently baked
     // into Bloodborne. Source Havok, scripts and dynamic object behavior stay local.
@@ -43,7 +43,7 @@ internal static partial class Program {
                     var msb=MSB1.Read(assets.Read(path)??assets.Read(path+".dcx")??throw new FileNotFoundException("Source MSB unavailable"));
                     PlayerStart=msb.Parts.Players.FirstOrDefault()?.Position;
                     Placements=msb.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Object)
-                        .Select(p=>new StaticPlacement(p.Name,p.ModelName??"",p.Position,p.Rotation,p.Scale)).ToArray();
+                        .Select(p=>new StaticPlacement(p.Name,p.ModelName??"",p.Position,p.Rotation,p.Scale,p is MSB1.Part.Object obj?obj.InitAnimID:-1,p.LightID,p.FogID,p.ScatterID,p.IsShadowSrc!=0,p.IsShadowDest!=0,p.IsShadowOnly!=0)).ToArray();
                     var area=map[..3];
                     // DS1/Remastered map textures live in area-wide BXF3s, rather
                     // than in the individual block's model folder.
@@ -77,6 +77,8 @@ internal static partial class Program {
         void IndexTextures(BinderReader reader) {
             foreach(var file in reader.Files)textureFiles.TryAdd(ModelName(file.Name),(reader,file));
         }
+
+        public byte[]? ReadAsset(string path)=>assets.Read(path);
 
         public Memory<byte>? ReadModel(string model) {
             ObjectDisposedException.ThrowIf(disposed,this);

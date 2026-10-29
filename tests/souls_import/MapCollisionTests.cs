@@ -7,6 +7,14 @@ static class CollisionTests {
     static void Reject(Action action){try{action();}catch(InvalidDataException){return;}throw new Exception("Malformed input accepted");}
     static void Main(string[] args){
         MapReplacementTests.Run();
+        MapAreaNameTests.Run();
+        MapEnvironmentTests.Run();
+        MapCollisionBindingsTests.Run();
+        MapConnectionsTests.Run();
+        SourceFlverTests.Run(args.Length>1?args[1]:null);
+        SourceCollisionTests.Run();
+        LegacySourceCollisionTests.Run();
+        NpcAppearanceTests.Run();
         StaticMapGeometryTests.Run();
         string path=Path.Combine(args[0],"dvdroot_ps4/map/m24_01_00_00/h24_01_00_00.hkx");using var archive=new BXF4Reader(path+"bhd",path+"bdt");var template=archive.ReadFile(archive.Files.Single(f=>f.Name.EndsWith("000010.hkx.dcx"))).ToArray();var before=System.Security.Cryptography.SHA256.HashData(template);
         var triangles=new List<MapCollision.Triangle>();for(int x=0;x<10;++x)for(int z=0;z<10;++z){triangles.Add(new(new(x,0,z),new(x,0,z+1),new(x+1,0,z)));triangles.Add(new(new(x+1,0,z),new(x,0,z+1),new(x+1,0,z+1)));}

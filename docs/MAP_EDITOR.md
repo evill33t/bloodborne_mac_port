@@ -703,28 +703,98 @@ physical alpha-tested props retain collision. The two source light-shaft meshes 
 verified native additive material with original texture and vertex alpha, and have no
 collision. Source angular fading and texture scrolling are not reproduced.
 
-The export adds an independent Bloodborne daytime sky, keeps the original scripted sky
-records invisible, and removes unused distant city geometry. This approximates the
-backdrop; DS1's sky, distant scenery, water surfaces and lighting are not transplanted.
+The export reads the original source high/low collision independently, preserving the
+player-solid filter and excluding camera, death and trigger surfaces from player collision.
+Firelink has 51,090 high-layer and 35,293 low-layer solid triangles. Native chunks retain
+their source placement identity, so the source lighting bindings follow collision regions.
+DS2 Scholar's adapter likewise uses its original Havok layers; vanilla 32-bit DS2 collision
+and original DS1 collision remain separate compatibility work.
 
-This remains a static map replacement with the same NPC, item, quest, navigation and
-campaign limitations as Majula. Local Firelink evidence under ignored
-`out/map-editor/firelink-validation/` covers 72 models, 117 placements, 160 textures,
-93 non-solid meshes (91 foliage and two light shafts), and 376,245 collision triangles
-in both native collision archives. Independent readback checks native references, all
-texture slots, preserved source ray alpha/mips, and original scripted sky identities.
+Firelink's source sky dome, cloud cards and distant landscape are converted to native sky
+shaders. A bounded DSR vertex-stride repair preserves the distant landscape's original
+positions and color/UV bytes. Source light directions, hemispheric colors and scattering
+rows are added to independent native GPARAM rows across all time phases. Binary inspection
+verifies the DS1R/native direction convention and color transfer; the converter preserves
+source light energy under Bloodborne's squared-color/intensity convention. Original GPARAM
+rows and material definitions remain intact. New rows are also registered in native group
+lookup tables; a controlled green-light gameplay probe verifies that the game applies them.
+Imported fog uses a calibrated distance haze with source hue, avoiding the source curve's
+strong foreground wash. Imported-area exposure is reduced by 0.4 stops (native Yebis exposure
+multiplied by approximately 0.758). Native height fog and fog brightness contrast are disabled
+in the calibrated rows. Exact source fog/tonemap curves, cubemaps, color grading and animated
+cloud response still differ. See [format evidence](SOULS_IMPORT_FORMAT_NOTES.md).
+The normal calibrated profile was also checked in gameplay, including a sky-facing view;
+the bounded run rendered without a guest crash and the player's HP remained unchanged.
 
-A normal Hunter's Mark respawn landed on the imported floor with full HP, and the copied
-save resumed above the floor with the production runtime. Native save-and-quit and later
-reload were checked. The user confirmed foliage/sky and restored additive rays during
-play. This is a bounded gameplay check; collision is still derived from render geometry
-and is not yet equivalent to the source game's dedicated collision.
+Twenty-five source urns use native destructible object rigs with the source intact and
+broken geometry. Native physics and fragment counts are approximations. One imported urn
+was broken with ordinary attacks in an isolated gameplay test. Six verified source static
+animation clips place 16 source corpses in their original poses; loot and ragdoll behavior
+are not transferred. Crestfallen, Petrus and Anastacia use their source appearances on
+native friendly animation wrappers. Human appearances include the source armor, FaceGen
+head and hair. These three actors have AI and dialogue disabled; source quests, combat,
+idle poses and availability conditions are not implemented. Other source actors are
+explicitly reported as unconverted rather than spawned without their quest conditions.
 
-The DS2 regression also exposed a preexisting vertex-copy issue: SoulsFormats' vertex
-copy omits `NormalW`, so rigid source bone selection now reads the original vertex. This
-corrects 5,710 positions across nine Majula models; 27 triangles move across the existing
-collision clipping bounds. Model/placement/texture counts, base triangle indices, the MSB
-and texture archives remain unchanged. The previous local Majula demo is preserved.
+The earlier normal Hunter's Mark respawn, native save-and-quit and reload checks landed
+above the imported floor. A later bounded walk with original source collision covered
+4.5 metres with unchanged HP. The original demo/save is preserved separately from these
+validation runs. These checks do not establish complete campaign compatibility.
+
+### Repeatable map import jobs
+
+Use the script to inventory source dependencies and publish a new isolated mod only after
+all conversion stages succeed:
+
+```sh
+python3 scripts/import_souls_map.py \
+  --profile DS1R --root '/path/to/DARK SOULS REMASTERED' \
+  --native-root /path/to/CUSA00900 --map m10_02_00_00 \
+  --smithbox /path/to/Smithbox --build \
+  --output /path/to/private-test-data/Mods/FirelinkShrine
+```
+
+For Majula, select `DS2S`, its installed `Game` folder and `m10_04_00_00`.
+The two map presets supply source anchors. DS1 imports persist the fog and exposure
+calibration in their job files. `--exposure-ev -0.4`, `--fog-strength 0.3`,
+`--fog-distance 80`, `--fog-start 25` and `--fog-color-scale 0.35` are the current defaults.
+`--fog-mode native` retains native fog while keeping the selected exposure adjustment.
+Tone gamma, auto-exposure mode and unrelated native controls remain intact.
+
+The two map presets supply source anchors. `--source-anchor=x,y,z`,
+`--target-anchor=x,y,z` and `--spawn-offset=x,y,z` override placement; use the equals
+syntax for negative comma-separated coordinates. `--plan-only` inventories without
+converting or writing assets. Game folders and existing outputs are refused as destinations.
+A failed stage leaves no published partial mod.
+
+Each export includes `import-job.json`, `source-plan.json`, `import-manifest.json` and
+`conversion.json`. The job can be rerun into a new folder:
+
+```sh
+python3 scripts/import_souls_map.py \
+  --config /path/to/private-test-data/Mods/FirelinkShrine/import-job.json \
+  --output /path/to/private-test-data/Mods/FirelinkShrine-next
+```
+
+The plan inventories actors, objects, collision filters, sound events and environment IDs.
+DS1/DS2 topology also retains source region/arrival references and numeric wildcard map
+IDs, resolving destinations only when the available map catalog gives an unambiguous
+match. Stable target reservations prevent maps from silently sharing the same native asset
+family. This is planning groundwork: source links, lifts, crow travel and other loading
+transitions are not activated by the importer.
+
+Current runtime conversion remains limited to Firelink/Majula into `m24_01_00_01`.
+Supported preview/reader profiles do not imply full map conversion for every game. Source
+music/ambience, items, navigation, quests and complete NPC/enemy behavior remain work in
+progress; the manifest records missing stages. Test against copied saves and enable only
+one replacement for this native area.
+
+`python3 tests/test_import_souls_map.py` covers completed-job publication, reruns,
+read-only source guards and backend failure cleanup using an asset-free backend fixture.
+The installed-asset checks include `tests/test_map_import.sh` (native game root, optional
+DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
+`tests/test_npc_face.sh`, `tests/test_map_characters.sh` and `tests/test_skin_hair_alpha.sh`.
+Their serialization/asset assertions are separate from the bounded gameplay evidence above.
 
 The importer is also available from the command line:
 

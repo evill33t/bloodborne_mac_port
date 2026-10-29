@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="MapCharactersTests.cs"/>
+    <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
+    <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
+    <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
+    <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
+    <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

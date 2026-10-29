@@ -2,6 +2,23 @@
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
   <ItemGroup>
     <Compile Include="MapCollisionTests.cs"/>
+    <Compile Include="MapAreaNameTests.cs"/>
+    <Compile Include="MapEnvironmentTests.cs"/>
+    <Compile Include="MapCollisionBindingsTests.cs"/>
+    <Compile Include="SourceFlverTests.cs"/>
+    <Compile Include="MapConnectionsTests.cs"/>
+    <Compile Include="../../editor/souls_import/SourceFlver.cs" Link="SourceFlver.cs"/>
+    <Compile Include="../../editor/souls_import/MapConnections.cs" Link="MapConnections.cs"/>
+    <Compile Include="../../editor/souls_import/MapEnvironment.cs" Link="MapEnvironment.cs"/>
+    <Compile Include="../../editor/souls_import/MapCollisionBindings.cs" Link="MapCollisionBindings.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
+    <Compile Include="SourceCollisionTests.cs"/>
+    <Compile Include="LegacySourceCollisionTests.cs"/>
+    <Compile Include="NpcAppearanceTests.cs"/>
+    <Compile Include="../../editor/souls_import/MapAreaName.cs" Link="MapAreaName.cs"/>
+    <Compile Include="../../editor/souls_import/SourceCollision.cs" Link="SourceCollision.cs"/>
+    <Compile Include="../../editor/souls_import/LegacySourceCollision.cs" Link="LegacySourceCollision.cs"/>
+    <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
     <Compile Include="MapReplacementTests.cs"/>
     <Compile Include="StaticMapGeometryTests.cs"/>
     <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs"/>

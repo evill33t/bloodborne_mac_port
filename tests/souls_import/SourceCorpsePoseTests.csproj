@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SourceCorpsePoseTests.cs"/>
+    <Compile Include="../../editor/souls_import/SourceCorpsePose.cs" Link="SourceCorpsePose.cs"/>
+    <Compile Include="../../editor/souls_import/SourceCollision.cs" Link="SourceCollision.cs"/>
+    <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs"/>
+    <Compile Include="../../editor/souls_import/StaticMapGeometry.cs" Link="StaticMapGeometry.cs"/>
+    <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
+    <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
+    <Reference Include="Havok.HKX2"><HintPath>$(SmithboxOutput)/Havok.HKX2.dll</HintPath></Reference>
+    <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>
