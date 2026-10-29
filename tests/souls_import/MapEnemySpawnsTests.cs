@@ -18,6 +18,17 @@ static class MapEnemySpawnsTests {
         var sourceFlags=new Dictionary<int,int>();var flagOwners=new Dictionary<int,int>();
         byte[]? Native(string path)=>composedFiles.GetValueOrDefault(path)??(File.Exists(Path.Combine(native,path))?File.ReadAllBytes(Path.Combine(native,path)):null);
         var allModels=new HashSet<string>();int total=0;
+        var donorAnimation=BND4.Read(File.ReadAllBytes(Path.Combine(native,"chr/c2610.anibnd.dcx")));
+        static bool Torch(TAE.Event e)=>e.Type==100&&BitConverter.ToInt32(e.GetParameterBytes(false),0)==610250;
+        // TAE stores parameter pointers rather than lengths. Removing a neighbour
+        // can change the zero alignment padding included by its reader.
+        static bool SamePayload(byte[] a,byte[] b) {
+            int common=Math.Min(a.Length,b.Length);
+            return Math.Abs(a.Length-b.Length)<16&&a.AsSpan(0,common).SequenceEqual(b.AsSpan(0,common))&&
+                a.Skip(common).All(v=>v==0)&&b.Skip(common).All(v=>v==0);
+        }
+        static bool SameEvent(TAE.Event a,TAE.Event b)=>a.Type==b.Type&&a.StartTime==b.StartTime&&a.EndTime==b.EndTime&&a.Unk04==b.Unk04&&a.Group?.GroupType==b.Group?.GroupType&&SamePayload(a.GetParameterBytes(false),b.GetParameterBytes(false));
+        int torchActors=0,nonTorchActors=0;
         foreach(var id in new[]{"m10_02_00_00","m10_01_00_00"}) {
             var source=MSB1.Read(Read("map/MapStudio/"+id+".msb")!);
             var map=MSBB.Read(File.ReadAllBytes(Path.Combine(native,"map/MapStudio/m24_01_00_01.msb.dcx")));MapReplacement.ParkActors(map);
@@ -45,6 +56,20 @@ static class MapEnemySpawnsTests {
             for(int i=0;i<oldNpcs.Rows.Count;i++)Check(npcs.Rows[i].ID==oldNpcs.Rows[i].ID&&MapCharacters.Payload(npcs.Rows[i]).SequenceEqual(MapCharacters.Payload(oldNpcs.Rows[i])),"Existing composed NPC row changed");
             foreach(var group in result.Spawns.GroupBy(p=>p.TargetModel)) {
                 Check(allModels.Add(group.Key),"Two maps reuse an imported character namespace");
+                bool hasTorch=group.First().SourceNPCParamID==250001;
+                Check(group.All(p=>p.HasSourceTorch==hasTorch),"Source torch loadout was misclassified");
+                if(hasTorch)torchActors+=group.Count();else nonTorchActors+=group.Count();
+                var animation=BND4.Read(result.Files["chr/"+group.Key+".anibnd.dcx"]);
+                foreach(var donor in donorAnimation.Files.Where(f=>TAE.Is(f.Bytes.ToArray()))) {
+                    var before=TAE.Read(donor.Bytes);var after=TAE.Read(animation.Files.Single(f=>f.ID==donor.ID).Bytes);
+                    Check(after.ID==200000+int.Parse(group.Key[1..])&&before.Animations.Select(a=>a.ID).SequenceEqual(after.Animations.Select(a=>a.ID)),"Torch filtering changed animation identities");
+                    Check(before.Animations.Sum(a=>a.Events.Count(Torch))==4,"Native torch fixture changed");
+                    foreach(var (a,b) in before.Animations.Zip(after.Animations)) {
+                        var expectedEvents=a.Events.Where(e=>hasTorch||!Torch(e)).ToArray();
+                        Check(expectedEvents.Length==b.Events.Count,"Torch filter changed event count: "+a.ID);
+                        foreach(var (e,n) in expectedEvents.Zip(b.Events))Check(SameEvent(e,n),$"Retained event changed: {a.ID}/{e.Type}, times {e.StartTime}/{n.StartTime} {e.EndTime}/{n.EndTime}, unknown {e.Unk04}/{n.Unk04}, group {e.Group?.GroupType}/{n.Group?.GroupType}, bytes {Convert.ToHexString(e.GetParameterBytes(false))}/{Convert.ToHexString(n.GetParameterBytes(false))}");
+                    }
+                }
                 var bnd=BND4.Read(result.Files["chr/"+group.Key+".chrbnd.dcx"]);var flver=FLVER2.Read(bnd.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);
                 var bank=TPF.Read(bnd.Files.Single(f=>TPF.Is(f.Bytes.ToArray())).Bytes);
                 Check(bank.Textures.All(t=>t.Header.Unk2==0xD),"PS4 texture lacks native tiling metadata");
@@ -101,6 +126,8 @@ static class MapEnemySpawnsTests {
             total+=result.Spawns.Count;
         }
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
+        Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
+        Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other hollows omit only four native torch events, retaining combat/status data and every other animation event");
         Console.WriteLine($"PASS: {total} ordinary hollow placements, source masks/shared textures, independent native rigs, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

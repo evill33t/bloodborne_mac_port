@@ -861,6 +861,15 @@ Separate collision controls exercised short approach segments and loaded Burg. A
 steering also left the narrow path or hit adjacent rocks, so these runs do not establish
 a complete clear stair route or that every reported snag is resolved.
 
+The hollow adapter also filters the native donor's torch particles by source
+loadout: `c2500` display mask 1 retains them; the sword, axe, shield, spear and
+other non-torch variants omit only the four `610250` spawn events in the donor's
+torch animation set. Installed-asset checks cover seven torch carriers and 85
+other hollows, preserve every other animation event (apart from zero alignment
+padding), and retain the native combat/status parameters. Torch placement and
+source fire damage remain approximate. This filter has export/asset validation;
+a new in-game visual check is pending.
+
 Each export includes `import-job.json`, `source-plan.json`, `import-manifest.json` and
 `conversion.json`. The job can be rerun into a new folder:
 
