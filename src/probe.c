@@ -964,6 +964,7 @@ int main(int argc, char **argv) {
     runtime_install_exit_menu(image, size);
     runtime_install_context_lock(image, size);
     runtime_install_render_guard(image, size);
+    runtime_install_havok_guard(image, size);
     if (runtime_coop_enabled()) {
         for (uint64_t i=0;i<ns;++i)
             runtime_coop_note_segment((uintptr_t)image+segments[i].address,segments[i].size,(unsigned)segments[i].flags);
