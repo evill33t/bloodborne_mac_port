@@ -20,6 +20,8 @@ internal static class MapEnvironmentTests {
         g.Params.Add(new(){Key="FogParamEditor",Fields=[F(new GPARAM.FloatField(),"Fog-fogAlpha",.7f),F(new GPARAM.FloatField(),"Fog-heightFogDensity",14f),F(new GPARAM.Vector4Field(),"Fog-Color",Vector4.One),F(new GPARAM.Vector4Field(),"Fog-heightColor",Vector4.One),F(new GPARAM.FloatField(),"Fog-Dist",42f),F(new GPARAM.FloatField(),"Fog-DistOffset",20f),F(new GPARAM.FloatField(),"Fog-fogContrast",.46f)]});
         g.Params.Add(new(){Key="ShadowParam ParamEditor",Fields=[F(new GPARAM.Vector2Field(),"hadowParam - Shadow: Angle0",new Vector2(-.45f,2.05f)),F(new GPARAM.FloatField(),"ShadowParam - Shadow: Near",.1f),F(new GPARAM.FloatField(),"ShadowParam - DepthOffsetScale",-.085f),F(new GPARAM.ColorField(),"Directional Shadow Color",System.Drawing.Color.FromArgb(200,23,14,7)),F(new GPARAM.FloatField(),"ShadowParam - Depth Smooth Compare",.005f),F(new GPARAM.FloatField(),"ShadowParam - Depth Smooth Compare",.006f)]});
         g.Params.Add(new(){Key="Tone Map[Yebis]",Fields=[F(new GPARAM.FloatField(),"Yebis-ToneMapExposure",3f),F(new GPARAM.IntField(),"Yebis-AutoExposure",0),F(new GPARAM.FloatField(),"Yebis-Gamma",2.2f),F(new GPARAM.FloatField(),"Yebis-FilmicContrast",.24f),F(new GPARAM.FloatField(),"GS Presents - ToneMap-Exposure",0f)]});
+        g.Params.Single(p=>p.Key=="Tone Map[Yebis]").Fields.AddRange([F(new GPARAM.FloatField(),"Yebis-ColorS",.9f),F(new GPARAM.FloatField(),"Yebis-ColorV",1f),F(new GPARAM.FloatField(),"Yebis-ColorH",0f),F(new GPARAM.FloatField(),"Yebis-Contrust",1f),F(new GPARAM.IntField(),"Yebis-Chromatic Aberration Enable",1)]);
+        g.Params.Add(new(){Key="ColorGrading[Yebis]",Fields=[F(new GPARAM.IntField(),"Yebis-ColorGrading-Enable",1),F(new GPARAM.IntField(),"Yebis-LutSourceId",4)]});
         g.Params.Add(new(){Key="NativeUnrelated",Fields=[new GPARAM.FloatField{Key="sentinel",Capacity=1,Values=[new(){ID=30000,Value=123.25f}]}]});
         // Native group indexes can reserve IDs absent from any field. Keep their
         // historical order; adding serialized values must also register the ID.
@@ -137,8 +139,28 @@ internal static class MapEnvironmentTests {
         var automatic=Profile();((GPARAM.IntField)automatic.Params.Single(p=>p.Key=="Tone Map[Yebis]").Fields.Single(f=>f.Key=="Yebis-AutoExposure")).Values[0].Value=1;
         Reject(()=>MapEnvironment.Convert(source.Light,source.Fog,source.Scatter,new Dictionary<string,byte[]>{{"auto",automatic.Write()}},bindings,"DS1R"));
     }
+    static void SourceColorCorrection() {
+        var source=Source();var original=Profile().Write();var profiles=new Dictionary<string,byte[]>{{"phase",original}};
+        var values=new Dictionary<string,float>{{"brightnessR",1},{"brightnessG",1},{"brightnessB",1},{"contrastR",1.15f},{"contrastG",1.15f},{"contrastB",1.15f},{"saturation",1.2f},{"hue",0}};
+        var correct=Parameter("TONE_CORRECT_BANK",(20,values),(21,new(values){["saturation"]=.7f,["contrastG"]=.9f}));
+        EnvironmentBinding[] bindings=[new("floor",20,20,20,255,true,20,20),new("annex",20,20,20,255,true,20,21),new("piece",20,20,20)];
+        // Zero exposure adjustment still needs independent color-correction rows;
+        // distinct correction IDs must not be conflated by a shared ToneMapID.
+        var result=MapEnvironment.Convert(source.Light,source.Fog,source.Scatter,profiles,bindings,"DS1R",calibration:new(false,0),toneCorrect:correct);
+        var g=GPARAM.Read(result.Files.Single().Bytes);int floor=result.SceneBindings["floor"].ToneMapID,annex=result.SceneBindings["annex"].ToneMapID,grade=result.SceneBindings["floor"].ColorGradingID!.Value;
+        Check(floor!=annex&&result.SceneBindings.Count==2&&!result.SceneBindings.ContainsKey("piece"),"Correction bindings lost their source pair or escaped collision scope");
+        Near(Value<float>(g,"Tone Map[Yebis]","Yebis-ColorS",floor),1.2f);Near(Value<float>(g,"Tone Map[Yebis]","Yebis-Contrust",floor),1f);
+        Near(Value<float>(g,"Tone Map[Yebis]","Yebis-ColorS",annex),.7f);Near(Value<float>(g,"Tone Map[Yebis]","Yebis-Contrust",annex),1f);
+        Near(Value<float>(g,"Tone Map[Yebis]","Yebis-ToneMapExposure",floor),3f);Check(Value<int>(g,"Tone Map[Yebis]","Yebis-Chromatic Aberration Enable",floor)==0,"Native chromatic fringe remains enabled on imported correction");
+        Check(Value<int>(g,"ColorGrading[Yebis]","Yebis-ColorGrading-Enable",grade)==0&&result.SceneBindings["annex"].ColorGradingID==grade,"Imported colors still inherit the native location LUT");
+        foreach(var before in GPARAM.Read(original).Params)for(int n=0;n<before.Fields.Count;n++)foreach(var value in before.Fields[n].Values)
+            Check(Equals(value.Value,g.Params.Single(p=>p.Key==before.Key).Fields[n].Values.Single(v=>v.ID==value.ID).Value),"Color correction mutated an original native row");
+        foreach(var (key,id) in new[]{("Tone Map[Yebis]",floor),("Tone Map[Yebis]",annex),("ColorGrading[Yebis]",grade)})Check(g.UnkParamExtras.Single(e=>e.GroupIndex==g.Params.FindIndex(p=>p.Key==key)).Ids.Contains(id),"Imported correction row lacks a native runtime index");
+        correct.Rows[0].Cells.Single(c=>c.Def.InternalName=="saturation").Value=float.NaN;
+        Reject(()=>MapEnvironment.Convert(source.Light,source.Fog,source.Scatter,profiles,bindings,"DS1R",calibration:new(false,0),toneCorrect:correct));
+    }
     internal static void Run() {
-        LightEnergy();ShadowDirection();FogToneCalibration();
+        LightEnergy();ShadowDirection();FogToneCalibration();SourceColorCorrection();
         var src=Source();var input=Profile().Write();var original=input.ToArray();var bindings=new[]{new EnvironmentBinding("ground",20,20,20),new EnvironmentBinding("foliage",23,255,255),new EnvironmentBinding("ground2",20,20,20)};
         var result=MapEnvironment.Convert(src.Light,src.Fog,src.Scatter,new Dictionary<string,byte[]>{{"phase0",input},{"phase1",input}},bindings,calibration:new(false,0));
         Check(result.Files.Count==2&&result.Bindings.Count==3,"Environment profiles or bindings omitted");

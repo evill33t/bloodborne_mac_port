@@ -253,3 +253,35 @@ and report IDs; it leaves existing location entries intact. Generic EMEVD banner
 8 alone does not perform this collision-driven text refresh. Fixture/readback
 coverage verifies the sign and localization preservation; gameplay display needs
 the corresponding native transition test.
+
+## Remastered color views and imported scene correction
+
+Legacy/source texture containers do not reliably expose the color-view intent through
+the DDS format alone. The shipped native foliage template uses
+`m24_01_leaf_pack_600_a` with TPF DXGI 72 (BC1 sRGB), while its normal uses DXGI 71
+(BC1 linear). The source `m10_grass_03` DDS reports DXGI 98 (BC7 linear); treating its
+encoded RGB directly as linear light makes dark olive texels much brighter and less
+saturated after native lighting and output gamma. Texture format numbers and the native
+TPF's explicit DXGI field are separate; the latter must carry the correct color view.
+
+`NativeSrgbColor` tags supported color DDSs with their corresponding sRGB DX10 view,
+preserving all compressed texels, alpha blocks and mip payloads. The Remastered map
+adapter applies this only to diffuse/sky slots, using separate texture names for color
+and data views. Normals and material data retain their linear views. Fixture checks
+verify unchanged payloads, idempotence and the sRGB DXGI field after PS4 TPF serialization.
+DS1 map vertex RGB likewise retains authored shading/tint; opaque native materials use
+alpha 1, while sky/effect cards retain source alpha.
+
+Firelink's source `ToneCorrectBank` row 20 specifies saturation 1.2 and uniform brightness
+1. Its native donor instead has saturation 0.9 and enables LUT 4. The importer now carries
+source correction IDs independently of tone-map IDs, adds a registered scene grading row
+that disables the native LUT, and copies saturation/uniform brightness into independent
+native tone rows. Native chromatic aberration is disabled on those imported rows.
+Native rows, gamma and exposure calibration remain unchanged.
+
+A private gameplay ablation copied source contrast 1.15 into `Yebis-Contrust` and crushed
+the scene's shadows. Resetting only that field to native 1 restored detail with the LUT
+still disabled. These contrast controls are not numerically interchangeable; source
+contrast, unequal RGB correction, nonzero hue and the exact source tone curve remain
+unconverted. A separate direct packed-shininess experiment made terrain look wet and was
+discarded; static material response continues to use the existing native approximation.

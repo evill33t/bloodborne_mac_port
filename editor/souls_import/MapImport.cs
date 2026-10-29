@@ -33,16 +33,31 @@ internal static partial class Program {
         var pieceTemplate=msb.Parts.MapPieces.First();var removedScenery=MapReplacement.PruneScenery(msb);var parkedActors=MapReplacement.ParkActors(msb);var colTemplate=msb.Parts.Collisions.Single(p=>p.Name=="h000020");var pieceLighting=msb.Parts.MapPieces.First(p=>p.GparamConfig.LightSetID==0).GparamConfig.DeepCopy();
         var nativeFlver=File.ReadAllBytes(Path.Combine(nativeRoot,"map",baseMap,baseMap+"_004570.flver.dcx"));var originalFlver=FLVER2.Read(nativeFlver);var materialTemplate=originalFlver.Materials[0];var meshTemplate=originalFlver.Meshes.First(m=>m.MaterialIndex==0);
         var convertedTextures=new Dictionary<string,TPF.Texture>(StringComparer.OrdinalIgnoreCase);var reports=new List<string>();
-        string Image(string path,string fallback,IReadOnlyDictionary<string,TPF.Texture> local){
+        string Image(string path,string fallback,IReadOnlyDictionary<string,TPF.Texture> local,bool color=false){
             var key=ModelName(path);TPF.Texture? source=local.GetValueOrDefault(key);
             if(source==null){key="__"+fallback;if(!convertedTextures.ContainsKey(key)){var pixel=fallback=="normal"?new byte[]{128,128,255,255}:fallback=="black"?new byte[]{0,0,0,255}:new byte[]{255,255,255,255};var dds=SkinRetarget.RgbaTexture(pixel);convertedTextures[key]=new TPF.Texture(area+"_import_"+key,105,0,dds,TPF.TPFPlatform.PS4);}if(path.Length>0)reports.Add("Missing source texture: "+path+" -> "+fallback);return convertedTextures[key].Name;}
-            if(!convertedTextures.ContainsKey(key)){var dds=source.HeaderizeExt(out var extension);var header=new DDS(dds);if(extension!=".dds"||header.dwWidth<1||header.dwHeight<1||header.dwWidth>8192||header.dwHeight>8192||dds.Length>128*1024*1024)throw new InvalidDataException("Unsupported source texture: "+key);if(fallback=="normal"){dds=MapMaterial.Normal(dds,profile.Id);header=new DDS(dds);}convertedTextures[key]=new TPF.Texture(area+"_import_"+key,SkinRetarget.Ps4Format(header),0,dds,TPF.TPFPlatform.PS4);}
+            if(color)key+="_srgb";
+            if(!convertedTextures.ContainsKey(key)){var dds=source.HeaderizeExt(out var extension);var header=new DDS(dds);if(extension!=".dds"||header.dwWidth<1||header.dwHeight<1||header.dwWidth>8192||header.dwHeight>8192||dds.Length>128*1024*1024)throw new InvalidDataException("Unsupported source texture: "+key);if(color)dds=SkinRetarget.NativeSrgbColor(dds);if(fallback=="normal")dds=MapMaterial.Normal(dds,profile.Id);header=new DDS(dds);convertedTextures[key]=new TPF.Texture(area+"_import_"+key,SkinRetarget.Ps4Format(header),0,dds,TPF.TPFPlatform.PS4);}
             return convertedTextures[key].Name;
         }
         FLVER2.Material ConvertMaterial(IFlverMaterial material,string materialName,IReadOnlyDictionary<string,TPF.Texture> local) {
             bool cutout=MapMaterial.Cutout(material.MTD,profile.Id),additive=MapMaterial.LightShaft(material.MTD,profile.Id);
             var nativeMaterial=new FLVER2.Material(materialName,additive?@"N:\SPRJ\data\Material\mtd\sfx\S_DiffuseX2[Dn]_Add.mtd":cutout?materialTemplate.MTD.Replace(".mtd","_e.mtd"):materialTemplate.MTD,materialTemplate.Index){GXIndex=materialTemplate.GXIndex};
-            foreach(var slot in materialTemplate.Textures.Where(t=>!t.ParamName.StartsWith("g_DOL"))){var fromSlot=slot.ParamName.StartsWith("g_DOL")?null:material.Textures.FirstOrDefault(t=>MapMaterial.SameSlot(t.ParamName,slot.ParamName));if(additive&&slot.ParamName=="g_BumpmapTexture"){nativeMaterial.Textures.Add(new FLVER2.Texture(slot.ParamName,@"N:\SPRJ\data\Other\SysTex\SYSTEX_DummyNormal.tga",slot.TilingScale,0,0,slot.Unk14,slot.Unk18,slot.Unk1C));continue;}if(slot.ParamName=="g_DisplacementTexture"){nativeMaterial.Textures.Add(new FLVER2.Texture(slot.ParamName,slot.Path,slot.TilingScale,slot.TilingTypeU,slot.TilingTypeV,slot.Unk14,slot.Unk18,slot.Unk1C));continue;}if(slot.ParamName is "g_SpecularTexture" or "g_ShininessTexture"){var system=slot.ParamName=="g_SpecularTexture"?"SYSTEX_DummyReflectance":"SYSTEX_DummyShininess";nativeMaterial.Textures.Add(new FLVER2.Texture(slot.ParamName,@"N:\SPRJ\data\Other\SysTex\"+system+".tga",slot.TilingScale,slot.TilingTypeU,slot.TilingTypeV,slot.Unk14,slot.Unk18,slot.Unk1C));continue;}string fallback=slot.ParamName.Contains("Bump")?"normal":"white";var name=Image(fromSlot?.Path??"",fallback,local);nativeMaterial.Textures.Add(new FLVER2.Texture(slot.ParamName,@"N:\SPRJ\data\Model\map\"+area+@"\tex\"+name+".tif",(fromSlot as FLVER2.Texture)?.TilingScale??slot.TilingScale,slot.TilingTypeU,slot.TilingTypeV,slot.Unk14,slot.Unk18,slot.Unk1C));}
+            foreach(var slot in materialTemplate.Textures.Where(t=>!t.ParamName.StartsWith("g_DOL"))) {
+                var fromSlot=material.Textures.FirstOrDefault(t=>MapMaterial.SameSlot(t.ParamName,slot.ParamName));
+                string path;
+                if(additive&&slot.ParamName=="g_BumpmapTexture")path=@"N:\SPRJ\data\Other\SysTex\SYSTEX_DummyNormal.tga";
+                else if(slot.ParamName=="g_DisplacementTexture")path=slot.Path;
+                else if(slot.ParamName is "g_SpecularTexture" or "g_ShininessTexture") {
+                    string system=slot.ParamName=="g_SpecularTexture"?"SYSTEX_DummyReflectance":"SYSTEX_DummyShininess";
+                    path=@"N:\SPRJ\data\Other\SysTex\"+system+".tga";
+                } else {
+                    string fallback=slot.ParamName.Contains("Bump")?"normal":"white";
+                    path=@"N:\SPRJ\data\Model\map\"+area+@"\tex\"+Image(fromSlot?.Path??"",fallback,local,profile.Id=="DS1R"&&slot.ParamName=="g_DiffuseTexture")+".tif";
+                }
+                nativeMaterial.Textures.Add(new FLVER2.Texture(slot.ParamName,path,(fromSlot as FLVER2.Texture)?.TilingScale??slot.TilingScale,
+                    slot.TilingTypeU,slot.TilingTypeV,slot.Unk14,slot.Unk18,slot.Unk1C));
+            }
             return nativeMaterial;
         }
         var stage=Directory.CreateTempSubdirectory("bbmap-map-");
@@ -61,7 +76,7 @@ internal static partial class Program {
             MSB1? legacyMap=profile.Id is "DS1" or "DS1R"?MSB1.Read(sourceMap.ReadAsset($"map/MapStudio/{map}.msb")??sourceMap.ReadAsset($"map/MapStudio/{map}.msb.dcx")??throw new FileNotFoundException("Source MSB unavailable")):null;
             var environment=legacyMap==null?null:MapEnvironment.Load(sourceMap.ReadAsset,ReadNative,profile.Id,map,target,definitions!,
                 legacyMap.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Object or MSB1.Part.Collision or MSB1.Part.Enemy)
-                    .Select(p=>new EnvironmentBinding(p.Name,p.LightID,p.FogID,p.ScatterID,p.ShadowID,p is MSB1.Part.Collision,p.ToneMapID)).ToArray(),calibration);
+                    .Select(p=>new EnvironmentBinding(p.Name,p.LightID,p.FogID,p.ScatterID,p.ShadowID,p is MSB1.Part.Collision,p.ToneMapID,p.ToneCorrectID)).ToArray(),calibration);
             if(environment!=null)foreach(var file in environment.Files)Write(file.Path,file.Bytes);
             MSBB.Part.GparamConfigStruct Lighting(string name)=>environment?.Bindings.GetValueOrDefault(name)?.DeepCopy()??pieceLighting.DeepCopy();
             BND4? materialBinder=null;List<string> skyLimitations=[];
@@ -90,7 +105,7 @@ internal static partial class Program {
                     var skyTextures=sourceMap.TexturesForModel(modelName);
                     var sky=MapEnvironment.BakeSky(SourceFlver.Read(skyData,profile.Id),FLVER2.Read(ReadNative($"map/{baseMap}/{baseMap}_900000.flver.dcx")??throw new FileNotFoundException("Native sky template unavailable")),
                         path=>Definition(sourceMaterials.Files,path),path=>Definition(materialBinder.Files,path),
-                        path=>@"N:\SPRJ\data\Model\map\"+area+@"\tex\"+Image(path,"white",skyTextures)+".tif","BBImport_"+map);
+                        path=>@"N:\SPRJ\data\Model\map\"+area+@"\tex\"+Image(path,"white",skyTextures,profile.Id=="DS1R")+".tif","BBImport_"+map);
                     foreach(var material in sky.Materials) {
                         if(materialBinder.Files.Any(f=>Leaf(f.Name).Equals(material.Name,StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("Imported sky material name already exists");
                         materialBinder.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,materialBinder.Files.Max(f=>f.ID)+1,@"N:\SPRJ\data\Material\mtd\map\BBImport\"+material.Name,material.Definition.Write()));
@@ -141,7 +156,7 @@ internal static partial class Program {
             if(boundCollision!=null)for(int i=0;i<slots.Length;i++)foreach(var col in msb.Parts.Collisions.Where(c=>c.ModelName==slots[i].ModelName)) {
                 col.GparamConfigStruct=Lighting(boundCollision[i].SourceName);
                 if(environment?.ShadowBindings.TryGetValue(boundCollision[i].SourceName,out int shadowID)==true)col.SceneGparamConfigStruct.ShadowParamID=shadowID;
-                if(environment?.SceneBindings.TryGetValue(boundCollision[i].SourceName,out var scene)==true)col.SceneGparamConfigStruct.ToneMapID=scene.ToneMapID;
+                if(environment?.SceneBindings.TryGetValue(boundCollision[i].SourceName,out var scene)==true){col.SceneGparamConfigStruct.ToneMapID=scene.ToneMapID;if(scene.ColorGradingID is {} grade)col.SceneGparamConfigStruct.ColorGradingID=grade;}
             }
             if(breakables!=null)foreach(var actor in breakables.Objects)actor.CollisionName=slots[0].Name;
             MapCharacters.Export? characters=null;

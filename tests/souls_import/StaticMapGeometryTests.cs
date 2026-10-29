@@ -90,7 +90,7 @@ internal static class StaticMapGeometryTests {
                 Check(baked.NormalW == 0, "Native map vertex retains a rigid bone selector");
                 for (int i = 0; i < 4; ++i)
                     Check(baked.BoneIndices[i] == 0 && baked.BoneWeights[i] == 0, "Native map vertex retains source skin data");
-                Check(baked.Colors.Count >= 2 && baked.Colors.All(c => c.A == 1 && c.R == 1 && c.G == 1 && c.B == 1), "Native vertex colors are not white");
+                Check(baked.Colors.Count >= 2 && baked.Colors.All(c => c.A == 1 && c.R == .1f && c.G == .2f && c.B == .3f), "Source painted RGB shading/tint was lost or blend alpha reached the opaque material");
                 Near(input.Position, new(1, 2, 3), "Baking mutated the source position");
                 Check(input.NormalW == 127 && input.BoneIndices[0] == paletteIndex && input.BoneWeights[0] == .75f && input.Tangents.Count == 1 && input.UVs.Count == 1 && input.Colors.Count == 1 && input.Colors[0].A == .5f, "Baking mutated source vertex streams");
             }
@@ -109,7 +109,9 @@ internal static class StaticMapGeometryTests {
             input.NormalW = 1;
             // NormalW=1 resolves through the palette to node 0; BoneIndices[0]=0 would select
             // the parented node and produce a different result.
-            Near(new StaticMapGeometry(source, profile).Bake(mesh, input).Position, new(12, 26, 42), "DS2 rigid selector changed");
+            var output=new StaticMapGeometry(source, profile).Bake(mesh, input);
+            Near(output.Position, new(12, 26, 42), "DS2 rigid selector changed");
+            Check(output.Colors.All(c=>c.A==1&&c.R==1&&c.G==1&&c.B==1),"DS1 tint transfer changed the separate DS2 material policy");
         }
         var effectInput=Vertex(0);
         var effect=new StaticMapGeometry(source,"DS1R").Bake(mesh,effectInput,true);
@@ -149,6 +151,14 @@ internal static class StaticMapGeometryTests {
         RigidPalette();
         OtherSkinModes();
         NormalProfiles();
+        foreach(var fourCC in new[]{"DXT1","DXT3","DXT5"}) {
+            var input=CompressedNormal(fourCC);var source=new DDS(input);var color=SkinRetarget.NativeSrgbColor(input);var tagged=new DDS(color);
+            Check((int)tagged.GetDXGIFormat()==(int)source.GetDXGIFormat()+1,"Diffuse color did not receive the corresponding sRGB view");
+            Check(input.AsSpan(source.DataOffset).SequenceEqual(color.AsSpan(tagged.DataOffset)),"Color transfer changed compressed texels, alpha or mip data");
+            var native=new TPF{Platform=TPF.TPFPlatform.PS4,Encoding=1,Flag2=3};native.Textures.Add(new TPF.Texture("color",SkinRetarget.Ps4Format(tagged),0,color,TPF.TPFPlatform.PS4));
+            var roundtrip=TPF.Read(native.Write()).Textures.Single();Check(roundtrip.Header.DXGIFormat==(int)tagged.GetDXGIFormat(),"Native TPF lost the sRGB color format");
+            Check(SkinRetarget.NativeSrgbColor(color).SequenceEqual(color),"Already sRGB color was converted twice");
+        }
         Console.WriteLine("PASS: DS1 rigid palettes and parent worlds, scaled normal/tangent frames, bind-pose preservation and profile-specific normal formats");
     }
 }

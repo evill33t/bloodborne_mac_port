@@ -4,9 +4,9 @@ using System.Globalization;
 using System.Numerics;
 using System.Text.RegularExpressions;
 
-internal record EnvironmentBinding(string Name,int LightID,int FogID,int ScatterID,int ShadowID=0,bool BindScene=false,int ToneMapID=0);
+internal record EnvironmentBinding(string Name,int LightID,int FogID,int ScatterID,int ShadowID=0,bool BindScene=false,int ToneMapID=0,int ToneCorrectID=0);
 internal record EnvironmentCalibration(bool SourceFog=true,float ToneEV=-.4f,float FogStrength=.30f,float FogDistance=80f,float FogStart=25f,float FogColorScale=.35f);
-internal record EnvironmentSceneBinding(int ToneMapID);
+internal record EnvironmentSceneBinding(int ToneMapID,int? ColorGradingID=null);
 internal record EnvironmentFile(string Path,byte[] Bytes);
 internal record EnvironmentRow(string Kind,int SourceID,int? NativeID,Dictionary<string,object> Values,string Status);
 internal record EnvironmentResult(Dictionary<string,MSBB.Part.GparamConfigStruct> Bindings,List<EnvironmentFile> Files,List<EnvironmentRow> Rows,List<string> Limitations) {
@@ -115,11 +115,24 @@ internal static class MapEnvironment {
         if(!float.IsFinite(exposure)||exposure<=0)throw new InvalidDataException("Invalid native tone exposure");
         Set(group,ExposureKey,id,exposure);
     }
-    internal static EnvironmentResult Convert(PARAM light,PARAM fog,PARAM scattering,IReadOnlyDictionary<string,byte[]> profiles,IReadOnlyList<EnvironmentBinding> bindings,string sourceProfile="DS1",PARAM? shadow=null,EnvironmentCalibration? calibration=null,PARAM? toneMap=null) {
+    static void ToneColor(GPARAM.Param group,int id,PARAM.Row row) {
+        float Scalar(string name){float value=Number(row,name);if(value<0||value>4)throw new InvalidDataException("Source tone correction exceeds the supported scalar range: "+name);return value;}
+        Set(group,"Yebis-ColorS",id,Scalar("saturation"));
+        // Equal source RGB controls can use the native scalar controls. Unequal
+        // channels and nonzero hue remain provenance, not an invented conversion.
+        float brightness=Scalar("brightnessR");
+        if(brightness==Scalar("brightnessG")&&brightness==Scalar("brightnessB"))Set(group,"Yebis-ColorV",id,brightness);
+        // Gameplay ablation: source contrast 1.15 copied to Yebis-Contrust
+        // crushes shadows; the controls are not numerically interchangeable.
+        // Preserve the native neutral contrast until its response is converted.
+        if(Number(row,"hue")==0)Set(group,"Yebis-ColorH",id,0f);
+        Set(group,"Yebis-Chromatic Aberration Enable",id,0);
+    }
+    internal static EnvironmentResult Convert(PARAM light,PARAM fog,PARAM scattering,IReadOnlyDictionary<string,byte[]> profiles,IReadOnlyList<EnvironmentBinding> bindings,string sourceProfile="DS1",PARAM? shadow=null,EnvironmentCalibration? calibration=null,PARAM? toneMap=null,PARAM? toneCorrect=null) {
         calibration??=new();
         if(!float.IsFinite(calibration.ToneEV)||calibration.ToneEV is <-8 or >8||!float.IsFinite(calibration.FogStrength)||calibration.FogStrength is <0 or >1||!float.IsFinite(calibration.FogDistance)||calibration.FogDistance is <=0 or >100000||!float.IsFinite(calibration.FogStart)||calibration.FogStart is <0 or >100000||!float.IsFinite(calibration.FogColorScale)||calibration.FogColorScale is <0 or >16)throw new InvalidDataException("Invalid map environment calibration");
         if(sourceProfile is not("DS1" or "DS1R"))throw new InvalidDataException("No light color transfer adapter for "+sourceProfile);
-        if(bindings.Select(p=>p.Name).Distinct(StringComparer.Ordinal).Count()!=bindings.Count||bindings.Any(b=>new[]{b.LightID,b.FogID,b.ScatterID,b.ShadowID,b.ToneMapID}.Any(id=>id<0||id>255)))throw new InvalidDataException("Invalid or repeated source environment binding");
+        if(bindings.Select(p=>p.Name).Distinct(StringComparer.Ordinal).Count()!=bindings.Count||bindings.Any(b=>new[]{b.LightID,b.FogID,b.ScatterID,b.ShadowID,b.ToneMapID,b.ToneCorrectID}.Any(id=>id<0||id>255)))throw new InvalidDataException("Invalid or repeated source environment binding");
         if(profiles.Count==0)throw new InvalidDataException("No native environment profiles");
         var parsed=profiles.ToDictionary(p=>p.Key,p=>GPARAM.Read(p.Value),StringComparer.Ordinal);
         if(parsed.Values.Any(g=>g.Version!=GPARAM.GparamVersion.V3))throw new InvalidDataException("Choose Bloodborne V3 environment profiles");
@@ -161,17 +174,25 @@ internal static class MapEnvironment {
             foreach(var g in parsed.Values)Set(Append(g,ShadowKey,native),ShadowAngle,native,angle);
             reports.Add(new("Shadow",source,native,Values(row),"Source shadow direction converted from degrees to native radians in an independent row; native cascades, fade, bias, filter, color and density retained."));
         }
-        var tones=new Dictionary<int,int>();
-        if(calibration.ToneEV!=0)foreach(int source in bindings.Where(b=>b.BindScene).Select(b=>b.ToneMapID).Distinct().Order()) {
-            int native=Allocate();tones.Add(source,native);var values=toneMap==null||source==255?new Dictionary<string,object>():Values(Row(toneMap,source));values["calibrationToneEV"]=calibration.ToneEV;values["calibrationExposureMultiplier"]=MathF.Pow(2,calibration.ToneEV);
-            reports.Add(new("Tone",source,native,values,"Independent native manual Yebis exposure calibration relative to each phase's row0; source tone-bank fields retained as provenance only. Native gamma, curve, grading, bloom and other tone controls preserved."));
-            foreach(var g in parsed.Values)Tone(Append(g,ToneKey,native),native,calibration);
+        var tones=new Dictionary<(int Tone,int Correct),int>();
+        int? neutralGrade=null;
+        if(toneCorrect!=null&&bindings.Any(b=>b.BindScene)) {
+            neutralGrade=Allocate();
+            foreach(var g in parsed.Values)Set(Append(g,"ColorGrading[Yebis]",neutralGrade.Value),"Yebis-ColorGrading-Enable",neutralGrade.Value,0);
+            reports.Add(new("ColorGrading",0,neutralGrade,new(),"Independent disabled native LUT row: imported DS1 colors must not inherit Yharnam's phase-specific lookup table. Source LUT/shader equivalence is not claimed."));
+        }
+        if(calibration.ToneEV!=0||toneCorrect!=null)foreach(var source in bindings.Where(b=>b.BindScene).Select(b=>(Tone:b.ToneMapID,Correct:toneCorrect==null?0:b.ToneCorrectID)).Distinct().Order()) {
+            int native=Allocate();tones.Add(source,native);var values=toneMap==null||source.Tone==255?new Dictionary<string,object>():Values(Row(toneMap,source.Tone));values["calibrationToneEV"]=calibration.ToneEV;values["calibrationExposureMultiplier"]=MathF.Pow(2,calibration.ToneEV);
+            PARAM.Row? correct=toneCorrect==null||source.Correct==255?null:Row(toneCorrect,source.Correct);
+            if(correct!=null){values["sourceToneCorrectID"]=source.Correct;values["sourceToneCorrect"]=Values(correct);}
+            reports.Add(new("Tone",source.Tone,native,values,"Independent native manual Yebis exposure calibration relative to each phase's row0."+(correct==null?" Native color controls retained.":" Source saturation and uniform RGB brightness transferred into native scalar controls; native chromatic aberration disabled. Source contrast, different tone curves, unequal channel correction and nonzero hue remain unconverted.")));
+            foreach(var g in parsed.Values){var group=Append(g,ToneKey,native);Tone(group,native,calibration);if(correct!=null)ToneColor(group,native,correct);}
         }
         var nativeBindings=bindings.ToDictionary(b=>b.Name,b=>new MSBB.Part.GparamConfigStruct{LightSetID=lights[b.LightID],FogParamID=b.FogID==255?noFog!.Value:fogs.GetValueOrDefault(b.FogID),LightScatteringID=scatters[b.ScatterID],EnvMapID=0},StringComparer.Ordinal);
         return new(nativeBindings,parsed.Select(p=>new EnvironmentFile(p.Key,p.Value.Write(DCX.Type.DCX_DFLT_10000_44_9))).ToList(),reports,
-            [calibration.SourceFog?"Fog uses calibrated native exponential haze with scaled source color; DS1's linear depth curve is not reproduced.":"Source fog calibration disabled; native fog row0 retained except explicitly disabled source fog.","Source environment diffuse/specular cubemaps, point lights, shadow color/density, shadow ranges/bias/cascades, source tone curve and color grading are not converted. ToneEV adjusts native manual exposure only.","Native directional/local light slot interpretation, atmospheric scattering and material response need matched in-game validation; numeric field conversion is not a claim of identical source rendering."]) {
+            [calibration.SourceFog?"Fog uses calibrated native exponential haze with scaled source color; DS1's linear depth curve is not reproduced.":"Source fog calibration disabled; native fog row0 retained except explicitly disabled source fog.","Source environment diffuse/specular cubemaps, point lights, shadow color/density, shadow ranges/bias/cascades and source tone curve are not converted. Source saturation/brightness use a native approximation; source contrast, LUTs, unequal channel correction and nonzero hue remain unconverted.","Native directional/local light slot interpretation, atmospheric scattering and material response need matched in-game validation; numeric field conversion is not a claim of identical source rendering."]) {
             ShadowBindings=bindings.Where(b=>b.BindScene&&shadows.ContainsKey(b.ShadowID)).ToDictionary(b=>b.Name,b=>shadows[b.ShadowID],StringComparer.Ordinal),
-            SceneBindings=bindings.Where(b=>b.BindScene&&tones.ContainsKey(b.ToneMapID)).ToDictionary(b=>b.Name,b=>new EnvironmentSceneBinding(tones[b.ToneMapID]),StringComparer.Ordinal),Calibration=calibration
+            SceneBindings=bindings.Where(b=>b.BindScene&&tones.ContainsKey((b.ToneMapID,toneCorrect==null?0:b.ToneCorrectID))).ToDictionary(b=>b.Name,b=>new EnvironmentSceneBinding(tones[(b.ToneMapID,toneCorrect==null?0:b.ToneCorrectID)],neutralGrade),StringComparer.Ordinal),Calibration=calibration
         };
     }
     internal static EnvironmentResult Load(Func<string,byte[]?> sourceRead,Func<string,byte[]?> nativeRead,string profile,string sourceMap,string targetMap,string definitionsDirectory,IReadOnlyList<EnvironmentBinding> bindings,EnvironmentCalibration? calibration=null) {
@@ -190,7 +211,7 @@ internal static class MapEnvironment {
                 profiles.Add(binderPath+"::"+file.Name,file.Bytes.ToArray());
             }
         }
-        var result=Convert(Source("LightBank"),Source("FogBank"),Source("LightScatteringBank"),profiles,bindings,profile,Source("ShadowBank"),calibration,Source("ToneMapBank"));
+        var result=Convert(Source("LightBank"),Source("FogBank"),Source("LightScatteringBank"),profiles,bindings,profile,Source("ShadowBank"),calibration,Source("ToneMapBank"),Source("ToneCorrectBank"));
         var converted=result.Files.ToDictionary(f=>f.Path,f=>f.Bytes,StringComparer.Ordinal);
         result.Files.RemoveAll(f=>f.Path.Contains("::",StringComparison.Ordinal));
         foreach(var (path,binder) in binders){foreach(var file in binder.Files)file.Bytes=DCX.Decompress(converted[path+"::"+file.Name]);result.Files.Add(new(path,binder.Write(DCX.Type.DCX_DFLT_10000_44_9)));}

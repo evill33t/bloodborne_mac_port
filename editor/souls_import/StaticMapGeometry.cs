@@ -58,7 +58,11 @@ internal sealed class StaticMapGeometry {
         while(v.UVs.Count<2)v.UVs.Add(Vector3.Zero);
         // The native static layout consumes color semantic 1. Effect alpha must
         // reach that slot even when the source has only color semantic 0.
-        var color=preserveColor&&input.Colors.Count>0?input.Colors[0]:new FLVER.VertexColor(1f,1f,1f,1f);
+        var color=(preserveColor||profile is "DS1" or "DS1R")&&input.Colors.Count>0?input.Colors[0]:new FLVER.VertexColor(1f,1f,1f,1f);
+        // DS1 RGB carries painted shading/tint, independently of the alpha used
+        // for material-layer blending. Keep that tint on opaque native meshes;
+        // effect/sky cards still retain their authored alpha as before.
+        if(!preserveColor)color=new FLVER.VertexColor(1f,color.R,color.G,color.B);
         v.Colors.Clear();v.Colors.Add(color);v.Colors.Add(color);
         return v;
     }

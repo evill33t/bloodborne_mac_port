@@ -60,9 +60,22 @@ internal static class SkinRetarget {
     // TPF's format byte is game-specific. Preserve the DDS pixel representation
     // and select the Bloodborne/PS4 format instead of copying that source byte.
     internal static byte Ps4Format(DDS dds)=>(int)dds.GetDXGIFormat() switch {
-        28=>105,87=>9,71=>0,72=>108,74=>3,77=>5,78=>110,80=>103,83=>104,95=>100,98=>102,99=>112,
+        28 or 29=>105,87 or 91=>9,71=>0,72=>108,74 or 75=>3,77=>5,78=>110,80=>103,83=>104,95=>100,98=>102,99=>112,
         var format=>throw new InvalidDataException("Unsupported DDS pixel format for PS4 conversion: "+format)
     };
+    // Legacy DDS FourCCs do not encode sRGB. Native Bloodborne albedo/sky
+    // textures do; tagging their color view preserves every block, mip and
+    // alpha bit while preventing nonlinear source RGB being lit as linear RGB.
+    internal static byte[] NativeSrgbColor(byte[] bytes) {
+        var header=new DDS(bytes);int format=(int)header.GetDXGIFormat();
+        int srgb=format switch {28=>29,87=>91,71=>72,74=>75,77=>78,98=>99,29 or 91 or 72 or 75 or 78 or 99=>format,
+            _=>throw new InvalidDataException("Unsupported source color texture format: "+format)};
+        if(format==srgb)return bytes;
+        int offset=header.DataOffset;
+        header.header10??=new DDS.HEADER_DXT10();header.header10.dxgiFormat=(DDS.DXGI_FORMAT)srgb;
+        header.ddspf.dwFlags=DDS.DDPF.FOURCC;header.ddspf.dwFourCC="DX10";
+        return header.Write(bytes.AsSpan(offset).ToArray());
+    }
     // BC5 supplies tangent-normal RG only. Bloodborne reconstructs direction
     // from RG; its normal-map B also modulates gloss. Preserve RG and supply a
     // neutral B=1 instead of allowing BC5's implicit B=0 to erase shininess.

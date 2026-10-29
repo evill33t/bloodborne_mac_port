@@ -718,6 +718,13 @@ verifies the DS1R/native direction convention and color transfer; the converter 
 source light energy under Bloodborne's squared-color/intensity convention. Original GPARAM
 rows and material definitions remain intact. New rows are also registered in native group
 lookup tables; a controlled green-light gameplay probe verifies that the game applies them.
+Remastered map albedo and sky textures receive explicit sRGB color views. Their compressed
+color/alpha blocks and mipmaps are preserved; normals and other data textures stay linear.
+The converter also preserves DS1 painted vertex RGB instead of replacing it with white.
+Imported scene rows use source saturation and uniform brightness, disable Yharnam's color
+lookup table and chromatic aberration, and retain native contrast. Directly copying DS1's
+contrast value into Yebis crushed shadow detail in a gameplay comparison, so source contrast
+remains provenance until its different response is converted.
 Imported fog uses a calibrated distance haze with source hue, avoiding the source curve's
 strong foreground wash. Imported-area exposure is reduced by 0.4 stops (native Yebis exposure
 multiplied by approximately 0.758). Native height fog and fog brightness contrast are disabled
@@ -759,7 +766,9 @@ The two map presets supply source anchors. DS1 imports persist the fog and expos
 calibration in their job files. `--exposure-ev -0.4`, `--fog-strength 0.3`,
 `--fog-distance 80`, `--fog-start 25` and `--fog-color-scale 0.35` are the current defaults.
 `--fog-mode native` retains native fog while keeping the selected exposure adjustment.
-Tone gamma, auto-exposure mode and unrelated native controls remain intact.
+Tone gamma, auto-exposure mode and unrelated native controls remain intact. DS1 scene color
+correction uses its source saturation/brightness and an independent row with native LUT
+grading disabled; source contrast, unequal channel correction and nonzero hue are not ported.
 
 The two map presets supply source anchors. `--source-anchor=x,y,z`,
 `--target-anchor=x,y,z` and `--spawn-offset=x,y,z` override placement; use the equals
