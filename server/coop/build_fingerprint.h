@@ -232,12 +232,29 @@ struct BuildRefusal {
     std::string notice; // one line for the team screen, at most RefusalNoticeMax characters
 };
 
+// An operator can explicitly group release labels without relaxing the co-op protocol check.
+// Both labels must be listed; the default remains the upstream exact-release policy.
+inline std::vector<BuildDifference> RefusingDifferencesOf(
+    const BuildFingerprint& mine, const BuildFingerprint& theirs,
+    const std::vector<std::string>& compatible_versions) {
+    auto differences = DifferencesOf(mine, theirs, BuildCheck::Refuse);
+    std::erase_if(differences, [&](const BuildDifference& difference) {
+        const auto listed = [&](const std::string& version) {
+            return std::find(compatible_versions.begin(), compatible_versions.end(), version) !=
+                   compatible_versions.end();
+        };
+        return difference.key == "version" && listed(difference.mine) && listed(difference.theirs);
+    });
+    return differences;
+}
+
 // Why shadNet refuses a game whose hello says `game`: another Seamless Co-op release than its own
 // build (`server`, null when it does not check it) or the games linked here (`here`, null when
 // none). The version is named alone when it differs (it explains the protocol). Empty when the
 // release is the same: whatever else differs only warns (BuildWarningOf).
 inline BuildRefusal BuildRefusalOf(std::string_view game, const BuildFingerprint* server,
-                                   const BuildFingerprint* here) {
+                                   const BuildFingerprint* here,
+                                   const std::vector<std::string>& compatible_versions = {}) {
     constexpr std::string_view Start = "another build: ";
     constexpr std::string_view NoticeStart = "Co-op refused: ";
     constexpr std::string_view Advice = "update in the launcher";
@@ -248,10 +265,11 @@ inline BuildRefusal BuildRefusalOf(std::string_view game, const BuildFingerprint
                 std::string{NoticeStart} + "your game is another release: " + std::string{Advice}};
     }
     const std::vector<BuildDifference> from_server =
-        server ? DifferencesOf(*parsed, *server, BuildCheck::Refuse)
+        server ? RefusingDifferencesOf(*parsed, *server, compatible_versions)
                : std::vector<BuildDifference>{};
     const std::vector<BuildDifference> from_here =
-        here ? DifferencesOf(*parsed, *here, BuildCheck::Refuse) : std::vector<BuildDifference>{};
+        here ? RefusingDifferencesOf(*parsed, *here, compatible_versions)
+             : std::vector<BuildDifference>{};
     const auto find = [](const std::vector<BuildDifference>& list,
                          std::string_view key) -> const BuildDifference* {
         for (const BuildDifference& difference : list) {
@@ -316,13 +334,14 @@ inline BuildRefusal BuildRefusalOf(std::string_view game, const BuildFingerprint
 // them on the team screen's line. Empty when nothing differs (another release is refused instead:
 // BuildRefusalOf).
 inline BuildRefusal BuildWarningOf(std::string_view game,
-                                   const std::vector<BuildFingerprint>& here) {
+                                   const std::vector<BuildFingerprint>& here,
+                                   const std::vector<std::string>& compatible_versions = {}) {
     const auto parsed = ParseBuildFingerprint(game);
     if (!parsed) {
         return {};
     }
     for (const BuildFingerprint& other : here) {
-        if (!DifferencesOf(*parsed, other, BuildCheck::Refuse).empty()) {
+        if (!RefusingDifferencesOf(*parsed, other, compatible_versions).empty()) {
             return {};
         }
     }

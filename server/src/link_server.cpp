@@ -120,6 +120,13 @@ LinkServer::LinkServer(SharedState* shared, const QString& db_path, quint16 tcp_
     // their own thread (a flood of new ids must not stop the games' relay).
     if (shared && shared->config)
         m_hosted = shared->config->GetHosted();
+    std::vector<std::string> compatible_versions;
+    for (const QString& version : m_hosted.compatibleVersions)
+        compatible_versions.push_back(version.toStdString());
+    m_link.SetCompatibleVersions(std::move(compatible_versions));
+    if (!m_hosted.compatibleVersions.isEmpty())
+        qInfo().noquote() << "Link: compatible release labels (co-op protocol still checked):"
+                          << m_hosted.compatibleVersions.join(", ");
     if (m_hosted.enabled) {
         Admission::Limits limits;
         limits.links_per_address = m_hosted.linksPerAddress;

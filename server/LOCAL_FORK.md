@@ -9,8 +9,23 @@ Linux service. The Mac app does not launch or package the server.
 
 Original upstream base: `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`.
 Imported deployed source: `9e60cec70e589a199cf86771de4844fe556562d4`.
-All server implementation and test files match that snapshot byte for byte. Local hosting
+The imported baseline is retained by its original hashes. Local hosting and server
 adaptations are listed by `adapted_sha256` in [SOURCE_MANIFEST.json](SOURCE_MANIFEST.json).
+
+The local server also supports `CompatibleClientVersions` in `shadnet.cfg`. To admit the
+Mac `dev` label and Windows `1.3.0` together, set:
+
+```ini
+CheckServerBuild=true
+CompatibleClientVersions=dev,1.3.0
+```
+
+Restart the server after changing this setting. Both release labels must be listed to allow
+their difference against the server or linked players. Co-op protocol mismatches remain
+refused, authentication is unchanged, and game-file/settings differences still warn players.
+An absent or empty list retains upstream's exact-release checks. A legacy, non-fingerprint
+`HostedBuild` remains an exact requirement. This setting allows joining the server; it does
+not establish that two installations' game assets, patches or gameplay behavior match.
 
 | Original local commit | Already included behavior |
 | --- | --- |

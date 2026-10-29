@@ -198,6 +198,46 @@ int Refusals() {
 
 // What differs but links: the player is told their installation differs
 // (the team screen's line), the log says every field with both values.
+int CompatibleVersions() {
+  const std::vector<std::string> compatible{"dev", "1.3.0"};
+  BuildFingerprint server = Server();
+  server.Set("version", "dev");
+  BuildFingerprint mac = Game();
+  mac.Set("version", "dev");
+  BuildFingerprint windows = Game();
+  windows.Set("version", "1.3.0");
+  const auto said = EncodeBuildFingerprint(windows);
+  // Opt-in only, and both join orders work against the server and peers.
+  CHECK(!BuildRefusalOf(said, &server, &mac).text.empty());
+  CHECK(BuildRefusalOf(said, &server, &mac, compatible).text.empty());
+  CHECK(BuildRefusalOf(said, &server, nullptr, compatible).text.empty());
+  CHECK(BuildRefusalOf(said, nullptr, &mac, compatible).text.empty());
+  CHECK(BuildRefusalOf(EncodeBuildFingerprint(mac), &server, &windows,
+                       compatible).text.empty());
+  CHECK(!BuildRefusalOf(said, &server, &mac, {"1.3.0"}).text.empty());
+  // Other releases remain refused; a version list never aliases the protocol.
+  auto other = windows;
+  other.Set("version", "1.4.0");
+  CHECK(!BuildRefusalOf(EncodeBuildFingerprint(other), &server, &mac,
+                        compatible).text.empty());
+  other = windows;
+  other.Set("protocol", "10");
+  CHECK(BuildRefusalOf(EncodeBuildFingerprint(other), &server, &mac,
+                       compatible).text.find("protocol 10") != std::string::npos);
+  CHECK(!BuildRefusalOf(EncodeBuildFingerprint(other), nullptr, &mac,
+                        compatible).text.empty());
+  CHECK(!BuildRefusalOf("not a fingerprint", &server, &mac,
+                        compatible).text.empty());
+  // Installation warnings still reach players admitted through an alias.
+  windows.Set("events", "aaaaaaaaaaaa");
+  const auto warning = BuildWarningOf(EncodeBuildFingerprint(windows), {mac},
+                                      compatible);
+  CHECK(warning.text.find("map events") != std::string::npos);
+  CHECK(warning.notice.find("game files") != std::string::npos);
+  std::cout << "compatible release labels: ok\n";
+  return 0;
+}
+
 int Warnings() {
   const BuildFingerprint here = Game();
   BuildFingerprint game = Game();
@@ -341,7 +381,7 @@ int ReleaseVersion() {
 
 int main() {
   if (Text() != 0 || Differences() != 0 || Refusals() != 0 || Warnings() != 0 ||
-      NoticesFit() != 0 || ReleaseVersion() != 0) {
+      CompatibleVersions() != 0 || NoticesFit() != 0 || ReleaseVersion() != 0) {
     return 1;
   }
   return 0;

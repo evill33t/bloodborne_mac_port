@@ -263,7 +263,8 @@
     {
       "path": "server/coop/build_fingerprint.h",
       "source": "server/coop/build_fingerprint.h",
-      "sha256": "298a8d9a1d3e8e4109e3d4e1aa90927927878dff2b6ad4576ba9c08d35eca857"
+      "sha256": "298a8d9a1d3e8e4109e3d4e1aa90927927878dff2b6ad4576ba9c08d35eca857",
+      "adapted_sha256": "5272959b0270ac4c9fda29bdaa2ee5b25ea021ff0a584c3c66bd7cbfe3e65098"
     },
     {
       "path": "server/coop/coop.proto",
@@ -670,12 +671,14 @@
     {
       "path": "server/src/config.cpp",
       "source": "server/src/config.cpp",
-      "sha256": "73704611558541eec7f4841fb33ca5f5b1ad3bf85056b28cb564f881d55970bd"
+      "sha256": "73704611558541eec7f4841fb33ca5f5b1ad3bf85056b28cb564f881d55970bd",
+      "adapted_sha256": "64fe01feefcd26897be5c6c610a7ff22e8240e1d0303cba9fcd69ebcbd261a09"
     },
     {
       "path": "server/src/config.h",
       "source": "server/src/config.h",
-      "sha256": "8a896c318cf1a2697d2f63fa36120b5adc00e49ab2b9bfb21402070615b41592"
+      "sha256": "8a896c318cf1a2697d2f63fa36120b5adc00e49ab2b9bfb21402070615b41592",
+      "adapted_sha256": "773a90df46578110cf8b5416b44841b1245ef53d3da16d61818cefe654953e2b"
     },
     {
       "path": "server/src/database.cpp",
@@ -710,7 +713,8 @@
     {
       "path": "server/src/link_server.cpp",
       "source": "server/src/link_server.cpp",
-      "sha256": "01725f1ee668e820f1b8a0e973fa6134268e58f58683069245473b463e897115"
+      "sha256": "01725f1ee668e820f1b8a0e973fa6134268e58f58683069245473b463e897115",
+      "adapted_sha256": "706be4bc59d2994465b3874a376298248895c1f001d8ed5d3ecc7028b6234921"
     },
     {
       "path": "server/src/link_server.h",
@@ -800,12 +804,14 @@
     {
       "path": "server/src/server_link.cpp",
       "source": "server/src/server_link.cpp",
-      "sha256": "3d9b10b0e0c4babb06773bdc6e9677aa00f7ab5784c69722eb941f7dd2168b28"
+      "sha256": "3d9b10b0e0c4babb06773bdc6e9677aa00f7ab5784c69722eb941f7dd2168b28",
+      "adapted_sha256": "480750c3d979fec85f9934928097882b1329ceb6d10dc9ee0195539003da4b90"
     },
     {
       "path": "server/src/server_link.h",
       "source": "server/src/server_link.h",
-      "sha256": "17b1c66b4b9a0af7f6df5da68393b80b27a97e63cf63b1e63fd8b7b884ff6b16"
+      "sha256": "17b1c66b4b9a0af7f6df5da68393b80b27a97e63cf63b1e63fd8b7b884ff6b16",
+      "adapted_sha256": "edcc1b62153b3c6ac5e8d2d00bf31d995a1c442357705f89e0b1c84a15f7d708"
     },
     {
       "path": "server/src/shadnet.proto",
@@ -1015,7 +1021,8 @@
     {
       "path": "server/tests/test_build_fingerprint.cpp",
       "source": "server/tests/test_build_fingerprint.cpp",
-      "sha256": "29db8ea9e4503d5486cf937b8e5bb9803b192715f34286a3fdeeb12193ae18a7"
+      "sha256": "29db8ea9e4503d5486cf937b8e5bb9803b192715f34286a3fdeeb12193ae18a7",
+      "adapted_sha256": "a41adf6d8229ee5c93d76f2b2070e37d02e80ec80e3e9fe907a61614a488c7d6"
     },
     {
       "path": "server/tests/test_fuzz_decoders.cpp",
@@ -1070,7 +1077,8 @@
     {
       "path": "server/tests/test_server_link.cpp",
       "source": "server/tests/test_server_link.cpp",
-      "sha256": "41c7b9d2333c488e330ea7fdf7f4847ded8e3fbffc24583eac41c31aeee06142"
+      "sha256": "41c7b9d2333c488e330ea7fdf7f4847ded8e3fbffc24583eac41c31aeee06142",
+      "adapted_sha256": "268023cb8ec345f24cbb662e4d3c536fa8e68003a7820f2ec8b7a70d10bb1803"
     },
     {
       "path": "server/tests/test_ss_info_path.cpp",

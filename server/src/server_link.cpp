@@ -726,7 +726,8 @@ void Hub::OnHello(const Endpoint& from, const QByteArray& datagram, qint64 now_m
         const auto server =
             own.isEmpty() ? std::nullopt : BloodborneCoop::ParseBuildFingerprint(own.toStdString());
         const auto build = BloodborneCoop::BuildRefusalOf(hello->build.toStdString(),
-                                                          server ? &*server : nullptr, here);
+                                                          server ? &*server : nullptr, here,
+                                                          compatible_versions);
         if (!build.text.empty()) {
             // The team screen's line first, then the whole reason (the link's text holds 255
             // bytes: the log has all of it).
@@ -741,7 +742,8 @@ void Hub::OnHello(const Endpoint& from, const QByteArray& datagram, qint64 now_m
             }
             // As a refusal: the team screen's line first, then every field.
             if (const auto differs =
-                    BloodborneCoop::BuildWarningOf(hello->build.toStdString(), builds);
+                    BloodborneCoop::BuildWarningOf(hello->build.toStdString(), builds,
+                                                   compatible_versions);
                 !differs.text.empty()) {
                 warning = QByteArray::fromStdString(differs.notice + "\n" + differs.text);
             }

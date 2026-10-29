@@ -23,6 +23,8 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <string>
+#include <vector>
 #include <QByteArray>
 #include <QHash>
 #include <QList>
@@ -300,6 +302,12 @@ public:
         server_build = std::move(fingerprint);
     }
 
+    // Explicit release-label aliases, applied to the server and linked peers alike.
+    // Fingerprint protocol, authentication and legacy HostedBuild checks are unchanged.
+    void SetCompatibleVersions(std::vector<std::string> versions) {
+        compatible_versions = std::move(versions);
+    }
+
     int Members() const {
         return static_cast<int>(members.size());
     }
@@ -389,6 +397,7 @@ private:
     QByteArray hello_ticket;
     QByteArray required_build;
     QByteArray server_build;
+    std::vector<std::string> compatible_versions;
 };
 
 } // namespace ServerLink

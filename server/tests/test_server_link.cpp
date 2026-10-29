@@ -498,6 +498,45 @@ int BuildChecks() {
   return 0;
 }
 
+int CompatibleVersions() {
+  const QByteArray dev = QByteArray(Build).replace("version=1.2.0", "version=dev");
+  const QByteArray windows = QByteArray(Build).replace("version=1.2.0", "version=1.3.0");
+  // Exercise the encrypted handshake in each join order, including a pre-build sign-in.
+  for (bool windows_first : {false, true}) {
+    Net hub;
+    hub->SetServerBuild("bb-build 1;version=dev;protocol=9;");
+    hub->SetCompatibleVersions({"dev", "1.3.0"});
+    auto result = hub.Receive(Kaniel, HelloFrom("Kaniel", {}), 0);
+    CHECK(DecodeWelcome(SentTo(result, Kaniel).value(0))->accepted);
+    result = hub.Receive(Kaniel, HelloFrom("Kaniel", windows_first ? windows : dev), 1);
+    CHECK(DecodeWelcome(SentTo(result, Kaniel).value(0))->accepted);
+    auto second = windows_first ? dev : windows;
+    second.replace("events=1f", "events=ff");
+    result = hub.Receive(Ada, HelloFrom("Ada", second), 2);
+    auto welcome = DecodeWelcome(SentTo(result, Ada).value(0));
+    CHECK(welcome && welcome->accepted && welcome->text.contains("game files"));
+    CHECK(hub->Members() == 2);
+    // An unlisted release and a listed release with a different protocol stay out.
+    const QByteArray unlisted = QByteArray(windows).replace("version=1.3.0", "version=1.4.0");
+    result = hub.Receive(Eileen, HelloFrom("Eileen", unlisted), 3);
+    welcome = DecodeWelcome(SentTo(result, Eileen).value(0));
+    CHECK(welcome && !welcome->accepted && welcome->text.contains("version 1.4.0"));
+    const QByteArray wrong_protocol = QByteArray(windows).replace("protocol=9", "protocol=10");
+    result = hub.Receive(Eileen, HelloFrom("Eileen", wrong_protocol), 4);
+    welcome = DecodeWelcome(SentTo(result, Eileen).value(0));
+    CHECK(welcome && !welcome->accepted && welcome->text.contains("protocol 10"));
+    CHECK(hub->Members() == 2);
+  }
+  // A legacy exact HostedBuild remains exact even with compatible labels configured.
+  Net exact;
+  exact->SetRequiredBuild("specific-build");
+  exact->SetCompatibleVersions({"dev", "1.3.0"});
+  auto result = exact.Receive(Kaniel, HelloFrom("Kaniel", windows), 0);
+  CHECK(!DecodeWelcome(SentTo(result, Kaniel).value(0))->accepted);
+  std::cout << "server link compatible release labels: ok\n";
+  return 0;
+}
+
 // Phase 11: the hello is the sign-in. The player's id and its secret (the
 // launcher made them) sign in, nothing else; the old calls go in the link's
 // second stream (Rpc), from signed-in games only.
@@ -1373,6 +1412,7 @@ int TwoPCsOneId() {
 
 int main() {
   if (Contracts() != 0 || HelloAndBuilds() != 0 || BuildChecks() != 0 ||
+      CompatibleVersions() != 0 ||
       Relays() != 0 || Liveness() != 0 || TeamOnly() != 0 ||
       VirtualMembers() != 0 || RoutesGamePackets() != 0 || SignsIn() != 0 ||
       ALongSilenceEndsTheSignIn() != 0 || TwoPCsOneId() != 0 || Crypto() != 0 ||

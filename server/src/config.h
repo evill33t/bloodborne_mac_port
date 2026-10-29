@@ -28,6 +28,7 @@ struct BackendConfig {
 struct HostedConfig {
     bool enabled = false;
     QString build; // the build every game must say (empty: the first linked game's, as before)
+    QStringList compatibleVersions; // optional release-label group; co-op protocol must still match
     QString banList = QStringLiteral("banned.txt");
     int linksPerAddress = 8;
     double hellosPerSecond = 4.0;

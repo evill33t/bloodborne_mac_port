@@ -66,6 +66,12 @@ void ConfigManager::Parse(const QString& path) {
     m_backend.summonPoll = str("BackendSummonPoll", "5").toInt();
     m_hosted.enabled = boolean("Hosted", false);
     m_hosted.build = str("HostedBuild", "").trimmed();
+    m_hosted.compatibleVersions =
+        s.value("CompatibleClientVersions", QString()).toStringList();
+    for (QString& version : m_hosted.compatibleVersions)
+        version = version.trimmed();
+    m_hosted.compatibleVersions.removeAll(QString());
+    m_hosted.compatibleVersions.removeDuplicates();
     m_hosted.banList = str("HostedBanList", "banned.txt");
     m_hosted.linksPerAddress = str("HostedLinksPerAddress", "8").toInt();
     m_hosted.hellosPerSecond = str("HostedHellosPerSecond", "4").toDouble();
