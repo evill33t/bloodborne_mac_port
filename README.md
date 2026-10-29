@@ -8,7 +8,9 @@ This is an experimental development build. Included features and draft integrati
 
 Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
 
-Recent mainline sync: upstream **0.5.10** (`ce29673`) adds preferred-display selection, cursor hiding, 5120×2160 support, an updater shutdown fix and null-table GPU protection. This branch also retains the broader guarded descriptor-copy checks from PR #98.
+Recent mainline sync: upstream **0.5.11** (`1c1ac7d`) retains preferred-display selection, cursor hiding, the updater shutdown fix and null-table GPU protection, and adds the larger graphics heap needed to draw the level at 5120×2160, stale-descriptor hardening (#98) and the absent graphics-bind guard (#100). [Upstream release notes and setup guide](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/1c1ac7d/README.md).
+
+**Video guide:** Andrew Tsai’s [guide to this port](https://www.youtube.com/watch?v=_QgmfFyZbYo).
 
 ## Features
 
