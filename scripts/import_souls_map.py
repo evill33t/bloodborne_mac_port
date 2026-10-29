@@ -48,6 +48,7 @@ def main(argv=None):
     parser.add_argument("--map", dest="source_map")
     parser.add_argument("--target-map")
     parser.add_argument("--attach-undead-burg", action="store_true", help="Compose Firelink and Undead Burg with native collision-triggered loading")
+    parser.add_argument("--import-items", action="store_true", help="Experimental DS1R consumable/key pickups and hollow loot conversion; copied test saves only")
     parser.add_argument("--source-anchor")
     parser.add_argument("--target-anchor")
     parser.add_argument("--spawn-offset")
@@ -85,6 +86,12 @@ def main(argv=None):
     if output.exists() or output.is_symlink():
         raise FileExistsError("Choose a new output folder: " + str(output))
     target = job.setdefault("target_map", "m24_01_00_01")
+    if args.import_items:
+        job["import_items"] = True
+    if "import_items" in job and not isinstance(job["import_items"], bool):
+        raise ValueError("import_items must be a JSON boolean")
+    if job.get("import_items") and job["profile"] != "DS1R":
+        raise ValueError("--import-items currently supports DS1R only")
     if args.attach_undead_burg:
         if job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or target != "m24_01_00_01":
             raise ValueError("--attach-undead-burg requires DS1R Firelink into m24_01_00_01")
@@ -133,6 +140,8 @@ def main(argv=None):
                     command += ["--" + key.replace("_", "-"), str(job.setdefault(key, default))]
             if job.get("smithbox"):
                 command += ["--smithbox", job["smithbox"]]
+            if job.get("import_items"):
+                command += ["--item-policy", "ds1-bloodborne"]
             if job.get("spawn_offset"):
                 command += ["--spawn-offset", job["spawn_offset"]]
             if connected:
@@ -172,7 +181,7 @@ def main(argv=None):
         (staging / "import-job.json").write_text(json.dumps(job, indent=2) + "\n")
         (staging / "source-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
         conversion = json.loads((staging / "conversion.json").read_text()) if (staging / "conversion.json").is_file() else {}
-        pending = ["source AI/quests/dialogue", "source items", "source music/ambience", "source water rendering/physics",
+        pending = ["source AI/quests/dialogue", "unsupported items/chests/conditional treasures" if conversion.get("items") else "source items", "source music/ambience", "source water rendering/physics",
                    "source navigation"]
         if not connected:
             pending.append("connected-map loading")

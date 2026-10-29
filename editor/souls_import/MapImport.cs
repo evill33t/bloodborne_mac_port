@@ -9,6 +9,8 @@ internal static partial class Program {
         string Get(string key)=>values.TryGetValue(key,out var value)?value:throw new ArgumentException("Missing "+key);
         if(profile.Id is not("DS1" or "DS1R" or "DS2" or "DS2S"))throw new NotSupportedException("Map conversion currently supports DS1/Remastered and DS2/Scholar");
         var map=Get("--map");var target=Get("--target-map");foreach(var id in new[]{map,target})if(!Regex.IsMatch(id,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid map identifier");
+        bool importItems=values.TryGetValue("--item-policy",out var itemPolicy);
+        if(importItems&&(profile.Id!="DS1R"||itemPolicy!="ds1-bloodborne"))throw new NotSupportedException("Item policy currently supports ds1-bloodborne for DS1R only");
         var supported=profile.Id is "DS1" or "DS1R"?map is "m10_02_00_00" or "m10_01_00_00":map=="m10_04_00_00";
         if(!supported||target is not("m24_01_00_01" or "m24_00_00_00"))throw new NotSupportedException("Supported maps: DS1 Firelink/Undead Burg or DS2 Majula; targets m24_01_00_01 and m24_00_00_00");
         var native=Canonical(Get("--native-root"));var output=Canonical(Get("--output"));foreach(var source in new[]{root,native})if(output.Equals(source,StringComparison.OrdinalIgnoreCase)||output.StartsWith(source.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException("Output must be outside source game folders");
@@ -194,6 +196,14 @@ internal static partial class Program {
                 foreach(var spawnReport in enemySpawns.Spawns){var actor=msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID);actor.GparamConfigStruct=Lighting(spawnReport.SourceName);SourceGroups(actor,spawnReport.SourceName);}
                 foreach(var (path,bytes) in enemySpawns.Files)Write(path,bytes);
             }
+            MapItems.Result? items=null;
+            if(importItems&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
+                items=MapItems.Bake(sourceMap.ReadAsset,ReadNative,legacyMap,msb,map,definitions!,nativeRoot,offset,boundCollision,slots,
+                    enemySpawns.Spawns,enemySpawns.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??
+                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!);
+                foreach(var pickup in items.Pickups)msb.Parts.Objects.Single(p=>p.Name==pickup.TargetPart).GparamConfigStruct=Lighting(pickup.SourcePart);
+                foreach(var (path,bytes) in items.Files)Write(path,bytes);
+            }
             foreach(var prefix in new[]{"h","l"}){
                 var groups=boundCollision==null?MapCollision.Partition(prefix=="h"?highTriangles:lowTriangles,slots.Length):boundCollision.Select(c=>(prefix=="h"?c.High:c.Low).ToList()).ToList();
                 var path=Path.Combine(nativeRoot,"map",baseMap,prefix+baseMap[1..]+".hkx");var archive=BXF4.Read(path+"bhd",path+"bdt");
@@ -214,7 +224,8 @@ internal static partial class Program {
             foreach(var player in msb.Parts.GetEntries().OfType<MSBB.Part.Player>()){player.Position=spawn;player.Rotation=Vector3.Zero;}
             foreach(var point in msb.Events.GetEntries().OfType<MSBB.Event.SpawnPoint>()){var region=msb.Regions.GetEntries().Single(r=>r.Name==point.SpawnPointName);region.Position=spawn;region.Rotation=Vector3.Zero;}
             var textures=BXF4.Read(ReadNative($"map/{area}/{area}_0003.tpfbhd")!,ReadNative($"map/{area}/{area}_0003.tpfbdt")!);int nextTexture=textures.Files.Max(f=>f.ID)+1;foreach(var texture in convertedTextures.Values){var tpf=new TPF{Platform=TPF.TPFPlatform.PS4,Encoding=1,Flag2=3};tpf.Textures.Add(texture);var encoded=tpf.Write(DCX.Type.DCX_DFLT_10000_44_9);var existing=textures.Files.SingleOrDefault(f=>Leaf(f.Name)==texture.Name+".tpf.dcx");if(existing==null)textures.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,nextTexture++,texture.Name+".tpf.dcx",encoded));else if(!existing.Bytes.Span.SequenceEqual(encoded))throw new InvalidDataException("Shared imported texture conflicts: "+texture.Name);}textures.Write(out var texHeader,out var texData);Write($"map/{area}/{area}_0003.tpfbhd",texHeader);Write($"map/{area}/{area}_0003.tpfbdt",texData);
-            var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadNative);
+            byte[]? ReadComposed(string path)=>items?.Files.GetValueOrDefault(path)??ReadNative(path);
+            var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadComposed);
             var destinations=values.TryGetValue("--connection-targets",out var connectionsPath)?JsonSerializer.Deserialize<Dictionary<string,string>>(File.ReadAllText(connectionsPath))!:new Dictionary<string,string>();
             MapRuntimeLinks.Result? runtimeLinks=null;
             if(legacyMap!=null&&boundCollision!=null)runtimeLinks=MapRuntimeLinks.Apply(msb,legacyMap,boundCollision,slots,destinations);
@@ -253,7 +264,7 @@ internal static partial class Program {
             var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,sourceNoRenderGeometry,filteredAll,missingData,accounted,
                 reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)};
             var report=new{source=profile.Id,map,target,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
-                placementSummary,placementResults,runtimeLinks,
+                placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot},
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
                 breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,posedCorpses,characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations},sourceSkyVertices,sourceSkyLimitations=skyLimitations,

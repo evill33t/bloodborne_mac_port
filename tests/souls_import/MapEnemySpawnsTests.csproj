@@ -7,6 +7,10 @@
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
     <Compile Include="../../editor/souls_import/MapEnemySpawns.cs" Link="MapEnemySpawns.cs"/>
+    <Compile Include="../../editor/souls_import/MapItems.cs" Link="MapItems.cs"/>
+    <Compile Include="../../editor/souls_import/MapItemPolicy.cs" Link="MapItemPolicy.cs"/>
+    <Compile Include="../../editor/souls_import/ImportParam.cs" Link="ImportParam.cs"/>
+    <Compile Include="../../editor/souls_import/MapAreaName.cs" Link="MapAreaName.cs"/>
     <Compile Include="../../editor/souls_import/MapReplacement.cs" Link="MapReplacement.cs"/>
     <Compile Include="../../editor/souls_import/MapCollisionBindings.cs" Link="MapCollisionBindings.cs"/>
     <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs"/>

@@ -748,7 +748,8 @@ linear. Native proportions and idle animation still differ from the source.
 The ordinary-hollow adapter instantiates six Firelink enemies with source meshes,
 textures, equipment display masks and placements on independent native Huntsman rigs.
 Other source actors are explicitly reported as unconverted. This adapter uses native
-combat, health, hitboxes and loot; it does not reproduce DS1 combat or source AI.
+combat, health and hitboxes; native donor loot remains the default unless the experimental
+item adapter is enabled. It does not reproduce DS1 combat or source AI.
 
 The earlier normal Hunter's Mark respawn, native save-and-quit and reload checks landed
 above the imported floor. A later bounded walk with original source collision covered
@@ -845,6 +846,41 @@ IDs, resolving destinations only when the available map catalog gives an unambig
 match. Stable target reservations prevent maps from silently sharing the same native asset
 family. The explicit Firelink/Burg allocation activates ordinary collision loading;
 lifts, crow travel and scripted transitions remain planning information.
+
+`--import-items` enables an experimental DS1R item stage for Firelink and Burg. It
+exports 13 and 19 ground pickups respectively, with native loot objects and independent
+item lots. Humanity becomes Madman's Knowledge; Twin Humanities becomes Great One's
+Wisdom. Consuming those items uses native Insight behavior. Other supported consumables
+use explicit native equivalents, including Estus acquisition becoming five Blood Vials
+per flask. Source soul tiers and upgrade materials use approximate native equivalents.
+Armor, weapons and accessories are excluded, and excluded equipment outcomes retain
+their probability as no-drop outcomes. Supported source consumable rolls remain separate
+from a repeatable 30% one-vial / 70% no-drop roll added to ordinary hollows. Enemy kill/drop
+behavior for these edited lots has not yet been verified in gameplay.
+
+Quest goods receive separate inventory identities and source-localized names/descriptions;
+native key icons are placeholders. These are inventory records, not functioning NPC quests
+or key-operated doors. Chests and conditional treasures are reported as unsupported.
+Per-outcome collection conditions are refused rather than silently discarded. New lot and
+goods rows preserve every existing row payload/name, including native duplicate lot IDs,
+and shared binders are composed across both areas. Collection flags use unused values in
+the existing retail group `52100`, reserving `52100600` through `52100899` after scanning
+native parameter and event/talk bytes. Ownership is retained across composed maps; exhausted
+reservations fail the job. Computed flag ranges and other mods can still conflict.
+
+Installed-asset tests cover all 32 pickups, 92 enemy loot assignments, the requested
+Humanity mappings, shared flag ownership, MSB references and native/composed parameter
+preservation. A copied-save gameplay test collected Madman's Knowledge x3 from the source
+Humanity location and consumed one through the inventory, increasing Insight from zero to
+one. That run used the earlier collection-flag implementation. Persistence with the revised
+retail flags and pickup visual alignment remain unverified, so the item stage is opt-in.
+It is not enabled by existing import-job files unless `import_items` is set to `true`.
+
+A separate ignored prototype loads Firelink as `m40_02_00_00` through a native event warp
+and lands on imported collision with unchanged HP, while retaining the original Bloodborne
+maps. New-map pickup interaction, the additional Dream headstone menu, lamps and a return
+route remain unresolved. This prototype is not an importer output mode or the published
+playable demo; it does not establish a complete additional campaign.
 
 Current runtime conversion supports Firelink/Majula into `m24_01_00_01`, plus the
 explicit connected DS1R Burg allocation above.

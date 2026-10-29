@@ -58,7 +58,7 @@ internal static class MapEnemySpawns {
             }
         }
         npcFile.Bytes=MapCharacters.WriteRows(npcs);files.Add("param/gameparam/gameparam.parambnd.dcx",game.Write(DCX.Type.DCX_DFLT_10000_44_9));
-        return new(files,reports,skipped,["Source hollow appearance, display masks and placements use native Huntsman animation, attack/hitbox, AI, health and loot behavior. Source combat and weapon behavior are not reproduced.",
+        return new(files,reports,skipped,["Source hollow appearance, display masks and placements use native Huntsman animation, attack/hitbox, AI and health. The item adapter replaces native donor loot where enabled. Source combat and weapon behavior are not reproduced.",
             "Only explicitly supported ordinary hollow parameter rows are instantiated. Source quest actors, bosses, multiplayer phantoms and other unsupported actors remain disabled.",
             "Source navigation, patrols and event activation are not converted. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation; native navigation is not source navigation."]);
     }

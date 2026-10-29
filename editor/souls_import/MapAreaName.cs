@@ -65,7 +65,7 @@ internal static class MapAreaName {
         return new Result((short)id,english,map.Parts.Collisions.Count,names);
     }
 
-    static string? SourceLanguage(string native,string profile) {
+    internal static string? SourceLanguage(string native,string profile) {
         var language=native.ToLowerInvariant() switch {
             "engus" or "enggb"=>"ENGLISH",
             "deude"=>"GERMAN",

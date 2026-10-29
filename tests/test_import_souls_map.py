@@ -26,7 +26,7 @@ from pathlib import Path
 command=sys.argv[1];args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 if command=='plan-map': print(json.dumps({'sourceMapSha256':'fixture'}))
 else:
-    out=Path(args['--output']);out.mkdir();(out/'conversion.json').write_text(json.dumps({'spawnOffset':args.get('--spawn-offset')}))
+    out=Path(args['--output']);out.mkdir();(out/'conversion.json').write_text(json.dumps({'spawnOffset':args.get('--spawn-offset'),'itemPolicy':args.get('--item-policy')}))
     (out/'artifact').write_text('complete')
     data=out/'dvdroot_ps4';data.mkdir()
     previous=Path(args['--native-overlay'])/'dvdroot_ps4/shared' if '--native-overlay' in args else None
@@ -50,6 +50,7 @@ else:
         first = self.run_job()
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual((self.output / "artifact").read_text(), "complete")
+        self.assertIsNone(json.loads((self.output / "conversion.json").read_text())["itemPolicy"])
         job = json.loads((self.output / "import-job.json").read_text())
         self.assertEqual(job["source_anchor"], "-51.8,-60.6,55.7")
         self.assertEqual(json.loads((self.output / "import-manifest.json").read_text())["source_map_sha256"], "fixture")
@@ -64,6 +65,18 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.output.exists())
         self.assertEqual(list(self.output.parent.iterdir()), [])
+
+    def test_item_conversion_is_opt_in_and_saved_for_reruns(self):
+        first = self.run_job("--import-items", "--attach-undead-burg")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertTrue(json.loads((self.output / "import-job.json").read_text())["import_items"])
+        for file in (self.output / "conversion.json", self.output / "maps/m10_01_00_00/conversion.json"):
+            self.assertEqual(json.loads(file.read_text())["itemPolicy"], "ds1-bloodborne")
+
+    def test_item_conversion_rejects_unsupported_profile(self):
+        result = self.run_job("--profile", "DS2S", "--import-items")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
 
     def test_game_folder_is_never_an_output(self):
         result = self.run_job("--output", self.source / "Mods")

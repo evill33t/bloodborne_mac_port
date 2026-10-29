@@ -10,6 +10,13 @@ static class MapEnemySpawnsTests {
         string root=args[0],native=args[1],defs=args[2];var originals=new Dictionary<string,byte[]>();
         byte[]? Read(string path){string p=Path.Combine(root,path);if(!File.Exists(p))return null;var b=File.ReadAllBytes(p);originals.TryAdd(p,SHA256.HashData(b));return b;}
         byte[] baseline=File.ReadAllBytes(Path.Combine(native,"param/gameparam/gameparam.parambnd.dcx")),composed=baseline;
+        Check(MapItemPolicy.Map(MapItemPolicy.SourceGoodsCategory,500,3,false)?.TargetID==1500,"Humanity does not become Madman's Knowledge");
+        Check(MapItemPolicy.Map(MapItemPolicy.SourceGoodsCategory,501,2,false)?.TargetID==1501,"Twin Humanities does not become Great One's Wisdom");
+        Check(MapItemPolicy.Map(0,500,1,false)==null,"Equipment IDs leaked into the goods inventory");
+        Check(MapItemPolicy.Map(MapItemPolicy.SourceGoodsCategory,2021,1,true)?.TargetID==902021,"Source keys lost their independent identity");
+        var composedFiles=new Dictionary<string,byte[]>();
+        var sourceFlags=new Dictionary<int,int>();var flagOwners=new Dictionary<int,int>();
+        byte[]? Native(string path)=>composedFiles.GetValueOrDefault(path)??(File.Exists(Path.Combine(native,path))?File.ReadAllBytes(Path.Combine(native,path)):null);
         var allModels=new HashSet<string>();int total=0;
         foreach(var id in new[]{"m10_02_00_00","m10_01_00_00"}) {
             var source=MSB1.Read(Read("map/MapStudio/"+id+".msb")!);
@@ -41,6 +48,44 @@ static class MapEnemySpawnsTests {
                 }
             }
             var back=MSBB.Read(map.Write());Check(back.Parts.Enemies.Count==result.Spawns.Count&&back.Parts.Enemies.All(a=>back.Models.Enemies.Any(m=>m.Name==a.ModelName)),"Enemy MSB references failed serialization");
+            var loot=MapItems.Bake(Read,Native,source,map,id,defs,native,offset,chunks,slots,result.Spawns,composed);
+            foreach(var lot in loot.Lots.Where(l=>l.SourceCollectionFlag>0)) {
+                Check(lot.CollectionFlag is >=52100600 and <=52100899,"Pickup used an unallocated native flag group");
+                Check(!sourceFlags.TryGetValue(lot.SourceCollectionFlag,out int previousFlag)||previousFlag==lot.CollectionFlag,"A shared source flag changed across maps");
+                Check(!flagOwners.TryGetValue(lot.CollectionFlag,out int previousOwner)||previousOwner==lot.SourceCollectionFlag,"Independent source pickups share a collection flag");
+                sourceFlags[lot.SourceCollectionFlag]=lot.CollectionFlag;flagOwners[lot.CollectionFlag]=lot.SourceCollectionFlag;
+            }
+            var next=BND4.Read(loot.GameParamBytes);
+            foreach(var f in game.Files.Where(f=>!new[]{"NpcParam.param","ItemLotParam.param","EquipParamGoods.param"}.Contains(Leaf(f.Name))))
+                Check(next.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Loot conversion changed an unrelated parameter table");
+            foreach(var (table,type,size,version) in new[]{("ItemLotParam","ITEMLOT_PARAM_ST",148,(short)2),("EquipParamGoods","EQUIP_PARAM_GOODS_ST",108,(short)1),("NpcParam","NPC_PARAM_ST",388,(short)5)}) {
+                var before=ImportParam.Read(game.Files.Single(f=>Leaf(f.Name)==table+".param").Bytes,type,size,version);
+                var after=ImportParam.Read(next.Files.Single(f=>Leaf(f.Name)==table+".param").Bytes,type,size,version);
+                foreach(var group in before.Rows.Where(r=>table!="NpcParam"||!result.Spawns.Any(s=>s.NPCParamID==r.ID)).GroupBy(r=>r.ID)) {
+                    // Native ItemLotParam intentionally includes duplicate IDs.
+                    var same=after.Rows.Where(r=>r.ID==group.Key).ToArray();var previousRows=group.ToArray();
+                    Check(same.Length==previousRows.Length&&previousRows.Zip(same).All(pair=>pair.First.Name==pair.Second.Name&&ImportParam.Payload(pair.First).SequenceEqual(ImportParam.Payload(pair.Second))),"Loot conversion modified an existing native/composed row");
+                }
+            }
+            var itemLots=ImportParam.Read(next.Files.Single(f=>Leaf(f.Name)=="ItemLotParam.param").Bytes,"ITEMLOT_PARAM_ST",148,2);
+            var vial=ImportParam.Payload(itemLots.Rows.Single(r=>r.ID==loot.VialDropLot));
+            Check(BitConverter.ToInt32(vial,0)==1000&&BitConverter.ToUInt16(vial,64)==300&&BitConverter.ToUInt16(vial,66)==700&&vial[138]==1&&BitConverter.ToInt32(vial,128)==-1,"Vial probability or repeatability is incorrect");
+            var keys=ImportParam.Read(next.Files.Single(f=>Leaf(f.Name)=="EquipParamGoods.param").Bytes,"EQUIP_PARAM_GOODS_ST",108,1);
+            foreach(var (sourceID,targetID) in loot.QuestItems)Check(keys.Rows.Single(r=>r.ID==targetID).Name=="Imported DS1R good "+sourceID,"Quest item identity was lost");
+            if(id=="m10_02_00_00") {
+                Check(loot.Lots.Any(l=>l.SourceID==1020000&&l.Goods.Any(g=>g.TargetID==1500&&g.Count==3)),"Firelink Humanity pickup was omitted");
+                Check(loot.Pickups.Any(p=>p.SourcePart=="o0500_0000"),"Firelink Humanity has no native pickup carrier");
+            }
+            Check(loot.Pickups.Count>0&&loot.Skipped.Count+loot.Pickups.Count==source.Events.Treasures.Count,"Source treasures are not fully accounted for");
+            var withItems=MSBB.Read(map.Write());
+            foreach(var p in loot.Pickups) {
+                var obj=withItems.Parts.Objects.Single(o=>o.Name==p.TargetPart);
+                Check(obj.Position==p.Position&&withItems.Parts.Collisions.Any(c=>c.Name==obj.CollisionName),"Pickup transform/collision reference did not round trip");
+                Check(withItems.Events.Treasures.Any(t=>t.TreasurePartName==p.TargetPart&&t.ItemLot1==p.Lots[0]),"Pickup treasure references did not round trip");
+            }
+            foreach(var (path,bytes) in loot.Files)composedFiles[path]=bytes;
+            composed=loot.GameParamBytes;
+            Console.WriteLine($"PASS: {id}: {loot.Pickups.Count} pickups, {loot.QuestItems.Count} quest identities, {loot.Lots.Count} source loot rows, native vial roll, preserved parameters");
             total+=result.Spawns.Count;
         }
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
