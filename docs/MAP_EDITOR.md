@@ -832,15 +832,36 @@ navigation and complete route traversal still require validation.
 Firelink also instantiates eleven ordinary cemetery skeletons (`c2900`, sword/shield
 and greatsword loadouts) and two giant skeletons (`c2910`). The adapter accepts only
 the three identified cemetery NPC/Think combinations and their source initial pose
-`9001`; it starts them in native standing combat rather than copying that incompatible
-animation ID. Their meshes, textures, equipment masks, positions and stature are
+`9001`. The importer decodes source `9001`/`9061` motion and retargets it into native
+`7004`/`7005` playback slots. Source cemetery proximity groups, trigger radii and staggered
+delays are composed into the existing native Firelink event script. The pile retains
+its source damage/collision protection; awakening retains its authored invulnerability
+and lock-on windows. The donor's animation offset also needs clone-local wake variants;
+their six shared lookup paths are redirected without changing other graph references.
+Completed awakening events start standing on reload, and dead
+actors are not forced to awaken. Their meshes, textures, equipment masks, positions and stature are
 retained, with all weighted bones directly matched to the native rig. Giant stature
 uses an explicit larger scale allowance; ordinary imports retain their original
 proportion bounds. Separate `c9700` model and `2419900` entity reservations preserve
 existing hollow identities. There are 105 imported enemies across the two maps.
-Skeletons still use the native donor's health, attacks, hitboxes and effects. Source
-bone-pile awakening, disassembly/reassembly, original movesets and giant attack reach
-are not converted.
+Skeletons still use the native donor's health, combat AI, attacks, hitboxes, death and
+effects. Living heavy-hit slots `2014`, `2020` and `2040`, including their native weapon
+variants, play the corresponding source motion. The first two include bone scattering
+and reassembly; `2040` is knockdown/recovery. Native AI cancellation gates move to the
+end of the source recovery. Necromancer resurrection, original attack movesets and
+giant attack reach are not converted.
+The four ordinary donor torch attacks lose their eight superarmor windows only in
+the skeleton clones: none of Firelink's selected source skeleton attacks has that
+gate. Other donor attack events and the source recovery protection remain intact.
+
+The bounded animation reader supports DS1R TAG0 spline clips with reference-pose
+fallbacks and track bindings. Conversion preserves local translation, rotation, scale
+and the unweighted locomotion root, then writes native Havok 2014 spline packfiles.
+This writer currently accepts a single block of at most 256 sampled frames; unsupported
+formats fail the export. Native animation headers reuse base-class padding, so stock
+HKX2 serialization alone does not produce the correct offsets. Named tracks, native
+reference-frame layout and the retail THREECOMP40 quaternion profile are retained.
+Source sound/particle events are not copied blindly across games.
 
 The secondary area uses complete native environment templates with independently
 converted Burg light/fog/tone rows. Appending rows to Cathedral Ward's sparse overrides
@@ -880,17 +901,29 @@ padding), and retain the native combat/status parameters. Torch placement and
 source fire damage remain approximate. Subsequent skeleton gameplay captures show
 non-torch actors without the donor's idle flames.
 
-Skeleton validation is under ignored `out/map-editor/skeleton-review/`. Installed-asset
-checks cover 105 placements, all three skeleton loadouts, giant proportions, equipment
-attachments, native AI dependencies, loot references and source preservation. The full
-script export adds nine skeleton asset files and changes only the target Firelink MSB
-and composed game-parameter binder; existing hollow/NPC assets remain byte-identical.
-In native gameplay all thirteen skeleton actors instantiated. Bounded close-up checks
-show ordinary and giant source appearances, pursuit and attacks; a giant reduced player
-HP from 444 to 245, and a player punch reduced an ordinary skeleton from 195 to 192 HP
-with a visible hit reaction. An earlier test was knocked off a cemetery ledge after
-taking damage. These checks do not establish death/loot behavior, source combat fidelity,
-complete cemetery traversal or the original awakening/reassembly behavior.
+Skeleton validation is under ignored `out/map-editor/skeleton-review/` and
+`out/map-editor/skeleton-animation/`. Tests cover 105 placements, all three skeleton
+loadouts, giant proportions, equipment attachments, native AI dependencies, loot
+references, source wake groups and preservation of 31 original assets. Source/native
+animation tests decode all ten source clips and verify the resulting poses, bindings,
+headers and timing. A complete repeatable export matches all 439 candidate game files;
+the animation stage changes only the three skeleton animation banks and the composed
+Firelink event script relative to the preceding skeleton/item export.
+
+Copied-save native runs with untouched production HKS verify pile awakening and natural
+charged-hit scattering, reassembly and return to combat for an ordinary sword/shield
+skeleton and a giant. Their HP remained at 73 and 49 respectively after the hit through
+recovery; no animation was forced in response to damage and no enemy HP was reset.
+These two private test encounters moved one actor onto clear Firelink ground, delayed
+its initial wake by 30 seconds, protected the player and supplied a native Burial Blade
+with its Skill requirement reduced from 12 to 10. Enemy AI remained active, and enemy
+NPC/attack parameters and production animation/behavior files were unchanged. None of
+those test controls is exported. A separate smoke of the exact export at the original
+cemetery positions shows the paired source awakening and subsequent attacks, including
+normal player damage and death. The private Lua diagnostic hooks used during earlier
+investigation are excluded from all acceptance runs and exports.
+These bounded checks do not establish death/loot behavior for the skeletons, source
+attack fidelity, necromancer resurrection or complete cemetery traversal.
 
 Each export includes `import-job.json`, `source-plan.json`, `import-manifest.json` and
 `conversion.json`. The job can be rerun into a new folder:
@@ -955,7 +988,11 @@ read-only source guards and backend failure cleanup using an asset-free backend 
 The installed-asset checks include `tests/test_map_import.sh` (native game root, optional
 DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
 `tests/test_npc_face.sh`, `tests/test_map_characters.sh`, `tests/test_map_enemy_spawns.sh`
-and `tests/test_skin_hair_alpha.sh`.
+and `tests/test_skin_hair_alpha.sh`. `tests/test_source_animation.sh` accepts the DS1R
+root and checks real source spline clips; `tests/test_native_animation.sh` also accepts
+the Bloodborne `dvdroot_ps4` root and independently decodes converted native packfiles,
+including the original native header layout and locomotion root. The animation exporter
+requires Smithbox's built `Havok.HKX2.dll` alongside SoulsFormats and Pfim.
 Their serialization/asset assertions are separate from the bounded gameplay evidence above.
 
 The importer is also available from the command line:

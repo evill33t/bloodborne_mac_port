@@ -190,11 +190,17 @@ internal static partial class Program {
                 foreach(var (path,bytes) in characters.Files)Write(path,bytes);
             }
             MapEnemySpawns.Result? enemySpawns=null;
+            IReadOnlyList<MapSkeletonAnimations.Wake> skeletonAwakenings=[];
             if(profile.Id=="DS1R"&&legacyMap!=null&&boundCollision!=null) {
                 enemySpawns=MapEnemySpawns.Bake(sourceMap.ReadAsset,legacyMap,map,definitions!,nativeRoot,msb,offset,boundCollision,slots,
                     characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,nativeMap:baseMap,readNative:ReadNative);
                 foreach(var spawnReport in enemySpawns.Spawns){var actor=msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID);actor.GparamConfigStruct=Lighting(spawnReport.SourceName);SourceGroups(actor,spawnReport.SourceName);}
                 foreach(var (path,bytes) in enemySpawns.Files)Write(path,bytes);
+                if(map=="m10_02_00_00") {
+                    string eventPath="event/"+baseMap+".emevd.dcx";
+                    var wake=MapSkeletonAnimations.Events(sourceMap.ReadAsset,ReadNative(eventPath)??throw new FileNotFoundException("Native cemetery destination script unavailable"),enemySpawns.Spawns);
+                    Write(eventPath,wake.Script);skeletonAwakenings=wake.Wakes;
+                }
             }
             MapItems.Result? items=null;
             if(importItems&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
@@ -267,7 +273,7 @@ internal static partial class Program {
                 placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot},
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
-                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,posedCorpses,characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
+                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,posedCorpses,characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
                 environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations="Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, quests, water physics, collision material behavior and navigation are not ported. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
             File.WriteAllText(Path.Combine(stage.FullName,"conversion.json"),JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true,IncludeFields=true}));File.WriteAllText(Path.Combine(stage.FullName,"README.txt"),$"Experimental {map} map replacement for Bloodborne {target}. Enable only with a copied test save. Place player near {to.X} {to.Y} {to.Z}. See conversion.json for coverage and limitations.\n");Directory.CreateDirectory(Path.GetDirectoryName(output)!);Directory.Move(stage.FullName,output);Console.WriteLine(JsonSerializer.Serialize(report,new JsonSerializerOptions{IncludeFields=true}));return 0;
         }catch{if(stage.Exists)stage.Delete(true);throw;}

@@ -9,6 +9,7 @@ dotnet=${DOTNET:-$(command -v dotnet || true)}
 [[ -n "$dotnet" ]] || dotnet=/usr/local/share/dotnet/dotnet
 [[ -f "$library/Andre.SoulsFormats.dll" ]] || { echo "Build Smithbox first: $library/Andre.SoulsFormats.dll is missing" >&2; exit 1; }
 [[ -f "$library/Pfim.dll" ]] || { echo "Build Smithbox first: $library/Pfim.dll is missing" >&2; exit 1; }
+[[ -f "$library/Havok.HKX2.dll" ]] || { echo "Build Smithbox first: $library/Havok.HKX2.dll is missing" >&2; exit 1; }
 [[ -f "$smithbox/src/Andre/Andre.Formats/Util/ArchiveKeys.cs" ]] || { echo "This adapter requires the Smithbox source checkout, including ArchiveKeys.cs" >&2; exit 1; }
 export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_CLI_HOME="$PWD/out/map-editor/dotnet-home"

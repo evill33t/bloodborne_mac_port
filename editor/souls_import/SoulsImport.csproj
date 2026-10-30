@@ -10,5 +10,6 @@
     <Compile Include="$(SmithboxRoot)/src/Andre/Andre.Formats/Util/ArchiveKeys.cs" Link="Smithbox/ArchiveKeys.cs" />
     <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
     <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+    <Reference Include="Havok.HKX2"><HintPath>$(SmithboxOutput)/Havok.HKX2.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

@@ -2,6 +2,7 @@
 using SoulsFormats;
 using System.Numerics;
 using System.Security.Cryptography;
+using System.Text;
 
 static class MapEnemySpawnsTests {
     static void Check(bool ok,string message){if(!ok)throw new Exception(message);}
@@ -56,6 +57,23 @@ static class MapEnemySpawnsTests {
                 Check(skeletons.Count(p=>p.SourceModel=="c2910")==2&&skeletons.All(p=>p.TargetModel.StartsWith("c97")&&p.EntityID is >=2419900 and <2420000&&!p.HasSourceTorch&&p.DirectWeightShare>.99),"Skeleton rig, population or reserved identity changed");
                 Check(skeletons.Where(p=>p.SourceModel=="c2910").All(p=>p.ProportionScale>1.5f&&p.ProportionScale<2.5f),"Giant skeleton stature was lost");
                 Check(skeletons.Where(p=>p.SourceNPCParamID==290000).All(p=>p.DisplayMasks.SequenceEqual(new[]{0,1}))&&skeletons.Where(p=>p.SourceNPCParamID==290002).All(p=>p.DisplayMasks.SequenceEqual(new[]{3})),"Skeleton sword/shield or greatsword loadout was lost");
+                var originalScript=File.ReadAllBytes(Path.Combine(native,"event/m24_01_00_00.emevd.dcx"));
+                var wake=MapSkeletonAnimations.Events(Read,originalScript,result.Spawns);var beforeScript=EMEVD.Read(originalScript);var afterScript=EMEVD.Read(wake.Script);
+                Check(wake.Wakes.Count==13&&afterScript.Events.Count==beforeScript.Events.Count+13,"Cemetery awakening event population changed");
+                foreach(var e in beforeScript.Events) {
+                    var following=afterScript.Events.Single(n=>n.ID==e.ID);
+                    Check(e.RestBehavior==following.RestBehavior&&e.Instructions.Count+(e.ID==0?13:0)==following.Instructions.Count&&e.Instructions.Zip(following.Instructions).All(p=>p.First.Bank==p.Second.Bank&&p.First.ID==p.Second.ID&&p.First.ArgData.SequenceEqual(p.Second.ArgData)),"Cemetery export changed an existing native event instruction");
+                }
+                Check(wake.Wakes.All(w=>skeletons.Any(s=>s.EntityID==w.Entity&&s.SourceEntityID==w.SourceEntity)&&skeletons.Any(s=>s.EntityID==w.Trigger&&s.SourceEntityID==w.SourceTrigger)),"Awakening targets reference an unimported actor");
+                Check(wake.Wakes.Select(w=>w.Radius).Distinct().Order().SequenceEqual(new[]{3f,4f,7f,11f})&&wake.Wakes.Any(w=>Math.Abs(w.Delay-2.2f)<.0001f),"Source awakening radii or group delays were lost");
+                foreach(var w in wake.Wakes) {
+                    var instructions=afterScript.Events.Single(e=>e.ID==w.EventID).Instructions;
+                    var rise=instructions.Single(i=>i.Bank==2003&&i.ID==18&&BitConverter.ToInt32(i.ArgData,4)==7005);
+                    Check(rise.ArgData[8]==0&&rise.ArgData[9]==0,"Awakening waits on an AI-dependent special-animation completion signal");
+                    var brains=instructions.Where(i=>i.Bank==2004&&i.ID==19).Select(i=>BitConverter.ToInt32(i.ArgData,4)).ToArray();
+                    Check(brains.SequenceEqual(new[]{261091,261010,261010}),"Awakening lost native dormant/combat AI transitions");
+                    Check(!instructions.Any(i=>i.Bank==2004&&i.ID is 1 or 43)&&!instructions.Any(i=>i.Bank==2003&&i.ID==18&&BitConverter.ToInt32(i.ArgData,4)==-1),"Awakening disables its native brain or forcibly cancels a later hit reaction");
+                }
             }
             var old=BND4.Read(composed);composed=result.Files["param/gameparam/gameparam.parambnd.dcx"];var game=BND4.Read(composed);
             foreach(var f in old.Files.Where(f=>Leaf(f.Name)!="NpcParam.param"))Check(game.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Enemy export overwrote an unrelated parameter entry");
@@ -68,12 +86,61 @@ static class MapEnemySpawnsTests {
                 Check(group.All(p=>p.HasSourceTorch==hasTorch),"Source torch loadout was misclassified");
                 if(hasTorch)torchActors+=group.Count();else nonTorchActors+=group.Count();
                 var animation=BND4.Read(result.Files["chr/"+group.Key+".anibnd.dcx"]);
+                bool skeletonModel=group.First().SourceModel is "c2900" or "c2910";
+                var wakeVariants=(from variant in Enumerable.Range(1,3) from slot in new[]{7004,7005} select (Variant:variant,Slot:slot,ID:(long)variant*1000000+slot)).ToArray();
+                Check(animation.Files.Count==donorAnimation.Files.Count+(skeletonModel?6:0)&&animation.Files.Select(f=>f.ID).Distinct().Count()==animation.Files.Count,"Skeleton wake clips changed the native binder outside six declared variants");
+                foreach(var original in donorAnimation.Files.Where(f=>!TAE.Is(f.Bytes.ToArray())&&!(f.ID>=7000000&&f.ID<8000000)&&
+                    !(skeletonModel&&f.ID>=1000000000&&new[]{2014,2020,2040,7004,7005}.Contains((f.ID-1000000000)%1000000)))) {
+                    var retained=animation.Files.Single(f=>f.ID==original.ID);
+                    Check(retained.Flags==original.Flags&&retained.Name==original.Name.Replace("c2610",group.Key,StringComparison.OrdinalIgnoreCase)&&retained.Bytes.Span.SequenceEqual(original.Bytes.Span),"Skeleton wake variants changed an unrelated native animation/rig entry");
+                }
+                foreach(int metadata in new[]{7000300,7000400,7000500,7000501}) {
+                    byte[] expectedMetadata=SkinRetarget.RenameBehavior(donorAnimation.Files.Single(f=>f.ID==metadata).Bytes,"c2610",group.Key);
+                    if(skeletonModel&&metadata==7000300)foreach(var variant in wakeVariants) {
+                        string clip=$"a{variant.Variant:D3}_{variant.Slot:D6}.hkx";
+                        byte[] shared=Encoding.ASCII.GetBytes(@"..\..\..\..\Model\chr\c9999\hkx\"+clip+"\0");
+                        int at=expectedMetadata.AsSpan().IndexOf(shared);
+                        Check(at>=0&&expectedMetadata.AsSpan(at+shared.Length).IndexOf(shared)<0,"Native shared wake reference fixture changed");
+                        Encoding.ASCII.GetBytes(@"..\..\..\..\Model\chr\"+group.Key+@"\hkx\"+clip+"\0").CopyTo(expectedMetadata,at);
+                    }
+                    Check(animation.Files.Single(f=>f.ID==metadata).Bytes.Span.SequenceEqual(expectedMetadata),"Wake path redirection changed unrelated native project/character/behavior data");
+                }
                 foreach(var donor in donorAnimation.Files.Where(f=>TAE.Is(f.Bytes.ToArray()))) {
                     var before=TAE.Read(donor.Bytes);var after=TAE.Read(animation.Files.Single(f=>f.ID==donor.ID).Bytes);
-                    Check(after.ID==200000+int.Parse(group.Key[1..])&&before.Animations.Select(a=>a.ID).SequenceEqual(after.Animations.Select(a=>a.ID)),"Torch filtering changed animation identities");
+                    var expectedIDs=before.Animations.Select(a=>a.ID).Concat(skeletonModel?wakeVariants.Select(v=>v.ID):Enumerable.Empty<long>()).Order();
+                    Check(after.ID==200000+int.Parse(group.Key[1..])&&expectedIDs.SequenceEqual(after.Animations.Select(a=>a.ID)),"Skeleton/torch filtering changed animation identities outside the declared wake variants");
+                    if(skeletonModel)foreach(var variant in wakeVariants) {
+                        var original=after.Animations.Single(a=>a.ID==variant.Slot);var copy=after.Animations.Single(a=>a.ID==variant.ID);
+                        string name=$"a{variant.Variant:D3}_{variant.Slot:D6}";
+                        Check(copy.AnimFileName==name+".hkt"&&copy.MiniHeader is TAE.Animation.AnimMiniHeader.Standard h&&!h.IsLoopByDefault&&!h.ImportsHKX&&!h.AllowDelayLoad&&h.ImportHKXSourceAnimID==-1,"Wake variant lost its own native animation identity");
+                        Check(copy.Events.Count==original.Events.Count&&copy.Events.Zip(original.Events).All(p=>SameEvent(p.First,p.Second)),"Wake variant lost source timing/protection gates");
+                        Check(copy.EventGroups.Count==original.EventGroups.Count&&copy.Events.Select(e=>e.Group is null?-1:copy.EventGroups.IndexOf(e.Group)).SequenceEqual(original.Events.Select(e=>e.Group is null?-1:original.EventGroups.IndexOf(e.Group))),"Wake variant lost event group membership");
+                        var clip=animation.Files.Single(f=>f.ID==1000000000+variant.ID);var baseClip=animation.Files.Single(f=>f.ID==1000000000+variant.Slot);
+                        Check(Leaf(clip.Name)==name+".hkx"&&clip.Flags==baseClip.Flags&&clip.CompressionType==baseClip.CompressionType&&clip.Bytes.Span.SequenceEqual(baseClip.Bytes.Span),"Wake variant clip filename/ID/payload does not match its native lookup");
+                    }
                     Check(before.Animations.Sum(a=>a.Events.Count(Torch))==4,"Native torch fixture changed");
-                    foreach(var (a,b) in before.Animations.Zip(after.Animations)) {
-                        var expectedEvents=a.Events.Where(e=>hasTorch||!Torch(e)).ToArray();
+                    foreach(var a in before.Animations) {
+                        var b=after.Animations.Single(n=>n.ID==a.ID);
+                        if(group.First().SourceModel is "c2900" or "c2910"&&((a.ID%1000000) is 2014 or 2020 or 2040||a.ID is 7004 or 7005)) {
+                            var hkx=animation.Files.Single(f=>f.ID==1000000000+a.ID);var pack=new NativeAnimation.Pack(hkx.Bytes.ToArray());
+                            int at=pack.Object("hkaSplineCompressedAnimation");float duration=pack.Float(at+16);
+                            Check(duration>0&&b.Events.All(e=>e.StartTime>=0&&e.EndTime<=duration+.0001f),"Converted clip has native gates beyond its source duration");
+                            foreach(var e in b.Events.Where(e=>e.Type==0&&new[]{23,78,79,86}.Contains(BitConverter.ToInt32(e.GetParameterBytes(false),0))))Check(e.StartTime>=duration-.101f,"Native AI can cancel source reassembly early");
+                            TAE.Event Gate(int jump)=>b.Events.Single(e=>e.Type==0&&BitConverter.ToInt32(e.GetParameterBytes(false),0)==jump);
+                            if(a.ID==7004)foreach(int jump in new[]{8,39})Check(Gate(jump).StartTime==0&&Math.Abs(Gate(jump).EndTime-duration)<.0001f,"Dormant pile lost authored damage/collision protection");
+                            if(a.ID==7005) {
+                                float invincible=group.First().SourceModel=="c2900"?2.5f:1.6666666f,lockOn=group.First().SourceModel=="c2900"?2.5f:2.6666667f;
+                                Check(Gate(8).StartTime==0&&Math.Abs(Gate(8).EndTime-invincible)<.0001f&&Gate(49).StartTime==0&&Math.Abs(Gate(49).EndTime-lockOn)<.0001f,"Awakening lost source vulnerability/lock-on timing");
+                                Check(!b.Events.Any(e=>e.Type==0&&BitConverter.ToInt32(e.GetParameterBytes(false),0)==39),"Awakening gained an unauthored hurtbox-disable gate");
+                                Check(Math.Abs(Gate(24).StartTime-invincible)<.0001f&&Math.Abs(Gate(24).EndTime-(group.First().SourceModel=="c2900"?2.9f:2.6666667f))<.0001f,"Awakening lost its source superarmor interval");
+                            }
+                            if(a.ID%1000000 is 2014 or 2020 or 2040)Check(Gate(24).StartTime==0&&Gate(24).EndTime>1.9f,"Source recovery lost its superarmor gate");
+                            continue;
+                        }
+                        bool skeletonAttack=group.First().SourceModel is "c2900" or "c2910"&&a.ID is 1003013 or 1003014 or 1003015 or 1003016;
+                        bool Armor(TAE.Event e)=>e.Type==0&&BitConverter.ToInt32(e.GetParameterBytes(false),0)==24;
+                        if(skeletonAttack)Check(a.Events.Count(Armor)==(a.ID==1003013?1:a.ID==1003015?3:2)&&!b.Events.Any(Armor),"Skeleton basic attack retained donor superarmor");
+                        var expectedEvents=a.Events.Where(e=>(hasTorch||!Torch(e))&&(!skeletonAttack||!Armor(e))).ToArray();
                         Check(expectedEvents.Length==b.Events.Count,"Torch filter changed event count: "+a.ID);
                         foreach(var (e,n) in expectedEvents.Zip(b.Events))Check(SameEvent(e,n),$"Retained event changed: {a.ID}/{e.Type}, times {e.StartTime}/{n.StartTime} {e.EndTime}/{n.EndTime}, unknown {e.Unk04}/{n.Unk04}, group {e.Group?.GroupType}/{n.Group?.GroupType}, bytes {Convert.ToHexString(e.GetParameterBytes(false))}/{Convert.ToHexString(n.GetParameterBytes(false))}");
                     }
@@ -135,7 +202,7 @@ static class MapEnemySpawnsTests {
         }
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
-        Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data and every other animation event");
+        Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data; skeleton basic attacks also omit eight donor superarmor windows");
         Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons), source masks/shared textures, independent native rigs, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }
