@@ -67,6 +67,12 @@ internal static partial class Program {
         var stage=Directory.CreateTempSubdirectory("bbmap-map-");
         try{
             void Write(string relative,byte[] bytes){var p=Path.Combine(stage.FullName,"dvdroot_ps4",relative);Directory.CreateDirectory(Path.GetDirectoryName(p)!);File.WriteAllBytes(p,bytes);}
+            byte[]? ReadStaged(string relative){var p=Path.Combine(stage.FullName,"dvdroot_ps4",relative);return File.Exists(p)?File.ReadAllBytes(p):ReadNative(relative);}
+            if(target=="m24_00_00_00") {
+                var script=EMEVD.Read(ReadNative("event/"+baseMap+".emevd.dcx")??throw new FileNotFoundException("Native map script unavailable"));
+                script.Events.Clear();script.Events.Add(new EMEVD.Event(0));script.Events.Add(new EMEVD.Event(50));
+                Write("event/"+baseMap+".emevd.dcx",script.Write(DCX.Type.DCX_DFLT_10000_44_9));
+            }
             // Keep referenced original records for event stability; relocate original
             // visuals and parked actors away from the imported level.
             foreach(var part in msb.Parts.GetEntries().Where(p=>p is not MSBB.Part.Player && p is not MSBB.Part.Collision && p.ModelName?.StartsWith("m9")!=true)) {
@@ -198,7 +204,7 @@ internal static partial class Program {
                 foreach(var (path,bytes) in enemySpawns.Files)Write(path,bytes);
                 if(map=="m10_02_00_00") {
                     string eventPath="event/"+baseMap+".emevd.dcx";
-                    var wake=MapSkeletonAnimations.Events(sourceMap.ReadAsset,ReadNative(eventPath)??throw new FileNotFoundException("Native cemetery destination script unavailable"),enemySpawns.Spawns);
+                    var wake=MapSkeletonAnimations.Events(sourceMap.ReadAsset,ReadStaged(eventPath)??throw new FileNotFoundException("Native cemetery destination script unavailable"),enemySpawns.Spawns);
                     Write(eventPath,wake.Script);skeletonAwakenings=wake.Wakes;
                 }
             }
@@ -209,6 +215,20 @@ internal static partial class Program {
                     characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!);
                 foreach(var pickup in items.Pickups)msb.Parts.Objects.Single(p=>p.Name==pickup.TargetPart).GparamConfigStruct=Lighting(pickup.SourcePart);
                 foreach(var (path,bytes) in items.Files)Write(path,bytes);
+            }
+            MapWorldState.Result? worldState=null;
+            MapTalk.Result? dialogue=null;
+            IReadOnlyList<MapQuestState.Presence> npcAvailability=[];
+            if(profile.Id=="DS1R"&&map=="m10_02_00_00"&&legacyMap!=null&&boundCollision!=null&&characters!=null) {
+                MapQuestState.VerifyReservations(nativeRoot);
+                string eventPath="event/"+baseMap+".emevd.dcx";
+                byte[] sourceScript=sourceMap.ReadAsset("event/"+map+".emevd.dcx")??throw new FileNotFoundException("Source Firelink events unavailable");
+                worldState=MapWorldState.Apply(legacyMap,msb,staticTargets,boundCollision,slots,
+                    ReadStaged(eventPath)??throw new FileNotFoundException("Native Firelink events unavailable"),MapQuestState.Flag,sourceScript);
+                var actors=characters.Reports.Where(r=>r.EntityID.HasValue).ToDictionary(r=>r.SourceEntityID,r=>r.EntityID!.Value);
+                var availability=MapQuestState.Availability(worldState.Script,actors,sourceScript);npcAvailability=availability.Bindings;
+                Write(eventPath,MapQuestState.Initialize(availability.Script,sourceMap.ReadAsset("event/common.emevd.dcx")??throw new FileNotFoundException("Source initial quest states unavailable")));
+                dialogue=MapTalk.Export(msb,profile.Id,map,nativeRoot,definitions!,sourceMap.ReadAsset,MapQuestState.Flag,actors,Write,readNative:ReadStaged,nativeMap:baseMap);
             }
             foreach(var prefix in new[]{"h","l"}){
                 var groups=boundCollision==null?MapCollision.Partition(prefix=="h"?highTriangles:lowTriangles,slots.Length):boundCollision.Select(c=>(prefix=="h"?c.High:c.Low).ToList()).ToList();
@@ -230,8 +250,7 @@ internal static partial class Program {
             foreach(var player in msb.Parts.GetEntries().OfType<MSBB.Part.Player>()){player.Position=spawn;player.Rotation=Vector3.Zero;}
             foreach(var point in msb.Events.GetEntries().OfType<MSBB.Event.SpawnPoint>()){var region=msb.Regions.GetEntries().Single(r=>r.Name==point.SpawnPointName);region.Position=spawn;region.Rotation=Vector3.Zero;}
             var textures=BXF4.Read(ReadNative($"map/{area}/{area}_0003.tpfbhd")!,ReadNative($"map/{area}/{area}_0003.tpfbdt")!);int nextTexture=textures.Files.Max(f=>f.ID)+1;foreach(var texture in convertedTextures.Values){var tpf=new TPF{Platform=TPF.TPFPlatform.PS4,Encoding=1,Flag2=3};tpf.Textures.Add(texture);var encoded=tpf.Write(DCX.Type.DCX_DFLT_10000_44_9);var existing=textures.Files.SingleOrDefault(f=>Leaf(f.Name)==texture.Name+".tpf.dcx");if(existing==null)textures.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,nextTexture++,texture.Name+".tpf.dcx",encoded));else if(!existing.Bytes.Span.SequenceEqual(encoded))throw new InvalidDataException("Shared imported texture conflicts: "+texture.Name);}textures.Write(out var texHeader,out var texData);Write($"map/{area}/{area}_0003.tpfbhd",texHeader);Write($"map/{area}/{area}_0003.tpfbdt",texData);
-            byte[]? ReadComposed(string path)=>items?.Files.GetValueOrDefault(path)??ReadNative(path);
-            var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadComposed);
+            var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadStaged);
             var destinations=values.TryGetValue("--connection-targets",out var connectionsPath)?JsonSerializer.Deserialize<Dictionary<string,string>>(File.ReadAllText(connectionsPath))!:new Dictionary<string,string>();
             MapRuntimeLinks.Result? runtimeLinks=null;
             if(legacyMap!=null&&boundCollision!=null)runtimeLinks=MapRuntimeLinks.Apply(msb,legacyMap,boundCollision,slots,destinations);
@@ -241,8 +260,6 @@ internal static partial class Program {
                 // Both Cathedral Ward story variants are reserved by this import.
                 // They must resolve to the same imported scene at either phase.
                 Write("map/MapStudio/m24_00_00_01.msb.dcx",msb.Write(DCX.Type.DCX_DFLT_10000_44_9));
-                var script=EMEVD.Read(ReadNative("event/m24_00_00_00.emevd.dcx")??throw new FileNotFoundException("Native map script unavailable"));
-                script.Events.Clear();Write("event/m24_00_00_00.emevd.dcx",script.Write(DCX.Type.DCX_DFLT_10000_44_9));
             } else foreach(var variantPath in Directory.EnumerateFiles(Path.Combine(nativeRoot,"map/MapStudio"),target[..6]+"_*.msb.dcx")) {
                 if(Path.GetFileName(variantPath)==target+".msb.dcx")continue;
                 // Shared Havok bodies keep each variant's own names/references,
@@ -250,6 +267,7 @@ internal static partial class Program {
                 var variant=MSBB.Read(File.ReadAllBytes(variantPath));
                 if(legacyMap!=null&&boundCollision!=null)MapRuntimeLinks.Apply(variant,legacyMap,boundCollision,MapRuntimeLinks.MirrorCollisionBindings(variant,slots),destinations);
                 else variant.Parts.ConnectCollisions.Clear();
+                if(worldState!=null)MapWorldState.Mirror(variant,worldState);
                 Write("map/MapStudio/"+Path.GetFileName(variantPath),variant.Write(DCX.Type.DCX_DFLT_10000_44_9));
             }
             var breakableTargets=breakables?.Objects.ToDictionary(p=>p.Name,StringComparer.Ordinal);
@@ -271,10 +289,11 @@ internal static partial class Program {
                 reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)};
             var report=new{source=profile.Id,map,target,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
                 placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot},
+                worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=worldState==null?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,npcAvailability},dialogue,
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
                 breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,posedCorpses,characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
-                environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations="Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, quests, water physics, collision material behavior and navigation are not ported. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
+                environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations="Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
             File.WriteAllText(Path.Combine(stage.FullName,"conversion.json"),JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true,IncludeFields=true}));File.WriteAllText(Path.Combine(stage.FullName,"README.txt"),$"Experimental {map} map replacement for Bloodborne {target}. Enable only with a copied test save. Place player near {to.X} {to.Y} {to.Z}. See conversion.json for coverage and limitations.\n");Directory.CreateDirectory(Path.GetDirectoryName(output)!);Directory.Move(stage.FullName,output);Console.WriteLine(JsonSerializer.Serialize(report,new JsonSerializerOptions{IncludeFields=true}));return 0;
         }catch{if(stage.Exists)stage.Delete(true);throw;}
     }

@@ -748,11 +748,58 @@ was broken with ordinary attacks in an isolated gameplay test. Six verified sour
 animation clips place 16 source corpses in their original poses; loot and ragdoll behavior
 are not transferred. Crestfallen, Petrus and Anastacia use their source appearances on
 native friendly animation wrappers. Human appearances include the source armor, FaceGen
-head and hair. These three actors have AI and dialogue disabled; source quests, combat,
-idle poses and availability conditions are not implemented. Their source head-to-foot
+head and hair. DS1R imports now replace the private idle loops with Crestfallen's
+seated animation 7810 and Anastacia's seated animation 0. Petrus uses a source unarmed
+standing idle approximation; his equipment-specific stance and weapon attachments
+remain unresolved. The native combat AI stays disabled. Their source head-to-foot
 skeletal height now corrects the native wrapper's stature (approximately 0.839 for the two
 human NPCs and 0.904 for Anastacia). Source albedo uses sRGB views; normal/data maps remain
-linear. Native proportions and idle animation still differ from the source.
+linear. Native hitboxes, procedural animation and cloth still differ from the source.
+The FaceGen adapter reflects the source depth axis and retains all authored face
+LOD/motion draw sets. A native gameplay check confirmed complete front-facing
+faces on both Crestfallen and Petrus after this correction.
+
+DS1R Firelink also has an explicit source-state adapter. Its pool uses the sealed
+floor and collision before both bell flags, then swaps to the opened alternatives
+and retains the completion flag across reloads. These are the bell interaction flags,
+not boss death flags. Water rendering, Frampt and the actual bell interactions are
+not converted. In particular, the Kiln/Lordvessel map and its offering quest are not
+part of this Firelink adapter.
+
+The importer reserves stable, checked flags in an unused part of the existing native
+52100 group. It initializes only the three empty initial NPC state ranges once per
+copied mod save, preserves later states, and follows the source disappearance
+conditions for Petrus and Crestfallen. This state belongs to the import; it does not
+reuse Bloodborne's NPC quest flags. Changes to that manifest must retain existing
+source-to-target entries so saved progress remains valid.
+
+The bounded conversation adapter creates independent native ESDs and imports source
+subtitle sequences into private TalkParam/text rows. Its 45 lines use 41 selected
+original voice clips, decoded from source FSB4 into an owned native FSB5/FEV
+project for each NPC. The wrappers use checked IDs below 9000 so native character
+resource loading discovers their sound projects. Their NPC rows clear the multilingual
+flag so native preload registers each English default bank under its unsuffixed name.
+English source speech is used for every audio language; subtitle localizations are
+retained. Existing native voice events and wavebanks are preserved.
+This conversion requires `ffmpeg` on PATH or `BBMAP_FFMPEG` pointing to an installed
+executable; no decoder is downloaded by the importer. Crestfallen has his introduction,
+bell directions, exhausted/repeat lines and bell-aware branches. Petrus has his
+introduction and greeting/repeat lines. Anastacia retains the initial silent response
+through an explicit adaptation of her invisible source talk proxy. Source talk animations,
+shops, covenants, rewards, hostility, arrivals/departures beyond the listed conditions,
+Anastacia's restoration and complete NPC quest chains are not implemented.
+
+Run `tests/test_map_character_animations.sh`, `tests/test_map_world_state.sh`,
+`tests/test_map_quest_state.sh` and `tests/test_map_talk.sh` with the installed source
+and native assets to check this adapter. Format tests cover the emitted state machines
+and preservation of native rows/events. They are separate from native gameplay checks.
+
+A native gameplay run confirmed that Crestfallen's introduction finishes and advances
+to his directions, Petrus progresses through his greetings, and Anastacia's silent
+response finishes. Interrupting Crestfallen's directions leaves that topic available.
+After native save-and-quit and a full process restart, both NPCs retained their
+conversation progress and the pool remained sealed. Captured game audio also matches
+the original DS1 speech waveform; subtitle display alone was not used as audio proof.
 
 The ordinary-hollow adapter instantiates six Firelink enemies with source meshes,
 textures, equipment display masks and placements on independent native Hemwick humanoid

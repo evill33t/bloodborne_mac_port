@@ -2,16 +2,20 @@
 using SoulsFormats;
 using System.Numerics;
 
-// Source appearance and placements on a friendly native animation wrapper with AI disabled.
-// Source animation, dialogue, equipment behavior and quest events are not ported.
+// Source appearance, placements and supported idle loops on a friendly native
+// animation wrapper. Quest interaction is composed separately from its donor AI.
 internal static class MapCharacters {
     internal const string TemplateModel="c8030";
     internal const int TemplateParam=803000;
+    // Character resource loading only requests sound banks for IDs1..8999.
+    // Keep owned NPC wrappers within that native range, including future audio.
+    internal const int FirstModel=8900,LastModel=8999;
     internal record CharacterReport(string SourceName,string SourceModel,int SourceEntityID,int CharaInitID,
         int SourceNPCParamID,int SourceThinkParamID,int SourceTalkID,int SourceInitAnimID,
         Vector3 SourcePosition,Vector3 SourceRotation,Vector3 SourceScale,string Status,string? TargetModel,
         int? EntityID,int? NPCParamID,int? ThinkParamID,int Vertices,int Triangles,double DirectWeightShare,
-        IReadOnlyList<string> SourceParts,IReadOnlyList<string> Limitations,IReadOnlyList<string> TextureFallbacks,float ProportionScale=1);
+        IReadOnlyList<string> SourceParts,IReadOnlyList<string> Limitations,IReadOnlyList<string> TextureFallbacks,float ProportionScale=1,
+        MapCharacterAnimations.Pose? SourcePose=null);
     internal record Export(IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<MSBB.Model.Enemy> Models,
         IReadOnlyList<MSBB.Part.Enemy> Actors,IReadOnlyList<CharacterReport> Reports,byte[] GameParamBytes);
 
@@ -27,7 +31,7 @@ internal static class MapCharacters {
     static bool IsModel(string path)=>Leaf(path).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)||Leaf(path).EndsWith(".flver.dcx",StringComparison.OrdinalIgnoreCase);
 
     // The original native row bytes, padding, duplicate rows and row order remain
-    // opaque. Only the two documented clone fields below are edited.
+    // opaque. Only the documented owned-clone fields below are edited.
     internal static PARAM NativeRows(Memory<byte> bytes,bool think) {
         var rows=PARAM.Read(bytes);string type=think?"NPC_THINK_PARAM_ST":"NPC_PARAM_ST";short version=(short)(think?1:5);int size=think?148:388;
         if(rows.ParamType!=type||rows.ParamdefDataVersion!=version||rows.DetectedSize!=size||rows.BigEndian||rows.Format2D!=PARAM.FormatFlags1.LongDataOffset)
@@ -154,13 +158,16 @@ internal static class MapCharacters {
         var usedNames=destination.Parts.GetEntries().Select(p=>p.Name).ToHashSet(StringComparer.Ordinal);
         var usedEntityIDs=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).ToHashSet();
         var usedParams=npcs.Rows.Select(r=>r.ID).ToHashSet();
-        var files=new Dictionary<string,byte[]>();var models=new List<MSBB.Model.Enemy>();var actors=new List<MSBB.Part.Enemy>();var reports=new Dictionary<string,CharacterReport>();int nextModel=9800,nextEntity=2419700;
+        var files=new Dictionary<string,byte[]>();var models=new List<MSBB.Model.Enemy>();var actors=new List<MSBB.Part.Enemy>();var reports=new Dictionary<string,CharacterReport>();int nextModel=FirstModel,nextEntity=2419700;
         foreach(var p in selected) {
             bool Occupied(int id) {
                 string name="c"+id;return usedModels.Contains(name)||usedNames.Contains(name+"_0000")||usedParams.Contains(id*100)||
-                    File.Exists(Path.Combine(nativeDvdRoot,"chr",name+".chrbnd.dcx"))||File.Exists(Path.Combine(nativeDvdRoot,"chr",name+".anibnd.dcx"))||File.Exists(Path.Combine(nativeDvdRoot,"action/script",name+".hks"));
+                    Directory.EnumerateFiles(Path.Combine(nativeDvdRoot,"chr"),name+".*").Any()||
+                    File.Exists(Path.Combine(nativeDvdRoot,"action/script",name+".hks"))||
+                    Directory.Exists(Path.Combine(nativeDvdRoot,"sound"))&&Directory.EnumerateFiles(Path.Combine(nativeDvdRoot,"sound"),"sprj_"+name+".*").Any()||
+                    Directory.Exists(Path.Combine(nativeDvdRoot,"sound"))&&Directory.EnumerateFiles(Path.Combine(nativeDvdRoot,"sound"),"sprj_"+name+"_*.fsb").Any();
             }
-            while(nextModel<=9999&&Occupied(nextModel))++nextModel;if(nextModel>9999)throw new InvalidDataException("No unused character model ID");
+            while(nextModel<=LastModel&&Occupied(nextModel))++nextModel;if(nextModel>LastModel)throw new InvalidDataException("No unused character model ID within the native sound-bank range");
             int id=nextModel++,paramID=id*100;string target="c"+id;usedModels.Add(target);usedParams.Add(paramID);
             while(nextEntity<=2419799&&usedEntityIDs.Contains(nextEntity))++nextEntity;if(nextEntity>2419799)throw new InvalidDataException("No unused imported character entity ID");
             int entityID=nextEntity++;usedEntityIDs.Add(entityID);
@@ -174,9 +181,15 @@ internal static class MapCharacters {
                 limitations=["Authored source c2750 appearance retained; source cloth simulation and source shader behavior are not reproduced."];
             }
             var bake=Package(sourceModel,textures,profile,TemplateModel,target,nativeCharacter,nativeAnimation,nativeScript,files);
+            var pose=profile=="DS1R"?MapCharacterAnimations.Apply(readSource,p,target,bake,files):null;
+            if(pose!=null)limitations.AddRange(pose.Limitations);
             // The original Doll logic is area-local and changes native quest flags.
             // An AI-disabled actor still owns its native animation/behavior rig.
             var param=npcBytes.ToArray();BitConverter.GetBytes(-1).CopyTo(param,4);
+            // Native18e0675 loads modelID*100 and reads isMultilingual at
+            // payload0x149 bit5. Owned voice projects use one default-language
+            // memory bank; a suffixed registration would not match that bank.
+            param[0x149]&=0xDF;
             // Native NpcParam display-mask fields 0..31 occupy these four bytes.
             // All source material groups, including source #33, remain baked.
             foreach(int index in new[]{0x146,0x147,0x14A,0x14B})param[index]=255;
@@ -186,8 +199,8 @@ internal static class MapCharacters {
             actor.TalkID=-1;actor.CharaInitID=-1;actor.Position=p.Position+offset;actor.Rotation=p.Rotation;actor.Scale=p.Scale*bake.ProportionScale;actor.CollisionName=collisionName;actor.PatrolInfoName=null!;
             Array.Clear(actor.MovePointNames);actor.InitAnimID=-1;actor.DamageAnimID=-1;actor.PatrolType=0;actor.FallbackPlatoonID=0;
             Array.Fill(actor.DrawGroups,uint.MaxValue);Array.Fill(actor.DispGroups,uint.MaxValue);Array.Fill(actor.BackreadGroups,uint.MaxValue);usedNames.Add(actor.Name);actors.Add(actor);
-            limitations.Add("Friendly native Bloodborne Doll animation, hitbox and physics are an approximation. AI is explicitly disabled (ThinkParamID and NPC aiThinkId -1); no native Doll AI or quest logic is packaged. Source idle poses, combat, weapons, dialogue and quest events are not ported. Talk and source quest interactions are disabled. Runtime animation/appearance require gameplay validation.");
-            reports.Add(p.Name,Report(p,"placed-native-idle-ai-disabled",target,entityID,paramID,bake.Vertices,bake.Triangles,bake.DirectWeightShare,parts,limitations,bake.TextureFallbacks,bake.ProportionScale));
+            limitations.Add("Friendly native Bloodborne hitbox and physics are an approximation. AI is explicitly disabled (ThinkParamID and NPC aiThinkId -1); no native Doll AI or quest logic is packaged. Source combat, equipment behavior and cloth simulation are not ported. Talk and availability are composed by the quest adapter. Runtime animation/appearance require gameplay validation.");
+            reports.Add(p.Name,Report(p,pose==null?"placed-native-idle-ai-disabled":"placed-source-idle-ai-disabled",target,entityID,paramID,bake.Vertices,bake.Triangles,bake.DirectWeightShare,parts,limitations,bake.TextureFallbacks,bake.ProportionScale) with {SourcePose=pose});
         }
         npcFile.Bytes=WriteRows(npcs);var paramBundle=gameParams.Write(DCX.Type.DCX_DFLT_10000_44_9);files.Add("param/gameparam/gameparam.parambnd.dcx",paramBundle);
         foreach(var p in source.Parts.Enemies.Where(p=>!reports.ContainsKey(p.Name))) {

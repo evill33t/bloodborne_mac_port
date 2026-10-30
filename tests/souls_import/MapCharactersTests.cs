@@ -10,6 +10,19 @@ static class MapCharactersTests {
     static void Equal(Memory<byte> actual,Memory<byte> expected,string message)=>Check(actual.Span.SequenceEqual(expected.Span),message);
     static void Reject(Action action,string message) {try{action();}catch(InvalidDataException){return;}catch(FileNotFoundException){return;}catch(NotSupportedException){return;}throw new Exception(message);}
     static bool Finite(Vector3 p)=>float.IsFinite(p.X)&&float.IsFinite(p.Y)&&float.IsFinite(p.Z);
+    sealed class NativeFixture : IDisposable {
+        internal string Root {get;}=Path.Combine(Path.GetTempPath(),"bbmap-character-allocation-"+Guid.NewGuid().ToString("N"));
+        internal NativeFixture(Func<string,byte[]> read) {
+            foreach(string path in new[]{"map/MapStudio/m21_00_00_00.msb.dcx","chr/c8030.chrbnd.dcx","chr/c8030.anibnd.dcx","action/script/c8030.hks"}) {
+                string target=Path.Combine(Root,path);Directory.CreateDirectory(Path.GetDirectoryName(target)!);File.WriteAllBytes(target,read(path));
+            }
+            Directory.CreateDirectory(Path.Combine(Root,"sound"));
+            // Occupancy must cover a project, a localized wavebank and a limiter
+            // even when the corresponding chr/HKS files do not exist.
+            foreach(string name in new[]{"sprj_c8901.fev","sprj_c8902_eng.fsb","sprj_c8903.itl"})File.WriteAllBytes(Path.Combine(Root,"sound",name),[]);
+        }
+        public void Dispose()=>Directory.Delete(Root,true);
+    }
     public static void Main(string[] args) {
         string sourceRoot=args[0],nativeRoot=args[1],defs=args[2];var hashes=new Dictionary<string,byte[]>();
         byte[]? Read(string path){string full=Path.Combine(sourceRoot,path);if(!File.Exists(full))return null;byte[] bytes=File.ReadAllBytes(full);hashes.TryAdd(full,SHA256.HashData(bytes));return bytes;}
@@ -21,18 +34,23 @@ static class MapCharactersTests {
         var unrelated=oldGame.Files.Single(f=>Leaf(f.Name)=="ObjectParam.param");byte[] stagedObject=unrelated.Bytes.ToArray();stagedObject[^1]^=1;unrelated.Bytes=stagedObject;
         byte[] stagedGame=oldGame.Write(DCX.Type.DCX_DFLT_10000_44_9);
         // The allocator must respect MSB models, all entity namespaces and files.
-        destination.Models.Enemies.Add(new MSBB.Model.Enemy("c9800"));
+        destination.Models.Enemies.Add(new MSBB.Model.Enemy("c8900"));
         destination.Regions.GetEntries()[0].EntityID=2419700;destination.Events.GetEntries()[0].EntityID=2419701;
         byte[] beforeDestination=destination.Write();
-        foreach(string path in new[]{"map/MapStudio/m21_00_00_00.msb.dcx","chr/c8030.chrbnd.dcx","chr/c8030.anibnd.dcx","action/script/c8030.hks"})Native(path);
-        var result=MapCharacters.BakeFirelink(Read,"DS1R",mapName,defs,nativeRoot,destination,offset,collision,stagedGame);
+        using var nativeFixture=new NativeFixture(Native);
+        var result=MapCharacters.BakeFirelink(Read,"DS1R",mapName,defs,nativeFixture.Root,destination,offset,collision,stagedGame);
         Equal(destination.Write(),beforeDestination,"Character staging mutated the destination MSB");
         Check(result.Actors.Count==3&&result.Models.Count==3&&result.Files.Count==10,"Expected three independent native character packages plus composed game parameters");
         Check(result.Reports.Count==source.Parts.Enemies.Count&&result.Reports.Select(r=>r.SourceName).Distinct().Count()==result.Reports.Count,"Not all source characters were accounted for exactly once");
-        var active=result.Reports.Where(r=>r.Status=="placed-native-idle-ai-disabled").ToArray();Check(active.Length==3,"Unsupported source NPCs were instantiated");
+        var active=result.Reports.Where(r=>r.Status=="placed-source-idle-ai-disabled").ToArray();Check(active.Length==3,"Unsupported source NPCs were instantiated");
+        Check(active.All(r=>r.SourcePose!=null)&&active.Single(r=>r.CharaInitID==6270).SourcePose!.SourceClipID==7810&&
+            active.Single(r=>r.SourceModel=="c2750").SourcePose!.SourceClipID==0,"Source initial NPC poses were not selected");
+        Check(active.Single(r=>r.CharaInitID==6080).SourcePose!.Approximation,"Petrus equipment-driven idle limitation was hidden");
         Check(active.Where(r=>r.SourceModel=="c0000").Select(r=>r.CharaInitID).Order().SequenceEqual(new[]{6080,6270}),"Wrong human NPC appearances selected");
         Check(active.Any(r=>r.SourceModel=="c2750"&&r.CharaInitID==-1),"Authored Anastacia source model missing");
-        Check(active.All(r=>r.EntityID>2419701&&r.EntityID<=2419799&&r.TargetModel!="c9800"),"Model/entity allocator collided with destination data");
+        Check(active.All(r=>r.EntityID>2419701&&r.EntityID<=2419799&&r.TargetModel!="c8900"),"Model/entity allocator collided with destination data");
+        Check(active.All(r=>int.Parse(r.TargetModel![1..]) is >=8904 and <9000),"Character allocator used a reserved sound identity or a model outside the native sound-bank range");
+        Check(result.Models.All(m=>int.Parse(m.Name[1..])<9000)&&result.Actors.All(a=>int.Parse(a.ModelName[1..])<9000),"Imported actor model cannot register a native character sound bank");
         Check(result.Reports.Where(r=>r.TargetModel==null).All(r=>r.Vertices==0&&r.Limitations.Any(l=>l.Contains("not instantiated"))),"Disabled quest NPCs look like converted actors");
         Check(result.Reports.Where(r=>r.SourceModel=="c0000"&&r.TargetModel==null).All(r=>r.Status=="disabled-source-quest-or-interaction"),"Future quest arrivals were spawned unconditionally");
         var systemTextures=TPF.Read(Native("other/systex.tpf.dcx")).Textures.Select(t=>Leaf(t.Name).Split('.')[0]).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -52,8 +70,20 @@ static class MapCharactersTests {
             Equal(result.Files[$"action/script/{target}.hks"],nativeScript,"Native idle HKS changed");
             foreach(var f in animation.Files) {
                 var originalFile=nativeAnimation.Files.Single(n=>n.ID==f.ID);
-                if(TAE.Is(f.Bytes.ToArray())) {var tae=TAE.Read(f.Bytes);var originalTae=TAE.Read(originalFile.Bytes);Check(tae.ID==200000+id&&tae.Animations.Count==originalTae.Animations.Count,"Renamed TAE lost animation/event data");tae.ID=originalTae.ID;Equal(tae.Write(),originalTae.Write(),"TAE conversion modified fields beyond the character ID");}
+                if(TAE.Is(f.Bytes.ToArray())) {
+                    var tae=TAE.Read(f.Bytes);var originalTae=TAE.Read(originalFile.Bytes);Check(tae.ID==200000+id&&tae.Animations.Count==originalTae.Animations.Count,"Renamed TAE lost animation/event data");
+                    foreach(int slot in report.SourcePose!.NativeIdleSlots) {
+                        var row=tae.Animations.Single(a=>a.ID==slot);
+                        Check(row.Events.All(e=>e.StartTime>=0&&e.EndTime<=report.SourcePose.Duration+.00001f),"Imported idle TAE timing exceeds its source loop");
+                        tae.Animations[tae.Animations.IndexOf(row)]=originalTae.Animations.Single(a=>a.ID==slot);
+                    }
+                    tae.ID=originalTae.ID;Equal(tae.Write(),originalTae.Write(),"NPC pose conversion changed a non-idle TAE row or metadata");
+                }
                 else if(f.ID>=7000000&&f.ID<8000000) {Equal(f.Bytes,SkinRetarget.RenameBehavior(originalFile.Bytes,"c8030",target),"Behavior rename changed fixup-safe clone semantics");Check(!System.Text.Encoding.ASCII.GetString(f.Bytes.Span).Contains("c8030",StringComparison.OrdinalIgnoreCase),"Behavior still addresses the original Doll character");}
+                else if(report.SourcePose!.NativeIdleSlots.Contains(f.ID-1000000000)) {
+                    Check(!f.Bytes.Span.SequenceEqual(originalFile.Bytes.Span),"Imported idle retained the native Doll pose");
+                    var pack=new NativeAnimation.Pack(f.Bytes.ToArray());Check(Math.Abs(pack.Float(pack.Object("hkaSplineCompressedAnimation")+16)-report.SourcePose.Duration)<.00001f,"NPC pose playback duration differs from source");
+                }
                 else Equal(f.Bytes,originalFile.Bytes,"Native animation/skeleton changed");
             }
             var flver=FLVER2.Read(character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);var textureEntry=character.Files.Single(f=>TPF.Is(f.Bytes.ToArray()));
@@ -93,10 +123,17 @@ static class MapCharactersTests {
             if(think)continue;
             foreach(var report in active) {
                 int param=report.NPCParamID!.Value;byte[] original=MapCharacters.Payload(oldRows.Rows.Single(r=>r.ID==803000));byte[] clone=MapCharacters.Payload(newRows.Rows.Single(r=>r.ID==param));
-                if(!think){BitConverter.GetBytes(-1).CopyTo(original,4);foreach(int index in new[]{0x146,0x147,0x14A,0x14B})original[index]=255;Check(BitConverter.ToInt32(clone,4)==-1&&report.ThinkParamID==-1,"Imported NPC AI is not explicitly disabled");}Equal(clone,original,"Native NPC/Think donor behavior changed beyond documented clone fields");
+                if(!think){BitConverter.GetBytes(-1).CopyTo(original,4);original[0x149]&=0xDF;foreach(int index in new[]{0x146,0x147,0x14A,0x14B})original[index]=255;Check(BitConverter.ToInt32(clone,4)==-1&&report.ThinkParamID==-1,"Imported NPC AI is not explicitly disabled");Check((clone[0x149]&0x20)==0,"Owned default-language voice bank retained multilingual registration");}Equal(clone,original,"Native NPC/Think donor behavior changed beyond documented clone fields");
             }
         }
         // Unsupported/missing source appearance is an error, never a native head substitution.
+        var exhausted=MSBB.Read(mapBytes);
+        for(int id=8900;id<=8999;id++)if(!exhausted.Models.Enemies.Any(m=>m.Name=="c"+id))exhausted.Models.Enemies.Add(new MSBB.Model.Enemy("c"+id));
+        byte[] exhaustedBefore=exhausted.Write();bool allocationRejected=false;
+        try {MapCharacters.BakeFirelink(Read,"DS1R",mapName,defs,nativeFixture.Root,exhausted,offset,collision,stagedGame);}
+        catch(InvalidDataException){allocationRejected=true;}
+        Check(allocationRejected,"Exhausted character range rolled over to c9000 instead of rejecting");
+        Equal(exhausted.Write(),exhaustedBefore,"Exhausted character allocation mutated the destination MSB");
         Reject(()=>MapCharacters.BakeFirelink(Read,"DS3",mapName,defs,nativeRoot,MSBB.Read(mapBytes),offset,collision),"Unsupported profile was silently substituted");
         Reject(()=>MapCharacters.BakeFirelink(Read,"DS1R",mapName,defs,nativeRoot,MSBB.Read(mapBytes),new(float.NaN),collision),"Non-finite character offset accepted");
         Reject(()=>MapCharacters.BakeFirelink(path=>path=="facegen/FaceGen.fgbnd"?null:Read(path),"DS1R",mapName,defs,nativeRoot,MSBB.Read(mapBytes),offset,collision),"Missing source head was silently substituted");

@@ -3,10 +3,17 @@
   <ItemGroup>
     <Compile Include="MapCharactersTests.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/MapCharacterAnimations.cs" Link="MapCharacterAnimations.cs"/>
+    <Compile Include="../../editor/souls_import/NativeAnimation.cs" Link="NativeAnimation.cs"/>
+    <Compile Include="../../editor/souls_import/NativeSpline.cs" Link="NativeSpline.cs"/>
+    <Compile Include="../../editor/souls_import/SourceAnimation.cs" Link="SourceAnimation.cs"/>
+    <Compile Include="../../editor/souls_import/SourceCollision.cs" Link="SourceCollision.cs"/>
+    <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs"/>
     <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
     <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
     <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+    <Reference Include="Havok.HKX2"><HintPath>$(SmithboxOutput)/Havok.HKX2.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

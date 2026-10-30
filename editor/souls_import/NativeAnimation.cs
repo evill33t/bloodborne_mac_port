@@ -60,12 +60,22 @@ internal static class NativeAnimation {
         if(names.Distinct(StringComparer.Ordinal).Count()!=names.Length)throw new InvalidDataException("Repeated native animation bone name");
         return new(p.String(obj+16),names,parent,local,Worlds(local,parent));
     }
-    internal static byte[] Convert(SourceAnimation clip,byte[] skeleton,IReadOnlyList<BoneMatch> mappings,float proportionScale) {
+    internal static byte[] Convert(SourceAnimation clip,byte[] skeleton,IReadOnlyList<BoneMatch> mappings,float proportionScale,bool preserveSourceWorld=false) {
         if(!float.IsFinite(proportionScale)||proportionScale is <.5f or >2.5f)throw new InvalidDataException("Invalid animation stature scale");
         var rig=Skeleton(skeleton);var sourceNames=clip.Bones.Select((b,i)=>(b.Name,i)).ToDictionary(p=>p.Name,p=>p.i,StringComparer.Ordinal);
         var targetNames=rig.Names.Select((n,i)=>(n,i)).ToDictionary(p=>p.n,p=>p.i,StringComparer.Ordinal);var map=Enumerable.Repeat(-1,rig.Names.Length).ToArray();
         foreach(var m in mappings.Where(m=>m.Direct))if(sourceNames.TryGetValue(m.Source,out int s)&&targetNames.TryGetValue(m.Target,out int t)) {
             if(map[t]!=-1&&map[t]!=s)throw new InvalidDataException("Animation retarget maps two source bones to one target");map[t]=s;
+        }
+        if(preserveSourceWorld) {
+            if(map.Count(i=>i>=0)<19)throw new InvalidDataException("NPC pose has too few explicit skin mappings");
+            // A robe may have no vertices weighted directly to a foot/hand.
+            // Native IK and hitboxes still consume those animation anchors.
+            // Fill unique common names without replacing an explicit skin map.
+            static string Key(string name)=>new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+            var uniqueSource=clip.Bones.Select((b,i)=>(key:Key(b.Name),i)).GroupBy(p=>p.key).Where(g=>g.Count()==1).ToDictionary(g=>g.Key,g=>g.Single().i);
+            foreach(var group in rig.Names.Select((n,i)=>(key:Key(n),i)).GroupBy(p=>p.key).Where(g=>g.Count()==1))
+                if(map[group.Single().i]<0&&uniqueSource.TryGetValue(group.Key,out int source)&&!map.Contains(source))map[group.Single().i]=source;
         }
         // Mesh-weight mappings omit the unweighted locomotion root. Bloodborne's
         // animation modifiers still consume it; leaving Master at reference height
@@ -87,7 +97,11 @@ internal static class NativeAnimation {
         if(transforms.Capacity>4000000)throw new InvalidDataException("Converted animation exceeds sampling budget");
         for(int frame=0;frame<clip.FrameCount;frame++) {
             var sw=Scaled(clip.Sample(frame==clip.FrameCount-1?clip.Duration:frame*clip.FrameDuration));var tw=new Matrix4x4[map.Length];var done=new byte[map.Length];
-            Matrix4x4 At(int t){if(done[t]==2)return tw[t];if(done[t]==1)throw new InvalidDataException("Cyclic target animation");done[t]=1;int parent=rig.Parents[t];var pw=parent<0?Matrix4x4.Identity:At(parent);tw[t]=map[t]>=0?alignment[t]*sw[map[t]]:rig.Local[t]*pw;done[t]=2;return tw[t];}
+            // Imported NPC meshes already carry the source-to-native bind-pose
+            // remap. Applying the native bind delta again displaces their hands
+            // by roughly 40cm on the Doll rig. The explicit NPC mode retains the
+            // source world pose; ordinary native-rest/combat conversion is unchanged.
+            Matrix4x4 At(int t){if(done[t]==2)return tw[t];if(done[t]==1)throw new InvalidDataException("Cyclic target animation");done[t]=1;int parent=rig.Parents[t];var pw=parent<0?Matrix4x4.Identity:At(parent);tw[t]=map[t]>=0?(preserveSourceWorld?sw[map[t]]:alignment[t]*sw[map[t]]):rig.Local[t]*pw;done[t]=2;return tw[t];}
             for(int t=0;t<map.Length;t++){var world=At(t);int parent=rig.Parents[t];var local=world;if(parent>=0){if(!Matrix4x4.Invert(At(parent),out var inverse))throw new InvalidDataException("Singular animated parent");local*=inverse;}transforms.Add(local);}
         }
         return NativeSpline.Encode(transforms,rig.Names.Length,clip.FrameCount,clip.FrameDuration,rig.Name,rig.Names);

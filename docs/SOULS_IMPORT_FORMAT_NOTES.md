@@ -285,3 +285,81 @@ still disabled. These contrast controls are not numerically interchangeable; sou
 contrast, unequal RGB correction, nonzero hue and the exact source tone curve remain
 unconverted. A separate direct packed-shininess experiment made terrain look wet and was
 discarded; static material response continues to use the existing native approximation.
+
+## DS1 FaceGen coordinates and draw variants
+
+The FaceGen TRI/EGM coordinates use the opposite depth axis from the authored DS1
+character parts. Reflect position and normal Z before assembling them with the
+canonical skeleton. Preserve the FLVER template's original triangle order and
+recompute tangents after this reflection. Negating triangle winding alone does
+not repair the misplaced geometry: a two-sided material can show the back of the
+face through the skull opening while leaving the mouth visibly wrong.
+
+An independent check extracts the 40-vertex boundary from the original
+`FC_M_0000` skull triangles. Both Firelink human NPCs' generated face boundaries
+then match its X/Y/Z positions within 0.7 micrometres; the unreflected geometry
+misses the opening by approximately 8–18 centimetres. This comparison uses
+authored geometry rather than another copy of the generated face.
+
+Retain all six authored face draw variants: base, LOD1, LOD2 and their motion-blur
+counterparts. Recover UV seams from the base topology and reuse those vertices
+for the collapsed LOD topology. Normal backface culling remains enabled.
+
+## Firelink world-state scope
+
+DS1 event `11020350` selects pool floor `o1480`/collision `h0005B2` initially and
+the opened `o1481`/`h0105B2` pair after both bell interaction flags `11010700` and
+`11400200`. These are distinct from the boss-death conditions. The adapter gives
+every converted collision record a unique entity ID, including duplicates that
+share a model, and switches all corresponding records together. The completion
+flag restores the opened state at map startup.
+
+The separate quest-flag manifest reserves explicit stable native bits, preserving
+saved mappings when further source flags are added. Initialization selects the
+three source NPC baseline states only when their ranges are empty, once per mod
+save. This does not implement the bell interactions, Frampt, water physics,
+Lordvessel offering or the Kiln map. A private native-gameplay test confirmed that
+one bell retains the physical cap and both bells remove it; its bell-setting
+triggers are diagnostic only and are excluded from exports.
+
+## Bounded Firelink speech conversion
+
+Source TalkParam rows have 32 bytes; native rows have 68. Only supported source
+sequences are adapted into independent native rows and ESDs. Their localized
+subtitles remain in menu FMG 1. Unvoiced imported rows did not sustain readable
+subtitles in a native comparison, while a local retail voiced row using the same
+actor and state machine did. Registering the original source speech restores
+normal subtitle duration.
+
+The source `frpg_sm10.fsb` contains FSB4 MPEG samples with four-byte frame
+alignment. Remove alignment padding, decode the selected clips with an installed
+`ffmpeg`, and verify their declared mono 44.1 kHz frame counts before producing
+native FSB5 PCM16 samples. Each NPC receives an owned character sound project
+with one resident bank and default-language metadata, matching the native PCM
+character layout. The native map sound project and its banks stay unchanged.
+The adapter does not replace a retail voice to borrow its subtitle timing.
+The native wrapper uses its shipped
+conversation-completion function 57 and completion command 71.
+
+The 45 selected lines share 41 source clips. Only this bounded Firelink voice
+schema is supported; these formats and checks do not establish a general sound
+bank converter or full NPC quest compatibility.
+
+Native character-resource loading parses the `cXXXX` resource name and requests
+its sound project only for IDs 1 through 8999. A higher imported ID can render
+correctly while its matching sound project is never requested. This condition
+is independent of TAE sound events or the NPC's disabled combat AI.
+
+The same loader looks up `NpcParam[modelID * 100]` and reads `isMultilingual`
+(payload byte `0x149`, bit 5). That flag controls both the loaded filename and
+the memory-bank registration name, independently of the FEV language metadata.
+Clear only this bit on imported NPC clones paired with default-language banks;
+the Doll donor enables it. Adding localized filename aliases alone does not
+repair the mismatched registration. Original NPC rows remain unchanged.
+
+The map sound task preloads the bank named after its project. An additional FEV
+bank descriptor alone does not prove that the native sound manager will load
+that bank. Its separate file callback can reject filenames before a filesystem
+request, depending on the native loader configuration and allow-list. Validate
+actual file requests, finite speech completion and captured game audio rather
+than treating subtitle display or FEV readback as playback proof.
