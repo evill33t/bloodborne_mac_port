@@ -70,6 +70,11 @@ internal static class NpcFace {
         if(positions.Any(p=>!Finite(p)))throw new InvalidDataException("Nonfinite morphed FaceGen position");return positions;
     }
     static (int,int,int) Key(int a,int b,int c) {if(a>b)(a,b)=(b,a);if(b>c)(b,c)=(c,b);if(a>b)(a,b)=(b,a);return(a,b,c);}
+    // FaceGen's TRI/EGM basis has the opposite Z direction from source FLVER.
+    // The forty generated outer-rim points match the authored FC_M_0000 skull
+    // opening to <1 micrometre after this reflection (X/Y already agree).
+    // Reflect normals too, and retain the original FLVER triangle winding.
+    static Vector3 FlverBasis(Vector3 point)=>new(point.X,point.Y,-point.Z);
     static FLVER2.BufferLayout Layout()=>new() {
         new(FLVER.LayoutType.Float3,FLVER.LayoutSemantic.Position),new(FLVER.LayoutType.UByte4,FLVER.LayoutSemantic.BoneIndices),
         new(FLVER.LayoutType.Short4Norm,FLVER.LayoutSemantic.BoneWeights),new(FLVER.LayoutType.Float3,FLVER.LayoutSemantic.Normal),
@@ -118,17 +123,28 @@ internal static class NpcFace {
                 }
                 mesh.FaceSets.Add(new(fs.Flags,false,fs.CullBackfaces,fs.Unk06,indices));
             }
+            // FaceGen's runtime template contains the same six draw variants as
+            // the authored skull/hair: base/LOD1/LOD2 and their motion-blur sets.
+            // Keep their topology so selecting a lower LOD cannot hide the face.
+            // Their collapsed triangles do not necessarily occur in the TRI, so
+            // recover seam UVs from the base topology above, then reuse vertices.
+            foreach(var fs in from.FaceSets.Where(f=>f.Flags!=FLVER2.FaceSet.FSFlags.None)) {
+                if((fs.Flags&FLVER2.FaceSet.FSFlags.EdgeCompressed)!=0)throw new NotSupportedException("Compressed FaceGen draw topology is unsupported");
+                var indices=fs.Triangulate(from.Vertices.Count<65535);
+                if(indices.Count%3!=0||indices.Any(v=>v<0||v>=assigned.Length))throw new InvalidDataException("Invalid FaceGen draw-variant facet");
+                mesh.FaceSets.Add(new(fs.Flags,false,fs.CullBackfaces,fs.Unk06,indices));
+            }
             for(int v=0;v<assigned.Length;++v) {
                 int original=map.Indices[v];var normal=normals[original];
                 if(!Finite(normal)||normal.LengthSquared()<1e-12f)throw new InvalidDataException("Invalid generated FaceGen normal");
                 if(!assigned[v])uv[v]=fallbackUv.GetValueOrDefault(original);
                 if(MathF.Round(uv[v].X*1024)<short.MinValue||MathF.Round(uv[v].X*1024)>short.MaxValue||MathF.Round(uv[v].Y*1024)<short.MinValue||MathF.Round(uv[v].Y*1024)>short.MaxValue)
                     throw new InvalidDataException("Generated FaceGen UV exceeds the packed source layout");
-                var vert=new FLVER.Vertex{Position=points[original],Normal=Vector3.Normalize(normal),UVs=[new(uv[v],0),new(uv[v],0)],Colors=[new FLVER.VertexColor(1f,1f,1f,1f)]};
+                var vert=new FLVER.Vertex{Position=FlverBasis(points[original]),Normal=Vector3.Normalize(FlverBasis(normal)),UVs=[new(uv[v],0),new(uv[v],0)],Colors=[new FLVER.VertexColor(1f,1f,1f,1f)]};
                 vert.BoneIndices[0]=head;vert.BoneWeights[0]=1;mesh.Vertices.Add(vert);
             }
             var tangents=new Vector3[mesh.Vertices.Count];var bitangents=new Vector3[tangents.Length];
-            foreach(var fs in mesh.FaceSets)for(int f=0;f<fs.Indices.Count;f+=3) {
+            foreach(var fs in mesh.FaceSets.Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None))for(int f=0;f<fs.Indices.Count;f+=3) {
                 int a=fs.Indices[f],b=fs.Indices[f+1],c=fs.Indices[f+2];var e1=mesh.Vertices[b].Position-mesh.Vertices[a].Position;var e2=mesh.Vertices[c].Position-mesh.Vertices[a].Position;
                 var u1=uv[b]-uv[a];var u2=uv[c]-uv[a];float determinant=u1.X*u2.Y-u1.Y*u2.X;
                 if(Math.Abs(determinant)<1e-12f)continue;var t=(e1*u2.Y-e2*u1.Y)/determinant;var bt=(e2*u1.X-e1*u2.X)/determinant;
