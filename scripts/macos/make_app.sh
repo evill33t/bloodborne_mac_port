@@ -7,7 +7,7 @@
 # to the newest). If the game stops with an error, the launcher shows a crash report and the log.
 #
 # The game window runs from inside the bundle (a link to out/bbgpu-host), so the Dock shows
-# "Bloodborne". A bundled Windows-launcher icon is used until the player's game artwork
+# "Bloodborne". The bundled Seamless Co-op logo is used until the player's game artwork
 # is available (assets/branding/README.md). Bloodborne.app stays local and ignored.
 #
 # usage: bash scripts/macos/make_app.sh     (again after moving the repository)
@@ -55,7 +55,7 @@ ln -s "$repo/out/bbgpu-host" "$app/Contents/MacOS/bbgpu-host"
 ln -s "$repo/out/bbgpu-host-macos27" "$app/Contents/MacOS/bbgpu-host-macos27"
 
 # The bundled fallback also covers a first launch without a selected game folder.
-source_icon=$repo/assets/branding/bloodborne.ico
+source_icon=$repo/assets/branding/seamless-coop-logo.png
 game=
 if [[ -f launch.conf ]]; then game=$(set -a; source ./launch.conf; printf '%s' "${BB_GAME_DIR:-}"); fi
 [[ -z $game && -f ../CUSA03173/eboot.bin ]] && game=$(cd ../CUSA03173 && pwd)

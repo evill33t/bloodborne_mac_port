@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Convert the selected artwork into a macOS icon without changing its composition.
-# Bundled fallback: Supermedo/bloodborne_pc, launcher/bloodborne.ico (nick24051998).
+# Bundled fallback: Yharnam Together / Bloodborne Seamless Co-op's website logo.
 # Exact source and hashes: assets/branding/README.md.
 set -euo pipefail
 source_icon=$1

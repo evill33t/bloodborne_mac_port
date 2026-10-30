@@ -41,7 +41,7 @@ app=$dist/Bloodborne.app
 contents=$app/Contents
 rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/port/scripts" "$contents/Resources/licenses"
-bash scripts/macos/build_icon.sh assets/branding/bloodborne.ico "$contents/Resources/Bloodborne.icns"
+bash scripts/macos/build_icon.sh assets/branding/seamless-coop-logo.png "$contents/Resources/Bloodborne.icns"
 
 # Executables: library search goes to Frameworks/ only (the build's rpaths name this checkout).
 install -m755 out/gpu-arm64/bbmap-prepare out/bb-probe out/bbgpu-host out/bbgpu-host-macos27 "$contents/MacOS/"
