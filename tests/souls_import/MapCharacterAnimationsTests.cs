@@ -42,11 +42,11 @@ static class MapCharacterAnimationsTests {
         var skeleton=BND4.Read(nativeBank).Files.Single(f=>f.ID==1000000).Bytes.ToArray();var rig=NpcAnimationInspector.Skeleton(skeleton);
         Check(rig.Names.Length==129&&rig.Name=="Master","Native Doll rig changed");var results=new List<object>();
         foreach(var source in selections) {
-            FLVER2 original=source.ModelName=="c0000"?NpcAppearance.Load(Read,defs,source.CharaInitID).Model:
+            FLVER2 original=source.ModelName=="c0000"?NpcAppearance.Load(Read,defs,source.CharaInitID,applyBodyShape:true).Model:
                 FLVER2.Read(BND3.Read(Read("chr/c2750.chrbnd.dcx")!).Files.Single(f=>Leaf(f.Name)=="c2750.flver").Bytes);
             var textures=original.Materials.SelectMany(m=>m.Textures).Select(t=>Leaf(t.Path).Split('.')[0]).Distinct(StringComparer.OrdinalIgnoreCase)
                 .Select(n=>new TPF.Texture(n,9,0,SkinRetarget.RgbaTexture([255,255,255,255]),TPF.TPFPlatform.PC)).ToArray();
-            var skin=SkinRetarget.Bake(original.Write(),nativeModel,textures,sourceProfile:"DS1R");skin=skin with{ProportionScale=SkinRetarget.HumanoidScale(original.Nodes,skin.Model.Nodes)};
+            var skin=SkinRetarget.Bake(original.Write(),nativeModel,textures,sourceProfile:"DS1R",preserveSourceDimensions:true);skin=skin with{ProportionScale=SkinRetarget.HumanoidScale(original.Nodes,skin.Model.Nodes)};
             string target="c"+(9800+results.Count);var input=BND4.Read(nativeBank);
             foreach(var f in input.Files){f.Name=f.Name.Replace("c8030",target);if(f.ID is >=7000000 and <8000000)f.Bytes=SkinRetarget.RenameBehavior(f.Bytes,"c8030",target);}
             // Unrelated prior-stage idle audio must survive the bounded Doll filter.
@@ -91,13 +91,29 @@ static class MapCharacterAnimationsTests {
                 }
                 var sp=ModelPose(original,clip.Bones.Select(b=>b.Name).ToArray(),sw);var tp=ModelPose(skin.Model,rig.Names,tw);var errors=new List<float>();
                 for(int m=0;m<original.Meshes.Count;m++)for(int v=0;v<original.Meshes[m].Vertices.Count;v++)errors.Add(Vector3.Distance(Posed(original.Meshes[m],original.Meshes[m].Vertices[v],sourceInverse,sp),Posed(skin.Model.Meshes[m],skin.Model.Meshes[m].Vertices[v],targetInverse,tp)*skin.ProportionScale));
+                int rigidHeadEdges=0,hairEdges=0;float rigidHeadMaxError=0;
+                bool HeadVertex(FLVER2.Mesh mesh,FLVER.Vertex v)=>Enumerable.Range(0,4).Any(j=>v.BoneWeights[j]>.9999f&&Key(original.Nodes[SkinRetarget.Bone(mesh,v.BoneIndices[j])].Name)=="head");
+                for(int m=0;m<original.Meshes.Count;m++) {
+                    var sm=original.Meshes[m];var tm=skin.Model.Meshes[m];bool hair=original.Materials[sm.MaterialIndex].Textures.Any(t=>Leaf(t.Path).Contains("HR_",StringComparison.OrdinalIgnoreCase));
+                    var positions=sm.Vertices.Select(v=>Posed(sm,v,sourceInverse,sp)).ToArray();var emitted=tm.Vertices.Select(v=>Posed(tm,v,targetInverse,tp)*skin.ProportionScale).ToArray();
+                    for(int v=0;v<sm.Vertices.Count;v++)if(HeadVertex(sm,sm.Vertices[v]))rigidHeadMaxError=Math.Max(rigidHeadMaxError,Vector3.Distance(positions[v],emitted[v]));
+                    foreach(var face in sm.FaceSets.Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None)) {
+                        var indices=face.Triangulate(sm.Vertices.Count<65535);
+                        for(int t=0;t<indices.Count;t+=3)for(int e=0;e<3;e++) {
+                            int a=indices[t+e],b=indices[t+(e+1)%3];if(!HeadVertex(sm,sm.Vertices[a])||!HeadVertex(sm,sm.Vertices[b]))continue;
+                            float length=Vector3.Distance(positions[a],positions[b]);if(length<.005f)continue;
+                            Check(Math.Abs(Vector3.Distance(emitted[a],emitted[b])-length)<.00005f,"Source rigid head/hair edge dimensions changed after native playback and actor scale");
+                            ++rigidHeadEdges;if(hair)++hairEdges;
+                        }
+                    }
+                }
+                if(source.ModelName=="c0000")Check(rigidHeadEdges>1000&&hairEdges>100&&rigidHeadMaxError<.001f,"Actual source head/hair pose or dimensions were not preserved");
                 float mean=errors.Average(),max=errors.Max(),p95=errors.Order().ElementAt((int)(errors.Count*.95));
-                // Weighted source armor vertices were blended into the native
-                // bind shape before playback. Petrus's robe retains up to6.4cm
-                // p95 residual; the joint landmark checks above remain5mm.
-                // The former bind-delta mode has15cm mean/40cm p95 error.
+                // Multi-bone armor retains blended bind-remap residuals even
+                // when rigid dimensions are preserved. The separate head/hair
+                // and joint checks above apply tighter anatomical bounds.
                 Check(mean<.04f&&p95<.08f&&max<.15f,$"{source.EntityID}: actual posed mesh exceeds source-bind remap tolerances (mean{mean},p95{p95},max{max})");
-                meshProof.Add(new{frame,mean,p95,max,vertices=errors.Count});
+                meshProof.Add(new{frame,mean,p95,max,vertices=errors.Count,rigidHeadEdges,hairEdges,rigidHeadMaxError});
             }
             var bad=BND4.Read(before);bad.Files.RemoveAll(f=>f.ID==1002000000);var badFiles=new Dictionary<string,byte[]>{{path,bad.Write(bad.Compression)}};var untouched=badFiles[path];
             Reject(()=>MapCharacterAnimations.Apply(Read,source,target,skin,badFiles),"Missing native idle slot accepted");Equal(badFiles[path],untouched,"Failed NPC staging partially mutated its output");

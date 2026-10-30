@@ -4,7 +4,9 @@
     <Compile Include="MapEnemySpawnsTests.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
     <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFaceMaterial.cs" Link="NpcFaceMaterial.cs"/>
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
+    <Compile Include="../../editor/souls_import/NpcBodyShape.cs" Link="NpcBodyShape.cs"/>
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
     <Compile Include="../../editor/souls_import/MapEnemySpawns.cs" Link="MapEnemySpawns.cs"/>
     <Compile Include="../../editor/souls_import/MapSkeletonAnimations.cs" Link="MapSkeletonAnimations.cs"/>

@@ -52,6 +52,31 @@ static class NpcFaceTests {
         return components.Single(c=>c.Length==40);
     }
     static void Reject(Action action) {try{action();}catch(InvalidDataException){return;}catch(NotSupportedException){return;}throw new Exception("Invalid face input accepted");}
+    static void TintPixels(TPF.Texture original,TPF.Texture tinted,int[] color,bool iris) {
+        using var before=Pfim.Pfimage.FromStream(new MemoryStream(original.HeaderizeExt(out _)));
+        using var after=Pfim.Pfimage.FromStream(new MemoryStream(tinted.HeaderizeExt(out _)));
+        Check(before.Format==Pfim.ImageFormat.Rgba32&&after.Format==Pfim.ImageFormat.Rgba32,"Tint comparison requires RGBA source pixels");
+        Check(before.Width==after.Width&&before.Height==after.Height&&before.MipMaps.Length==after.MipMaps.Length,"Appearance tint lost dimensions or mips");
+        int pixels=0,unmasked=0,masked=0;
+        void Mip(int a,int b,int width,int height,int strideA,int strideB) {
+            for(int y=0;y<height;y++)for(int x=0;x<width;x++) {
+                int p=a+y*strideA+x*4,q=b+y*strideB+x*4;byte alpha=before.Data[p+3];
+                Check(after.Data[q+3]==alpha,"Tint changed source coverage/iris mask alpha");
+                for(int c=0;c<3;c++) {
+                    // Independent floating-point evaluation of the shipped DXBC:
+                    // hair multiplies all RGB; eye blends the multiplier by alpha.
+                    double factor=color[2-c]/255.0;if(iris)factor=1+alpha/255.0*(factor-1);
+                    int expected=(int)Math.Round(before.Data[p+c]*factor,MidpointRounding.AwayFromZero);
+                    Check(Math.Abs(after.Data[q+c]-expected)<=1,"Tint differs from source encoded-space shader formula");
+                    if(iris&&alpha==0)Check(after.Data[q+c]==before.Data[p+c],"Iris tint changed the unmasked sclera");
+                }
+                pixels++;if(alpha==0)unmasked++;if(alpha==255)masked++;
+            }
+        }
+        Mip(0,0,before.Width,before.Height,before.Stride,after.Stride);
+        for(int i=0;i<before.MipMaps.Length;i++){var a=before.MipMaps[i];var b=after.MipMaps[i];Check(a.Width==b.Width&&a.Height==b.Height,"Tint mip dimensions changed");Mip(a.DataOffset,b.DataOffset,a.Width,a.Height,a.Stride,b.Stride);}
+        Check(pixels>1000&&(!iris||unmasked>0&&masked>0),"Tint check did not cover real source coverage and iris masks");
+    }
     public static void Main(string[] args) {
         string root=args[0],native=args[1],defs=args[2];var hashes=new Dictionary<string,byte[]>();
         byte[]? Read(string path) {
@@ -85,6 +110,7 @@ static class NpcFaceTests {
         var geometryHashes=new HashSet<string>();var textureHashes=new HashSet<string>();var reports=new List<object>();
         foreach(int id in new[]{6080,6270}) {
             var row=faces.Rows.Single(r=>r.ID==id);var result=NpcFace.Load(Read,row,1);
+            NpcFaceMaterialTests.Run(faceAssets.Files.Single(f=>Leaf(f.Name)=="face.flver").Bytes.ToArray(),result,faceAssets.Files.Single(f=>Leaf(f.Name)=="face.bmp").Bytes.ToArray());
             var standalone=FLVER2.Read(result.Model.Write());
             DrawVariants(standalone,"Generated source readback");
             // Independent shipped geometry establishes the engine's front-face
@@ -102,6 +128,15 @@ static class NpcFaceTests {
             Check(result.Model.Meshes.SelectMany(m=>m.FaceSets).Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None).Sum(f=>f.Indices.Count/3)==1704,"Main source face/eye triangle count changed");
             Check(result.SourceParts.Count==2&&result.SourcePaths.Count==4,"Face lacks original neck or selected hair part");
             Check(result.SourcePaths.Contains(id==6080?"parts/HR_M_0003.partsbnd.dcx":"parts/HR_M_0011.partsbnd.dcx"),"Source hairstyle resolved incorrectly");
+            var hairBank=BND3.Read(Read(result.SourcePaths.Single(p=>p.Contains("/HR_",StringComparison.Ordinal)))!);
+            var rawHair=FLVER2.Read(hairBank.Files.Single(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)).Bytes);
+            var hairNames=rawHair.Materials.SelectMany(m=>m.Textures).Where(t=>t.ParamName=="g_Diffuse").Select(t=>Path.GetFileNameWithoutExtension(Leaf(t.Path))).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var hairTints=hairNames.Select(n=>(Name:n,Tinted:result.Textures.Single(t=>t.Name==$"FG_import_{id}_hair_{n}"))).ToArray();
+            var eyeTint=result.Textures.Single(t=>t.Name==$"FG_import_{id}_eye_FG_eye");
+            foreach(var h in hairTints)TintPixels(result.Textures.Single(t=>t.Name.Equals(h.Name,StringComparison.OrdinalIgnoreCase)),h.Tinted,id==6080?[250,210,105]:[80,65,30],false);
+            TintPixels(result.Textures.Single(t=>t.Name=="FG_eye"),eyeTint,id==6080?[172,210,255]:[50,85,210],true);
+            Check(result.SourceParts.Last().Materials.SelectMany(m=>m.Textures).Where(t=>t.ParamName=="g_Diffuse").All(t=>hairTints.Any(h=>t.Path==h.Tinted.Name+".dds")),"Hair material did not bind its owned tint");
+            Check(result.Model.Materials[2].Textures.Single(t=>t.ParamName=="g_Diffuse").Path==eyeTint.Name+".dds","Eye material did not bind its owned tint");
             var expectedMin=id==6080?new Vector3(-.057641346f,1.5042477f,-.13450328f):new Vector3(-.056093f,1.5074661f,-.13956593f);
             var expectedMax=id==6080?new Vector3(.057570063f,1.650441f,-.03846198f):new Vector3(.056092992f,1.650441f,-.03846198f);
             Near(result.Model.Header.BoundingBoxMin,expectedMin,.000001f,"Independent EGM face minimum differs");Near(result.Model.Header.BoundingBoxMax,expectedMax,.000001f,"Independent EGM face maximum differs");
@@ -138,7 +173,7 @@ static class NpcFaceTests {
                 var nativeFile=Path.Combine(native,"chr",target+".chrbnd.dcx");var nativeBytes=File.ReadAllBytes(nativeFile);hashes.TryAdd(nativeFile,SHA256.HashData(nativeBytes));
                 var template=BND4.Read(nativeBytes).Files.Single(f=>f.Name.EndsWith(".flver"));var nativeModel=FLVER2.Read(template.Bytes);
                 Check(NativeWinding(nativeModel,nativeModel.Meshes.Count)>.98f,"Original Bloodborne character culling convention changed");
-                var baked=SkinRetarget.Bake(encoded,template.Bytes,assembled.Textures,null,null,"c6907");
+                var baked=SkinRetarget.Bake(encoded,template.Bytes,assembled.Textures,null,null,"c6907",sourceProfile:"DS1R");
                 Check(baked.Vertices==assembled.Vertices&&baked.DirectWeightShare==1,"Native retarget lost source face geometry or direct weights");
                 var outModel=FLVER2.Read(baked.Model.Write());var outTextures=TPF.Read(baked.Textures.Write());
                 DrawVariants(outModel,"Native "+target+" FLVER readback");
@@ -155,6 +190,8 @@ static class NpcFaceTests {
                     Check(outModel.Meshes[m].Vertices[v].BoneIndices[0]==th,"Native face Head index changed");
                 }
                 Check(outTextures.Platform==TPF.TPFPlatform.PS4&&outTextures.Textures.Any(t=>t.Name.Contains($"FG_import_{id}_face")),"Native export lost the generated source face texture");
+                foreach(var h in hairTints)TintPixels(result.Textures.Single(t=>t.Name.Equals(h.Name,StringComparison.OrdinalIgnoreCase)),outTextures.Textures.Single(t=>t.Name.Contains(h.Tinted.Name+"_srgb")),id==6080?[250,210,105]:[80,65,30],false);
+                TintPixels(result.Textures.Single(t=>t.Name=="FG_eye"),outTextures.Textures.Single(t=>t.Name.Contains(eyeTint.Name+"_srgb")),id==6080?[172,210,255]:[50,85,210],true);
                 targets.Add(new{target,baked.Vertices,baked.Triangles,baked.DirectWeightShare,textures=outTextures.Textures.Count});
             }
             reports.Add(new{id,result.HairStyle,assembled.Vertices,assembled.Triangles,seamVertices=generatedRim.Length,seamError,parts=assembled.Parts.Select(p=>p.Path),targets});
@@ -163,6 +200,9 @@ static class NpcFaceTests {
         Check(geometryHashes.Count==2&&textureHashes.Count==2,"Distinct NPC face geometry/color collapsed");
         var selected=faces.Rows.Single(r=>r.ID==6270);var field=selected.Cells.Single(c=>c.Def.InternalName=="faceGeoData00");var old=field.Value;field.Value=(byte)(Convert.ToInt32(old)+1);
         var changed=NpcFace.Load(Read,selected,1);field.Value=old;Check(!geometryHashes.Contains(Convert.ToHexString(SHA256.HashData(changed.Model.Write()))),"Source face coefficients do not affect geometry");
+        var styleField=selected.Cells.Single(c=>c.Def.InternalName=="hairStyle");var oldStyle=styleField.Value;styleField.Value=(byte)0;
+        var bald=NpcFace.Load(Read,selected,1);styleField.Value=oldStyle;
+        Check(bald.HairStyle==0&&bald.SourceParts.Count==1&&!bald.Textures.Any(t=>t.Name.StartsWith($"FG_import_{selected.ID}_hair_",StringComparison.Ordinal)),"Authored bald selection requires a nonexistent hair tint material");
         var assets=BND3.Read(Read("facegen/FaceGen.fgbnd")!);var egm=assets.Files.Single(f=>Leaf(f.Name)=="face.egm");var broken=egm.Bytes.ToArray();BitConverter.GetBytes(853).CopyTo(broken,8);egm.Bytes=broken;var bad=assets.Write();
         Reject(()=>NpcFace.Load(p=>p=="facegen/FaceGen.fgbnd"?bad:Read(p),selected,1));
         Reject(()=>NpcFace.Load(Read,selected,7));

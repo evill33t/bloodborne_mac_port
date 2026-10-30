@@ -103,11 +103,38 @@ static class MapCharactersTests {
             if(report.SourceModel=="c0000") {
                 Check(report.SourceParts.Contains("facegen/FaceGen.fgbnd")&&report.SourceParts.Any(p=>p.Contains("/HR_")),"Human actor lacks actual source face/hair assets");
                 Check(names.Any(n=>n.Contains("FG_import_"+report.CharaInitID)),"Human actor lacks its distinct EGT face diffuse");
-                var assembled=NpcAppearance.Load(Read,defs,report.CharaInitID);Check(report.Vertices==assembled.Vertices&&report.Triangles==assembled.Triangles,"Source material render masks removed human geometry (including groups above 31)");
+                var assembled=NpcAppearance.Load(Read,defs,report.CharaInitID,applyBodyShape:true);Check(report.Vertices==assembled.Vertices&&report.Triangles==assembled.Triangles,"Source material render masks removed human geometry (including groups above 31)");
                 for(int m=0;m<assembled.Model.Meshes.Count;m++)for(int v=0;v<assembled.Model.Meshes[m].Vertices.Count;v++)for(int uv=0;uv<2;uv++) {
                     var delta=Vector3.Abs(flver.Meshes[m].Vertices[v].UVs[uv]-assembled.Model.Meshes[m].Vertices[v].UVs[uv]);
                     Check(delta.X<=.5001f/1024+.5001f/2048&&delta.Y<=.5001f/1024+.5001f/2048,"Packaged human UV set scaled/wrapped instead of preserving source coordinates");
                 }
+                // Independently compare the authored source hair's edge lengths
+                // with the actual packaged FLVER under its decoded idle pose.
+                // This bypasses the appearance composer's vertex calculations.
+                string hairPath=assembled.Parts.Single(p=>p.Slot=="Hair").Path;
+                Check(assembled.BodyShape!=null,"Packaged human omitted source body-shape provenance");
+                float sourceHeadFactor=assembled.BodyShape!.Bones.Single(b=>b.Bone=="Head").Scale.X;
+                Check(Math.Abs(sourceHeadFactor-(report.CharaInitID==6080?1.10f:1.04f))<.00001f,"Source NPC Head control/BSI limit was not applied");
+                var rawHair=FLVER2.Read(BND3.Read(Read(hairPath)!).Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);
+                var hairMeshes=assembled.Model.Meshes.Select((m,i)=>(m,i)).Where(p=>assembled.Model.Materials[p.m.MaterialIndex].Textures.Any(t=>Leaf(t.Path).Contains("HR_",StringComparison.OrdinalIgnoreCase))).ToArray();
+                Check(hairMeshes.Length==rawHair.Meshes.Count,"Packaged appearance lost an authored hair subset");
+                var rig=NpcAnimationInspector.Skeleton(animation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
+                var inspector=new NpcAnimationInspector(animation.Files.Single(f=>f.ID==1000000000).Bytes.ToArray());var idle=inspector.Animation(report.SourcePose!.FrameCount,rig.Names.Length);
+                var pose=NativeAnimation.Worlds(inspector.Pose(idle,idle.Poses.Length/2),rig.Parents);int head=flver.Nodes.FindIndex(n=>n.Name=="Head"),poseHead=Array.IndexOf(rig.Names,"Head");
+                Check(head>=0&&poseHead>=0,"Missing packaged head bind");
+                Check(Matrix4x4.Invert(SkinRetarget.World(flver.Nodes)[head],out var inverseHead),"Singular packaged head bind");int edges=0;
+                for(int m=0;m<rawHair.Meshes.Count;m++) {
+                    var raw=rawHair.Meshes[m];var emitted=flver.Meshes[hairMeshes[m].i];Check(raw.Vertices.Count==emitted.Vertices.Count,"Packaged hair vertex correspondence changed");
+                    foreach(var face in raw.FaceSets.Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None)) {
+                        var indices=face.Triangulate(raw.Vertices.Count<65535);
+                        for(int t=0;t<indices.Count;t+=3)for(int e=0;e<3;e++) {
+                            int a=indices[t+e],b=indices[t+(e+1)%3];float expected=Vector3.Distance(raw.Vertices[a].Position,raw.Vertices[b].Position)*sourceHeadFactor;if(expected<.005f)continue;
+                            Vector3 Point(int v)=>Vector3.Transform(emitted.Vertices[v].Position,inverseHead*pose[poseHead])*report.ProportionScale;
+                            Check(Math.Abs(Vector3.Distance(Point(a),Point(b))-expected)<.00005f,"Packaged animated hair was shrunk by the native actor's stature scale");++edges;
+                        }
+                    }
+                }
+                Check(edges>100,"Source hair dimension regression did not inspect real triangle edges");
             } else Check(report.SourceParts.Contains("chr/c2750.chrtpfbdt")&&flver.Meshes.Count==18,"Authored Anastacia geometry/textures were not retained");
             Check(report.TextureFallbacks.Any(l=>l.Contains("neutral reflectance approximation")),"DS1R character wrapper did not pass the source profile to material conversion");
             Check(report.Limitations.Any(l=>l.Contains("not ported"))&&report.Limitations.Any(l=>l.Contains("gameplay validation")),"Native approximation/runtime boundary is not reported");

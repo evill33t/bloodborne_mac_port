@@ -14,6 +14,7 @@
     <Compile Include="../../editor/souls_import/MapEnvironment.cs" Link="MapEnvironment.cs"/>
     <Compile Include="../../editor/souls_import/MapCollisionBindings.cs" Link="MapCollisionBindings.cs"/>
     <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFaceMaterial.cs" Link="NpcFaceMaterial.cs"/>
     <Compile Include="SourceCollisionTests.cs"/>
     <Compile Include="LegacySourceCollisionTests.cs"/>
     <Compile Include="NpcAppearanceTests.cs"/>
@@ -21,6 +22,7 @@
     <Compile Include="../../editor/souls_import/SourceCollision.cs" Link="SourceCollision.cs"/>
     <Compile Include="../../editor/souls_import/LegacySourceCollision.cs" Link="LegacySourceCollision.cs"/>
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
+    <Compile Include="../../editor/souls_import/NpcBodyShape.cs" Link="NpcBodyShape.cs"/>
     <Compile Include="MapReplacementTests.cs"/>
     <Compile Include="StaticMapGeometryTests.cs"/>
     <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs"/>

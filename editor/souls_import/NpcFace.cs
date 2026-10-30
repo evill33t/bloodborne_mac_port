@@ -5,13 +5,16 @@ using System.Numerics;
 using System.Text;
 
 internal record NpcFaceResult(FLVER2 Model,List<FLVER2> SourceParts,List<TPF.Texture> Textures,
-    List<string> SourcePaths,List<string> Limitations,int FaceGenID,int HairStyle);
+    List<string> SourcePaths,List<string> Limitations,int FaceGenID,int HairStyle) {
+    public NpcFaceMaterial.Report? Material {get;init;}
+}
 
 // FaceGen's public TRI/EGM/EGT layouts are documented by Singular Inversions:
 // https://facegen.com/dl/sdk/doc/manual/fileformats.html
 // DS1R executable a45aaa36...98d7b, 0x140771c50, decodes each saved byte as
 // float(byte)*20/255-10. 0x140777f90 accumulates EGT modes in 16.16 fixed point.
-// The shipped FG FLVER buffers are empty runtime templates, not neutral heads.
+// Shipped FG buffers carry a DSR flag that the installed reader skips; the
+// guarded material adapter recovers their authored UVs and blend attributes.
 internal static class NpcFace {
     sealed record Polygon(int[] Vertices,int[] UVs);
     sealed record Shape(Vector3[] Positions,Vector2[] UVs,List<Polygon> Polygons);
@@ -178,10 +181,40 @@ internal static class NpcFace {
         }
         var dds=new DDS{dwWidth=width,dwHeight=height,dwMipMapCount=1,dwPitchOrLinearSize=width*4};dds.ddspf.dwFlags=DDS.DDPF.RGB|DDS.DDPF.ALPHAPIXELS;dds.ddspf.dwRGBBitCount=32;dds.ddspf.dwRBitMask=255;dds.ddspf.dwGBitMask=65280;dds.ddspf.dwBBitMask=16711680;dds.ddspf.dwABitMask=4278190080;return dds.Write(rgba);
     }
+    // DSR multiplies encoded albedo by the saved RGB/255 before its explicit
+    // gamma2.2 conversion. Eye alpha masks iris tint; hair alpha is coverage.
+    // Bake owned albedos rather than inheriting the native donor's tint state.
+    internal static byte[] Tint(byte[] dds,int red,int green,int blue,bool iris) {
+        if(new[]{red,green,blue}.Any(c=>c is <0 or >255))throw new InvalidDataException("Invalid source appearance tint");
+        var source=new DDS(dds);
+        if(source.dwWidth is <1 or >4096||source.dwHeight is <1 or >4096||source.dwDepth>1||source.dwCaps2!=0||
+            source.header10 is {} dx&&(dx.arraySize!=1||dx.resourceDimension!=DDS.DIMENSION.TEXTURE2D))
+            throw new InvalidDataException("Unsupported appearance tint texture");
+        using var image=Pfim.Pfimage.FromStream(new MemoryStream(dds));
+        if(image.Format is not(Pfim.ImageFormat.Rgba32 or Pfim.ImageFormat.Rgb24))throw new InvalidDataException("Unsupported appearance tint pixels");
+        int step=image.BitsPerPixel/8;using var pixels=new MemoryStream();
+        void Mip(int offset,int width,int height,int stride) {
+            for(int y=0;y<height;y++)for(int x=0;x<width;x++) {
+                int at=checked(offset+y*stride+x*step),alpha=step==4?image.Data[at+3]:255;
+                int Channel(int index,int tint) {
+                    int factor=iris?65025-alpha*(255-tint):tint*255;
+                    return (image.Data[at+index]*factor+32512)/65025;
+                }
+                pixels.WriteByte((byte)Channel(2,red));pixels.WriteByte((byte)Channel(1,green));pixels.WriteByte((byte)Channel(0,blue));pixels.WriteByte((byte)alpha);
+            }
+        }
+        Mip(0,image.Width,image.Height,image.Stride);foreach(var mip in image.MipMaps)Mip(mip.DataOffset,mip.Width,mip.Height,mip.Stride);
+        var header=new DDS{dwWidth=image.Width,dwHeight=image.Height,dwMipMapCount=image.MipMaps.Length+1,dwPitchOrLinearSize=image.Width*4};
+        header.dwFlags|=DDS.DDSD.PITCH;
+        if(image.MipMaps.Length>0){header.dwFlags|=DDS.DDSD.MIPMAPCOUNT;header.dwCaps|=DDS.DDSCAPS.COMPLEX|DDS.DDSCAPS.MIPMAP;}
+        header.ddspf.dwFlags=DDS.DDPF.RGB|DDS.DDPF.ALPHAPIXELS;header.ddspf.dwRGBBitCount=32;
+        header.ddspf.dwRBitMask=0xff;header.ddspf.dwGBitMask=0xff00;header.ddspf.dwBBitMask=0xff0000;header.ddspf.dwABitMask=0xff000000;
+        return header.Write(pixels.ToArray());
+    }
     internal static NpcFaceResult Load(Func<string,byte[]?> read,PARAM.Row faceGen,int sex) {
         if(sex is not(0 or 1))throw new InvalidDataException("Invalid source NPC face sex");
         var files=BND3.Read(Required(read,"facegen/FaceGen.fgbnd"));var canonicalFiles=BND3.Read(Required(read,"chr/c0000.chrbnd.dcx"));
-        var canonical=FLVER2.Read(Asset(canonicalFiles,"c0000.flver"));var template=FLVER2.Read(Asset(files,"face.flver"));var mapping=F2TR.Read(Asset(files,"face.flver2tri"));
+        var canonical=FLVER2.Read(Asset(canonicalFiles,"c0000.flver"));var template=NpcFaceMaterial.ReadTemplate(Asset(files,"face.flver").ToArray());var mapping=F2TR.Read(Asset(files,"face.flver2tri"));
         var face=Tri(Asset(files,"face.tri"));var eye=Tri(Asset(files,"eye.tri"));
         var geo=Enumerable.Range(0,50).Select(i=>Coefficient(Cell(faceGen,$"faceGeoData{i:D2}"))).ToArray();
         var tex=Enumerable.Range(0,50).Select(i=>Coefficient(Cell(faceGen,$"faceTexData{i:D2}"))).ToArray();
@@ -189,18 +222,36 @@ internal static class NpcFace {
         var textures=TPF.Read(Asset(files,"facegen.tpf")).Textures.ToList();textures.Add(new(texture,9,0,Color(Asset(files,"face.egt"),Asset(files,"face.bmp"),tex),TPF.TPFPlatform.PC));
         var sources=new List<string>{"facegen/FaceGen.fgbnd","chr/c0000.chrbnd.dcx"};var parts=new List<FLVER2>();
         string gender=sex==1?"M":"F";
-        void AddPart(string path) {
+        FLVER2 AddPart(string path) {
             var b=BND3.Read(Required(read,path));var flvers=b.Files.Where(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)).ToArray();if(flvers.Length!=1)throw new InvalidDataException("Ambiguous NPC face part FLVER");
             var model=FLVER2.Read(flvers[0].Bytes);if(model.Meshes.Count>0)parts.Add(model);sources.Add(path);
-            foreach(var file in b.Files)if(TPF.Is(file.Bytes.ToArray()))textures.AddRange(TPF.Read(file.Bytes).Textures);
+            foreach(var file in b.Files)if(TPF.Is(file.Bytes.ToArray()))textures.AddRange(TPF.Read(file.Bytes).Textures);return model;
         }
         AddPart($"parts/FC_{gender}_0000.partsbnd.dcx");int style=Cell(faceGen,"hairStyle");
-        int hair=HairModel(style,sex);AddPart($"parts/HR_{gender}_{hair:D4}.partsbnd.dcx");
+        int hair=HairModel(style,sex);var hairPart=AddPart($"parts/HR_{gender}_{hair:D4}.partsbnd.dcx");
+        void TintMaterials(FLVER2 model,string shader,string role,bool iris) {
+            var references=model.Materials.Where(m=>Leaf(m.MTD).StartsWith(shader,StringComparison.OrdinalIgnoreCase))
+                .SelectMany(m=>m.Textures).Where(t=>t.ParamName=="g_Diffuse").GroupBy(t=>Path.GetFileNameWithoutExtension(Leaf(t.Path)),StringComparer.OrdinalIgnoreCase).ToArray();
+            if(references.Length==0&&role=="hair"&&model.Meshes.Count==0)return; // Authored bald HR_*_0000.
+            if(references.Length==0)throw new InvalidDataException("Source appearance tint material unavailable: "+role);
+            foreach(var group in references) {
+                var candidates=textures.Where(t=>Path.GetFileNameWithoutExtension(Leaf(t.Name)).Equals(group.Key,StringComparison.OrdinalIgnoreCase)).ToArray();
+                if(candidates.Length!=1)throw new InvalidDataException("Missing or ambiguous appearance tint texture: "+group.Key);
+                string name=$"FG_import_{faceGen.ID}_{role}_{group.Key}";var original=candidates[0].HeaderizeExt(out var extension);
+                if(extension!=".dds")throw new InvalidDataException("Unsupported source tint texture container");
+                string field=iris?"eyeColor_":"hairColor_";
+                var tinted=Tint(original,Cell(faceGen,field+"R"),Cell(faceGen,field+"G"),Cell(faceGen,field+"B"),iris);
+                textures.Add(new(name,9,0,tinted,TPF.TPFPlatform.PC));foreach(var reference in group)reference.Path=name+".dds";
+            }
+        }
+        TintMaterials(hairPart,"Ps_Hair[","hair",false);TintMaterials(generated,"Ps_Eye[","eye",true);
+        var faceMaterial=NpcFaceMaterial.Bake(generated,template,textures,texture,Asset(files,"face.bmp").ToArray(),faceGen.ID,sex);
         var limitations=new List<string>{
             "Source FaceGen shape coefficients, TRI topology/UVs and full EGT color modes are reconstructed; the unsupported two-triangle auxiliary eye card is omitted.",
-            "The source skin-detail overlay, subsurface and eye/hair tint shaders are not reproduced by the native material conversion; hair/neck color and alpha shading require runtime comparison.",
+            "Source hair RGB and alpha-masked iris RGB are baked into independent albedos with original alpha/mips. Native lighting/gamma, neck color, subsurface and hair alpha shading still differ from the source shaders.",
             "Face/eyes use the verified canonical Head bind and do not reproduce source eye animation or body-shape customization."
         };
-        return new(generated,parts,textures,sources,limitations,faceGen.ID,style);
+        limitations.AddRange(faceMaterial.Limitations);
+        return new(generated,parts,textures,sources,limitations,faceGen.ID,style){Material=faceMaterial};
     }
 }

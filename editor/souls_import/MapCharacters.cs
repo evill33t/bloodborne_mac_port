@@ -15,7 +15,7 @@ internal static class MapCharacters {
         Vector3 SourcePosition,Vector3 SourceRotation,Vector3 SourceScale,string Status,string? TargetModel,
         int? EntityID,int? NPCParamID,int? ThinkParamID,int Vertices,int Triangles,double DirectWeightShare,
         IReadOnlyList<string> SourceParts,IReadOnlyList<string> Limitations,IReadOnlyList<string> TextureFallbacks,float ProportionScale=1,
-        MapCharacterAnimations.Pose? SourcePose=null);
+        MapCharacterAnimations.Pose? SourcePose=null,NpcBodyShape.Report? SourceBodyShape=null);
     internal record Export(IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<MSBB.Model.Enemy> Models,
         IReadOnlyList<MSBB.Part.Enemy> Actors,IReadOnlyList<CharacterReport> Reports,byte[] GameParamBytes);
 
@@ -110,10 +110,10 @@ internal static class MapCharacters {
     }
 
     internal static SkinBake Package(byte[] sourceModel,List<TPF.Texture> textures,string profile,string template,string target,
-        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false) {
+        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false) {
         int id=int.Parse(target[1..]);
         var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
-        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610",allowLargeHumanoid:allowLargeHumanoid);visual.Bytes=bake.Model.Write();
+        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610",allowLargeHumanoid:allowLargeHumanoid,preserveSourceDimensions:preserveSourceDimensions);visual.Bytes=bake.Model.Write();
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
         if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native actor template reserves texture binder ID 100");
         character.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,100,@"N:\SPRJ\data\INTERROOT_ps4\chr\"+target+@"\"+target+".tpf",bake.Textures.Write(DCX.Type.None)));
@@ -171,16 +171,16 @@ internal static class MapCharacters {
             int id=nextModel++,paramID=id*100;string target="c"+id;usedModels.Add(target);usedParams.Add(paramID);
             while(nextEntity<=2419799&&usedEntityIDs.Contains(nextEntity))++nextEntity;if(nextEntity>2419799)throw new InvalidDataException("No unused imported character entity ID");
             int entityID=nextEntity++;usedEntityIDs.Add(entityID);
-            byte[] sourceModel;List<TPF.Texture> textures;List<string> parts;List<string> limitations;
+            byte[] sourceModel;List<TPF.Texture> textures;List<string> parts;List<string> limitations;NpcBodyShape.Report? bodyShape=null;
             if(p.ModelName=="c0000") {
-                var appearance=NpcAppearance.Load(readSource,definitionsDirectory,p.CharaInitID);
+                var appearance=NpcAppearance.Load(readSource,definitionsDirectory,p.CharaInitID,applyBodyShape:profile=="DS1R");
                 if(!appearance.Parts.Any(part=>part.Slot=="Face")||!appearance.Parts.Any(part=>part.Slot=="Hair"))throw new InvalidDataException("Initial Firelink human NPC requires its real source FaceGen head and hair");
-                sourceModel=appearance.Model.Write();textures=appearance.Textures;parts=appearance.Parts.Select(part=>part.Path).Distinct().ToList();limitations=appearance.Limitations.ToList();
+                sourceModel=appearance.Model.Write();textures=appearance.Textures;parts=appearance.Parts.Select(part=>part.Path).Distinct().ToList();limitations=appearance.Limitations.ToList();bodyShape=appearance.BodyShape;
             } else {
                 var appearance=Authored(readSource,p.ModelName);sourceModel=appearance.Model;textures=appearance.Textures;parts=appearance.Paths;
                 limitations=["Authored source c2750 appearance retained; source cloth simulation and source shader behavior are not reproduced."];
             }
-            var bake=Package(sourceModel,textures,profile,TemplateModel,target,nativeCharacter,nativeAnimation,nativeScript,files);
+            var bake=Package(sourceModel,textures,profile,TemplateModel,target,nativeCharacter,nativeAnimation,nativeScript,files,preserveSourceDimensions:profile=="DS1R");
             var pose=profile=="DS1R"?MapCharacterAnimations.Apply(readSource,p,target,bake,files):null;
             if(pose!=null)limitations.AddRange(pose.Limitations);
             // The original Doll logic is area-local and changes native quest flags.
@@ -200,7 +200,7 @@ internal static class MapCharacters {
             Array.Clear(actor.MovePointNames);actor.InitAnimID=-1;actor.DamageAnimID=-1;actor.PatrolType=0;actor.FallbackPlatoonID=0;
             Array.Fill(actor.DrawGroups,uint.MaxValue);Array.Fill(actor.DispGroups,uint.MaxValue);Array.Fill(actor.BackreadGroups,uint.MaxValue);usedNames.Add(actor.Name);actors.Add(actor);
             limitations.Add("Friendly native Bloodborne hitbox and physics are an approximation. AI is explicitly disabled (ThinkParamID and NPC aiThinkId -1); no native Doll AI or quest logic is packaged. Source combat, equipment behavior and cloth simulation are not ported. Talk and availability are composed by the quest adapter. Runtime animation/appearance require gameplay validation.");
-            reports.Add(p.Name,Report(p,pose==null?"placed-native-idle-ai-disabled":"placed-source-idle-ai-disabled",target,entityID,paramID,bake.Vertices,bake.Triangles,bake.DirectWeightShare,parts,limitations,bake.TextureFallbacks,bake.ProportionScale) with {SourcePose=pose});
+            reports.Add(p.Name,Report(p,pose==null?"placed-native-idle-ai-disabled":"placed-source-idle-ai-disabled",target,entityID,paramID,bake.Vertices,bake.Triangles,bake.DirectWeightShare,parts,limitations,bake.TextureFallbacks,bake.ProportionScale) with {SourcePose=pose,SourceBodyShape=bodyShape});
         }
         npcFile.Bytes=WriteRows(npcs);var paramBundle=gameParams.Write(DCX.Type.DCX_DFLT_10000_44_9);files.Add("param/gameparam/gameparam.parambnd.dcx",paramBundle);
         foreach(var p in source.Parts.Enemies.Where(p=>!reports.ContainsKey(p.Name))) {

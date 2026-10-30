@@ -758,6 +758,17 @@ linear. Native hitboxes, procedural animation and cloth still differ from the so
 The FaceGen adapter reflects the source depth axis and retains all authored face
 LOD/motion draw sets. A native gameplay check confirmed complete front-facing
 faces on both Crestfallen and Petrus after this correction.
+The DS1R friendly NPC adapter also preserves source mesh dimensions when scaling
+the native playback rig. Source body controls use the canonical skeleton's
+`c0000.bsipwv` limits, including Petrus's 1.10 head multiplier. Rigid head/hair
+deformation is exact; static baking of blended body vertices approximates source
+runtime deformation (measured initial-idle error up to 8.3 mm before native
+retargeting). Hair and iris colors are baked from each source FaceGen row into
+owned albedos, preserving source alpha and every mip. Eye alpha masks iris tint
+so the sclera remains unchanged. Face skin albedo blends the generated EGT and
+authored detail layer using recovered source UVs and vertex alpha. Local atlas
+seams, detail-only normals, neck shading, subsurface response and native
+lighting/tone remain approximations.
 
 DS1R Firelink also has an explicit source-state adapter. Its pool uses the sealed
 floor and collision before both bell flags, then swaps to the opened alternatives

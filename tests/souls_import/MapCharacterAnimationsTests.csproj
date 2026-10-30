@@ -11,7 +11,9 @@
     <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs"/>
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
+    <Compile Include="../../editor/souls_import/NpcBodyShape.cs" Link="NpcBodyShape.cs"/>
     <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFaceMaterial.cs" Link="NpcFaceMaterial.cs"/>
     <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
     <Reference Include="Havok.HKX2"><HintPath>$(SmithboxOutput)/Havok.HKX2.dll</HintPath></Reference>
     <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>

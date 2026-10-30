@@ -302,8 +302,45 @@ misses the opening by approximately 8–18 centimetres. This comparison uses
 authored geometry rather than another copy of the generated face.
 
 Retain all six authored face draw variants: base, LOD1, LOD2 and their motion-blur
-counterparts. Recover UV seams from the base topology and reuse those vertices
-for the collapsed LOD topology. Normal backface culling remains enabled.
+counterparts. Recover authored UVs and vertex colors through the guarded DSR
+buffer decoder and retain their vertex correspondence for every LOD. Normal
+backface culling remains enabled.
+
+DS1R body customization is independent of FaceGen geometry. The signed five
+`CharaInitParam` controls decode as `value * 0.01`. Canonical `c0000.bsipwv`
+records select a control, local axes and positive/negative percentage limits for
+each bone. The runtime applies that scale about the current posed bone joint.
+Petrus's head control 100 and Head limits 95–110 produce a uniform 1.10 factor;
+Crestfallen's control 40 produces 1.04. Neck uses its own Y/Z limits. The adapter
+bakes these deformations into source geometry; blended vertices approximate
+runtime per-bone deformation, with a measured maximum 8.23 mm over the selected
+source idle samples. Skeleton binds, weights, topology and animation bytes are
+preserved by this stage. A separate NPC-only inverse-stature correction prevents
+the native actor scale from shrinking rigid head/hair dimensions by another 16%.
+
+The shipped DSR CPU setters decode saved hair/eye RGB bytes directly as `RGB/255`.
+The hair draw path multiplies encoded diffuse RGB by that tint. Eye DXBC instead
+uses `diffuseRGB * lerp(1, eyeTint, diffuseAlpha)` to preserve the sclera. Both
+source shaders apply their explicit gamma 2.2 conversion after these products;
+applying the raw tint to already linear albedo would produce a paler result.
+Petrus uses hair RGB (250,210,105) and iris RGB (172,210,255). Conversion bakes
+these products into independent RGBA albedos, preserving original alpha and all
+mip levels. Native sRGB sampling/lighting, neck shading and subsurface response
+remain separate approximations.
+
+The FaceGen FLVER's vertex buffers are populated, but their `0x40000000` flag
+causes the installed reader to skip them. A private, guarded layout repair
+recovers both face UV sets and vertex alpha without editing source assets.
+The source runtime overwrites generated positions/normals while preserving
+those authored UVs and colors. Face albedo is
+`lerp(EGT(UV0), detail(UV1) + skinOffset, vertexAlpha)`, where the offset comes
+from the generated and neutral image's top-right pixel difference. Petrus uses
+`(-10,-7,-10)/255`. Specular maps use the corresponding alpha blend.
+The adapter bakes a 2048x512 atlas in the source UV0 domain, preserving left/right
+color differences that overlap in UV1. It keeps all geometry and LOD indices,
+dilates atlas padding and emits a complete mip chain. Local quantized UV seams
+and resampled detail-only normals remain approximations; full dual-normal
+mixing and source subsurface lighting are not ported.
 
 ## Firelink world-state scope
 

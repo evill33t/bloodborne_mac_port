@@ -166,7 +166,7 @@ internal static class SkinRetarget {
         float s=ratio-1;var stretch=new Matrix4x4(1+s*u.X*u.X,s*u.X*u.Y,s*u.X*u.Z,0,s*u.Y*u.X,1+s*u.Y*u.Y,s*u.Y*u.Z,0,s*u.Z*u.X,s*u.Z*u.Y,1+s*u.Z*u.Z,0,0,0,0,1);
         return rigid*Matrix4x4.CreateTranslation(-targetStart)*stretch*Matrix4x4.CreateFromQuaternion(rotation)*Matrix4x4.CreateTranslation(targetStart);
     }
-    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false,bool allowLargeHumanoid=false){
+    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false){
         if(!Regex.IsMatch(textureOwner,@"\Ac\d{4,5}\z"))throw new ArgumentException("Invalid texture owner");
         string OwnedTexture(string name)=>textureOwner+"_import_"+name;
         IFlver source=FLVER2.Is(sourceBytes.ToArray())?FLVER2.Read(sourceBytes):FLVER0.Is(sourceBytes.ToArray())?FLVER0.Read(sourceBytes):throw new InvalidDataException("Unsupported source FLVER");
@@ -193,7 +193,11 @@ internal static class SkinRetarget {
         // Resolve every referenced bone lazily: unreferenced source helper nodes need no mapping.
         var changed=new Matrix4x4[mapping.Length];var normals=new Matrix4x4[mapping.Length];var ready=new bool[mapping.Length];
         var sourceNames=source.Nodes.Select((n,i)=>(key:BoneName(n.Name),i)).GroupBy(v=>v.key).ToDictionary(g=>g.Key,g=>g.First().i);
-        float thicknessScale=fitSegments&&new[]{"head","lfoot","rfoot"}.All(sourceNames.ContainsKey)?1/HumanoidScale(source.Nodes,native.Nodes,allowLargeHumanoid):1;
+        // Source-world NPC poses compensate the actor's stature scale in joint
+        // translations. Their vertex offsets need the same inverse scale, or
+        // rigid heads/hair become smaller despite correctly placed joints.
+        // This opt-in does not change segment fitting or ordinary combat skins.
+        float thicknessScale=(preserveSourceDimensions||fitSegments&&new[]{"head","lfoot","rfoot"}.All(sourceNames.ContainsKey))?1/HumanoidScale(source.Nodes,native.Nodes,allowLargeHumanoid):1;
         var endpoints=new Dictionary<string,string>{{"pelvis","spine"},{"spine","spine1"},{"spine1","neck"},{"neck","head"}};
         foreach(string side in new[]{"l","r"})foreach(var (start,end) in new[]{("clavicle","upperarm"),("upperarm","forearm"),("forearm","hand"),("foretwist","hand"),("thigh","calf"),("calf","foot"),("calftwist","foot"),("foot","toe0"),("finger0","finger01"),("finger1","finger11"),("finger2","finger21")})endpoints.Add(side+start,side+end);
         int Target(int i){

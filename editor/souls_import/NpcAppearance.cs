@@ -5,7 +5,9 @@ using System.Numerics;
 
 internal record NpcArmorPart(string Slot,int RequestedID,int BaseID,int ModelID,string Gender,string Path);
 internal record NpcAppearanceResult(FLVER2 Model,List<TPF.Texture> Textures,List<NpcArmorPart> Parts,
-    List<string> Limitations,int CharaInitID,int Sex,int FaceGenID,int Vertices,int Triangles);
+    List<string> Limitations,int CharaInitID,int Sex,int FaceGenID,int Vertices,int Triangles) {
+    public NpcBodyShape.Report? BodyShape {get;init;}
+}
 
 // DS1 human NPCs have a skeleton-only c0000 model. Their visible armor comes
 // from CharaInit/Protector rows and separate parts binders, not that model.
@@ -28,16 +30,16 @@ internal static class NpcAppearance {
         var cell=row.Cells?.SingleOrDefault(c=>c.Def.InternalName==name)??throw new InvalidDataException("Missing NPC appearance field: "+name);
         return Convert.ToInt32(cell.Value,CultureInfo.InvariantCulture);
     }
-    internal static NpcAppearanceResult Load(Func<string,byte[]?> read,string definitionsDirectory,int charaInitId) {
+    internal static NpcAppearanceResult Load(Func<string,byte[]?> read,string definitionsDirectory,int charaInitId,bool applyBodyShape=false) {
         var bytes=read("param/GameParam/GameParam.parambnd.dcx")??Required(read,"param/GameParam/GameParam.parambnd");
         var files=Binder(bytes);
         PARAM Param(string name) {
             var entry=files.SingleOrDefault(f=>Leaf(f.Name).Equals(name+".param",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("Missing NPC appearance parameter: "+name);
             var param=PARAM.Read(entry.Bytes);param.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitionsDirectory,name+".xml")));return param;
         }
-        return Assemble(read,Param("CharaInitParam"),Param("EquipParamProtector"),charaInitId,Param("FaceGenParam"));
+        return Assemble(read,Param("CharaInitParam"),Param("EquipParamProtector"),charaInitId,Param("FaceGenParam"),applyBodyShape);
     }
-    internal static NpcAppearanceResult Assemble(Func<string,byte[]?> read,PARAM charaInit,PARAM protectors,int charaInitId,PARAM? faceGen=null) {
+    internal static NpcAppearanceResult Assemble(Func<string,byte[]?> read,PARAM charaInit,PARAM protectors,int charaInitId,PARAM? faceGen=null,bool applyBodyShape=false) {
         var character=Row(charaInit,charaInitId,"CharaInitParam");
         int sex=Cell(character,"npcPlayerSex"),face=Cell(character,"npcPlayerFaceGenId");
         if(sex is not(0 or 1))throw new InvalidDataException("Unsupported DS1 NPC sex");
@@ -81,17 +83,26 @@ internal static class NpcAppearance {
             parts.Add(new(slot.Item1,requested,baseId,model,gender,path));models.Add(source);
         }
         if(parts.Count==0)throw new InvalidDataException("NPC appearance has no supported equipped armor");
-        // Body morphs and weapon attachments require their own source adapters.
+        // Cloth and weapon attachments require their own source adapters.
         // Appearance conversion does not establish source AI or quest behavior.
         if(parts.Any(p=>p.Slot=="Head"))limitations.Add($"Source FaceGen row {face}, hair and facial detail are not applied; this first assembly targets fully covered helmets.");
-        limitations.Add("Source body-shape customization, cloth simulation, weapon models and weapon attachments are not assembled.");
+        limitations.Add(applyBodyShape?"Source cloth simulation, weapon models and weapon attachments are not assembled.":"Source body-shape customization, cloth simulation, weapon models and weapon attachments are not assembled.");
         limitations.Add("Appearance only: source animations, AI, dialogue and quest conditions are not converted. Runtime behavior must come from an explicit Bloodborne template.");
         var result=Compose(canonical,models);
+        NpcBodyShape.Report? bodyShape=null;
+        if(applyBodyShape) {
+            var entries=canonicalFiles.Where(f=>Leaf(f.Name).Equals("c0000.bsipwv",StringComparison.OrdinalIgnoreCase)).ToArray();
+            if(entries.Length!=1)throw new InvalidDataException("Source body-scale metadata is missing or ambiguous");
+            int[] controls=new[]{"bodyScaleHead","bodyScaleBreast","bodyScaleAbdomen","bodyScaleArm","bodyScaleLeg"}.Select(n=>Cell(character,n)).ToArray();
+            bodyShape=NpcBodyShape.Apply(result,entries[0].Bytes.ToArray(),controls);
+            limitations=limitations.Select(l=>l.Replace("Face/eyes use the verified canonical Head bind and do not reproduce source eye animation or body-shape customization.","Face/eyes use the verified canonical Head bind; source eye animation is not reproduced.",StringComparison.Ordinal)).ToList();
+            limitations.Add(bodyShape.Limitation);
+        }
         foreach(var material in result.Materials) {
             var diffuse=material.Textures.FirstOrDefault(t=>t.ParamName is "g_Diffuse" or "g_DiffuseTexture");
             if(diffuse==null||!textures.ContainsKey(TextureName(diffuse.Path)))throw new InvalidDataException("NPC diffuse texture is unavailable: "+(diffuse?.Path??material.Name));
         }
-        return new(result,textures.Values.ToList(),parts,limitations,charaInitId,sex,face,result.Meshes.Sum(m=>m.Vertices.Count),result.Meshes.SelectMany(m=>m.FaceSets).Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None).Sum(f=>f.Indices.Count/3));
+        return new(result,textures.Values.ToList(),parts,limitations,charaInitId,sex,face,result.Meshes.Sum(m=>m.Vertices.Count),result.Meshes.SelectMany(m=>m.FaceSets).Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None).Sum(f=>f.Indices.Count/3)){BodyShape=bodyShape};
     }
     static FLVER2 ReadModel(List<BinderFile> files,string name) {
         var entry=files.SingleOrDefault(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".flver.dcx",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("Expected one NPC FLVER model: "+name);
