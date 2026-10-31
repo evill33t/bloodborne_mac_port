@@ -4,6 +4,7 @@
 // Travel and place: lamps and rests, talks, trips, the guest's resume. Split from
 // bloodborne_re.cpp; the shared declarations are in bloodborne_re_internal.h.
 
+#include "core/bloodborne_altar.h"
 #include "core/bloodborne_crash_dump.h"
 #include "core/bloodborne_flags.h"
 #include "core/bloodborne_lamp_points.h"
@@ -358,6 +359,10 @@ void PS4_SYSV_ABI RestInsteadOfLampTravel(u64, GuestRegisterSnapshot* registers)
                      flag);
         }
         return;
+    }
+    // This player's own warp into a ritual altar's dungeon: its load builds that altar's.
+    if (const auto altar = party_controller ? AltarOfWarpRequest(flag) : std::nullopt) {
+        NoteAltarWarp(*altar);
     }
     // A lamp whose boss lives (its character still off here) is not lit: event 7100 would run on
     // the request, light nothing and end (Kaniel's playtest 2026-10-20, the Witch's Abode).
@@ -868,6 +873,39 @@ void HideCharactersAgain() {
     }
 }
 
+} // namespace
+
+namespace Coop {
+
+// Kaniel 2026-10-29: in co-op vials, bullets and other consumables did not come back from the
+// storage box after a death or a trip. A death revives in place and a trip can load by the summon
+// placement (WarpGuestToLampPoint), so the respawn load's restock never ran: its two steps here
+// instead (see RestockItemClampOffset), only while both are the 01.09 functions.
+bool RestockFromStorage(std::string_view why) {
+    const auto starts_with = [](u64 offset, std::span<const u8> bytes) {
+        return image_base != 0 &&
+               HasMemoryAccess(image_base + offset, bytes.size(), MemoryProt::CpuRead) &&
+               std::ranges::equal(
+                   std::span<const u8>{reinterpret_cast<const u8*>(image_base + offset),
+                                       bytes.size()},
+                   bytes);
+    };
+    const bool found =
+        starts_with(RestockItemClampOffset, RestockItemClampPrologue) &&
+        starts_with(RestockFromStorageOffset, std::span<const u8>{StandardR15Prologue.data(), 6});
+    if (found) {
+        reinterpret_cast<void PS4_SYSV_ABI (*)()>(image_base + RestockItemClampOffset)();
+        reinterpret_cast<void PS4_SYSV_ABI (*)()>(image_base + RestockFromStorageOffset)();
+    }
+    LOG_INFO(Debug, "Bloodborne restock from storage after {}: {}", why,
+             found ? "done" : "functions not found");
+    return found;
+}
+
+} // namespace Coop
+
+namespace {
+
 // Does what a reload at the lamp would (see RefreshAtLamp) and asks WorldChrMan for the bonfire
 // respawn (see WorldRespawnStateOffset).
 void RefreshWorldAtLamp(s32 lamp, s32 players) {
@@ -1006,16 +1044,18 @@ namespace Coop {
 
 std::atomic<bool> wipe_trip_respawn_pending{};
 
-void BringBackWhatTheHostBroughtBack(std::span<const u32> handles) {
+std::atomic<s64> session_host_moved_ms{0};
+
+bool BringBackWhatTheHostBroughtBack(std::span<const u32> handles) {
     static std::chrono::steady_clock::time_point last{};
     const auto now = std::chrono::steady_clock::now();
     if (handles.empty() || !lamp_rest_hooks_installed || now - last < BringBackEvery) {
-        return;
+        return false;
     }
     const u64 world = ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0);
     if (world < 0x10000 || ReadValue<s32>(world, WorldRespawnStateOffset) != 0 ||
         party_rest_respawn_pending.load()) {
-        return;
+        return false;
     }
     last = now;
     brought_back_handles = {handles.begin(), handles.end()};
@@ -1035,6 +1075,7 @@ void BringBackWhatTheHostBroughtBack(std::span<const u32> handles) {
     party_rest_respawn_pending.store(true);
     party_rest_respawn_running.store(true);
     WriteValue(world, WorldRespawnStateOffset, s32{1});
+    return true;
 }
 
 void TickLampRest() {
@@ -1851,19 +1892,20 @@ void KeepOwnedWeaponFlagsOwn() {
 namespace Coop {
 
 void TickPlayersOnThisMap() {
-    LogItemModuleChecks();
-    LogItemButtonAndMapItems();
-    KeepGuestFullHp();
-    PolishMultiplayerUi();
+    TimeTickStep("LogItemModuleChecks", LogItemModuleChecks);
+    TimeTickStep("LogItemButtonAndMapItems", LogItemButtonAndMapItems);
+    TimeTickStep("KeepGuestFullHp", KeepGuestFullHp);
+    TimeTickStep("PolishMultiplayerUi", PolishMultiplayerUi);
     const bool in_session = InPartySession();
     // The boards go both ways in and out of a session (a guest on its own trip is out of one).
     const bool sharing = SharesWithParty(party_controller.has_value(), GetLocalPlayer() >= 0x10000);
-    UnlockPartyTrophies(sharing);
-    KeepRitualAltarsWhole();
-    SetPartyWorldChanges(sharing);
-    KeepGuestProgress(in_session);
-    LogFlagChangesInSession(sharing);
+    TimeTickStep("UnlockPartyTrophies", [&] { UnlockPartyTrophies(sharing); });
+    TimeTickStep("KeepRitualAltarsWhole", KeepRitualAltarsWhole);
+    TimeTickStep("SetPartyWorldChanges", [&] { SetPartyWorldChanges(sharing); });
+    TimeTickStep("KeepGuestProgress", [&] { KeepGuestProgress(in_session); });
+    TimeTickStep("LogFlagChangesInSession", [&] { LogFlagChangesInSession(sharing); });
     {
+        const TickStepTimer step{"KeepEnemyDeathsInStep"};
         const auto started = std::chrono::steady_clock::now();
         KeepEnemyDeathsInStep(sharing);
         coop_time.Add("enemy step",
@@ -1872,32 +1914,34 @@ void TickPlayersOnThisMap() {
                           .count(),
                       SteadyMilliseconds());
     }
-    SnapshotHostMapState(sharing);
-    ResumeWhereTheGuestLeft(in_session);
-    LogWatchedWrites();
-    GiveDeferredBossItems();
-    TurnOffMultiplayerWalls(in_session);
-    PlayGuestAsHost(in_session);
-    TickGuestLampTrip();
+    TimeTickStep("SnapshotHostMapState", [&] { SnapshotHostMapState(sharing); });
+    TimeTickStep("ResumeWhereTheGuestLeft", [&] { ResumeWhereTheGuestLeft(in_session); });
+    TimeTickStep("LogWatchedWrites", LogWatchedWrites);
+    TimeTickStep("GiveDeferredBossItems", GiveDeferredBossItems);
+    TimeTickStep("TurnOffMultiplayerWalls", [&] { TurnOffMultiplayerWalls(in_session); });
+    TimeTickStep("PlayGuestAsHost", [&] { PlayGuestAsHost(in_session); });
+    TimeTickStep("TickGuestLampTrip", TickGuestLampTrip);
     // SHADPS4_BLOODBORNE_ESD_LOG=1: every member's talk answers, not only a guest's.
     static const bool esd_log_all = std::getenv("SHADPS4_BLOODBORNE_ESD_LOG") != nullptr;
     LogEsdAnswers(in_session && party_controller &&
                   (esd_log_all || party_controller->SearchEffectId() == SmallResonantBellEffect));
-    RestoreSearchAfterTrip(in_session);
+    TimeTickStep("RestoreSearchAfterTrip", [&] { RestoreSearchAfterTrip(in_session); });
     const u32 map = PlayingMap();
     party_map_now.store(party_controller && IsUsablePackedMap(map) ? map : 0);
-    if (EnemyOwnerOn()) {
-        TickEnemyOwner(in_session, IsUsablePackedMap(map) ? map : 0);
-    } else {
-        ClaimEnemiesWhenAlone(in_session, IsUsablePackedMap(map) ? map : 0);
-    }
-    GrantPartyEchoes();
-    TickTrades();
-    FinishWaitingJoins(in_session);
-    ResendOwnDataOnChange(in_session);
-    LogMemberDataChanges(in_session);
-    GiveEncounterInsight(in_session);
-    KeepImpurityBonus(in_session);
+    TimeTickStep("TickEnemyOwner", [&] {
+        if (EnemyOwnerOn()) {
+            TickEnemyOwner(in_session, IsUsablePackedMap(map) ? map : 0);
+        } else {
+            ClaimEnemiesWhenAlone(in_session, IsUsablePackedMap(map) ? map : 0);
+        }
+    });
+    TimeTickStep("GrantPartyEchoes", GrantPartyEchoes);
+    TimeTickStep("TickTrades", TickTrades);
+    TimeTickStep("FinishWaitingJoins", [&] { FinishWaitingJoins(in_session); });
+    TimeTickStep("ResendOwnDataOnChange", [&] { ResendOwnDataOnChange(in_session); });
+    TimeTickStep("LogMemberDataChanges", [&] { LogMemberDataChanges(in_session); });
+    TimeTickStep("GiveEncounterInsight", [&] { GiveEncounterInsight(in_session); });
+    TimeTickStep("KeepImpurityBonus", [&] { KeepImpurityBonus(in_session); });
     // Whether this character has been to the Hunter's Dream: its own world has the first visit's
     // flag, or it is there (the first visit's event runs for a guest too).
     static int dream_slot = -2;
@@ -1921,6 +1965,8 @@ void TickPlayersOnThisMap() {
         }
     }
     RecheckShopLinesOnce(IsUsablePackedMap(map) ? map : 0);
+    TimeTickStep("GiveNpcDeathDrops",
+                 [&] { GiveNpcDeathDrops(in_session, IsUsablePackedMap(map) ? map : 0); });
     GiveBackPhantomKeyItems();
     KeepHeldItemFlagsOwn();
     KeepGestureFlagsOwn();
@@ -2036,6 +2082,11 @@ void TickPartyTrip() {
         // Again on arrival (below), in case the load created no map items (see
         // SetGuestPickupsBeforeMapItems): the headstone reads the lamps when it is used.
         guest_arrived = IsPartyGuestRole();
+        // A lamp's, headstone's or death's trip restocks as its load would have (a world reload
+        // for the time of day does not travel).
+        if (!party_trip.WorldReload()) {
+            RestockFromStorage("a trip");
+        }
         if (guest_trip_in_flight) {
             guest_trip_in_flight = false;
             guest_trip_fixup_at = std::chrono::steady_clock::now() + std::chrono::seconds{1};
@@ -2088,6 +2139,18 @@ bool PS4_SYSV_ABI KeepMatchingDuringTrip(u64, const GuestRegisterSnapshot* regis
         LOG_INFO(Debug, "Bloodborne party: a world reload (time of day) is a trip once it loads");
     }
     if (!PartyTripActive()) {
+        // Kaniel 2026-10-25: a game that took its team's host role in play (the host left) keeps
+        // its session when a member goes irregularly: NetSync's update ends the session then
+        // (its timer after "OnIrregularLeaveSession", the call returning here), and the old
+        // host's world this game plays in ended each session it opened again as the members that
+        // left it went (rig host-quits-title3: the new host's sessions closed 15 times, nobody
+        // joined).
+        constexpr u64 IrregularLeaveStopReturn = 0x0178A6C3;
+        if (return_address == image_base + IrregularLeaveStopReturn && TeamHostTookOver()) {
+            LOG_INFO(Debug, "Bloodborne party: kept the team's session this game hosts now (a "
+                            "member's irregular leave would end it)");
+            return true;
+        }
         if (party_controller && InPartySession()) {
             LogGameCallChainAt("CSMultiPlayMan StopRequest", registers->rsp);
         }

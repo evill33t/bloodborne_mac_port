@@ -127,6 +127,10 @@ set(SOURCES
     # The parties' worlds (co-op phase 3)
     src/bloodborne_world.h
     src/bloodborne_world.cpp
+    src/lobby_friends.h
+    src/lobby_friends.cpp
+    src/lobby_friends_db.h
+    src/lobby_friends_db.cpp
     src/bloodborne_party_boards.h
     src/bloodborne_party_boards.cpp
     ${COOP_SOURCES}
@@ -324,6 +328,7 @@ if(BUILD_TESTING)
     add_executable(test_bloodborne_world EXCLUDE_FROM_ALL
         tests/test_bloodborne_world.cpp
         src/bloodborne_world.cpp
+        src/lobby_friends.cpp
         src/bloodborne_party_boards.cpp
         src/server_link.cpp
         ${COOP_SOURCES}
@@ -337,9 +342,26 @@ if(BUILD_TESTING)
     target_link_libraries(test_bloodborne_world PRIVATE Qt6::Core libprotobuf)
     add_test(NAME bloodborne_world COMMAND test_bloodborne_world)
 
+    add_executable(test_lobby_friends_db EXCLUDE_FROM_ALL
+        tests/test_lobby_friends_db.cpp
+        src/lobby_friends_db.cpp
+        src/database.cpp
+        "${PROTO_OUT}/shadnet.pb.cc"
+        "${PROTO_OUT}/coop.pb.cc"
+    )
+    target_include_directories(test_lobby_friends_db PRIVATE
+        src
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${PROTO_OUT}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/externals/protobuf/src"
+    )
+    target_link_libraries(test_lobby_friends_db PRIVATE Qt6::Core Qt6::Network Qt6::Sql libprotobuf)
+    add_test(NAME lobby_friends_db COMMAND test_lobby_friends_db)
+
     add_executable(test_world_writer EXCLUDE_FROM_ALL
         tests/test_world_writer.cpp
         src/bloodborne_world.cpp
+        src/lobby_friends.cpp
         src/bloodborne_party_boards.cpp
         src/server_link.cpp
         ${COOP_SOURCES}
@@ -363,6 +385,7 @@ if(BUILD_TESTING)
         src/admin.cpp
         src/admission.cpp
         src/bloodborne_world.cpp
+        src/lobby_friends.cpp
         src/bloodborne_party_boards.cpp
         src/server_link.cpp
         ${COOP_SOURCES}

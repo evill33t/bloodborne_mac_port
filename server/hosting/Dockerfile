@@ -85,7 +85,7 @@ FROM qt-${QT_FROM} AS qt
 # --- shadnet -------------------------------------------------------------------------------------
 FROM qt AS build
 ARG BUILD_JOBS=0
-ARG SOURCE_REVISION=9e60cec70e589a199cf86771de4844fe556562d4
+ARG SOURCE_REVISION=5d2305ee611ef1e03be39ff925f0da75c9a70393
 WORKDIR /src/server
 # What CMakeLists.txt reads; not hosting/, so editing the ops files does not rebuild shadnet.
 COPY server/CMakeLists.txt /src/server/
@@ -103,8 +103,8 @@ RUN --mount=type=cache,id=shadnet-build,target=/src/server/build \
     cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/qt \
     && printf '#pragma once\n#define BB_SCM_REV "%s"\n' "$SOURCE_REVISION" > build/include/bbcoop_revision.h \
     && cmake --build build --target shadnet bbload test_server_link test_build_fingerprint \
-        test_packet_routes test_rpc_tunnel test_admission test_http_gate test_team_lobby test_bloodborne_trade test_bloodborne_world test_world_writer $( [ "$BUILD_JOBS" -gt 0 ] && echo -j"$BUILD_JOBS" ) \
-    && ctest --test-dir build --output-on-failure -R '^(server_link|build_fingerprint|packet_routes|rpc_tunnel|admission|http_gate|team_lobby|bloodborne_trade|bloodborne_world|world_writer)$' \
+        test_packet_routes test_rpc_tunnel test_admission test_http_gate test_team_lobby test_lobby_friends_db test_bloodborne_trade test_bloodborne_world test_world_writer $( [ "$BUILD_JOBS" -gt 0 ] && echo -j"$BUILD_JOBS" ) \
+    && ctest --test-dir build --output-on-failure -R '^(server_link|build_fingerprint|packet_routes|rpc_tunnel|admission|http_gate|team_lobby|lobby_friends_db|bloodborne_trade|bloodborne_world|world_writer)$' \
     && mkdir -p /bin-out && strip -o /bin-out/shadnet build/shadnet \
     && strip -o /bin-out/bbload build/bbload
 COPY server/hosting/collect-runtime.sh /usr/local/bin/

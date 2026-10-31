@@ -10,6 +10,7 @@
 
 #include <array>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -109,6 +110,11 @@ private:
 //    the team's session where it stands and plays on alone, in its own world (no reload).
 //  - Adopt: playing alone, the Start of the team it is ready in came (it joined the hunt from the
 //    menu): it takes the team's party, and joins the session in place (TeamJoin).
+//  - Lead (Kaniel 2026-10-25): it plays in the team as a guest (not `hosts`) and the lobby made it
+//    the leader (the host left): it takes the host's role.
+//  - Follow (Kaniel 2026-10-25): it hosts, another member leads and that leader's session is the
+//    team's (`session_host`, as the server last said; two guests took over at once): it leaves
+//    its own session and joins the leader's as a guest.
 // The team menu closed (TeamMenu): opened from the game's System page, the pad presses Circle from
 // AfterMs after for HoldMs so that page closes too; opened from the port's Insert menu, nothing.
 class TeamMenuBack {
@@ -127,9 +133,13 @@ private:
     std::optional<s64> closed_ms;
 };
 
-enum class TeamPlayStep { None, Adopt, Leave };
+enum class TeamPlayStep { None, Adopt, Leave, Lead, Follow };
 TeamPlayStep TeamPlayStepOf(const bbcoop::LobbyState* lobby, std::string_view party,
-                            const bbcoop::TeamStart* start, const std::string& me = {});
+                            const bbcoop::TeamStart* start, const std::string& me = {},
+                            bool hosts = true, std::string_view session_host = {});
+// Kaniel 2026-10-25: the team's host now: its leader (the server's lobby makes the member hosting
+// the session the leader) when the lobby speaks of the Start's team, else the Start's host.
+std::string TeamHostOf(const bbcoop::LobbyState* lobby, const bbcoop::TeamStart& start);
 // The menu's "Join the hunt" in game: the invitation to `invite_team` accepted first (when in no
 // team), then this save ready with its slot and character; the leader's starts the team too.
 // Kaniel 2026-10-16: the leader's also picks `world`, this save's world ("" a new one).
@@ -213,6 +223,21 @@ std::vector<std::pair<s32, bool>> WorldFlagChanges(u32 flags_per_block,
 // the host's progress since shows from the guest's next trip.
 bool TakesTeamWorldBlock(u32 block, const std::set<u32>& taken, std::span<const u32> covered,
                          bool guest_trip);
+// Kaniel's players 2026-10-28/29: an ending (the Dream's 12100000, 12100002, 12100180) starts the
+// next playthrough (2003:21): the game puts its world back to a new game's and reloads the save,
+// its clear count (GameDataMan +0x68, the GetClearCount event function) one up. The team's world
+// from before it then went over that load: every lamp and boss back (Provi's day 4), and the
+// Dream's ending flag on again, so the ending played at the next visit, NG+ 1, 2, 3 (Lisara's
+// group). A load is the next playthrough's when its save slot's clear count is past the one
+// the last load of that slot saw in this game.
+class PlaythroughWatch {
+public:
+    // Notes a load of `slot` with its clear count: whether it starts a new playthrough.
+    bool NextPlaythrough(int slot, s32 clear_count);
+
+private:
+    std::map<int, s32> seen;
+};
 // The lamps lit in the team's world in the blocks a load took (`blocks`), as lamp entities
 // (LampOfActiveFlag). A lamp stays lit only for a character whose lamp list holds it, so they go on
 // the guest's list as its flags go in (Kaniel's play test 2026-10-18: krolebord's lamps listed only

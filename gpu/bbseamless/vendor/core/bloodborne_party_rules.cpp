@@ -107,27 +107,48 @@ namespace {
 constexpr u64 SoloParamRepositoryPointerOffset = 0x05540340;
 
 // Calls `found` with each loaded PARAM file of `type` (AtkParam_Pc and AtkParam_Npc share one)
-// until it returns true; returns that file, or 0.
+// until it returns true; returns that file, or 0. The slot it was in last time first
+// (LoadedParamSlots), the whole repository only when that slot no longer holds it.
 template <typename Found>
 u64 FindLoadedParamWhere(std::string_view type, Found&& found) {
+    const TickStepTimer step{"FindLoadedParam"};
     const u64 repository = ReadValue<u64>(image_base + SoloParamRepositoryPointerOffset, 0);
     if (repository < 0x10000 || !HasMemoryAccess(repository, 0x2000, MemoryProt::CpuRead)) {
         return 0;
     }
-    for (u64 slot = 0; slot < 0x2000; slot += 8) {
+    const auto param_in = [&](u64 slot) -> u64 {
         const u64 holder = ReadValue<u64>(repository, slot);
         if (holder < 0x10000 || !HasMemoryAccess(holder, 0x78, MemoryProt::CpuRead)) {
-            continue;
+            return 0;
         }
         const u64 inner = ReadValue<u64>(holder, 0x70);
         if (inner < 0x10000 || !HasMemoryAccess(inner, 0x78, MemoryProt::CpuRead)) {
-            continue;
+            return 0;
         }
         const u64 param = ReadValue<u64>(inner, 0x70);
         if (param < 0x10000 || !HasMemoryAccess(param, 0x40, MemoryProt::CpuRead)) {
-            continue;
+            return 0;
         }
-        if (IsParamOfType({reinterpret_cast<const u8*>(param), 0x40}, type) && found(param)) {
+        return IsParamOfType({reinterpret_cast<const u8*>(param), 0x40}, type) && found(param)
+                   ? param
+                   : 0;
+    };
+    static std::mutex slots_mutex;
+    static LoadedParamSlots slots;
+    std::optional<u64> last;
+    {
+        std::scoped_lock lock{slots_mutex};
+        last = slots.Slot(type);
+    }
+    if (last) {
+        if (const u64 param = param_in(*last); param != 0) {
+            return param;
+        }
+    }
+    for (u64 slot = 0; slot < 0x2000; slot += 8) {
+        if (const u64 param = param_in(slot); param != 0) {
+            std::scoped_lock lock{slots_mutex};
+            slots.Found(type, slot);
             return param;
         }
     }
@@ -201,30 +222,32 @@ std::optional<std::span<u8>> WritableParam(u64 param, u64 row_size) {
     if (rows == 0 || !HasMemoryAccess(param, entries, MemoryProt::CpuRead)) {
         return std::nullopt;
     }
-    u64 size = entries;
-    for (u64 row = 0; row < rows; ++row) {
-        size = std::max(size, ReadValue<u64>(param, 0x40 + row * 24 + 8) + row_size);
-    }
+    // The entries in one span: a ReadValue each was a memory check a row (21 000 a second).
+    const u64 size = ParamTableSize({reinterpret_cast<const u8*>(param), entries}, rows, row_size);
     if (size > 0x1000000 || !HasMemoryAccess(param, size, MemoryProt::CpuWrite)) {
         return std::nullopt;
     }
     return std::span<u8>{reinterpret_cast<u8*>(param), size};
 }
 
-// Row 271000's {HP, poise} or {attack, 0} as this table holds it now.
-std::optional<std::pair<s32, s32>> HarderEnemiesMarker(std::span<const u8> param, u64 first,
-                                                       u64 second) {
+// Row 271000's {HP, poise, turnVellocity's bits} or {attack, 0, 0} as this table holds it now.
+using ParamMarker = std::array<s32, 3>;
+std::optional<ParamMarker> HarderEnemiesMarker(std::span<const u8> param, u64 first, u64 second) {
     const auto row = FindParamRow(param, NpcAttackMarkerRow);
-    if (!row || *row + second + 2 > param.size()) {
+    if (!row || *row + std::max<u64>(second + 2, first + 4) > param.size()) {
         return std::nullopt;
     }
     u32 one = 0;
     s16 two = 0;
+    s32 turn = 0;
     std::memcpy(&one, param.data() + *row + first, first == NpcHpOffset ? 4 : 2);
     if (second != 0) {
         std::memcpy(&two, param.data() + *row + second, sizeof(two));
     }
-    return std::pair{static_cast<s32>(one), static_cast<s32>(two)};
+    if (first == NpcHpOffset) {
+        std::memcpy(&turn, param.data() + *row + NpcTurnVelocityOffset, sizeof(turn));
+    }
+    return ParamMarker{static_cast<s32>(one), static_cast<s32>(two), turn};
 }
 
 } // namespace
@@ -272,42 +295,50 @@ std::string RateText(const std::optional<HarderEnemies>& rate) {
                 : std::string{"the normal game"};
 }
 
-// One loaded table as the game had it (its own values) and the rate it holds now.
+// One loaded table as the game had it (its own values) and the rate it holds now. Kaniel
+// 2026-10-28: and NpcParam's boss turn speed (the boss tempo rule), 1 the game's.
 struct ScaledParam {
     u64 table = 0;
     std::vector<u8> own;
-    std::optional<std::pair<s32, s32>> marker; // as last written
+    std::optional<ParamMarker> marker; // as last written
     std::optional<HarderEnemies> rate;
+    float turn = 1.0f;
+    bool Scaled() const {
+        return rate.has_value() || turn != 1.0f;
+    }
 };
 
-// Puts `wanted` into `table` (from its own values); whether it changed anything.
+// Puts `wanted` and `turn` into `table` (from its own values); whether it changed anything.
+// `scale` gets the table and the rate (none: only the turn speed changes).
 template <typename Scale>
 bool ScaleParam(ScaledParam& kept, u64 address, std::span<u8> table,
-                std::optional<std::pair<s32, s32>> marker,
-                const std::optional<HarderEnemies>& wanted, Scale&& scale) {
+                std::optional<ParamMarker> marker, const std::optional<HarderEnemies>& wanted,
+                float turn, Scale&& scale) {
     const bool fresh = address != kept.table || marker != kept.marker;
     if (fresh) {
         // A new table (or one loaded again): its values are the game's own.
-        if (!wanted) {
+        if (!wanted && turn == 1.0f) {
             kept = ScaledParam{.table = address, .marker = marker};
             return false;
         }
         kept.table = address;
         kept.own.assign(table.begin(), table.end());
         kept.rate.reset();
-    } else if (SameRate(kept.rate, wanted)) {
+        kept.turn = 1.0f;
+    } else if (SameRate(kept.rate, wanted) && kept.turn == turn) {
         return false;
     }
-    if (kept.own.size() != table.size() && !kept.rate) {
+    if (kept.own.size() != table.size() && !kept.Scaled()) {
         kept.own.assign(table.begin(), table.end()); // still the game's own values
     }
     if (kept.own.size() == table.size()) {
         std::memcpy(table.data(), kept.own.data(), table.size());
     }
-    if (wanted) {
-        scale(table, *wanted);
+    if (wanted || turn != 1.0f) {
+        scale(table, wanted);
     }
     kept.rate = wanted;
+    kept.turn = turn;
     return true;
 }
 
@@ -320,21 +351,27 @@ void MakeEnemiesHarder() {
     const std::size_t hunters = rules.enemy_scaling ? HuntersOnMyMap() : 0;
     const std::optional<HarderEnemies> wanted =
         rules.enemy_scaling ? TeamScaledEnemies(hunters) : harder_enemies;
+    // Kaniel 2026-10-28: the boss tempo rule's turn speed for the boss rows.
+    const float turn = ActiveBossTempoTuning().turn;
     static ScaledParam npc_kept;
     static ScaledParam attack_kept;
     static std::optional<std::vector<std::pair<s32, float>>> boss_bonus_own;
     std::scoped_lock lock{harder_enemies_mutex};
-    if (!wanted && !npc_kept.rate && !attack_kept.rate && !boss_bonus_own) {
+    if (!wanted && turn == 1.0f && !npc_kept.Scaled() && !attack_kept.rate && !boss_bonus_own) {
         enemies_harder_now.store(false);
         return; // never scaled: the game's tables as they are
     }
     static std::chrono::steady_clock::time_point last{};
     static std::optional<HarderEnemies> last_wanted;
+    static float last_turn = 1.0f;
     const auto now = std::chrono::steady_clock::now();
-    if (now - last < std::chrono::seconds{1} && SameRate(wanted, last_wanted)) {
+    if (now - last < std::chrono::seconds{1} && SameRate(wanted, last_wanted) &&
+        turn == last_turn) {
         return;
     }
     last = now;
+    const TickStepTimer step{"MakeEnemiesHarder"};
+    last_turn = turn;
     if (!SameRate(wanted, last_wanted) && rules.enemy_scaling) {
         LOG_INFO(Debug, "Bloodborne enemy scaling: {} hunter(s) on this map: {}", hunters,
                  RateText(wanted));
@@ -354,32 +391,51 @@ void MakeEnemiesHarder() {
     if (const auto table = npc != 0 ? WritableParam(npc, NpcRowSize) : std::nullopt) {
         const auto marker = HarderEnemiesMarker(*table, NpcHpOffset, NpcPoiseOffset);
         std::size_t rows = 0;
-        if (ScaleParam(npc_kept, npc, *table, marker, wanted,
-                       [&](std::span<u8> param, const HarderEnemies& rate) {
-                           rows = MakeNpcParamHarder(param, rate);
+        std::size_t turned = 0;
+        // What this step changes: the harder rate (or its table) and the boss turn speed.
+        const bool rate_changes = !SameRate(npc_kept.rate, wanted) || npc_kept.table != npc;
+        const bool turn_changes = npc_kept.turn != turn || (npc_kept.table != npc && turn != 1.0f);
+        if (ScaleParam(npc_kept, npc, *table, marker, wanted, turn,
+                       [&](std::span<u8> param, const std::optional<HarderEnemies>& rate) {
+                           rows = rate ? MakeNpcParamHarder(param, *rate) : 0;
+                           turned = ScaleBossTurnSpeed(param, turn);
                        })) {
             npc_kept.marker = HarderEnemiesMarker(*table, NpcHpOffset, NpcPoiseOffset);
-            LOG_INFO(Debug,
-                     "Bloodborne harder enemies: {} NpcParam rows, {} (Father Gascoigne HP {}, "
-                     "poise {}){}",
-                     rows, RateText(wanted), npc_kept.marker ? npc_kept.marker->first : -1,
-                     npc_kept.marker ? npc_kept.marker->second : -1,
-                     in_world ? "; enemies already on this map keep their old stats" : "");
+            if (rate_changes) {
+                LOG_INFO(Debug,
+                         "Bloodborne harder enemies: {} NpcParam rows, {} (Father Gascoigne HP "
+                         "{}, poise {}){}",
+                         rows, RateText(wanted), npc_kept.marker ? (*npc_kept.marker)[0] : -1,
+                         npc_kept.marker ? (*npc_kept.marker)[1] : -1,
+                         in_world ? "; enemies already on this map keep their old stats" : "");
+            }
+            if (turn_changes) {
+                float gascoigne = 0.0f;
+                if (const auto row = FindParamRow(*table, NpcAttackMarkerRow)) {
+                    std::memcpy(&gascoigne, table->data() + *row + NpcTurnVelocityOffset,
+                                sizeof(gascoigne));
+                }
+                LOG_INFO(Debug,
+                         "Bloodborne boss tempo: {} boss NpcParam rows turn x{:.2f} (Father "
+                         "Gascoigne {:.0f} degrees a second){}",
+                         turned, turn, gascoigne,
+                         in_world ? "; the bosses already on this map turn as before" : "");
+            }
         }
     }
     if (const auto table = attacks != 0 ? WritableParam(attacks, AtkRowSize) : std::nullopt) {
         const auto marker = HarderEnemiesMarker(*table, AtkPhysOffset, 0);
         std::size_t rows = 0;
-        if (ScaleParam(attack_kept, attacks, *table, marker, wanted,
-                       [&](std::span<u8> param, const HarderEnemies& rate) {
-                           rows = MakeNpcAttacksHarder(param, rate.damage);
+        if (ScaleParam(attack_kept, attacks, *table, marker, wanted, 1.0f,
+                       [&](std::span<u8> param, const std::optional<HarderEnemies>& rate) {
+                           rows = rate ? MakeNpcAttacksHarder(param, rate->damage) : 0;
                        })) {
             attack_kept.marker = HarderEnemiesMarker(*table, AtkPhysOffset, 0);
             LOG_INFO(Debug,
                      "Bloodborne harder enemies: {} AtkParam_Npc rows, x{:.2f} damage (Father "
                      "Gascoigne's first swing {}){}",
                      rows, wanted ? wanted->damage : 1.0f,
-                     attack_kept.marker ? attack_kept.marker->first : -1,
+                     attack_kept.marker ? (*attack_kept.marker)[0] : -1,
                      in_world ? "; enemies already on this map keep their old stats" : "");
         }
     }
@@ -468,6 +524,7 @@ void PolishMultiplayerUi() {
         return;
     }
     last = now;
+    const TickStepTimer step{"PolishMultiplayerUi"};
     if (const std::size_t messages = PolishMessages(); messages != 0) {
         LOG_INFO(Debug, "Bloodborne party UI: {} messages now say Host and Guest", messages);
     }
@@ -964,9 +1021,18 @@ constexpr u64 FullEchoRateOffset = 0x04927EBC;
 constexpr std::array<u8, 11> AddSoulsPrologue{0x55, 0x48, 0x89, 0xE5, 0x41, 0x56,
                                               0x53, 0x48, 0x83, 0xEC, 0x10};
 
-void PS4_SYSV_ABI NoteAddSouls(u64, const GuestRegisterSnapshot* registers) {
+void PS4_SYSV_ABI NoteAddSouls(u64, GuestRegisterSnapshot* registers) {
     const u64 caller = ReadValue<u64>(registers->rsp, 0);
     const s32 amount = static_cast<s32>(registers->rsi);
+    // The enemy kill reward keeps the dying character in r14 (see QuietKills): a party kill the
+    // kill step put down again pays nothing, to this member or the party.
+    if (amount > 0 && caller == image_base + EnemyKillRewardOffset &&
+        TakesQuietKillReward(registers->r14)) {
+        registers->rsi &= ~u64{0xFFFFFFFF};
+        LOG_INFO(Debug, "Bloodborne echoes: +{} for {:#x} not paid: a party kill put down again",
+                 amount, ReadValue<u32>(registers->r14, 0x08));
+        return;
+    }
     LOG_INFO(Debug, "Bloodborne echoes: +{} (rates {}) from {:#x}", amount, registers->rcx & 0xFF,
              caller >= image_base ? caller - image_base : caller);
     // A kill reward: the game paid this member (a post of the same kill is not owed here).

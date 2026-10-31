@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -89,6 +90,10 @@ QByteArray Framed(const bbcoop::JournalRecord& record) {
 
 QString Hex(quint64 value) {
     return QStringLiteral("%1").arg(value, 0, 16);
+}
+
+std::string AuthenticatedMember(const QByteArray& online_id) {
+    return online_id.toHex().toStdString();
 }
 
 // Phase 11: what was written reaches the disk, not only the system's cache (a power cut or a
@@ -894,6 +899,9 @@ void Service::OnHello(Member& member, const bbcoop::Hello& hello, qint64 now_ms,
                          ", this server speaks " + std::to_string(CoopProtocol));
     } else if (party.indexOf(':') <= 0 || hello.member().empty()) {
         welcome.set_text("no party key or member name");
+    } else if (require_authenticated_identity &&
+               hello.member() != AuthenticatedMember(member.online_id)) {
+        welcome.set_text("member identity does not match the signed-in account");
     } else if (hosted.enabled && !OwnName(member, hello.member())) {
         welcome.set_text("the member name is not this player's");
     } else if (hosted.enabled) {
@@ -919,6 +927,7 @@ void Service::OnHello(Member& member, const bbcoop::Hello& hello, qint64 now_ms,
         !member.name.empty() && member.name == hello.member() && member.run == hello.run();
     member.party = FolderOf(party);
     member.cut_from.clear();
+    member.cut_ms = 0;
     const bool team = party.startsWith("world:");
     member.name = hello.member();
     member.run = hello.run();
@@ -1198,6 +1207,22 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
                               .arg(world.name, QString::fromStdString(member.name))
                               .arg(envelope.altar_record().altar()));
         SendToOthers(world, member, relayed, now_ms);
+        // Kaniel 2026-10-30: an empty record is a chalice taken off its altar (an altar holds
+        // one, so every new dungeon comes after one). The chalice dungeons are all map
+        // 0x1D000000 to the log: they start over, or the same chalice placed again builds its
+        // dungeon with the old kills standing.
+        const std::string& bits = envelope.altar_record().bits();
+        if (bits.size() >= 4 &&
+            std::all_of(bits.begin(), bits.begin() + 4, [](char byte) { return byte == '\xff'; })) {
+            constexpr std::uint32_t ChaliceDungeonMap = 0x1D000000;
+            ResetMap(world, ChaliceDungeonMap, now_ms);
+            result.log.append(
+                QStringLiteral("party world %1: altar %2 emptied by %3, the chalice dungeons start "
+                               "over")
+                    .arg(world.name)
+                    .arg(envelope.altar_record().altar())
+                    .arg(QString::fromStdString(member.name)));
+        }
         break;
     }
     case bbcoop::Envelope::kPing: {
@@ -1238,6 +1263,19 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
             world.session->host() != member.name) {
             break;
         }
+        // Kaniel 2026-10-25: one host. Another member's game hosts the team's open session
+        // already (two guests took over when their host left): this one's is not the team's, and
+        // it is told that one to join (rig host-quits-title3: the lead went back and forth).
+        if (world.session && world.session->host() != member.name && SessionHostLinked(world)) {
+            result.log.append(QStringLiteral("party world %1: %2's session is not the team's: %3 "
+                                             "hosts it")
+                                  .arg(world.name, QString::fromStdString(member.name),
+                                       QString::fromStdString(world.session->host())));
+            bbcoop::Envelope current;
+            *current.mutable_team_session() = *world.session;
+            SendTo(member, current, now_ms);
+            break;
+        }
         bbcoop::Envelope relayed = envelope;
         relayed.mutable_team_session()->set_host(member.name);
         if (relayed.team_session().join().empty()) {
@@ -1255,6 +1293,11 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
         SendToOthers(world, member, relayed, now_ms);
         if (!world.session) {
             EndInvasion(world.name, bbcoop::InvasionEnd::HOST_LEFT, now_ms, result);
+        }
+        // Kaniel 2026-10-25: the member whose game hosts the team's session leads its team (a
+        // guest's game took the room when the host left).
+        if (world.session && world.team) {
+            LeadBySession(world, member.name, result); // the lobby goes out at the tick
         }
         break;
     }
@@ -1913,8 +1956,16 @@ Service::Result Service::Tick(qint64 now_ms) {
         EndInvasion(name, bbcoop::InvasionEnd::TIMEOUT, now_ms, result);
     }
     if (const TeamLobby::Outcome expired = lobby.Expire(now_ms); expired.changed) {
-        result.log.append(QStringLiteral("team lobby: members gone for %1 min left their teams")
+        QStringList gone;
+        for (const TeamLobby::Departure& out : expired.departed) {
+            gone.append(QString::fromStdString(out.member));
+        }
+        result.log.append(QStringLiteral("team lobby: %1 gone (its game quiet %2 ms while its "
+                                         "team plays, or offline %3 min): out of its team")
+                              .arg(gone.join(QStringLiteral(", ")))
+                              .arg(LeftGraceMs)
                               .arg(OfflineGraceMs / 60000));
+        TakeOutOfTeams(expired, now_ms, result);
         Settle(expired, now_ms, result);
     }
     if (lobby_changed && (!hosted.enabled || now_ms - lobby_sent_ms >= hosted.lobby_interval_ms)) {
@@ -1958,8 +2009,9 @@ std::string Service::CharacterOf(const std::string& member) const {
 
 bool Service::SessionHostLinked(const PartyWorld& world) const {
     return world.session && std::any_of(members.begin(), members.end(), [&](const auto& entry) {
+               // A quiet link's game is gone, as far as hosting goes (Kaniel 2026-10-25).
                return entry.second.party == world.name &&
-                      entry.second.name == world.session->host();
+                      entry.second.name == world.session->host() && !entry.second.quiet;
            });
 }
 
@@ -2017,9 +2069,38 @@ QString Service::VisitingOf(const ServerLink::Endpoint& link) const {
     return found != members.end() && found->second.hostile ? found->second.visiting : QString{};
 }
 
+void Service::Quiet(const ServerLink::Endpoint& link, bool quiet, qint64 now_ms) {
+    const auto found = members.find(link.Key());
+    if (found == members.end()) {
+        return;
+    }
+    found->second.quiet = quiet;
+    const std::string name = found->second.lobby;
+    if (name.empty()) {
+        return;
+    }
+    const bool heard = std::any_of(members.begin(), members.end(), [&](const auto& m) {
+        return m.second.lobby == name && !m.second.quiet;
+    });
+    lobby.Quiet(name, !heard, now_ms);
+}
+
 QString Service::PartyOf(const ServerLink::Endpoint& link) const {
     const auto found = members.find(link.Key());
-    return found == members.end() ? QString{} : found->second.party;
+    if (found == members.end()) {
+        return {};
+    }
+    // Amanises 2026-10-25: just cut from its team's world: still that party's for the link while
+    // its game says goodbye (RoutesPacket lets only the game's own packets through).
+    if (found->second.party.isEmpty() && InCutGrace(found->second)) {
+        return found->second.cut_from;
+    }
+    return found->second.party;
+}
+
+bool Service::InCutGrace(const Member& member) const {
+    return !member.cut_from.isEmpty() && member.cut_ms != 0 &&
+           clock_ms - member.cut_ms < CutGraceMs;
 }
 
 bool Service::RoutesPacket(const ServerLink::Endpoint& from, const ServerLink::Endpoint& to,
@@ -2033,9 +2114,22 @@ bool Service::RoutesPacket(const ServerLink::Endpoint& from, const ServerLink::E
                channel < BloodborneCoop::NativeChannelCount;
     }
     // Kaniel 2026-10-16: a member out of its team reaches none of the team's games, nor they it.
-    if ((!sender->second.cut_from.isEmpty() && sender->second.cut_from == target->second.party) ||
-        (!target->second.cut_from.isEmpty() && target->second.cut_from == sender->second.party)) {
-        return false;
+    const bool sender_cut =
+        !sender->second.cut_from.isEmpty() && sender->second.cut_from == target->second.party;
+    const bool target_cut =
+        !target->second.cut_from.isEmpty() && target->second.cut_from == sender->second.party;
+    if (sender_cut || target_cut) {
+        // Amanises 2026-10-25: right after the cut only the game's own packets (its leave).
+        // Kaniel 2026-10-26: and only between it and the session's host, the one its leave is
+        // for (all the team's games when the host itself was cut, or no host was known).
+        const Member& cut = sender_cut ? sender->second : target->second;
+        const Member& other = sender_cut ? target->second : sender->second;
+        const bool host_pair =
+            cut.cut_host.empty() || other.name == cut.cut_host || cut.name == cut.cut_host;
+        return host_pair && InCutGrace(cut) &&
+               BloodborneCoop::NativeChannelPolicy(channel) ==
+                   BloodborneCoop::ChannelPolicy::Pass &&
+               channel < BloodborneCoop::NativeChannelCount;
     }
     // Invasions: a hostile visitor and the team it visits go by the hostile table; the team
     // member's part in the enemies is the visited world's.
@@ -2214,12 +2308,15 @@ void Service::TakeTeamWorld(Member& member, PartyWorld& world, const bbcoop::Tea
 
 void Service::OnLobbyHello(Member& member, const bbcoop::LobbyHello& hello, qint64 now_ms,
                            Result& result) {
-    if (hello.protocol() != CoopProtocol || hello.member().empty()) {
+    const bool wrong_identity =
+        require_authenticated_identity && hello.member() != AuthenticatedMember(member.online_id);
+    if (hello.protocol() != CoopProtocol || hello.member().empty() || wrong_identity) {
         bbcoop::Envelope answer;
         answer.mutable_lobby_state()->set_notice(
             hello.member().empty() ? "no member name"
+            : wrong_identity       ? "member identity does not match the signed-in account"
                                    : "co-op protocol " + std::to_string(hello.protocol()) +
-                                         ", this server speaks " + std::to_string(CoopProtocol));
+                                   ", this server speaks " + std::to_string(CoopProtocol));
         SendTo(member, answer, now_ms);
         result.log.append(QStringLiteral("team lobby: refused %1: %2")
                               .arg(QString::fromStdString(Who(member)),
@@ -2245,6 +2342,12 @@ void Service::OnLobbyHello(Member& member, const bbcoop::LobbyHello& hello, qint
         (arrived || !rewards_before || (!covenants_before && member.covenant_rewards))) {
         ResumeRewards(member, now_ms, result);
     }
+    if (!hello.name().empty()) {
+        lobby_names[member.lobby] = hello.name();
+    }
+    if (arrived) {
+        relations.erase(member.lobby); // read again: its game's own friend list may have changed
+    }
     if (arrived) {
         result.log.append(
             QStringLiteral("team lobby: %1 (%2) signed in")
@@ -2255,11 +2358,17 @@ void Service::OnLobbyHello(Member& member, const bbcoop::LobbyHello& hello, qint
     if (arrived_outcome.worlds_changed) {
         StoreWorldList(result);
     }
+    if (!arrived_outcome.departed.empty()) {
+        result.log.append(QStringLiteral("team lobby: %1 is back at the title while its team "
+                                         "plays: out of it, invited back")
+                              .arg(QString::fromStdString(hello.member())));
+    }
+    TakeOutOfTeams(arrived_outcome, now_ms, result);
     Settle(arrived_outcome, now_ms, result);
     if (arrived) {
         // Its state even when nothing changed for the others.
         bbcoop::Envelope envelope;
-        *envelope.mutable_lobby_state() = lobby.StateFor(member.lobby);
+        *envelope.mutable_lobby_state() = LobbyStateFor(member);
         SendTo(member, envelope, now_ms);
     }
     // A region: what the shard that sent it here asked (join its team, make its team again).
@@ -2308,6 +2417,16 @@ void Service::OnTeamRequest(Member& member, const bbcoop::TeamRequest& said, qin
     if (!ticket && request.action() == bbcoop::TeamRequest::CREATE) {
         request.clear_code(); // a team's code is the server's to make
     }
+    switch (request.action()) {
+    case bbcoop::TeamRequest::FRIEND_ADD:
+    case bbcoop::TeamRequest::FRIEND_REMOVE:
+    case bbcoop::TeamRequest::FRIEND_DECLINE:
+    case bbcoop::TeamRequest::SEARCH:
+        OnFriendRequest(member, request, now_ms, result);
+        return;
+    default:
+        break;
+    }
     const TeamLobby::Outcome outcome = lobby.Request(member.lobby, request, now_ms);
     // Kaniel 2026-10-16: the world a Start plays is the team's last played.
     if (request.action() == bbcoop::TeamRequest::START && !outcome.starts.empty()) {
@@ -2331,11 +2450,14 @@ void Service::OnTeamRequest(Member& member, const bbcoop::TeamRequest& said, qin
                      : QStringLiteral(": refused, ") + QString::fromStdString(outcome.notice)));
     if (!outcome.notice.empty()) {
         bbcoop::Envelope envelope;
-        *envelope.mutable_lobby_state() = lobby.StateFor(member.lobby);
+        *envelope.mutable_lobby_state() = LobbyStateFor(member);
         envelope.mutable_lobby_state()->set_notice(outcome.notice);
         SendTo(member, envelope, now_ms);
     }
     PutAside(outcome.forgotten_lines, QStringLiteral("forgotten"), result);
+    for (const std::string& id : outcome.lamps_reset) {
+        ResetLamps(id, result);
+    }
     if (outcome.changed) {
         StoreWorldList(result);
     }
@@ -2347,33 +2469,74 @@ void Service::OnTeamRequest(Member& member, const bbcoop::TeamRequest& said, qin
                         bbcoop::InvasionEnd::INVADERS_OFF, now_ms, result);
         }
     }
-    for (const TeamLobby::Departure& out : outcome.departed) {
-        TakeOutOfTeam(out, now_ms, result);
-    }
+    TakeOutOfTeams(outcome, now_ms, result);
     Settle(outcome, now_ms, result);
 }
 
+void Service::TakeOutOfTeams(const TeamLobby::Outcome& outcome, qint64 now_ms, Result& result) {
+    for (const TeamLobby::Departure& out : outcome.departed) {
+        TakeOutOfTeam(out, now_ms, result);
+    }
+}
+
 void Service::TakeOutOfTeam(const TeamLobby::Departure& out, qint64 now_ms, Result& result) {
+    if (out.party.empty()) {
+        return; // its team played no world yet
+    }
+    const QString party = FolderOf(QByteArray::fromStdString(out.party));
+    const auto world = worlds.find(party);
+    if (world == worlds.end()) {
+        return;
+    }
+    bool linked = false;
     for (auto& [key, member] : members) {
-        if (member.lobby != out.member || member.party.isEmpty()) {
-            continue;
-        }
-        const QString party = member.party;
-        const auto world = worlds.find(party);
-        if (out.party.empty() || world == worlds.end() ||
-            party != FolderOf(QByteArray::fromStdString(out.party))) {
+        if (member.lobby != out.member || member.party != party) {
             continue; // not in the world of that team
         }
+        linked = true;
         result.log.append(
             QStringLiteral("party world %1: %2 is out of team %3: out of its world")
                 .arg(party, QString::fromStdString(member.name), QString::fromStdString(out.team)));
         member.party.clear();
         member.cut_from = party;
-        member.map = 0;
-        if (world->second.session && world->second.session->host() == member.name) {
-            CloseSession(world->second, now_ms, result);
+        member.cut_ms = now_ms;
+        member.cut_host = world->second.session ? world->second.session->host() : std::string{};
+        for (const auto& [other_key, other] : members) {
+            if (member.cut_host.empty() && other.host && other.party == party) {
+                member.cut_host = other.name; // the session's host by its hello
+            }
         }
-        ForgetMember(world->second, member.name, now_ms, result);
+        member.map = 0;
+    }
+    // Kaniel 2026-10-25: a game gone (no link left in the world) goes the same way: its session
+    // closes for the others, and its share, boards and owners go.
+    if (!linked) {
+        result.log.append(
+            QStringLiteral("party world %1: %2 is out of team %3 (its game gone): "
+                           "out of its world")
+                .arg(party, QString::fromStdString(out.member), QString::fromStdString(out.team)));
+    }
+    if (world->second.session && world->second.session->host() == out.member) {
+        CloseSession(world->second, now_ms, result);
+    }
+    ForgetMember(world->second, out.member, now_ms, result);
+    // The member hosting the session now (it took the room before the leaver was out) leads.
+    if (world->second.session && SessionHostLinked(world->second)) {
+        LeadBySession(world->second, world->second.session->host(), result);
+    }
+}
+
+void Service::LeadBySession(const PartyWorld& world, const std::string& host, Result& result) {
+    const bbcoop::Team* team = lobby.TeamOf(host);
+    if (!team || team->party().empty() ||
+        FolderOf(QByteArray::fromStdString(team->party())) != world.name) {
+        return; // not the session of its team's world
+    }
+    const std::string team_id = team->id();
+    if (lobby.Lead(host).changed) {
+        lobby_changed = true;
+        result.log.append(QStringLiteral("team lobby: %1 hosts team %2's session: it leads")
+                              .arg(QString::fromStdString(host), QString::fromStdString(team_id)));
     }
 }
 
@@ -2446,7 +2609,7 @@ void Service::SendLobby(qint64 now_ms) {
     for (auto& [key, member] : members) {
         if (!member.lobby.empty()) {
             bbcoop::Envelope envelope;
-            *envelope.mutable_lobby_state() = lobby.StateFor(member.lobby);
+            *envelope.mutable_lobby_state() = LobbyStateFor(member);
             if (hosted.enabled) {
                 // Only to the players whose own state changed.
                 std::string bytes = envelope.lobby_state().SerializeAsString();
@@ -2459,6 +2622,171 @@ void Service::SendLobby(qint64 now_ms) {
             SendTo(member, envelope, now_ms);
         }
     }
+}
+
+const FriendRelations& Service::RelationsOf(const std::string& lobby_member) const {
+    // Kaniel 2026-10-26: the book's answer kept until a friend request changes it, or the player
+    // signs in to the lobby again (its game's own friend list may have changed it): every lobby
+    // state asks, and the book reads the accounts' database on the link's thread.
+    if (const auto found = relations.find(lobby_member); found != relations.end()) {
+        return found->second;
+    }
+    return relations[lobby_member] = friend_book->Of(lobby_member);
+}
+
+bbcoop::LobbyState Service::LobbyStateFor(const Member& member) const {
+    bbcoop::LobbyState state = lobby.StateFor(member.lobby);
+    if (friend_book) {
+        FriendRelations relations = RelationsOf(member.lobby);
+        for (auto* list : {&relations.friends, &relations.received, &relations.sent}) {
+            for (FriendEntry& entry : *list) {
+                if (const auto name = lobby_names.find(entry.member); name != lobby_names.end()) {
+                    entry.name = name->second;
+                }
+            }
+        }
+        AddFriendsToLobby(state, member.lobby, relations, member.search_query, member.search);
+    }
+    return state;
+}
+
+bool Service::Within(std::deque<qint64>& times, size_t per_minute, qint64 now_ms) {
+    while (!times.empty() && now_ms - times.front() >= 60'000) {
+        times.pop_front();
+    }
+    if (times.size() >= per_minute) {
+        return false;
+    }
+    times.push_back(now_ms);
+    return true;
+}
+
+void Service::SendLobbyTo(const std::string& lobby_member, qint64 now_ms) {
+    for (auto& [key, member] : members) {
+        if (member.lobby == lobby_member) {
+            bbcoop::Envelope envelope;
+            *envelope.mutable_lobby_state() = LobbyStateFor(member);
+            SendTo(member, envelope, now_ms);
+        }
+    }
+}
+
+// Amanises 2026-10-25: the players whose name holds `query` (any case): the lobby's names first
+// (what players see; the account name is an id made on the player's PC), then the accounts'.
+// Kaniel 2026-10-26: on a hosted server only the players signed in now, and one not signed in by
+// its whole name: a stranger lists no one's account by two letters.
+std::vector<FriendEntry> Service::SearchPlayers(const std::string& searcher,
+                                                const std::string& query) const {
+    const auto lower = [](std::string text) {
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text;
+    };
+    const std::string wanted = lower(query);
+    std::set<std::string> online;
+    if (hosted.enabled) {
+        for (const std::string& signed_in : lobby.SignedIn()) {
+            online.insert(signed_in);
+        }
+    }
+    std::vector<FriendEntry> found;
+    std::set<std::string> listed;
+    for (const auto& [lobby_member, name] : lobby_names) {
+        const std::string folded = lower(name);
+        const bool match = hosted.enabled && !online.contains(lobby_member)
+                               ? folded == wanted
+                               : folded.find(wanted) != std::string::npos;
+        if (found.size() < FriendSearchLimit && match) {
+            found.push_back({lobby_member, name});
+            listed.insert(lobby_member);
+        }
+    }
+    // Names that start with the text first, as the accounts' search lists them.
+    std::stable_sort(found.begin(), found.end(), [&](const FriendEntry& a, const FriendEntry& b) {
+        return (lower(a.name).rfind(wanted, 0) == 0) > (lower(b.name).rfind(wanted, 0) == 0);
+    });
+    if (friend_book && !hosted.enabled) {
+        for (FriendEntry& entry : friend_book->Search(searcher, query, FriendSearchLimit)) {
+            if (found.size() < FriendSearchLimit && listed.insert(entry.member).second) {
+                found.push_back(std::move(entry));
+            }
+        }
+    }
+    return found;
+}
+
+void Service::OnFriendRequest(Member& member, const bbcoop::TeamRequest& request, qint64 now_ms,
+                              Result& result) {
+    const auto action = request.action();
+    std::string notice;
+    if (!friend_book) {
+        notice = "friends are not kept on this server";
+    } else if (action == bbcoop::TeamRequest::SEARCH && !request.query().empty() &&
+               !Within(search_times[member.lobby], SearchesPerMinute, now_ms)) {
+        // Kaniel 2026-10-26: a search reads the accounts; a game that floods them is refused.
+        notice = "too many searches: try again in a minute";
+    } else if (action == bbcoop::TeamRequest::SEARCH) {
+        // Its own list: only the searcher sees it, until the next search (empty clears it).
+        std::string query = request.query();
+        if (query.size() > 32) {
+            query.resize(32);
+        }
+        member.search_query = query;
+        member.search.clear();
+        if (query.size() >= FriendSearchMinLength) {
+            member.search = SearchPlayers(member.lobby, query);
+        } else if (!query.empty()) {
+            notice = "type at least " + std::to_string(FriendSearchMinLength) + " letters";
+        }
+        result.log.append(
+            QStringLiteral("team lobby: %1 searched \"%2\": %3 found")
+                .arg(QString::fromStdString(member.lobby), QString::fromStdString(query))
+                .arg(member.search.size()));
+    } else if (request.member().empty() || request.member() == member.lobby) {
+        notice = "no such player";
+    } else if (action == bbcoop::TeamRequest::FRIEND_ADD &&
+               !Within(friend_adds[member.lobby], FriendAddsPerMinute, now_ms)) {
+        // Kaniel 2026-10-26: no flood of friend requests (each one reaches the other's game).
+        notice = "too many friend requests: try again in a minute";
+    } else if (const auto declined = declines.find({member.lobby, request.member()});
+               action == bbcoop::TeamRequest::FRIEND_ADD && declined != declines.end() &&
+               now_ms < declined->second &&
+               std::ranges::none_of(
+                   RelationsOf(member.lobby).received,
+                   [&](const FriendEntry& e) { return e.member == request.member(); })) {
+        // Kaniel 2026-10-26: one who said no is not asked again at once (unless it asks now).
+        notice = "this hunter declined: try again later";
+    } else {
+        notice = action == bbcoop::TeamRequest::FRIEND_ADD
+                     ? friend_book->Add(member.lobby, request.member())
+                 : action == bbcoop::TeamRequest::FRIEND_REMOVE
+                     ? friend_book->Remove(member.lobby, request.member())
+                     : friend_book->Decline(member.lobby, request.member());
+        result.log.append(QStringLiteral("team lobby: %1 %2 %3%4")
+                              .arg(QString::fromStdString(member.lobby),
+                                   QString::fromStdString(bbcoop::TeamRequest::Action_Name(action)),
+                                   QString::fromStdString(request.member()))
+                              .arg(notice.empty() ? QString{}
+                                                  : QStringLiteral(": refused, ") +
+                                                        QString::fromStdString(notice)));
+        if (notice.empty()) {
+            relations.erase(member.lobby);
+            relations.erase(request.member());
+            if (action == bbcoop::TeamRequest::FRIEND_DECLINE) {
+                declines[{request.member(), member.lobby}] = now_ms + DeclineCooldownMs;
+            } else if (action == bbcoop::TeamRequest::FRIEND_ADD) {
+                declines.erase({request.member(), member.lobby}); // it asks back: friends now
+            }
+        }
+    }
+    // The other player's lists changed too (its request, its friend).
+    if (notice.empty() && action != bbcoop::TeamRequest::SEARCH) {
+        SendLobbyTo(request.member(), now_ms);
+    }
+    bbcoop::Envelope envelope;
+    *envelope.mutable_lobby_state() = LobbyStateFor(member);
+    envelope.mutable_lobby_state()->set_notice(notice);
+    SendTo(member, envelope, now_ms);
 }
 
 void Service::SetHosted(const HostedRules& rules) {
@@ -2683,6 +3011,43 @@ void Service::PutAside(const std::vector<bbcoop::TeamWorldInfo>& lines, const QS
         result.log.append(QStringLiteral("world list: world %1 %2, its folder goes to %3")
                               .arg(QString::fromStdString(id), why, aside));
     }
+}
+
+void Service::ResetLamps(const std::string& id, Result& result) {
+    const QString name = FolderOf(QByteArray::fromStdString(TeamLobby::PartyOf(id)));
+    const auto cached = worlds.find(name);
+    std::optional<bbcoop::TeamWorld> stored;
+    if (cached != worlds.end()) {
+        stored = TeamWorldOf(cached->second);
+    } else if (!folder.isEmpty()) {
+        if (writer->Moving(folder, name)) {
+            writer->Drain();
+        }
+        stored = LoadTeamWorld(QDir{QDir{folder}.filePath(name)});
+    }
+    if (!stored) {
+        result.log.append(
+            QStringLiteral("team world %1: no lamps to reset (no world yet)").arg(name));
+        return;
+    }
+    bbcoop::TeamWorld reset = *stored;
+    reset.clear_on();
+    for (const s32 flag : stored->on()) {
+        if (!LampResetClears(flag)) {
+            reset.add_on(flag);
+        }
+    }
+    reset.set_version(stored->version() + 1);
+    if (cached != worlds.end()) {
+        cached->second.team_world = reset;
+    }
+    if (writer) {
+        writer->SaveTeamWorld(QDir{folder}.filePath(name), reset);
+    }
+    result.log.append(QStringLiteral("team world %1: its lamps reset (%2 flags off, version %3)")
+                          .arg(name)
+                          .arg(stored->on_size() - reset.on_size())
+                          .arg(reset.version()));
 }
 
 namespace {

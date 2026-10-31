@@ -947,13 +947,6 @@ void PS4_SYSV_ABI NoteTitleMenu(u64, const GuestRegisterSnapshot*) {
     TeamBackAtTitle();
 }
 
-// SprjRemoMan's step methods, Init .. EpilogWait (its step table, filled at 0x01CFBA91), and
-// their first instructions.
-constexpr std::array<u64, 7> SprjRemoManStepOffsets{0x01CFA050, 0x01CFA310, 0x01CFA4C0, 0x01CFA670,
-                                                    0x01CFB060, 0x01CFB350, 0x01CFB5F0};
-constexpr std::array<u8, 8> RemoStepEntry{0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56};
-constexpr std::array<u8, 7> RemoEpilogWaitEntry{0x55, 0x48, 0x89, 0xE5, 0x41, 0x56, 0x53};
-
 void InstallTeamLobby(u64 base, u64 image_size) {
     if (!TeamModeOn()) {
         return;
@@ -979,6 +972,9 @@ void InstallTeamLobby(u64 base, u64 image_size) {
     }
     // Kaniel 2026-10-15: a cutscene under the team's loading screen is skipped (Options pressed
     // for it while the cutscene player is in its playing step).
+    if (!CoopSitesMatch(base, image_size, "cutscene skip", "cutscenes under a load play")) {
+        return;
+    }
     struct RemoStep {
         u64 offset;
         std::span<const u8> bytes;
@@ -1548,6 +1544,33 @@ bool PS4_SYSV_ABI SkipNetworkBanner(u64, const GuestRegisterSnapshot* registers)
     return true;
 }
 
+// See MemberLeftNoticeOffset: no notice of a member that left in a party (it held the pad).
+bool PS4_SYSV_ABI SkipMemberLeftNotice(u64, const GuestRegisterSnapshot*) {
+    static std::atomic<u32> logged{0};
+    if (logged.fetch_add(1) < 50) {
+        LOG_INFO(Debug, "Bloodborne party: a left member's notice not shown");
+    }
+    return true;
+}
+
+// See SessionLostTestOffset: FrpgNetMan as the "Session lost." window's test reads it, with the
+// bit that skips the window set.
+struct SessionLostStandIn {
+    alignas(16) std::array<u8, 0xA10> bytes{};
+    SessionLostStandIn() {
+        bytes[0xA05] = 1;
+    }
+};
+const SessionLostStandIn session_lost_stand_in;
+
+void PS4_SYSV_ABI SkipSessionLostWindow(u64, GuestRegisterSnapshot* registers) {
+    registers->rax = reinterpret_cast<u64>(session_lost_stand_in.bytes.data());
+    static std::atomic<u32> logged{0};
+    if (logged.fetch_add(1) < 20) {
+        LOG_INFO(Debug, "Bloodborne party: the session's end shows no \"Session lost.\" window");
+    }
+}
+
 // See LanCutErrorOffset: the network script's lost-connection error does nothing in a party.
 bool PS4_SYSV_ABI SkipLanCutError(u64, const GuestRegisterSnapshot*) {
     static std::atomic<u32> logged{0};
@@ -1602,6 +1625,23 @@ void InstallSilentKeyItems(u64 base, u64 image_size) {
     coop_features.On("silent key items");
 }
 
+// Kaniel 2026-10-28: the boss tempo rule's hook (BossTempoGoal), on whatever the rules say: it
+// changes nothing at Vanilla, and logs a boss's breathers there too.
+void InstallBossTempo(u64 base, u64 image_size) {
+    if (!CoopSitesMatch(base, image_size, "boss tempo",
+                        "the boss tempo rule leaves the bosses' breathers as they are")) {
+        return;
+    }
+    if (!InstallCoopHook(reinterpret_cast<void*>(base + AddSubGoalLifeHookOffset),
+                         AddSubGoalLifeHook, 0, GuestCodeHook{BossTempoGoal}) ||
+        !InstallCoopHook(reinterpret_cast<void*>(base + AddSubGoalFrontLifeHookOffset),
+                         AddSubGoalLifeHook, AddSubGoalFrontTag, GuestCodeHook{BossTempoGoal})) {
+        coop_features.Skipped("boss tempo", "the hook did not go in");
+        return;
+    }
+    coop_features.On("boss tempo");
+}
+
 // Kaniel 2026-10-25: the co-op cameras (spectating teammates, the free camera; see
 // CoopCameraStep), in the port only.
 void InstallCoopCamera(u64 base, u64 image_size) {
@@ -1629,7 +1669,12 @@ void InstallNoMultiplayerBanners(u64 base, u64 image_size) {
         return;
     }
     if (!InstallCoopHook(reinterpret_cast<void*>(base + ShowNetworkBannerOffset),
-                         ShowNetworkBannerPrologue, 0, GuestFunctionOverride{SkipNetworkBanner})) {
+                         ShowNetworkBannerPrologue, 0, GuestFunctionOverride{SkipNetworkBanner}) ||
+        !InstallCoopHook(reinterpret_cast<void*>(base + MemberLeftNoticeOffset),
+                         MemberLeftNoticePrologue, 0,
+                         GuestFunctionOverride{SkipMemberLeftNotice}) ||
+        !InstallCoopHook(reinterpret_cast<void*>(base + SessionLostTestOffset), SessionLostTest, 0,
+                         SkipSessionLostWindow)) {
         coop_features.Skipped("no multiplayer banners", "the hook did not go in");
         return;
     }
@@ -1887,6 +1932,7 @@ void InstallCoopFeatures(u64 base, u64 image_size) {
     InstallQuietSummonBanners(base, image_size);
     InstallNoMultiplayerBanners(base, image_size);
     InstallSilentKeyItems(base, image_size);
+    InstallBossTempo(base, image_size);
     InstallCharacterNames(base, image_size);
     InstallNoLostConnectionPopup(base, image_size);
     InstallGuestsHitNpcs(base, image_size);
@@ -1909,6 +1955,7 @@ void InstallCoopFeatures(u64 base, u64 image_size) {
     InstallTeamLobby(base, image_size);
     InstallFloorGuard(base, image_size);
     InstallFlagBlockGuard(base, image_size);
+    InstallChaliceAltarPick(base, image_size);
     InstallMemberPacketGuard(base, image_size);
     InstallSharedLoot(base, image_size);
     InstallLampsStayLitAtRegistration(base, image_size);

@@ -32,6 +32,7 @@
 #include "coop/coop_messages.h"
 #include "coop/coop_stream.h"
 #include "core/bloodborne_invasion.h"
+#include "core/bloodborne_lamp_points.h"
 #include "core/bloodborne_team.h"
 #include "core/libraries/network/server_link.h"
 #include "core/libraries/np/np_matching2/np_matching2.h"
@@ -113,7 +114,14 @@ bool team_world_due = false;
 bool team_world_taken = false;
 std::set<u32> team_world_blocks;
 bool team_host = false;
+// Kaniel 2026-10-25: this game took the team's host role in play (BecomeTeamHost: the host left);
+// see TeamHostTookOver.
+std::atomic<bool> took_over{false};
 bool personal_world_due = false;
+// The clear counts this game's loads saw per save slot, and a load found to be the next
+// playthrough's not yet handled (ApplyTeamWorldOnLoad keeps that save's new world).
+PlaythroughWatch playthroughs;
+bool next_playthrough_due = false;
 WorldFlags team_world_reported;
 s64 team_world_reported_ms = 0;
 // A guest: the team world its game last took or followed (TeamStoryToFollow's `before`).
@@ -164,6 +172,20 @@ bool team_world_default_sent = false;
 // Kaniel 2026-10-16: this save left its team while playing (removed, or left from the menu): it
 // still clears the leaving flag and its phantom (TickTeamJoin) until the title or a team again.
 bool left_team_in_play = false; // team_mutex
+// Amanises 2026-10-25: a team guest out of its session where it stands: the game sent its phantom
+// home (it fades out and waits for the load home) and nothing loaded, so the player stood
+// invisible, only its camera turning, with the host's copy frozen where it was (P2, 2026-10-25
+// 21:58, Leave and Remove alike). Where it stood, loaded again once the leave is over
+// (TickLeaveHome): its own world, as a guest's trip home gives it.
+struct LeaveHome {
+    u32 map = 0;
+    float x = 0, y = 0, z = 0, heading = 0;
+    s64 left_ms = 0;
+    s64 idle_since_ms = -1;
+};
+std::optional<LeaveHome> leave_home;      // the game's thread
+constexpr s64 LeaveHomeSettleMs = 1'000;  // out of the session and not loading this long
+constexpr s64 LeaveHomeGiveUpMs = 30'000; // still in the session: left to the game
 // Kaniel 2026-10-16: the team screen opened over the game from its System menu (TeamMenu), and
 // when it closed: the game's own page under it gets a Circle a moment later (TeamMenuBackPressed).
 std::atomic<bool> team_menu_open{false};
@@ -250,14 +272,28 @@ std::optional<std::vector<u32>> kept_rot;
 u8 RulesBits(const HostRules& rules) {
     return static_cast<u8>((rules.rot ? 1 : 0) | (rules.travel_together ? 2 : 0) |
                            (rules.travel_vote && rules.travel_together ? 4 : 0) |
-                           (rules.enemy_scaling ? 8 : 0));
+                           (rules.enemy_scaling ? 8 : 0) |
+                           (static_cast<u8>(rules.boss_tempo) & 3) << 4);
 }
 
 HostRules RulesOf(u8 bits) {
+    const u8 tempo = (bits >> 4) & 3;
     return {.rot = (bits & 1) != 0,
             .travel_together = (bits & 2) != 0,
             .travel_vote = (bits & 4) != 0,
-            .enemy_scaling = (bits & 8) != 0};
+            .enemy_scaling = (bits & 8) != 0,
+            .boss_tempo = tempo <= 2 ? static_cast<BossTempo>(tempo) : BossTempo::Vanilla};
+}
+
+BossTempo BossTempoOf(bbcoop::BossTempo tempo) {
+    switch (tempo) {
+    case bbcoop::BOSS_TEMPO_AGGRESSIVE:
+        return BossTempo::Aggressive;
+    case bbcoop::BOSS_TEMPO_RELENTLESS:
+        return BossTempo::Relentless;
+    default:
+        return BossTempo::Vanilla;
+    }
 }
 
 void NoteTeamRules(const bbcoop::LobbyState& state, const std::string& me) {
@@ -266,7 +302,8 @@ void NoteTeamRules(const bbcoop::LobbyState& state, const std::string& me) {
     const HostRules rules{.rot = r.rot(),
                           .travel_together = r.travel_together(),
                           .travel_vote = r.travel_vote(),
-                          .enemy_scaling = r.enemy_scaling()};
+                          .enemy_scaling = r.enemy_scaling(),
+                          .boss_tempo = BossTempoOf(r.boss_tempo())};
     const u8 bits = RulesBits(rules);
     const bool was_in = in_team.exchange(team);
     if (team && (team_rules_bits.exchange(bits) != bits || !was_in)) {
@@ -328,6 +365,7 @@ bool TakeLobbyMessage(const bbcoop::Envelope& envelope) {
         if (team_session && !team_session->host().empty() && !session.host().empty() &&
             team_session->host() != session.host() && !session.join().empty()) {
             LOG_INFO(Debug, "Co-op team join: the session host moved to {}", session.host());
+            session_host_moved_ms.store(SteadyMilliseconds());
         }
         team_session = session;
         return true;
@@ -432,6 +470,7 @@ void SendLobby(s64 now_ms) {
             r.set_travel_together(own.travel_together);
             r.set_travel_vote(own.travel_vote);
             r.set_enemy_scaling(own.enemy_scaling);
+            r.set_boss_tempo(static_cast<bbcoop::BossTempo>(own.boss_tempo));
             stream->Send(EncodeEnvelope(rules), now_ms);
         }
     }
@@ -1712,8 +1751,10 @@ namespace {
 // load. The white phantom of a joined guest is a player again a little later (PhantomHome).
 void LeaveTeamInPlay(u64 manager) {
     std::string party;
+    bool was_host = false;
     {
         std::scoped_lock lock{team_mutex};
+        was_host = team_host;
         party = std::exchange(team_party, {});
         team_world.reset();
         team_session.reset();
@@ -1726,6 +1767,7 @@ void LeaveTeamInPlay(u64 manager) {
         team_load = {};
         team_gate.DropStart();
         left_team_in_play = true;
+        took_over.store(false, std::memory_order_relaxed);
     }
     {
         std::scoped_lock lock{stream_mutex};
@@ -1735,6 +1777,24 @@ void LeaveTeamInPlay(u64 manager) {
         party_controller->Wait();
     }
     const s32 matching = ReadValue<s32>(manager, 0x124);
+    if (matching != 0 && !was_host) {
+        // Where it stands, read while it is still the game's player (see LeaveHome).
+        const u64 player = GetLocalPlayer();
+        const u64 modules = player >= 0x10000 ? ReadValue<u64>(player, 0x3B0) : 0;
+        const u64 physics = modules >= 0x10000 ? ReadValue<u64>(modules, 0x68) : 0;
+        const u32 map = GetCurrentPackedMap();
+        if (IsUsablePackedMap(map) && physics >= 0x10000 &&
+            HasMemoryAccess(physics, 0x1EC, MemoryProt::CpuRead)) {
+            leave_home = LeaveHome{
+                .map = map,
+                .x = ReadValue<float>(physics, 0x1E0),
+                .y = ReadValue<float>(physics, 0x1E4),
+                .z = ReadValue<float>(physics, 0x1E8),
+                .heading = ReadValue<float>(physics, 0x1D4),
+                .left_ms = SteadyMilliseconds(),
+            };
+        }
+    }
     if (matching != 0) {
         reinterpret_cast<void PS4_SYSV_ABI (*)(u64)>(image_base +
                                                      MultiPlayStopRequestOffset)(manager);
@@ -1743,6 +1803,52 @@ void LeaveTeamInPlay(u64 manager) {
              "Co-op team menu: out of the team ({}): {}; the save plays on alone where it "
              "stands",
              party, matching != 0 ? "left its session" : "no session to leave");
+}
+
+// Amanises 2026-10-25: see LeaveHome. Once the game is out of its session and not loading for
+// LeaveHomeSettleMs, the guest is loaded again where it stood (the placement warp a lamp trip
+// uses). A load of the game's own (a death, a lamp) takes it home anyway.
+void TickLeaveHome(u64 manager) {
+    if (!leave_home) {
+        return;
+    }
+    const s64 now = SteadyMilliseconds();
+    const u64 global = GetGlobalState();
+    if (global < 0x10000 || ReadValue<u8>(global, 0x08) != 0) {
+        leave_home.reset();
+        LOG_INFO(Debug, "Co-op team menu: out of the team: a load of the game's own takes it home");
+        return;
+    }
+    if (ReadValue<s32>(manager, 0x124) != 0 || InPartySession()) {
+        leave_home->idle_since_ms = -1;
+        if (now - leave_home->left_ms >= LeaveHomeGiveUpMs) {
+            leave_home.reset();
+            LOG_WARNING(Debug,
+                        "Co-op team menu: out of the team, but still in a session after "
+                        "{} s: no load home",
+                        LeaveHomeGiveUpMs / 1000);
+        }
+        return;
+    }
+    if (leave_home->idle_since_ms < 0) {
+        leave_home->idle_since_ms = now;
+    }
+    if (now - leave_home->idle_since_ms < LeaveHomeSettleMs) {
+        return;
+    }
+    const LeaveHome home = *std::exchange(leave_home, std::nullopt);
+    const LampPoint point{.warp_point = -1,
+                          .packed_map = home.map,
+                          .x = home.x,
+                          .y = home.y,
+                          .z = home.z,
+                          .heading = home.heading};
+    const bool started = WarpGuestToLampPoint(point);
+    LOG_INFO(Debug,
+             "Co-op team menu: out of the team: {} where it stood (map {:#x} at {:.1f} {:.1f} "
+             "{:.1f}, {} ms after the leave)",
+             started ? "its own world loads" : "the load home did not start", home.map, home.x,
+             home.y, home.z, now - home.left_ms);
 }
 
 // Kaniel 2026-10-16: the team's Start for a save playing alone (it joined the hunt from the
@@ -1767,6 +1873,7 @@ void AdoptTeamInPlay(const bbcoop::TeamStart& start) {
         team_load.Start(SteadyMilliseconds());
         left_team_in_play = false;
     }
+    leave_home.reset(); // in a team again before the load home
     const bool host = start.host() == me;
     if (party_controller) {
         party_controller->Assign(host ? PartyRole::Host : PartyRole::Guest);
@@ -1785,6 +1892,97 @@ void AdoptTeamInPlay(const bbcoop::TeamStart& start) {
     TeamMenu(false, false);
 }
 
+// The team's host now: this game, from the TakeHost of the session's room or the lobby's lead.
+// Its save is the team's world from here on (it took the team's at its loads): it reports it, and
+// its loads never take the server's copy back over its own.
+void BecomeTeamHost() {
+    {
+        std::scoped_lock lock{team_mutex};
+        team_host = true;
+        team_world_reported = {};
+        team_world_reported_ms = 0;
+    }
+    took_over.store(true, std::memory_order_relaxed);
+    // Its character a live player's (type 0, the host's team): a guest's game plays a white
+    // phantom (type 1, the co-op guests' team 20, bloodborne_party.h CharacterTeamOffset), and
+    // a phantom's hits on the enemies are its host's to apply (rig 2026-10-25, host-quits-title:
+    // the new host's hits never landed). SetChrType, the event binding, sets the type and the
+    // team that goes with it.
+    constexpr s32 CoopGuestTeam = 20;
+    const u64 player = GetLocalPlayer();
+    if (player < 0x10000 ||
+        !HasMemoryAccess(player, CharacterTeamOffset + 4, MemoryProt::CpuRead)) {
+        return;
+    }
+    const s32 type = ReadValue<s32>(player, 0x78);
+    const s32 team = ReadValue<s32>(player, CharacterTeamOffset);
+    if (type == 0 && team != CoopGuestTeam) {
+        return;
+    }
+    reinterpret_cast<void PS4_SYSV_ABI (*)(u64, s32, s32)>(image_base + SetChrTypeOffset)(
+        0, LocalPlayerEntity, 0);
+    LOG_INFO(Debug,
+             "Co-op team play: this host's character is a live player's now (type {} team {} "
+             "-> type {} team {})",
+             type, team, ReadValue<s32>(player, 0x78), ReadValue<s32>(player, CharacterTeamOffset));
+}
+
+// Kaniel 2026-10-25: the host left (back at the title, or its game gone) and the lobby made this
+// guest the leader. Out of any session (the others left, so it left the session alone in it, or it
+// stood apart), it takes the host's role where it stands and opens the team's session (TeamJoin's
+// host steps); in another member's session it waits: that one's game took the room (TakeHost),
+// and the lead goes to it.
+void LeadTeamInPlay(u64 manager) {
+    static bool waiting_logged = false;
+    if (ReadValue<s32>(manager, 0x124) != 0) {
+        if (!waiting_logged) {
+            waiting_logged = true;
+            LOG_INFO(Debug, "Co-op team play: this guest leads the team now; it hosts once out of "
+                            "its session");
+        }
+        return;
+    }
+    waiting_logged = false;
+    BecomeTeamHost();
+    {
+        std::scoped_lock lock{team_mutex};
+        team_join = {};
+    }
+    if (party_controller) {
+        party_controller->Assign(PartyRole::Host);
+    }
+    RequestServerHello();
+    LOG_INFO(Debug, "Co-op team play: this guest leads the team now: it hosts the team's session "
+                    "where it stands");
+}
+
+// Kaniel 2026-10-25: this game hosts a session of its own, but another member leads and the
+// server keeps that one's session as the team's (two guests took over at once when their host
+// left): a guest again, it leaves its own session and joins the leader's (TeamJoin's Join).
+void FollowLeaderInPlay(u64 manager) {
+    std::string leader;
+    {
+        std::scoped_lock lock{team_mutex};
+        team_host = false;
+        team_join = {};
+        leader = team_session ? team_session->host() : std::string{};
+    }
+    took_over.store(false, std::memory_order_relaxed);
+    if (party_controller) {
+        party_controller->Assign(PartyRole::Guest);
+    }
+    const s32 matching = ReadValue<s32>(manager, 0x124);
+    if (matching != 0) {
+        reinterpret_cast<void PS4_SYSV_ABI (*)(u64)>(image_base +
+                                                     MultiPlayStopRequestOffset)(manager);
+    }
+    RequestServerHello();
+    LOG_INFO(Debug,
+             "Co-op team play: {} leads and hosts the team's session: this game is its guest "
+             "again ({})",
+             leader, matching != 0 ? "left its own session" : "no session to leave");
+}
+
 void TickTeamPlay(u64 manager) {
     TeamPlayStep step = TeamPlayStep::None;
     std::optional<bbcoop::TeamStart> start;
@@ -1795,13 +1993,19 @@ void TickTeamPlay(u64 manager) {
         }
         const auto& lobby = team_gate.Lobby();
         start = team_gate.Start();
+        const std::string session_host =
+            team_session && !team_session->join().empty() ? team_session->host() : std::string{};
         step = TeamPlayStepOf(lobby ? &*lobby : nullptr, team_party, start ? &*start : nullptr,
-                              lobby_member);
+                              lobby_member, team_host, session_host);
     }
     if (step == TeamPlayStep::Leave) {
         LeaveTeamInPlay(manager);
     } else if (step == TeamPlayStep::Adopt) {
         AdoptTeamInPlay(*start);
+    } else if (step == TeamPlayStep::Lead) {
+        LeadTeamInPlay(manager);
+    } else if (step == TeamPlayStep::Follow) {
+        FollowLeaderInPlay(manager);
     }
 }
 
@@ -1822,11 +2026,41 @@ void TeamChoose(TeamGate::Choice choice) {
     }
 }
 
+std::atomic<u64> title_visits{0};
+
+bool TeamHostTookOver() {
+    return took_over.load(std::memory_order_relaxed);
+}
+
+u64 TeamTitleVisits() {
+    return title_visits.load(std::memory_order_relaxed);
+}
+
+bool TeamLobbySaysPlaying() {
+    std::scoped_lock lock{team_mutex};
+    const auto& lobby = team_gate.Lobby();
+    return lobby && lobby->has_team() &&
+           std::ranges::any_of(lobby->team().members(), [](const bbcoop::TeamMember& m) {
+               return m.member() == lobby_member && m.state() == bbcoop::LobbyPlayer::PLAYING;
+           });
+}
+
 void TeamBackAtTitle() {
+    title_visits.fetch_add(1, std::memory_order_relaxed);
+    took_over.store(false, std::memory_order_relaxed);
     if (!team_switch) {
         return;
     }
+    {
+        // Kaniel 2026-10-25: back at the title while its team plays, a member is out of the team
+        // and out of its world on the server (TakeOutOfTeam): its next Start, the same team's
+        // party or not, says the party's hello again (rig host-quits-title: the old host's game
+        // loaded as a guest and never joined).
+        std::scoped_lock lock{stream_mutex};
+        hello_party.clear();
+    }
     std::scoped_lock lock{team_mutex};
+    team_party.clear();
     if (lobby_playing || team_gate.Holding()) {
         team_gate.Reset();
         lobby_playing = false;
@@ -1836,6 +2070,7 @@ void TeamBackAtTitle() {
     team_load = {};
     team_load_settle = {};
     left_team_in_play = false;
+    leave_home.reset();
     team_world_default_sent = false;
     team_load_covers.store(false, std::memory_order_relaxed);
     team_menu_open.store(false, std::memory_order_relaxed);
@@ -1856,6 +2091,7 @@ bool TickTeamJoin(bool ready) {
     }
     // Kaniel 2026-10-16: the team menu in game: out of the team, or into it, where it stands.
     TickTeamPlay(manager);
+    TickLeaveHome(manager);
     std::optional<bbcoop::TeamSession> session;
     bool in_team = false;
     bool left_in_play = false;
@@ -1946,11 +2182,13 @@ bool TickTeamJoin(bool ready) {
         // tick says the session to the server (Publish) for anyone joining later.
         WriteValue(manager, 0x124, s32{MatchingStateHosting});
         WriteValue(manager, 0x120, s32{4});
+        BecomeTeamHost();
         if (party_controller) {
             party_controller->Assign(PartyRole::Host);
         }
         RequestServerHello();
         LOG_INFO(Debug, "Co-op team join: the session host moved to this game (the room is ours)");
+        session_host_moved_ms.store(SteadyMilliseconds());
         break;
     case TeamJoin::Action::LeaveAlone:
         // Phase 7: the others left the room (only the server ends a session, so it stays with this
@@ -2000,7 +2238,12 @@ void EndTeamResume() {
 
 std::string TeamStartHost() {
     std::scoped_lock lock{team_mutex};
-    return team_gate.Start() ? team_gate.Start()->host() : std::string{};
+    if (!team_gate.Start()) {
+        return {};
+    }
+    // Kaniel 2026-10-25: the team's host now (the lead follows the session's host).
+    const auto& lobby = team_gate.Lobby();
+    return TeamHostOf(lobby ? &*lobby : nullptr, *team_gate.Start());
 }
 
 void RefuseServerResumePoint() {
@@ -2144,6 +2387,15 @@ size_t SetWorldFlags(const WorldStore& world, const WorldFlags& target) {
 
 } // namespace
 
+// This save's clear count (GameDataMan +0x68, as the GetClearCount event function reads it).
+std::optional<s32> SaveClearCount() {
+    const u64 data = ReadValue<u64>(image_base + GameDataManPointerOffset, 0);
+    if (data < 0x10000) {
+        return std::nullopt;
+    }
+    return TryRead<s32>(data, 0x68);
+}
+
 void ApplyTeamWorldOnLoad(bool trip) {
     if (!team_switch) {
         return;
@@ -2152,6 +2404,56 @@ void ApplyTeamWorldOnLoad(bool trip) {
     // mid-visit) comes back first; an invader takes no team's world into its save.
     RestoreInvasionHomeOnLoad();
     if (Invading()) {
+        return;
+    }
+    // An ending's next playthrough (PlaythroughWatch): this load's save has the new game's world.
+    // It stays: the host's next report makes it the team's, a guest's trips take the team's
+    // again once the host's is in, and this save's own world kept aside (from before its
+    // playthrough ended) never comes back over it (Lisara's group: a guest's solo NG+ load got
+    // its old own world back, the Dream on fire and every lamp out).
+    // Read once the load's flags are (the save's, never the last character's still).
+    if (const int slot = character_slot.load(); slot >= 0 && ReadFlagStore().whole) {
+        if (const auto clear_count = SaveClearCount()) {
+            std::scoped_lock lock{team_mutex};
+            if (playthroughs.NextPlaythrough(slot, *clear_count)) {
+                next_playthrough_due = true;
+                LOG_INFO(Debug,
+                         "Co-op team world: slot {} starts its next playthrough (clear "
+                         "count {})",
+                         slot, *clear_count);
+            }
+        }
+    }
+    bool next_playthrough = false;
+    {
+        std::scoped_lock lock{team_mutex};
+        next_playthrough = next_playthrough_due;
+    }
+    if (next_playthrough) {
+        const int slot = character_slot.load();
+        std::optional<WorldStore> store = ReadWorldStore();
+        if (!store || slot < 0) {
+            return; // the next call (the flags readable, the slot known)
+        }
+        std::error_code error;
+        std::filesystem::remove(PersonalWorldFile(slot), error);
+        std::scoped_lock lock{team_mutex};
+        next_playthrough_due = false;
+        personal_world_due = false;
+        if (team_world_due) {
+            for (const FlagBlockBits& block : store->blocks) {
+                team_world_blocks.insert(block.id);
+            }
+            team_world_taken = true;
+            team_world_reported = {};
+        }
+        LOG_INFO(Debug,
+                 "Co-op team world: slot {}'s next playthrough keeps its new world ({} blocks; "
+                 "{}; its own world kept aside dropped)",
+                 slot, store->blocks.size(),
+                 !team_world_due ? "no team"
+                 : team_host     ? "the team's from this host's next report"
+                                 : "the team's again at its trips");
         return;
     }
     std::optional<bbcoop::TeamWorld> world;
@@ -2520,10 +2822,18 @@ bool RunTeamTitleVerb(const AutoplayCommand& command, bool begun, double elapsed
                 done = listed;
             }
         }
-    } else if (command.verb == "team-accept") {
+    } else if (command.verb == "team-accept" || command.verb == "team-back") {
+        // team-back [seconds] (Kaniel 2026-10-25): a game started again goes back into its team:
+        // still in it (it left last), or by the invite back its team's new leader holds for it;
+        // after `seconds` (20) with neither, on (the team is gone: the next steps make one).
         done = lobby && lobby->has_team();
         if (!done && lobby && lobby->invites_size() > 0) {
             request(bbcoop::TeamRequest::ACCEPT, {}, lobby->invites(0).team());
+        }
+        if (!done && command.verb == "team-back" &&
+            elapsed > (command.args.empty() ? 20.0 : std::atof(command.args[0].c_str()))) {
+            LOG_INFO(Debug, "Co-op team lobby: team-back: no team and no invite back, on");
+            return true;
         }
     } else if (IsTeamScreenVerb(command.verb)) {
         if (!TeamScreenUp()) {

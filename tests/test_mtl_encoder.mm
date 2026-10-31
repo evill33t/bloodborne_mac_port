@@ -5,6 +5,7 @@
 // Metal::Encoder blits, dispatches, render passes and draws, on the system's GPU. No window.
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#include "video_core/texture_cache/types.h"
 #include <mach/mach.h>
 
 #include <algorithm>
@@ -2912,6 +2913,12 @@ void TestUntrackedOrdering() {
 }
 
 int main() {
+    // shadPS4 #5524, retained from Kaniel's v1.3.1 texture regression: extra mips cannot
+    // compensate for missing array layers, and extra layers cannot replace missing mips.
+    const VideoCore::SubresourceExtent many_mips{6, 1}, many_layers{1, 6}, both{6, 6};
+    assert(!many_mips.Contains(many_layers) && !many_layers.Contains(many_mips));
+    assert(both.Contains(many_mips) && both.Contains(many_layers) && both.Contains(both));
+
     @autoreleasepool {
         TestObject();
         TestTicks();

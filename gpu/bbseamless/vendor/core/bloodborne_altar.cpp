@@ -238,14 +238,19 @@ AltarRepair RepairAltarRecord(std::span<const u8> record) {
     }
     repair.action = AltarRepair::Action::Clear;
     repair.record = EmptyAltarRecord();
-    // The ritual took the chalice the record names (FormData's goods, byte 16).
-    if (record.size() >= 20) {
-        const u32 goods = BigEndianWord(record, 4);
-        if (goods >= 6100 && goods <= 6599) {
-            repair.chalice = goods;
-        }
-    }
+    repair.chalice = AltarRecordChalice(record);
     return repair;
+}
+
+std::optional<u32> AltarRecordChalice(std::span<const u8> record) {
+    if (record.size() < 20) {
+        return std::nullopt;
+    }
+    const u32 goods = BigEndianWord(record, 4);
+    if (goods < 6100 || goods > 6599) {
+        return std::nullopt;
+    }
+    return goods;
 }
 
 std::optional<AltarRecord> StandardAltarRecord(u8 key, std::span<const u8> state) {
@@ -287,6 +292,105 @@ AltarRecord EmptyAltarRecord() {
     PutBigEndian(record, 8, 0x80000000u);
     PutBigEndian(record, SettingsAt, 0x02003000u);
     return record;
+}
+
+std::optional<s32> AltarOfPickBits(u32 bits) {
+    if (bits == 0 || bits >= (1u << AltarPickFlagCount) || (bits & (bits - 1)) != 0) {
+        return std::nullopt;
+    }
+    s32 altar = static_cast<s32>(AltarPickFlagCount) - 1;
+    while ((bits >>= 1) != 0) {
+        --altar;
+    }
+    return altar;
+}
+
+std::optional<s32> AltarPickedIn(std::span<const s32> on) {
+    u32 bits = 0;
+    for (u32 index = 0; index < AltarPickFlagCount; ++index) {
+        if (std::binary_search(on.begin(), on.end(), AltarPickFlag + static_cast<s32>(index))) {
+            bits |= 1u << (AltarPickFlagCount - 1 - index);
+        }
+    }
+    return AltarOfPickBits(bits);
+}
+
+std::optional<s32> AltarOfWarpRequest(s32 flag) {
+    constexpr s32 WarpRequest = 72100420;
+    if (flag < WarpRequest || flag >= WarpRequest + RitualAltarCount) {
+        return std::nullopt;
+    }
+    return flag - WarpRequest;
+}
+
+void ChaliceAltarPick::ObserveOwn(std::optional<s32> altar) {
+    if (!altar) {
+        return;
+    }
+    if (own_seen && altar != own) {
+        picked = altar;
+    }
+    own_seen = true;
+    own = altar;
+}
+
+void ChaliceAltarPick::ObserveTeam(std::optional<s32> altar) {
+    if (altar && altar != team) {
+        picked = altar;
+    }
+    if (altar) {
+        team = altar;
+    }
+}
+
+void ChaliceAltarPick::Warps(s32 altar) {
+    picked = altar;
+}
+
+void ChaliceAltarPick::Loaded() {
+    own_seen = false;
+    own.reset();
+}
+
+void ChaliceAltarPick::Reset() {
+    *this = {};
+}
+
+TeamAltarTake TakeTeamAltarRecord(std::span<const u8> mine, std::span<const u8> news) {
+    const AltarRecordKind kind = ClassifyAltarRecord(news);
+    if (kind == AltarRecordKind::Broken) {
+        return TeamAltarTake::LeftOut;
+    }
+    if (std::ranges::equal(mine, news)) {
+        return TeamAltarTake::Same;
+    }
+    return kind == AltarRecordKind::Empty ? TeamAltarTake::Clear : TeamAltarTake::Take;
+}
+
+std::vector<s32> AltarRemovals::Observe(const Kinds& kinds, bool own) {
+    std::vector<s32> emptied;
+    for (s32 altar = 0; altar < RitualAltarCount; ++altar) {
+        const auto& now = kinds[altar];
+        if (!now) {
+            continue;
+        }
+        if (own && seen[altar] == AltarRecordKind::Dungeon && now == AltarRecordKind::Empty) {
+            emptied.push_back(altar);
+        }
+        seen[altar] = now;
+    }
+    return emptied;
+}
+
+void AltarRemovals::Reset() {
+    seen = {};
+}
+
+std::optional<s32> ChaliceAltarPick::ForLoad(std::optional<s32> saved) const {
+    if (!picked || picked == saved) {
+        return std::nullopt;
+    }
+    return picked;
 }
 
 } // namespace Core::Bloodborne

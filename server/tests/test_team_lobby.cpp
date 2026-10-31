@@ -45,6 +45,16 @@ bbcoop::TeamRequest Request(bbcoop::TeamRequest::Action action,
   return request;
 }
 
+// A member's player slot in its team (the sign it joins with), 99 for none.
+uint32_t SignOf(const TeamLobby &lobby, const std::string &member) {
+  for (const bbcoop::TeamMember &m : lobby.TeamOf(member)->members()) {
+    if (m.member() == member) {
+      return m.sign();
+    }
+  }
+  return 99;
+}
+
 int TeamFormsByInvite() {
   TeamLobby lobby = NewLobby();
   lobby.Arrive("a", "Kaniel", false);
@@ -160,10 +170,12 @@ int AStartedTeamStaysStartedWhileItsGamesLoad() {
   const TeamLobby::Outcome in =
       lobby.Request("b", Request(Action::READY, {}, {}, 1));
   CHECK(in.starts.size() == 1 && in.starts[0] == "b");
-  // Once it played, nobody playing any more ends it.
+  // Once it played, nobody playing any more ends it (the last one back at the
+  // title keeps the team; the one before it left while b played).
+  lobby.Arrive("b", "Ada", true);
   lobby.Arrive("a", "Kaniel", false);
   lobby.Arrive("b", "Ada", false);
-  CHECK(!lobby.TeamOf("a")->started());
+  CHECK(lobby.TeamOf("b") && !lobby.TeamOf("b")->started());
   return 0;
 }
 
@@ -179,14 +191,150 @@ int StartedTeamKeepsGoingWhileOnePlays() {
   lobby.Request("a", Request(Action::START));
   lobby.Arrive("a", "Kaniel", true);
   lobby.Arrive("b", "Ada", true);
-  // The host's game crashes: b still plays, the team stays started, and the
-  // host's Continue (ready again) goes at once.
+  // The host's game crashes: b still plays, the team stays started. Kaniel
+  // 2026-10-25: the host is out of it a few seconds later, b leads, and the
+  // host's Continue (the invite back accepted, ready) goes at once, b hosting.
   lobby.Leave("a");
   CHECK(lobby.TeamOf("b")->started());
+  lobby.Expire(1000);
+  const TeamLobby::Outcome out = lobby.Expire(1000 + LeftGraceMs);
+  CHECK(out.changed && out.departed.size() == 1 &&
+        out.departed[0].member == "a");
+  CHECK(lobby.TeamOf("b")->started() && lobby.TeamOf("b")->leader() == "b");
   lobby.Arrive("a", "Kaniel", false);
+  const bbcoop::LobbyState a = lobby.StateFor("a");
+  CHECK(!a.has_team() && a.invites_size() == 1 &&
+        a.invites(0).from_name() == "Ada");
+  lobby.Request("a", Request(Action::ACCEPT, {}, a.invites(0).team()));
   const TeamLobby::Outcome again =
       lobby.Request("a", Request(Action::READY, {}, {}, 0));
   CHECK(again.starts.size() == 1 && again.starts[0] == "a");
+  CHECK(lobby.StartFor("a").host() == "b");
+  return 0;
+}
+
+// Kaniel 2026-10-25: a team plays on without the one who left it. Three play;
+// the leader quits to the title (its lobby hello says it plays no more): it is
+// out of the team at once, the next member who still plays leads (it hosts:
+// sign 0, the other guest keeps its own), and the leaver has a standing invite
+// back from the new leader. Accepted, it is a guest with a guest's sign, and
+// its Start names the new leader as the host.
+struct ThreePlaying {
+  TeamLobby lobby = NewLobby();
+  std::string team;
+  std::string party;
+  ThreePlaying() {
+    for (const char *m : {"a", "b", "c"}) {
+      lobby.Arrive(m, std::string{"Player "} + m, false);
+    }
+    lobby.Request("a", Request(Action::CREATE));
+    team = lobby.TeamOf("a")->id();
+    for (const char *m : {"b", "c"}) {
+      lobby.Request("a", Request(Action::INVITE, m));
+      lobby.Request(m, Request(Action::ACCEPT, {}, team));
+    }
+    for (const char *m : {"a", "b", "c"}) {
+      lobby.Request(m, Request(Action::READY, {}, {}, 1));
+    }
+    lobby.Request("a", Request(Action::START));
+    party = lobby.TeamOf("a")->party();
+    for (const char *m : {"a", "b", "c"}) {
+      lobby.Arrive(m, std::string{"Player "} + m, true);
+    }
+  }
+};
+
+int ALeaderBackAtTheTitleHandsTheTeamOver() {
+  ThreePlaying t;
+  TeamLobby &lobby = t.lobby;
+  CHECK(SignOf(lobby, "b") == 7 && SignOf(lobby, "c") == 6);
+  const TeamLobby::Outcome quit = lobby.Arrive("a", "Player a", false);
+  CHECK(quit.changed);
+  CHECK((quit.departed ==
+         std::vector<TeamLobby::Departure>{{"a", t.team, t.party}}));
+  CHECK(lobby.TeamOf("a") == nullptr);
+  const bbcoop::Team &team = *lobby.TeamOf("b");
+  CHECK(team.started() && team.leader() == "b" && team.members_size() == 2);
+  CHECK(SignOf(lobby, "b") == 0 && SignOf(lobby, "c") == 6);
+  const bbcoop::LobbyState a = lobby.StateFor("a");
+  CHECK(a.invites_size() == 1 && a.invites(0).team() == t.team &&
+        a.invites(0).from() == "b" && a.invites(0).from_name() == "Player b");
+  CHECK(lobby.Request("a", Request(Action::ACCEPT, {}, t.team)).changed);
+  CHECK(SignOf(lobby, "a") == 7 && lobby.TeamOf("a")->leader() == "b");
+  const TeamLobby::Outcome in =
+      lobby.Request("a", Request(Action::READY, {}, {}, 1));
+  CHECK(in.starts.size() == 1 && in.starts[0] == "a");
+  CHECK(lobby.StartFor("a").host() == "b");
+  // A guest back at the title leaves the same way (c), invited back by b.
+  const TeamLobby::Outcome guest = lobby.Arrive("c", "Player c", false);
+  CHECK(guest.departed.size() == 1 && guest.departed[0].member == "c");
+  CHECK(lobby.TeamOf("b")->leader() == "b");
+  CHECK(lobby.StateFor("c").invites_size() == 1 &&
+        lobby.StateFor("c").invites(0).from() == "b");
+  return 0;
+}
+
+// The last one to stop keeps the team as before: not started, Start again.
+int TheLastOneBackAtTheTitleKeepsTheTeam() {
+  ThreePlaying t;
+  TeamLobby &lobby = t.lobby;
+  lobby.Arrive("b", "Player b", false);
+  lobby.Arrive("c", "Player c", false);
+  const TeamLobby::Outcome last = lobby.Arrive("a", "Player a", false);
+  CHECK(last.departed.empty());
+  CHECK(lobby.TeamOf("a") && lobby.TeamOf("a")->leader() == "a" &&
+        !lobby.TeamOf("a")->started());
+  CHECK(lobby.TeamOf("a")->members_size() == 1);
+  return 0;
+}
+
+// A game whose link went quiet (crashed, closed) leaves its started team once
+// it stays quiet for LeftGraceMs while another member still plays; heard again
+// in time it stays. Expire's leavers come back as departed too.
+int AGoneGameLeavesAStartedTeamInSeconds() {
+  ThreePlaying t;
+  TeamLobby &lobby = t.lobby;
+  lobby.Quiet("c", true, 1000);
+  lobby.Quiet("c", false, 1500); // a blip
+  CHECK(!lobby.Expire(1000 + LeftGraceMs).changed);
+  lobby.Quiet("a", true, 2000);
+  CHECK(!lobby.Expire(2000 + LeftGraceMs - 1).changed);
+  CHECK(lobby.TeamOf("a")->leader() == "a");
+  const TeamLobby::Outcome out = lobby.Expire(2000 + LeftGraceMs);
+  CHECK((out.departed ==
+         std::vector<TeamLobby::Departure>{{"a", t.team, t.party}}));
+  CHECK(lobby.TeamOf("a") == nullptr && lobby.TeamOf("b")->leader() == "b");
+  CHECK(lobby.StateFor("a").invites_size() == 1);
+  // Quiet does not count as playing: with b's game quiet too, c's leaving
+  // keeps it (nobody else plays), as the last one would.
+  lobby.Quiet("b", true, 3000);
+  lobby.Quiet("c", true, 3000);
+  CHECK(!lobby.Expire(3000 + LeftGraceMs).changed);
+  CHECK(lobby.TeamOf("c") != nullptr && lobby.TeamOf("c")->members_size() == 2);
+  // A game's new hello is heard: not quiet any more.
+  lobby.Arrive("b", "Player b", true);
+  CHECK(lobby.Expire(3000 + 2 * LeftGraceMs).departed.size() == 1);
+  CHECK(lobby.TeamOf("c") == nullptr && lobby.TeamOf("b")->leader() == "b");
+  return 0;
+}
+
+// The lead follows the session's host: once another member's game hosts the
+// team's session (it took the room), it leads; the others keep their signs,
+// and the standing invites come from it.
+int TheLeadFollowsTheSessionsHost() {
+  ThreePlaying t;
+  TeamLobby &lobby = t.lobby;
+  lobby.Arrive("a", "Player a", false); // out; b leads
+  CHECK(!lobby.Lead("x").changed);
+  CHECK(!lobby.Lead("b").changed); // leads already
+  CHECK(lobby.Lead("c").changed);
+  CHECK(lobby.TeamOf("b")->leader() == "c");
+  CHECK(SignOf(lobby, "c") == 0 && SignOf(lobby, "b") == 7);
+  const bbcoop::LobbyState a = lobby.StateFor("a");
+  CHECK(a.invites_size() == 1 && a.invites(0).from() == "c" &&
+        a.invites(0).from_name() == "Player c");
+  lobby.Request("a", Request(Action::ACCEPT, {}, t.team));
+  CHECK(SignOf(lobby, "a") == 6);
   return 0;
 }
 
@@ -261,15 +409,6 @@ int ATeamIsGoneOnceEveryMemberIsGone() {
 
 // Phase 7: the server gives each guest its player slot (the sign it joins
 // with: 7, 6, 5), and a guest keeps it while others come and go.
-uint32_t SignOf(const TeamLobby &lobby, const std::string &member) {
-  for (const bbcoop::TeamMember &m : lobby.TeamOf(member)->members()) {
-    if (m.member() == member) {
-      return m.sign();
-    }
-  }
-  return 99;
-}
-
 int GuestsKeepTheirPlayerSlots() {
   TeamLobby lobby = NewLobby();
   for (const char *m : {"a", "b", "c", "d", "e"}) {
@@ -669,6 +808,48 @@ int AWorldsLampsAreCounted() {
   return 0;
 }
 
+// Provi 2026-10-29: a world's lamp reset clears each lamp's active flag, the
+// flag after it and its light request, never the Dream's or other flags.
+int ALampResetClearsOnlyLampFlags() {
+  for (const s32 flag : {12117810, 12117811, 12117830, 13997810, 13997811,
+                         72110200, 72110219, 73990200}) {
+    CHECK(LampResetClears(flag));
+  }
+  for (const s32 flag : {1000, 12107810, 12107811, 12117812, 12117800, 12401800,
+                         14007810, 72100200, 72110220, 72110199, 70000200}) {
+    CHECK(!LampResetClears(flag));
+  }
+  return 0;
+}
+
+// Provi 2026-10-29: the leader resets a world's lamps in the picker, as it
+// forgets one: never another member, a world the server lacks or one played
+// now.
+int TheLeaderResetsAWorldsLamps() {
+  TwoHunters t;
+  TeamLobby &lobby = t.lobby;
+  t.Start();
+  const std::string world = lobby.Worlds()[0].id();
+  bbcoop::TeamWorldInfo note;
+  note.set_id(world);
+  note.set_lamps(5);
+  lobby.NoteWorld(note);
+  bbcoop::TeamRequest reset = Request(Action::RESET_LAMPS);
+  reset.set_world(world);
+  CHECK(!lobby.Request("a", reset).notice.empty()); // played now
+  t.Stop();
+  CHECK(!lobby.Request("b", reset).notice.empty()); // not the leader
+  bbcoop::TeamRequest none = reset;
+  none.set_world("nope");
+  CHECK(!lobby.Request("a", none).notice.empty());
+  const TeamLobby::Outcome done = lobby.Request("a", reset);
+  CHECK(done.notice.empty() && done.changed && done.worlds_changed);
+  CHECK(done.lamps_reset == std::vector<std::string>{world});
+  CHECK(lobby.Worlds()[0].lamps() == 0);
+  CHECK(lobby.Worlds().size() == 1); // still listed
+  return 0;
+}
+
 // Hosted (docs/HOSTED_SERVER.md): a world is its players'; a lobby lists few
 // others.
 static std::string PlayAWorld(TeamLobby &lobby, const std::string &leader,
@@ -1005,6 +1186,12 @@ int TheLeaderSetsTheTeamsRules() {
   CHECK(back.ParseFromString(lobby.StateFor("b").SerializeAsString()));
   CHECK(back.team().rules().travel_together() &&
         back.team().rules().enemy_scaling() && !back.team().rules().rot());
+  // Kaniel 2026-10-28: the boss tempo, Vanilla unless the leader picks a level.
+  CHECK(now.boss_tempo() == bbcoop::BOSS_TEMPO_VANILLA);
+  rules.mutable_rules()->set_boss_tempo(bbcoop::BOSS_TEMPO_RELENTLESS);
+  CHECK(lobby.Request("a", rules).changed);
+  CHECK(back.ParseFromString(lobby.StateFor("b").SerializeAsString()));
+  CHECK(back.team().rules().boss_tempo() == bbcoop::BOSS_TEMPO_RELENTLESS);
   return 0;
 }
 
@@ -1110,6 +1297,101 @@ int TheLeaderPicksTheTeamsDeathMode() {
   return 0;
 }
 
+// Amanises 2026-10-25, open teams (matchmaking): a leader lists its team, a
+// player in no team sees it and asks to join (one ask at a time), the leader
+// takes it in or says no.
+int OpenTeamsAreAskedToJoin() {
+  TeamLobby lobby = NewLobby();
+  lobby.Arrive("a", "Kaniel", false);
+  lobby.Arrive("b", "Ada", false);
+  lobby.Arrive("c", "Bo", false);
+  lobby.Request("a", Request(Action::CREATE));
+  const std::string team = lobby.TeamOf("a")->id();
+  CHECK(lobby.StateFor("b").team_size() == 4);
+  // Not open: not listed, and not asked.
+  CHECK(lobby.StateFor("b").open_teams_size() == 0);
+  CHECK(
+      !lobby.Request("b", Request(Action::ASK_JOIN, {}, team)).notice.empty());
+  // Only the leader opens it.
+  lobby.Request("a", Request(Action::INVITE, "c"));
+  lobby.Request("c", Request(Action::ACCEPT, {}, team));
+  bbcoop::TeamRequest open = Request(Action::OPEN);
+  open.set_join(bbcoop::Team::ASK);
+  CHECK(!lobby.Request("c", open).notice.empty());
+  CHECK(lobby.Request("a", open).changed);
+  CHECK(lobby.StateFor("a").team().join() == bbcoop::Team::ASK);
+  bbcoop::LobbyState b = lobby.StateFor("b");
+  CHECK(b.open_teams_size() == 1 && b.open_teams(0).team() == team);
+  CHECK(b.open_teams(0).leader_name() == "Kaniel" &&
+        b.open_teams(0).members() == 2);
+  CHECK(!b.open_teams(0).asked());
+  // Asked: the leader sees it, the asker sees it asked; a member that is no
+  // leader cannot answer.
+  CHECK(lobby.Request("b", Request(Action::ASK_JOIN, {}, team)).changed);
+  CHECK(lobby.StateFor("b").open_teams(0).asked());
+  bbcoop::LobbyState a = lobby.StateFor("a");
+  CHECK(a.asks_size() == 1 && a.asks(0).member() == "b" &&
+        a.asks(0).name() == "Ada");
+  CHECK(lobby.StateFor("c").asks_size() == 0);
+  CHECK(!lobby.Request("c", Request(Action::ASK_ACCEPT, "b")).notice.empty());
+  // Declined: gone; asked again and taken back: gone.
+  CHECK(lobby.Request("a", Request(Action::ASK_DECLINE, "b")).changed);
+  CHECK(lobby.StateFor("a").asks_size() == 0 &&
+        !lobby.StateFor("b").open_teams(0).asked());
+  lobby.Request("b", Request(Action::ASK_JOIN, {}, team));
+  lobby.Request("b", Request(Action::ASK_CANCEL));
+  CHECK(lobby.StateFor("a").asks_size() == 0);
+  CHECK(!lobby.Request("a", Request(Action::ASK_ACCEPT, "b")).notice.empty());
+  // Accepted: in the team, its ask over, the team not listed to its own member.
+  lobby.Request("b", Request(Action::ASK_JOIN, {}, team));
+  CHECK(lobby.Request("a", Request(Action::ASK_ACCEPT, "b")).changed);
+  CHECK(lobby.TeamOf("b") == lobby.TeamOf("a"));
+  CHECK(lobby.StateFor("a").asks_size() == 0 &&
+        lobby.StateFor("b").open_teams_size() == 0);
+  // Full: not listed, asks refused. Closed: not listed, waiting asks gone.
+  lobby.Arrive("d", "Dee", false);
+  lobby.Arrive("e", "Eve", false);
+  lobby.Request("d", Request(Action::ASK_JOIN, {}, team));
+  CHECK(lobby.Request("a", Request(Action::ASK_ACCEPT, "d")).changed);
+  CHECK(lobby.TeamOf("a")->members_size() == 4);
+  CHECK(lobby.StateFor("e").open_teams_size() == 0);
+  CHECK(
+      !lobby.Request("e", Request(Action::ASK_JOIN, {}, team)).notice.empty());
+  lobby.Request("d", Request(Action::LEAVE));
+  lobby.Request("e", Request(Action::ASK_JOIN, {}, team));
+  CHECK(lobby.StateFor("a").asks_size() == 1);
+  open.set_join(bbcoop::Team::INVITE_ONLY);
+  CHECK(lobby.Request("a", open).changed);
+  CHECK(lobby.StateFor("a").asks_size() == 0 &&
+        lobby.StateFor("e").open_teams_size() == 0);
+  // One ask at a time; an asker that goes is no longer asking.
+  lobby.Request("d", Request(Action::CREATE));
+  const std::string other = lobby.TeamOf("d")->id();
+  open.set_join(bbcoop::Team::ASK);
+  lobby.Request("a", open);
+  lobby.Request("d", open);
+  CHECK(lobby.StateFor("e").open_teams_size() == 2);
+  lobby.Request("e", Request(Action::ASK_JOIN, {}, team));
+  lobby.Request("e", Request(Action::ASK_JOIN, {}, other));
+  CHECK(lobby.StateFor("a").asks_size() == 0 &&
+        lobby.StateFor("d").asks_size() == 1);
+  lobby.Leave("e");
+  CHECK(lobby.StateFor("d").asks_size() == 0);
+  // Open to all: listed as open, and asking it joins it at once.
+  lobby.Arrive("f", "Fay", false);
+  open.set_join(bbcoop::Team::OPEN);
+  CHECK(lobby.Request("d", open).changed);
+  bbcoop::LobbyState f = lobby.StateFor("f");
+  CHECK(f.open_teams_size() == 2);
+  const auto &listed =
+      f.open_teams(0).team() == other ? f.open_teams(0) : f.open_teams(1);
+  CHECK(listed.join() == bbcoop::Team::OPEN);
+  CHECK(lobby.Request("f", Request(Action::ASK_JOIN, {}, other)).changed);
+  CHECK(lobby.TeamOf("f") == lobby.TeamOf("d") &&
+        lobby.StateFor("d").asks_size() == 0);
+  return 0;
+}
+
 int main() {
   int failed = 0;
   failed |= TheLeaderSetsTheTeamsRules();
@@ -1121,6 +1403,10 @@ int main() {
   failed |= TeamHoldsFour();
   failed |= ReadyAndStart();
   failed |= StartedTeamKeepsGoingWhileOnePlays();
+  failed |= ALeaderBackAtTheTitleHandsTheTeamOver();
+  failed |= TheLastOneBackAtTheTitleKeepsTheTeam();
+  failed |= AGoneGameLeavesAStartedTeamInSeconds();
+  failed |= TheLeadFollowsTheSessionsHost();
   failed |= AStartedTeamStaysStartedWhileItsGamesLoad();
   failed |= LeaveAndRemove();
   failed |= OfflineMemberLeavesAfterGrace();
@@ -1132,6 +1418,8 @@ int main() {
   failed |= TheLeaderForgetsAWorld();
   failed |= TheServerKeepsItsLastWorlds();
   failed |= AWorldsLampsAreCounted();
+  failed |= ALampResetClearsOnlyLampFlags();
+  failed |= TheLeaderResetsAWorldsLamps();
   failed |= AWorldsLineSaysWhoPlayedItAndWhenItWasMade();
   failed |= AWorldPlayedNowSaysByWhichTeam();
   failed |= APickBeforeATeamGoesIntoTheTeam();
@@ -1144,6 +1432,7 @@ int main() {
   failed |= TeamCodesAreUnique();
   failed |= WrongLookupsAreLimited();
   failed |= AFriendIsInvitedByName();
+  failed |= OpenTeamsAreAskedToJoin();
   if (failed == 0) {
     std::cout << "team lobby: all checks passed\n";
   }

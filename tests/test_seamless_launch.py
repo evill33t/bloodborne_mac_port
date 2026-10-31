@@ -40,6 +40,13 @@ class SeamlessLaunch(unittest.TestCase):
             self.assertEqual(env['BB_USER_DIR'],str(data/'explicit'))
             self.assertEqual(env['SHADPS4_BLOODBORNE_HOST_RULES'],'travel,vote,scale')
             with self.assertRaises(ValueError): s.launch_environment({'BB_SHADNET_NPID':'half'},data)
+    def test_v131_boss_tempo_rules_reach_client(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data=Path(temp)
+            for tempo in ('aggressive','relentless'):
+                (data/'bbport.ini').write_text('seamless_host_rules=travel,vote,'+tempo+'\n')
+                env=s.launch_environment({},data)
+                self.assertEqual(env['SHADPS4_BLOODBORNE_HOST_RULES'],'travel,vote,'+tempo)
     def test_launcher_custom_save_folder_is_copied_then_isolated(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);selected=root/'chosen saves';selected.mkdir();(selected/'slot').write_bytes(b'original')

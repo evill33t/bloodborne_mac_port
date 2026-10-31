@@ -969,6 +969,7 @@ void Hub::Heard(Link& link, qint64 now_ms, Result& result) {
         result.log.append(
             QStringLiteral("server link: %1 heard again after %2 ms").arg(Name(link)).arg(gap));
         TellOthers(link, MemberState::Back, gap, result);
+        result.back.append(link.endpoint);
     }
     link.last_heard_ms = now_ms;
     link.lost = false;
@@ -1041,6 +1042,7 @@ Hub::Result Hub::Tick(qint64 now_ms) {
             result.log.append(
                 QStringLiteral("server link: nothing from %1 for %2 ms").arg(Name(link)).arg(gap));
             TellOthers(link, MemberState::Quiet, gap, result);
+            result.quiet.append(link.endpoint);
         }
         if (!link.lost && gap > lost_ms) {
             link.lost = true;

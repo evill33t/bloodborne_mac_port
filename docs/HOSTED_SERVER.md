@@ -22,6 +22,7 @@ Off by default: a host's own server behaves as before. On (`shadnet.cfg`):
 | The HTTP ports (20443 the game's services, 31315 summons and WebAPI) answer only addresses with a signed-in link, and only as a player linked from there (the backend's `UserId` or `PlatformAccountId`, the summon's `UserId`, the bearer token's account); 403 otherwise. GETs (ss.info, status) act as nobody and stay open | `http_gate.h` | the player id came from the request: anyone reaching the ports could act as any player |
 | Crash reports (`/bb/report`) off unless `HostedReports` (then 8 MB each); the stats page off unless `HostedStats` | `webapi_server.cpp`, `server.cpp` | a report costs a password hash; the stats page lists player ids |
 | The lobby goes out at most every 250 ms, only to players whose own state changed, listing their team, invites and 32 others | `team_lobby.cpp` `StateFor`, `bloodborne_world.cpp` `SendLobby` | every lobby change sent every player the whole server's list: O(n^2), 216 Mbit/s at 120 players |
+| The lobby's player search lists the players signed in now, and one not signed in only by its whole name; the accounts are not searched (`SearchPlayers`). At most 10 friend requests and 20 searches a player a minute; one who declined a request is not asked by that player again for 10 minutes | `bloodborne_world.cpp` `OnFriendRequest` | two letters listed every account on the server, offline ones by their player id; a request reaches the other's game, so a stranger could ask again and again |
 | A trade only between members of one started team | `bloodborne_world.cpp` `TakeTrade` | trades go by member name; a stranger in a party could be offered goods or answer for another |
 | Party worlds in memory: at most `HostedPartyWorlds` (2048) | `bloodborne_world.h` `Limits` | every team's world on one machine |
 | The operator's commands on a UNIX-domain socket only the server's user opens (`HostedAdminSocket`, never a network port; `server/hosting/admin.sh`): list players, kick, ban/unban by id or address with an optional end (written to `banned.txt`, so restarts keep them), list worlds (members, last played, bytes on disk, measured off the link thread) and those put aside, restore one (its folder moved back at once), stats (players, worlds, link thread load, refusals); a second server started on a live socket is refused it instead of taking it | `admin.h`, `link_server.cpp` | only `banned.txt` and a restart before; a forgotten world could only come back by hand |
@@ -97,6 +98,18 @@ several of that name: refused), who is then listed to the inviter. Wrong codes a
 per player: past 5 in a minute every lookup waits (`TeamLobby::LookupTries`). Both are typed in
 the window's text entry (the game's name dialog's) and need this build on both sides
 (`TeamRequest` actions 12-14, `Team.code`).
+
+Friends and open teams (from #412, Amanises), on every server. The team screen's Friends page lists
+the player's friends (online first), the requests waiting for its answer and the ones it sent, and
+a search by name; friends are shadNet's own friend table (`lobby_friends_db.cpp`), the one the
+game's friend list reads, so a lobby friend is a friend there too and a block made there refuses a
+request. The lobby keeps each player's friends in memory (`RelationsOf`) until a request changes
+them or the player signs in to the lobby again. The leader picks how the team is joined
+(`TeamRequest.OPEN`, `Team.join`): Invite only (the default: not listed, as before), Ask to join
+(listed; the leader accepts or declines) or Open to all (listed; anyone joins at once, a started
+hunt too, as by its code). Players in no team see the listed teams with room (12 at most) under
+Invitations and open teams; each shard lists its own. `TeamRequest` actions 19-27, `Team.join`
+12, `LobbyState` fields 7-14.
 
 ## The link's handshake and encryption (link version 4)
 

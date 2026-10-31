@@ -41,6 +41,10 @@ Enemies that rise out of the mist as a player comes near (AMBUSH_EVENTS: the woo
 into Hemwick and four more) woke only for an alive player in its own world, the host; a guest's
 approach wakes them too.
 
+Rom's lake (LAKE_DIVE_EVENTS, Kaniel 2026-10-29): a white phantom's fog by the edge opened only
+once the host had dived, and the drop's 5 s of no death waited for that too, so a guest going over
+first died from the fall. Neither waits now, and a guest's dive starts Rom like the host's.
+
 One-time enemies (keep_one_time_drop_checks: the Wandering Nightmares) leave for good once their
 event ends, which waits for an alive player with the enemy's drop flag; a client skipped the flag
 check, and a party guest reads alive, so the guest's game ended them all with no kill. The skip no
@@ -144,14 +148,18 @@ def patch_events(emevd: bytes, edits: list | None = None) -> tuple[bytes, int]:
 # Story cutscenes that ended for a client before they played (audit 2026-10-25, Kaniel: "everyone
 # is moved but only the host sees the cutscene"): common 9422 the Hypogean Gaol's arrival after a
 # kidnapping (and its point of insight), m25_00 12500000 Cainhurst's arrival, m26_00 12601854 the
-# one after the Nightmare of Mensis' boss. The Dream's endings (m21_00 12100000, 12100002,
-# 12100180: they start the next playthrough, 2003:21) stay the host's.
+# one after the Nightmare of Mensis' boss. The Dream's endings are ENDING_EVENTS.
+# m28_00 12800430 is the mummy at the end of Yahar'gul's hall (the action button on its warp
+# object 2801500, then 2003:49 to the Lecture Building, m32's 3202959): only the host could
+# inspect it and only the host travelled (Provi's day 4, v1.3.1). It is each player's own trip
+# (LOCAL_EVENTS).
 CLIENT_EVENTS = {
     'common.emevd.dcx': {9350, 9400, 9404, 9421, 9422},
     'm21_00_00_00.emevd.dcx': {9401, 12105043, 12107100},
     'm24_00_00_00.emevd.dcx': {12401803},
     'm25_00_00_00.emevd.dcx': {12500000},
     'm26_00_00_00.emevd.dcx': {12601854},
+    'm28_00_00_00.emevd.dcx': {12800430},
 }
 INSIGHT_EVENT = 9350
 INITIALIZE_EVENT = (2000, 0)
@@ -340,6 +348,39 @@ CHALICE_REWARD_EVENTS = {'m29.emevd.dcx': 12901693}
 GOTO_IF_MULTIPLAYER_STATE = (1003, 105)
 
 
+# The game's banner 15 (TextEffect_YouWin, UNLOCKED) is party death's YOU ARE DOWN in the HUD patch
+# (bbport/scripts/hud_patch.py): every banner is in use and this one has NIGHTMARE SLAIN's timeline
+# and layers. Its only event shows none; the message box after it still says what happened.
+# SetTextEffect takes ids 1 to 17, so id 0 queues nothing.
+DROPPED_BANNER_EVENTS = {'m29.emevd.dcx': {12900192}}
+SET_TEXT_EFFECT = (2007, 2)
+DOWNED_BANNER_ID = 15
+
+
+def drop_banners(emevd: bytes, wanted: set[int],
+                 edits: list | None = None) -> tuple[bytes, int]:
+    data = bytearray(emevd)
+    fields = struct.unpack_from('<16q', data, 16)
+    event_count, event_offset, instruction_offset, args_offset = (fields[0], fields[1], fields[3],
+                                                                  fields[13])
+    patched = 0
+    for index in range(event_count):
+        event, count, first, _, _, _, _ = struct.unpack_from('<qqqqqii', data,
+                                                             event_offset + index * 48)
+        if event not in wanted:
+            continue
+        for k in range(count):
+            bank, ident, length, offset, _ = struct.unpack_from(
+                '<iiqqq', data, instruction_offset + first + k * INSTRUCTION_SIZE)
+            at = args_offset + offset
+            if ((bank, ident) == SET_TEXT_EFFECT and length >= 4 and
+                    struct.unpack_from('<i', data, at)[0] == DOWNED_BANNER_ID):
+                struct.pack_into('<i', data, at, 0)
+                note(edits, event, k, bank, ident, 'its banner is the downed banner now')
+                patched += 1
+    return bytes(data), patched
+
+
 def patch_chalice_rewards(emevd: bytes, edits: list | None = None,
                           event_id: int = 12901693) -> tuple[bytes, int]:
     data = bytearray(emevd)
@@ -388,6 +429,45 @@ def patch_client_events(emevd: bytes, wanted: set[int],
             if bank == 1003 and ident == 6 and length >= 2 and data[at + 1] == 1:
                 data[at + 1] = NEVER
                 note(edits, event, k, bank, ident, 'client end never matches')
+                patched += 1
+    return bytes(data), patched
+
+
+# The Dream's endings (m21_00 12100000 after Gehrman, 12100002 after the Moon Presence, 12100180
+# Gehrman's offer taken): the cutscene, the ending's trophy, then the next playthrough (2003:21).
+# Each ended for a client (1003:6 state 1), 12100000 also unless the local player is alive (4:3
+# player 10000 type 0, a white phantom is type 1): the guests saw nothing, their session ended
+# under them as the host's game left for the next playthrough, and they stayed in the old one
+# (Kaniel's players 2026-10-28/29). Patched, a guest's game plays the ending too and starts its
+# own next playthrough; the runtime keeps each save's new world (PlaythroughWatch).
+ENDING_EVENTS = {'m21_00_00_00.emevd.dcx': {12100000, 12100002, 12100180}}
+
+
+def let_guests_see_the_endings(emevd: bytes, wanted: set[int],
+                               edits: list | None = None) -> tuple[bytes, int]:
+    data = bytearray(emevd)
+    fields = struct.unpack_from('<16q', data, 16)
+    event_count, event_offset, instruction_offset = fields[0], fields[1], fields[3]
+    args_offset = fields[13]
+    patched = 0
+    for index in range(event_count):
+        event, count, first, _, _, _, _ = struct.unpack_from('<qqqqqii', data,
+                                                             event_offset + index * 48)
+        if event not in wanted:
+            continue
+        for k in range(count):
+            bank, ident, length, offset, _ = struct.unpack_from(
+                '<iiqqq', data, instruction_offset + first + k * 32)
+            at = args_offset + offset
+            if bank == 1003 and ident == 6 and length >= 2 and data[at + 1] == 1:
+                data[at + 1] = NEVER
+                note(edits, event, k, bank, ident, 'client end never matches')
+                patched += 1
+            if (bank == 4 and ident == 3 and length >= 9 and data[at] != UNUSED_GROUP and
+                    struct.unpack_from('<i', data, at + 4)[0] == LOCAL_PLAYER and
+                    data[at + 8] == ALIVE):
+                data[at] = UNUSED_GROUP
+                note(edits, event, k, bank, ident, 'alive check no longer waited on')
                 patched += 1
     return bytes(data), patched
 
@@ -539,9 +619,17 @@ def let_guests_wake_ambushes(emevd: bytes, wanted: set[int],
 # 12105040 rises the shop messengers in the bath (2100211-2100213) while this player's shop menu
 # is open (12105041, their talk) and sinks them after; kept in step, another player's restart
 # of it rose them and played their tune again and again (Kaniel 2026-10-21).
+# m29 12906824 (started by the story layouts m29_20_90_00 and m29_31_90_00) sets a Bath shop flag
+# (5090 Bone Ash, 5091 Madman) once the layer 2 boss is dead; the shop flags are each player's
+# own, so kept in step the first game to run it ended it in the other's, which never set its own
+# (seixas 2026-10-27: no Bone Ash set after the Keeper of the Old Lords).
+# m28_00 12800430 (Yahar'gul's mummy, see CLIENT_EVENTS) warps to the Lecture Building: kept in
+# step, one player's inspection would take every teammate in Yahar'gul along.
 LOCAL_EVENTS = {
     'm21_00_00_00.emevd.dcx': {12101000, 12101020, 12101021, 12101022, 12101024, 12101026,
                                12101028, 12105040, 12107100, 12107200},
+    'm28_00_00_00.emevd.dcx': {12800430},
+    'm29.emevd.dcx': {12906824},
 }
 for _name, _events in ACTION_PICKUP_EVENTS.items():
     LOCAL_EVENTS[_name] = LOCAL_EVENTS.get(_name, set()) | set(_events)
@@ -705,8 +793,73 @@ def open_boss_fog_for_guests(emevd: bytes, edits: list | None = None) -> tuple[b
                 patched += 1
     if not new_args:
         return bytes(data), patched
+    return with_new_arguments(data, fields, new_args), patched
+
+
+# Rom's lake (m32_00, Kaniel 2026-10-29): a white phantom's fog by the edge (13204831) waited for
+# the boss's entrance (13201802) and the host's "dived" flag (13204800), and the drop's 5 s of
+# no-death for anyone but the host (13204821) waited for that flag too. 13204820 gives it to an
+# alive player (the host) walking into the drop's area 3202800 and then sets 13204800, which
+# starts Rom. So a guest could not pass the fog before the host did, and a guest who went over
+# the edge first died from the 96 m fall.
+LAKE_DIVE_EVENTS = {'m32_00_00_00.emevd.dcx': {'fog': 13204831, 'dive': 13204821}}
+
+
+def let_guests_dive_first(emevd: bytes, wanted: dict[str, int],
+                          edits: list | None = None) -> tuple[bytes, int]:
+    """The phantom fog stops waiting for flags the host sets (its condition groups keep the
+    boss-dead check, the phantom check and the button). The dive's no-death stops waiting for
+    the host's flag H, and its "set H + 1" becomes "set H..H + 1", so a guest diving first is
+    kept alive by the fall and starts the boss like the host does (H is shared with the party,
+    IsBossFogEntryFlag)."""
+    data = bytearray(emevd)
+    fields = list(struct.unpack_from('<16q', data, 16))
+    event_count, event_offset, instruction_offset = fields[0], fields[1], fields[3]
+    args_offset = fields[13]
+    new_args = bytearray()
+    patched = 0
+    for index in range(event_count):
+        event, count, first, *_ = struct.unpack_from('<qqqqqii', data, event_offset + index * 48)
+        if event not in wanted.values():
+            continue
+        at = [instruction_offset + first + k * INSTRUCTION_SIZE for k in range(count)]
+        instructions = [struct.unpack_from('<iiqqq', data, place) for place in at]
+        args = [bytes(data[args_offset + offset:args_offset + offset + length])
+                for _, _, length, offset, _ in instructions]
+        waits = [k for k, (bank, ident, *_) in enumerate(instructions)
+                 if (bank, ident) == IF_EVENT_FLAG and args[k][1] == 1 and
+                 0 < args[k][0] < UNUSED_GROUP]
+        if not waits:
+            continue  # patched already
+        if event == wanted['dive']:
+            sets = [k for k, (bank, ident, *_) in enumerate(instructions)
+                    if (bank, ident) == SET_EVENT_FLAG and args[k][4] == 1]
+            if len(waits) != 1 or len(sets) != 1:
+                raise EventPatchError(f'event {event}: not the dive this patch knows')
+            entered = struct.unpack_from('<i', args[sets[0]], 0)[0]
+            if struct.unpack_from('<i', args[waits[0]], 4)[0] != entered - 1:
+                raise EventPatchError(f'event {event}: it does not wait for the flag before '
+                                      f'{entered}')
+            offset = fields[12] + len(new_args)
+            new_args += struct.pack('<iiBxxx', entered - 1, entered, 1)
+            struct.pack_into('<iiqqq', data, at[sets[0]], *BATCH_SET_EVENT_FLAGS, 12, offset,
+                             instructions[sets[0]][4])
+            note(edits, event, sets[0], *BATCH_SET_EVENT_FLAGS,
+                 'a guest diving sets the host flag too')
+            patched += 1
+        for k in waits:
+            data[args_offset + instructions[k][3]] = UNUSED_GROUP
+            note(edits, event, k, *IF_EVENT_FLAG, 'no longer waits for the host flag')
+            patched += 1
+    if not new_args:
+        return bytes(data), patched
+    return with_new_arguments(data, fields, new_args), patched
+
+
+def with_new_arguments(data: bytearray, fields: list, new_args: bytearray) -> bytes:
+    """Appends arguments to the argument table, moving the tables after it."""
     new_args += bytes(-(fields[12] + len(new_args)) % ARGS_ALIGNMENT)
-    args_end = args_offset + fields[12]
+    args_end = fields[13] + fields[12]
     out = data[:args_end] + new_args + data[args_end:]
     for field in SHIFTED_OFFSET_FIELDS:
         if field != 13 and fields[field] >= args_end:
@@ -714,7 +867,7 @@ def open_boss_fog_for_guests(emevd: bytes, edits: list | None = None) -> tuple[b
     fields[12] += len(new_args)
     struct.pack_into('<16q', out, 16, *fields)
     struct.pack_into('<I', out, 0x0C, struct.unpack_from('<I', out, 0x0C)[0] + len(new_args))
-    return bytes(out), patched
+    return bytes(out)
 
 
 def already_local(data: bytes, instruction_offset: int, args_offset: int, event: list) -> bool:
@@ -911,7 +1064,8 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
     counts = {'boss event checks': 0, 'boss fog checks': 0, 'insight event checks': 0,
               'client event ends': 0, 'local events': 0, 'chalice wall checks': 0,
               'item pickup checks': 0, 'host door effects': 0, 'ambush checks': 0,
-              'chalice reward checks': 0, 'one-time enemy checks': 0}
+              'chalice reward checks': 0, 'one-time enemy checks': 0, 'lake dive checks': 0,
+              'ending checks': 0, 'dropped banners': 0}
     try:
         if name.startswith('m'):
             emevd, counts['boss event checks'] = patch_events(emevd, edits)
@@ -921,6 +1075,9 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
         if name in CLIENT_EVENTS:
             emevd, counts['client event ends'] = patch_client_events(emevd, CLIENT_EVENTS[name],
                                                                      edits)
+        if name in ENDING_EVENTS:
+            emevd, counts['ending checks'] = let_guests_see_the_endings(emevd,
+                                                                        ENDING_EVENTS[name], edits)
         if name in ACTION_PICKUP_EVENTS:
             emevd, counts['item pickup checks'] = let_guests_pick_up_items(
                 emevd, ACTION_PICKUP_EVENTS[name], edits)
@@ -933,9 +1090,15 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
         if name in HOST_DOOR_EFFECT:
             emevd, counts['host door effects'] = patch_host_door_effect(
                 emevd, edits, HOST_DOOR_EFFECT[name])
+        if name in LAKE_DIVE_EVENTS:
+            emevd, counts['lake dive checks'] = let_guests_dive_first(
+                emevd, LAKE_DIVE_EVENTS[name], edits)
         if name in CHALICE_REWARD_EVENTS:
             emevd, counts['chalice reward checks'] = patch_chalice_rewards(
                 emevd, edits, CHALICE_REWARD_EVENTS[name])
+        if name in DROPPED_BANNER_EVENTS:
+            emevd, counts['dropped banners'] = drop_banners(emevd, DROPPED_BANNER_EVENTS[name],
+                                                            edits)
         # Last: validate names changed instructions by their number in the game's event, which
         # only inserts move.
         if name in LOCAL_EVENTS:

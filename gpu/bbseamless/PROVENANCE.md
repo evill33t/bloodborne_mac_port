@@ -1,6 +1,9 @@
 # Reference client sources
 
-Imported from [lKaniel/bloodborne-server at 8d5e54f](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1).
+Updated to [lKaniel/bloodborne-server v1.3.1 at 5d2305e](https://github.com/lKaniel/bloodborne-server/tree/5d2305ee611ef1e03be39ff925f0da75c9a70393)
+from the original 8d5e54f import. Local Mac adapters and durable invasion rewards are retained.
+The v1.3.1 friends/open-team work also credits **Amanises**; lamp reset credits **Provi**, as
+retained in the original sources. See [the integration record](../../docs/SEAMLESS_V1_3_1.md).
 Original co-op client author: **Kaniel / lKaniel**
 ([GitHub](https://github.com/lKaniel)). The Mac overlay/Metal foundation and original
 `tests/test_mtl_overlay.mm` harness are by **Mark Hall**, as credited in their retained

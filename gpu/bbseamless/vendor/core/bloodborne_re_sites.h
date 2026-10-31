@@ -111,6 +111,11 @@ constexpr u64 SosStatusUpdateOffset = 0x01872360;
 constexpr u64 StageWarpDescriptorFinalizeOffset = 0x01944F23;
 constexpr u64 MultiPlayStageUidPolicyOffset = 0x0193C5DE;
 constexpr u64 MultiPlayStopRequestOffset = 0x01ED07A0;
+// The System menu's "Exit Game" (text 110004; its item's action 0x01C0C9F0 asks "Quit?") answered
+// Yes: the callable's operator() (vtable 0x05344A10 slot 2), which reads no state of its own and
+// sets the requests that take the game back to the title (+0x250 of [0x05562878] and GameMan's).
+// The rig's quit-title calls it as the menu would.
+constexpr u64 QuitGameConfirmedOffset = 0x01C0D050;
 constexpr u64 MatchingStopTaskEnqueueOffset = 0x00C98070;
 constexpr u64 CrossMapGuestHandoffOffset = 0x01E4FF3A;
 constexpr u64 HealingFountainAvailabilityOffset = 0x012F836E;

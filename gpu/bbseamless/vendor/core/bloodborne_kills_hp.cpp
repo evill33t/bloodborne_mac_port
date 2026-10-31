@@ -588,6 +588,30 @@ std::mutex hand_out_mutex;
 std::map<std::string, HandOut> handed_by_me;
 HandOut handed_to_me;
 
+// Kaniel 2026-10-28 (passive bosses): the bosses BossRunnerOf saw lately, by +0x90 index, with
+// their pick's runner and when; the game's hand-out names a boss only to that runner
+// (BossesKeptFrom).
+constexpr s64 BossIndexKeepMs = 10'000;
+std::mutex boss_indices_mutex;
+std::map<u32, std::pair<std::string, s64>> boss_indices;
+
+void NoteBossIndex(u32 index, const std::string& runner, s64 now_ms) {
+    std::scoped_lock lock{boss_indices_mutex};
+    boss_indices[index] = {runner, now_ms};
+}
+
+std::vector<BossHand> RecentBosses(s64 now_ms) {
+    std::scoped_lock lock{boss_indices_mutex};
+    std::erase_if(boss_indices, [&](const auto& entry) {
+        return now_ms - entry.second.second > BossIndexKeepMs;
+    });
+    std::vector<BossHand> bosses;
+    for (const auto& [index, seen] : boss_indices) {
+        bosses.push_back(BossHand{.index = index, .runner = seen.first});
+    }
+    return bosses;
+}
+
 // The enemies this game handed out (owner) or was handed (follower), from fresh hand-outs only.
 std::vector<u32> FreshHandOut(EnemyRole role, s64 now_ms) {
     std::scoped_lock lock{hand_out_mutex};
@@ -660,7 +684,35 @@ void NoteHandOutSent(const std::string& member, std::span<u8> payload, bool writ
         std::vector<u32> entries(count);
         std::memcpy(entries.data(), payload.data() + 4, size_t{count} * 4);
         static HandOutSettle settle;
-        const std::vector<u32> settled = settle.Filter(member, entries, now_ms);
+        const std::vector<BossHand> picks = RecentBosses(now_ms);
+        const std::string board_member = BoardMemberOfOnlineId(member);
+        const std::vector<u32> bosses = BossesKeptFrom(picks, board_member);
+        const std::vector<u32> given = BossesGivenTo(picks, board_member);
+        const std::vector<u32> settled =
+            GiveBosses(settle.Filter(member, entries, now_ms, bosses), given);
+        // The bosses the game would hand to another member than the pick's (kept here), and
+        // those the pick gives this one (each change).
+        const auto indices = [](std::span<const u32> from, std::span<const u32> among) {
+            std::string which;
+            for (const u32 entry : from) {
+                if (entry != HandOutHeldEntry && std::ranges::contains(among, entry & 0xFFFF)) {
+                    which += fmt::format(" {:x}", entry & 0xFFFF);
+                }
+            }
+            return which.empty() ? std::string{" none"} : which;
+        };
+        const std::string bosses_text =
+            fmt::format("kept{}, given{}", indices(entries, bosses), indices(settled, given));
+        static std::map<std::string, std::string> bosses_last;
+        static u32 bosses_logged = 0;
+        if (bosses_last[member] != bosses_text && bosses_logged < 200) {
+            bosses_last[member] = bosses_text;
+            ++bosses_logged;
+            LOG_INFO(Debug,
+                     "Bloodborne enemy owner: bosses in the hand-out to {} by the boss "
+                     "pick: {} (t={:.1f})",
+                     member, bosses_text, now_ms / 1000.0);
+        }
         std::memcpy(payload.data() + 4, settled.data(), size_t{count} * 4);
         const auto held = static_cast<u32>(std::ranges::count(settled, HandOutHeldEntry));
         static std::map<std::string, u32> held_last;
@@ -869,7 +921,9 @@ std::string BossRunnerOf(u64 character) {
     const auto at = CharacterPosition(character);
     const VitalsView view = ReadVitalsBoard();
     const u32 handle = ReadValue<u32>(character, 0x08);
+    const u32 index = ReadValue<u32>(character, 0x90);
     if (!at || !view.Fresh()) {
+        NoteBossIndex(index, boss_runners[handle].Last(), SteadyMilliseconds());
         return boss_runners[handle].Last(); // as last decided, not back and forth
     }
     std::string owner;
@@ -881,6 +935,7 @@ std::string BossRunnerOf(u64 character) {
     }
     const std::string runner =
         boss_runners[handle].Tick(PlayingMap(), handle, *at, view.board.members, owner);
+    NoteBossIndex(index, runner, SteadyMilliseconds());
     // Ours to run, awake and alive: claimed on the board (see ClaimsBoss).
     const u64 control = ReadValue<u64>(character, 0x18);
     const auto mine = std::ranges::find(view.board.members, view.member, &MemberVitals::member);
@@ -1393,8 +1448,18 @@ void TickEnemyOwner(bool in_session, u32 map) {
     const u64 doll = DollCharacter();
     ForEachWorldCharacter(world, [&](u64 character) {
         if (character == player || character == doll || players.contains(character) ||
-            CharacterHp(character) <= 0 ||
-            HandedOut(handed_to_this, ReadValue<u32>(character, 0x90))) {
+            CharacterHp(character) <= 0) {
+            return;
+        }
+        if (HandedOut(handed_to_this, ReadValue<u32>(character, 0x90))) {
+            // The rig 2026-10-28 (passive bosses): a boss the hand-out gives this game (the pick
+            // put it there, GiveBosses) is still asked about, so this game claims it on the board
+            // (ClaimsBoss); unclaimed, the host walking up took it back and restarted its AI.
+            const u64 control = ReadValue<u64>(character, 0x18);
+            if (role == EnemyRole::Follower && control >= 0x10000 &&
+                ReadValue<s32>(control, 0x14) == EnemyAwake) {
+                BossRunnerOf(character);
+            }
             return;
         }
         const u64 word = OwnershipWordAddress(world, character);
@@ -2247,6 +2312,10 @@ SeenCharacter SeeCharacter(u64 character) {
                             Coop::CurrentEnemyRole() == EnemyRole::Owner)};
 }
 
+// The copies the kill step put down with the game's kill: their kill reward pays nothing.
+std::mutex quiet_kills_mutex;
+QuietKills quiet_kills;
+
 // A death respawn reset the map: this member's kills are taken back (VisitKills::Forget).
 std::atomic<bool> party_kills_reset{};
 [[maybe_unused]] const bool party_kills_reset_registered =
@@ -2255,6 +2324,11 @@ std::atomic<bool> party_kills_reset{};
 } // namespace
 
 namespace Coop {
+
+bool TakesQuietKillReward(u64 character) {
+    std::scoped_lock lock{quiet_kills_mutex};
+    return quiet_kills.Takes(character, SteadyMilliseconds());
+}
 
 // Enemy deaths kept in step across loads: this member's kills during its visit go to the
 // party's kill board (VisitKills), and its copies of the enemies another member killed during
@@ -2426,6 +2500,18 @@ void KeepEnemyDeathsInStep(bool sharing) {
     // and with this member's own and held ones (see GatherPartyKills).
     PartyKillsNow party =
         GatherPartyKills(visit_kills, map, changes, forget_kills, died_for_others);
+    // A kill of this member's taken back (a generator brought it back) is no party kill, though
+    // the party's log has it until this member's unkill has gone round (see TakenBackKills).
+    static TakenBackKills taken_back;
+    for (const auto& [handle, killed] : changes) {
+        if (!killed) {
+            taken_back.TakeBack(static_cast<u32>(handle), now_ms);
+        }
+    }
+    for (const u32 handle : taken_back.Holding(party.all, now_ms)) {
+        party.all.erase(handle);
+        party.members.erase(handle);
+    }
     std::unordered_set<u32>& others = party.all;
     const std::unordered_set<u32>& member_kills = party.members;
     // And what is dead in the host's world, killed before the session too (its save): a guest
@@ -2458,14 +2544,38 @@ void KeepEnemyDeathsInStep(bool sharing) {
         }
     }
     if (hosts_now) {
-        BringBackWhatTheHostBroughtBack(
-            BroughtBackByTheHost(*hosts_now, dead_here, others, now_ms));
+        static BringBackGuard bring_back_guard;
+        const s64 host_moved = session_host_moved_ms.load();
+        const std::vector<u32> back = bring_back_guard.Filter(
+            visit, BroughtBackByTheHost(*hosts_now, dead_here, others, now_ms), *hosts_now,
+            dead_here);
+        static u32 held_logged = 0;
+        if (!back.empty() &&
+            HoldsBringBacks(now_ms, host_moved != 0 ? std::optional{host_moved} : std::nullopt)) {
+            if (++held_logged <= 20) {
+                LOG_INFO(Debug,
+                         "Bloodborne party: {} bring-backs held, the session host moved {} ms ago",
+                         back.size(), now_ms - host_moved);
+            }
+        } else if (BringBackWhatTheHostBroughtBack(back)) {
+            bring_back_guard.Brought(back, now_ms);
+        }
     }
     TraceMemberKills(characters, pointers, hidden, others, died_for_others);
     size_t newly_hidden = 0;
     size_t newly_died = 0;
     const auto me = LocalPlayerPosition();
     const bool can_kill = Coop::KillCharacterCallable();
+    // Copies this game's own generator brought back are hidden, not killed again (LocalRevives).
+    static LocalRevives revives;
+    static u64 revives_visit = 0;
+    if (visit != revives_visit) {
+        revives.Clear();
+        revives_visit = visit;
+    }
+    for (const SeenCharacter& seen : characters) {
+        revives.See(seen.handle, seen.hp);
+    }
     // Copies at 0 HP without the game's death, since when (see FinishesStuckDeath).
     static std::unordered_map<u64, s64> zero_since;
     static std::unordered_set<u64> finished;
@@ -2501,15 +2611,19 @@ void KeepEnemyDeathsInStep(bool sharing) {
             AppliesMemberKill(others.contains(handle), CharacterHp(character)) &&
             ReadValue<u8>(character, 0x28) == 0 &&
             HasMemoryAccess(character, 0x29, MemoryProt::CpuWrite)) {
-            if (can_kill && !died_for_others.contains(handle) &&
+            if (can_kill && !died_for_others.contains(handle) && !revives.Revived(handle) &&
                 IsCharacter(character, "member kill") &&
                 DiesInsteadOfHiding(me, CharacterPosition(character))) {
-                // Near this player: it dies as the game kills (no echoes), not vanishing. Its
-                // one-time drop first: given with its lot's flag on, the game's death drops no
-                // orb of it as well (Kaniel's test 2026-10-23: the host got the hag's drop and
-                // saw it lying there too).
+                // Near this player: it dies as the game kills, not vanishing, and pays no echoes
+                // (QuietKills). Its one-time drop first: given with its lot's flag on, the game's
+                // death drops no orb of it as well (Kaniel's test 2026-10-23: the host got the
+                // hag's drop and saw it lying there too).
                 if (member_kills.contains(handle)) {
                     GiveMemberKillDrop(character, handle);
+                }
+                {
+                    std::scoped_lock lock{quiet_kills_mutex};
+                    quiet_kills.Killed(character, now_ms);
                 }
                 using Kill = void PS4_SYSV_ABI (*)(u64 character);
                 reinterpret_cast<Kill>(image_base + KillCharacterOffset)(character);
@@ -2659,9 +2773,11 @@ void SwitchCharactersLikeTheHost(u32 map, std::span<const u64> characters,
             }
         }
     }
+    static SwitchOnWait switch_on_wait;
     std::string which;
-    for (const CharacterSwitch& change :
-         SwitchedLikeTheHost(host, mine, switched_off, kill_hidden, off_for_good)) {
+    for (const CharacterSwitch& change : switch_on_wait.Due(
+             SwitchedLikeTheHost(host, mine, switched_off, kill_hidden, off_for_good), switched_off,
+             SteadyMilliseconds())) {
         const auto at = std::ranges::find(mine, change.handle, &CharacterSwitch::handle);
         if (!SetCharacterDisabled(pointers[at - mine.begin()], change.disabled)) {
             continue;

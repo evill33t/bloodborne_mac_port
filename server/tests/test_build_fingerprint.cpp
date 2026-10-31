@@ -199,13 +199,13 @@ int Refusals() {
 // What differs but links: the player is told their installation differs
 // (the team screen's line), the log says every field with both values.
 int CompatibleVersions() {
-  const std::vector<std::string> compatible{"dev", "1.3.0"};
+  const std::vector<std::string> compatible{"dev", "1.3.1"};
   BuildFingerprint server = Server();
   server.Set("version", "dev");
   BuildFingerprint mac = Game();
   mac.Set("version", "dev");
   BuildFingerprint windows = Game();
-  windows.Set("version", "1.3.0");
+  windows.Set("version", "1.3.1");
   const auto said = EncodeBuildFingerprint(windows);
   // Opt-in only, and both join orders work against the server and peers.
   CHECK(!BuildRefusalOf(said, &server, &mac).text.empty());
@@ -214,10 +214,14 @@ int CompatibleVersions() {
   CHECK(BuildRefusalOf(said, nullptr, &mac, compatible).text.empty());
   CHECK(BuildRefusalOf(EncodeBuildFingerprint(mac), &server, &windows,
                        compatible).text.empty());
-  CHECK(!BuildRefusalOf(said, &server, &mac, {"1.3.0"}).text.empty());
+  CHECK(!BuildRefusalOf(said, &server, &mac, {"1.3.1"}).text.empty());
   // Other releases remain refused; a version list never aliases the protocol.
   auto other = windows;
   other.Set("version", "1.4.0");
+  CHECK(!BuildRefusalOf(EncodeBuildFingerprint(other), &server, &mac,
+                        compatible).text.empty());
+  other = windows;
+  other.Set("version", "1.3.0");
   CHECK(!BuildRefusalOf(EncodeBuildFingerprint(other), &server, &mac,
                         compatible).text.empty());
   other = windows;

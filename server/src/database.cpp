@@ -594,6 +594,31 @@ QList<QPair<int64_t, QString>> Database::GetUsernamesFromIds(const QSet<int64_t>
     return result;
 }
 
+QList<QPair<int64_t, QString>> Database::SearchUsernames(const QString& text, int limit) {
+    QList<QPair<int64_t, QString>> result;
+    if (text.isEmpty() || limit <= 0)
+        return result;
+    // The text as it is: LIKE's own characters (% _ and the escape) stand for themselves.
+    QString escaped;
+    for (const QChar c : text) {
+        if (c == '%' || c == '_' || c == '\\')
+            escaped += '\\';
+        escaped += c;
+    }
+    QSqlQuery q(m_db);
+    q.prepare("SELECT user_id, username FROM account "
+              "WHERE banned=0 AND username LIKE ? ESCAPE '\\' "
+              "ORDER BY (username LIKE ? ESCAPE '\\') DESC, username COLLATE NOCASE ASC LIMIT ?");
+    q.addBindValue(QStringLiteral("%") + escaped + QStringLiteral("%"));
+    q.addBindValue(escaped + QStringLiteral("%"));
+    q.addBindValue(limit);
+    if (!Exec(q))
+        return result;
+    while (q.next())
+        result << qMakePair(q.value(0).toLongLong(), q.value(1).toString());
+    return result;
+}
+
 bool Database::UpdateLoginTime(int64_t userId) {
     uint64_t now = static_cast<uint64_t>(QDateTime::currentSecsSinceEpoch());
     QSqlQuery q(m_db);

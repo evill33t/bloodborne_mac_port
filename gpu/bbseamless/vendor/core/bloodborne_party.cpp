@@ -306,8 +306,9 @@ namespace {
 
 bool HasReviveCalls(const GhostDeathCalls& calls) {
     return calls.set_event_flag && calls.clear_return_state && calls.request_full_recover &&
-           calls.update_blood_mark && calls.revive_player && calls.revive_local_character &&
-           calls.restore_alive_state && calls.chr_reset_animation && calls.warp_to_last_lamp;
+           calls.restock_from_storage && calls.update_blood_mark && calls.revive_player &&
+           calls.revive_local_character && calls.restore_alive_state && calls.chr_reset_animation &&
+           calls.warp_to_last_lamp;
 }
 
 // What both deaths share. `character_type` is set back after the local revive makes the player
@@ -316,6 +317,8 @@ void ReviveInPlace(const GhostDeathCalls& calls, std::optional<s32> character_ty
     calls.set_event_flag(0, DeathEventFlag, false);
     calls.clear_return_state();
     calls.request_full_recover();
+    // The respawn load a death skips here also refills vials and bullets from the storage box.
+    calls.restock_from_storage();
     calls.update_blood_mark();
     calls.revive_player();
     calls.revive_local_character();
@@ -526,6 +529,69 @@ std::optional<std::string> FindOnlineIdIn(std::span<const u8> bytes,
         }
     }
     return found;
+}
+
+SessionNameCache::Look SessionNameCache::Lookup(u64 identity,
+                                                std::span<const std::string> online_ids,
+                                                s64 now_ms) const {
+    const auto entry = std::ranges::find(entries, identity, &Entry::identity);
+    if (entry == entries.end() || !std::ranges::equal(entry->online_ids, online_ids)) {
+        return {};
+    }
+    if (entry->where) {
+        return {Plan::Recheck, *entry->where};
+    }
+    const s64 wait = std::min(MissRetryMs << std::min(entry->misses - 1, 3), MissRetryMaxMs);
+    return {now_ms - entry->missed_at < wait ? Plan::StillMissing : Plan::Scan};
+}
+
+void SessionNameCache::Found(u64 identity, std::span<const std::string> online_ids, Block where) {
+    Keep({identity, {online_ids.begin(), online_ids.end()}, where});
+}
+
+void SessionNameCache::Missed(u64 identity, std::span<const std::string> online_ids, s64 now_ms) {
+    const auto known = std::ranges::find(entries, identity, &Entry::identity);
+    const int misses =
+        known != entries.end() && !known->where && std::ranges::equal(known->online_ids, online_ids)
+            ? known->misses + 1
+            : 1;
+    Keep({identity, {online_ids.begin(), online_ids.end()}, std::nullopt, now_ms, misses});
+}
+
+void SessionNameCache::Forget(u64 identity) {
+    std::erase_if(entries, [identity](const Entry& entry) { return entry.identity == identity; });
+}
+
+void SessionNameCache::Keep(Entry entry) {
+    Forget(entry.identity);
+    if (entries.size() >= Members) {
+        entries.erase(entries.begin());
+    }
+    entries.push_back(std::move(entry));
+}
+
+u64 ParamTableSize(std::span<const u8> param, u16 rows, u64 row_size) {
+    u64 size = 0x40 + u64{rows} * 24;
+    for (u64 row = 0; row < rows; ++row) {
+        u64 offset = 0;
+        std::memcpy(&offset, param.data() + 0x40 + row * 24 + 8, sizeof(offset));
+        size = std::max(size, offset + row_size);
+    }
+    return size;
+}
+
+std::optional<u64> LoadedParamSlots::Slot(std::string_view type) const {
+    const auto slot = std::ranges::find(slots, type, &std::pair<std::string, u64>::first);
+    return slot != slots.end() ? std::optional<u64>{slot->second} : std::nullopt;
+}
+
+void LoadedParamSlots::Found(std::string_view type, u64 slot) {
+    if (const auto known = std::ranges::find(slots, type, &std::pair<std::string, u64>::first);
+        known != slots.end()) {
+        known->second = slot;
+        return;
+    }
+    slots.emplace_back(std::string{type}, slot);
 }
 
 RecreatePlan PlanRecreate(std::span<const std::optional<std::string>> found,
@@ -859,6 +925,21 @@ std::optional<std::string> CoopTimeMeter::Report(s64 now_ms, size_t slowest) {
     return line;
 }
 
+std::optional<std::string> TickSpikeLog::Note(std::string_view part, s64 ns, s64 now_ms,
+                                              std::string_view role, u64 memory_checks) {
+    if (ns <= threshold_ns) {
+        return std::nullopt;
+    }
+    std::scoped_lock lock{mutex};
+    if (lines >= cap) {
+        return std::nullopt;
+    }
+    ++lines;
+    return fmt::format("Co-op tick spike: {} {:.2f} ms t={}.{:03} s role {}, {} memory checks{}",
+                       part, static_cast<double>(ns) / 1e6, now_ms / 1000, now_ms % 1000, role,
+                       memory_checks, lines == cap ? " (the last spike line)" : "");
+}
+
 OwnRestore RestoresOwnCharacters(std::span<const u32> own,
                                  const std::unordered_set<u32>& hidden_here,
                                  const std::unordered_set<u32>& switched_off) {
@@ -1111,14 +1192,18 @@ std::vector<s32> LitHeadstoneLamps(const std::function<bool(s32)>& on) {
 
 std::vector<s32> LampsToRelight(const std::set<s32>& kept, std::span<const s32> team,
                                 const std::function<bool(s32)>& on) {
+    // The shared lamps only: a chalice map's view lamps are the current altar's (FlagTable).
+    const auto relights = [&](s32 flag) {
+        return LampOfActiveFlag(flag) && SharedWithParty(flag) && !on(flag);
+    };
     std::set<s32> lamps;
     for (const s32 flag : kept) {
-        if (LampOfActiveFlag(flag) && !on(flag)) {
+        if (relights(flag)) {
             lamps.insert(flag);
         }
     }
     for (const s32 flag : team) {
-        if (LampOfActiveFlag(flag) && !on(flag)) {
+        if (relights(flag)) {
             lamps.insert(flag);
         }
     }
@@ -2385,6 +2470,28 @@ std::vector<CharacterSwitch> SwitchedLikeTheHost(std::span<const CharacterShown>
     return changes;
 }
 
+std::vector<CharacterSwitch> SwitchOnWait::Due(std::span<const CharacterSwitch> changes,
+                                               const std::unordered_set<u32>& switched_off,
+                                               s64 now_ms) {
+    std::map<u32, s64> waiting;
+    std::vector<CharacterSwitch> due;
+    for (const CharacterSwitch& change : changes) {
+        if (change.disabled || switched_off.contains(change.handle)) {
+            due.push_back(change);
+            continue;
+        }
+        const auto it = since.find(change.handle);
+        const s64 first = it != since.end() ? it->second : now_ms;
+        if (now_ms - first >= WaitMs) {
+            due.push_back(change);
+        } else {
+            waiting.emplace(change.handle, first);
+        }
+    }
+    since = std::move(waiting);
+    return due;
+}
+
 std::vector<CharacterHits> HitsLikeTheHost(std::span<const CharacterShown> host,
                                            std::span<const CharacterHits> mine,
                                            const std::unordered_set<u32>& kill_hidden) {
@@ -2520,6 +2627,46 @@ std::vector<std::pair<s32, bool>> VisitKills::Observe(u64 visit,
     return changes;
 }
 
+void LocalRevives::See(u32 handle, s32 hp) {
+    if (hp <= 0) {
+        dead.insert(handle);
+        revived.erase(handle);
+    } else if (dead.erase(handle) > 0) {
+        revived.insert(handle);
+    }
+}
+
+void LocalRevives::Clear() {
+    dead.clear();
+    revived.clear();
+}
+
+void QuietKills::Killed(u64 character, s64 now_ms) {
+    since[character] = now_ms;
+}
+
+bool QuietKills::Takes(u64 character, s64 now_ms) {
+    std::erase_if(since, [&](const auto& entry) { return now_ms - entry.second >= QuietMs; });
+    return since.erase(character) > 0;
+}
+
+void TakenBackKills::TakeBack(u32 handle, s64 now_ms) {
+    since[handle] = now_ms;
+}
+
+std::vector<u32> TakenBackKills::Holding(const std::unordered_set<u32>& party_kills, s64 now_ms) {
+    std::vector<u32> holding;
+    for (auto it = since.begin(); it != since.end();) {
+        if (!party_kills.contains(it->first) || now_ms - it->second >= HoldMs) {
+            it = since.erase(it);
+            continue;
+        }
+        holding.push_back(it->first);
+        ++it;
+    }
+    return holding;
+}
+
 std::vector<u32> VisitKills::Held(u32 map) const {
     const auto it = held.find(map);
     return it != held.end() ? it->second : std::vector<u32>{};
@@ -2613,9 +2760,8 @@ bool SharesWithParty(bool party_configured, bool player_loaded) {
 }
 
 bool SharesKillEchoes(u64 caller_offset, bool posts) {
-    constexpr u64 EnemyKillReward = 0x018FC99B;
     constexpr u64 BossKillReward = 0x01385263;
-    return posts && (caller_offset == EnemyKillReward || caller_offset == BossKillReward);
+    return posts && (caller_offset == EnemyKillRewardOffset || caller_offset == BossKillReward);
 }
 
 void KillEchoLedger::Paid(KillEchoes kill, s64 now_ms) {
@@ -2947,6 +3093,17 @@ bool GivesGuestNpcGift(bool in_party_session, bool summoned_guest, s32 flag) {
     return in_party_session && summoned_guest && NpcGiftLot(flag).has_value();
 }
 
+bool GivesNpcDeathDrop(const NpcDeathDrop& drop, bool guest_in_session, u32 map, bool death_flag_on,
+                       bool lot_flag_on, bool lot_flag_hosts, bool holds_goods, bool given) {
+    if (!guest_in_session || !death_flag_on || given || (drop.map != 0 && drop.map != map)) {
+        return false;
+    }
+    if (lot_flag_hosts && drop.goods != 0) {
+        return !holds_goods; // the host's flag says nothing about this guest
+    }
+    return !lot_flag_on;
+}
+
 bool MenuSeesAClient(bool party_configured, bool summoned_client) {
     return summoned_client && !party_configured;
 }
@@ -3133,6 +3290,22 @@ std::size_t MakeNpcParamHarder(std::span<u8> param, const HarderEnemies& harder)
         std::memcpy(row + NpcHpOffset, &new_hp, sizeof(new_hp));
         std::memcpy(row + NpcPoiseOffset, &new_poise, sizeof(new_poise));
         return new_hp != hp || new_poise != poise;
+    });
+}
+
+std::size_t ScaleBossTurnSpeed(std::span<u8> param, float factor) {
+    if (factor == 1.0f) {
+        return 0;
+    }
+    return ForEachParamRow(param, "NPC_PARAM_ST", NpcTypeOffset + 1, [&](u8* row) {
+        float turn = 0.0f;
+        std::memcpy(&turn, row + NpcTurnVelocityOffset, sizeof(turn));
+        if (row[NpcTypeOffset] != NpcTypeBoss || !(turn > 0.0f)) {
+            return false;
+        }
+        turn *= factor;
+        std::memcpy(row + NpcTurnVelocityOffset, &turn, sizeof(turn));
+        return true;
     });
 }
 
@@ -4155,8 +4328,49 @@ std::vector<u32> HandOutIds(std::span<const u8> payload) {
     return ids;
 }
 
+std::vector<u32> BossesKeptFrom(std::span<const BossHand> bosses, std::string_view member) {
+    std::vector<u32> kept;
+    for (const BossHand& boss : bosses) {
+        if (boss.runner.empty() || boss.runner != member) {
+            kept.push_back(boss.index);
+        }
+    }
+    return kept;
+}
+
+std::vector<u32> BossesGivenTo(std::span<const BossHand> bosses, std::string_view member) {
+    std::vector<u32> given;
+    for (const BossHand& boss : bosses) {
+        if (!boss.runner.empty() && boss.runner == member) {
+            given.push_back(boss.index);
+        }
+    }
+    return given;
+}
+
+std::vector<u32> GiveBosses(std::vector<u32> entries, std::span<const u32> given) {
+    const auto is_given = [&](u32 entry) {
+        return entry != HandOutHeldEntry && std::ranges::contains(given, entry & 0xFFFF);
+    };
+    for (const u32 boss : given) {
+        if (std::ranges::any_of(entries, [&](u32 entry) { return (entry & 0xFFFF) == boss; })) {
+            continue;
+        }
+        auto room = std::ranges::find(entries, HandOutHeldEntry);
+        if (room == entries.end()) {
+            const auto other = std::ranges::find_if(entries.rbegin(), entries.rend(),
+                                                    [&](u32 entry) { return !is_given(entry); });
+            room = other == entries.rend() ? entries.end() : std::prev(other.base());
+        }
+        if (room != entries.end()) {
+            *room = boss;
+        }
+    }
+    return entries;
+}
+
 std::vector<u32> HandOutSettle::Filter(const std::string& member, std::span<const u32> entries,
-                                       s64 now_ms) {
+                                       s64 now_ms, std::span<const u32> bosses) {
     Member& state = members[member];
     if (now_ms - state.last_ms > HandOutFreshMs) {
         state = {}; // a load, a trip away: what it was handed before means nothing now
@@ -4169,6 +4383,10 @@ std::vector<u32> HandOutSettle::Filter(const std::string& member, std::span<cons
     std::set<u32> wanted;
     for (const u32 entry : entries) {
         const u32 index = entry & 0xFFFF;
+        if (std::ranges::contains(bosses, index)) {
+            out.push_back(HandOutHeldEntry); // the boss pick's, not the game's
+            continue;
+        }
         wanted.insert(index);
         const s64 since = state.wanted_since.try_emplace(index, now_ms).first->second;
         if (first || state.handed.contains(index) || now_ms - since >= HandOverSettleMs) {
@@ -4499,6 +4717,49 @@ std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
     }
     std::ranges::sort(back);
     return back;
+}
+
+std::vector<u32> BringBackGuard::Filter(u64 now_visit, std::span<const u32> back,
+                                        std::span<const CharacterShown> host,
+                                        std::span<const DeadCopy> dead_here) {
+    if (now_visit != visit) {
+        visit = now_visit;
+        brought_at.clear();
+        refused.clear();
+    }
+    // The host's copy died: what comes back after that is a new bring-back.
+    for (const CharacterShown& character : host) {
+        if (character.dead) {
+            brought_at.erase(character.handle);
+            refused.erase(character.handle);
+        }
+    }
+    std::vector<u32> kept;
+    for (const u32 handle : back) {
+        if (refused.contains(handle)) {
+            continue;
+        }
+        const auto brought = brought_at.find(handle);
+        const auto dead = std::ranges::find(dead_here, handle, &DeadCopy::handle);
+        if (brought != brought_at.end() && dead != dead_here.end() &&
+            dead->dead_since_ms - brought->second < StaysBackMs) {
+            refused.insert(handle);
+            brought_at.erase(brought);
+            continue;
+        }
+        kept.push_back(handle);
+    }
+    return kept;
+}
+
+void BringBackGuard::Brought(std::span<const u32> handles, s64 now_ms) {
+    for (const u32 handle : handles) {
+        brought_at[handle] = now_ms;
+    }
+}
+
+bool HoldsBringBacks(s64 now_ms, std::optional<s64> host_moved_ms) {
+    return host_moved_ms && now_ms - *host_moved_ms < HostMovedHoldMs;
 }
 
 bool KeepDisabledAfterRespawn(bool disabled_before, s32 hp_before) {
@@ -6142,6 +6403,10 @@ std::string BulletTally::TakeSummary(std::size_t most) {
 
 bool SkipsEnemyBarDamage(u32 handle, std::span<const u32> downed_bodies) {
     return std::ranges::find(downed_bodies, handle) != downed_bodies.end();
+}
+
+bool AreaMissesDownedPlayer(s32 entity, bool down, bool in_void) {
+    return entity == LocalPlayerEntity && down && !in_void;
 }
 
 bool SomeoneElseStands(std::span<const MemberVitals> board, std::string_view self, u32 map) {

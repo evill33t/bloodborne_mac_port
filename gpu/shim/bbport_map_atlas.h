@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Kaniel / lKaniel, Map::WorldOf and AtlasOffset, bbport_overlay.cpp at 8d5e54f.
+// Kaniel / lKaniel, Map::WorldOf and AtlasOffset, bbport_overlay.cpp at 5d2305e.
 #pragma once
 #include <cstdint>
 namespace BbMapView {

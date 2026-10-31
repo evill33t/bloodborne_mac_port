@@ -11,6 +11,8 @@
 //   there in one load (with the vote: the team has TravelVoteMs to say No, one No stops it).
 // - Enemy scaling: enemies grow from the vanilla game (alone) to the harder defaults (a full
 //   team) with the hunters on their map.
+// - Boss tempo (Kaniel 2026-10-28): Vanilla, Aggressive or Relentless; bosses rest less between
+//   attacks and turn faster.
 // This file is the pure part: the rules' text, the rot and what it does, the vote and the scale.
 
 #pragma once
@@ -27,16 +29,25 @@
 
 namespace Core::Bloodborne {
 
+// bbcoop::BossTempo's numbers.
+enum class BossTempo : u8 {
+    Vanilla = 0,
+    Aggressive = 1,
+    Relentless = 2,
+};
+
 struct HostRules {
     bool rot = false;
     bool travel_together = false;
     bool travel_vote = false; // only with travel_together
     bool enemy_scaling = false;
+    BossTempo boss_tempo = BossTempo::Vanilla;
     bool operator==(const HostRules&) const = default;
 };
 
-// The launcher's setting: words split by commas ("rot", "travel", "vote", "scale"); anything else
-// (or "off", or nothing) is off. "vote" alone is nothing: it is a part of "travel".
+// The launcher's setting: words split by commas ("rot", "travel", "vote", "scale", and the boss
+// tempo's "aggressive" or "relentless", the last one given); anything else (or "off", or
+// nothing) is off. "vote" alone is nothing: it is a part of "travel".
 HostRules ParseHostRules(std::string_view setting);
 // The same words back ("off" for none), for the log and the build's line.
 std::string HostRulesText(const HostRules& rules);
@@ -185,5 +196,64 @@ constexpr float HarderDefaultPoise = 3.0f;
 std::optional<HarderEnemies> TeamScaledEnemies(std::size_t hunters);
 // The hunters on `map` by the party's map board: this player and every other member there.
 std::size_t HuntersOnMap(std::span<const MemberMap> board, std::string_view self, u32 map);
+
+// Kaniel 2026-10-28 (boss tempo, docs/BOSS_TEMPO.md): a boss's AI scripts give it a breather
+// after most of its attacks: the act's GetWellSpace_Odds (often 70) is Common_Battle_Activate's
+// chance (GetRandam_Int(1, 100) <= odds) of the after-act move, which adds sub-goals that wait
+// (GOAL_COMMON_Wait), back off (LeaveTarget) or strafe (SidewayMove) for a life time, and the
+// acts themselves turn (Turn) and strafe between swings. Each level shortens those goals' life
+// (`gap`), cuts all but `odds` of the waits, back-offs and strafes to almost nothing (the
+// after-act chance x odds), and turns boss rows of NpcParam faster (turnVellocity x `turn`).
+// `anim` (the animation speed) is not used yet.
+struct BossTempoTuning {
+    float gap = 1.0f;
+    float odds = 1.0f;
+    float turn = 1.0f;
+    float anim = 1.0f;
+    bool operator==(const BossTempoTuning&) const = default;
+    bool Changes() const {
+        return *this != BossTempoTuning{};
+    }
+};
+// SHADPS4_BLOODBORNE_BOSS_TEMPO=gap,odds,turn,anim (the dev setting): gap in (0, 1], odds in
+// [0, 1], turn and anim in [0.5, 4]; anything else is nothing.
+std::optional<BossTempoTuning> ParseBossTempoTuning(std::string_view setting);
+// The level's tuning: Vanilla is always the game's; the dev setting (`tuned`) replaces the
+// others' presets.
+BossTempoTuning BossTempoTuningFor(BossTempo level,
+                                   const std::optional<BossTempoTuning>& tuned = std::nullopt);
+const char* BossTempoName(BossTempo level);
+
+// The AI goals (the scripts' goal_list.lua).
+constexpr s32 GoalCommonWait = 2000;
+constexpr s32 GoalCommonTurn = 2001;
+constexpr s32 GoalCommonLeaveTarget = 2016;
+constexpr s32 GoalCommonSidewayMove = 2017;
+bool IsBossTempoGoal(s32 goal);
+// A cut goal's life: one frame or two, so the next act comes right away.
+constexpr float CutGoalLife = 0.05f;
+// The life a boss's `goal` gets for the scripts' `life` (0 or less: no limit, kept), with `roll`
+// (0-99) against the tuning's odds; never longer than the game's.
+float BossGoalLife(s32 goal, float life, const BossTempoTuning& tuning, u32 roll);
+
+// AddSubGoal (0x0124CC60): goal (rdi), its new sub-goal's id (esi), life time (xmm0), up to
+// seven float parameters and more on the stack; every Lua overload and the native goals call it.
+// The hook goes after its prologue stored the life at [rbp + AddSubGoalLifeFrameOffset], over
+// `mov r14, rdi; xor ecx, ecx`. A goal's [+0] is its AI ([+0x28] the NpcThinkParam id: the
+// GetNpcThinkParamID binding, 0x0125BC00); the AI keeps its character at +0x558, which it takes
+// from its manipulator ([+0], whose virtuals the IsNpcPlayer binding calls) at 0x0128EDC3. The AI
+// runs on the CSChrThread workers, several at once.
+constexpr u64 AddSubGoalOffset = 0x0124CC60;
+constexpr u64 AddSubGoalLifeHookOffset = 0x0124CCAC;
+constexpr std::array<u8, 5> AddSubGoalLifeHook{0x49, 0x89, 0xFE, 0x31, 0xC9};
+constexpr s64 AddSubGoalLifeFrameOffset = -0xBC;
+// AddSubGoal_Front's (0x0124D4F0: the same arguments, the sub-goal goes first): the same hook
+// over the same two instructions, its life at [rbp - 0xB8]. The hooks' tags say which.
+constexpr u64 AddSubGoalFrontOffset = 0x0124D4F0;
+constexpr u64 AddSubGoalFrontLifeHookOffset = 0x0124D53C;
+constexpr s64 AddSubGoalFrontLifeFrameOffset = -0xB8;
+constexpr u64 AddSubGoalFrontTag = 1;
+constexpr u64 AiCharacterOffset = 0x558;
+constexpr u64 AiTakesItsCharacterOffset = 0x0128EDC3;
 
 } // namespace Core::Bloodborne

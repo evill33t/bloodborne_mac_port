@@ -500,12 +500,12 @@ int BuildChecks() {
 
 int CompatibleVersions() {
   const QByteArray dev = QByteArray(Build).replace("version=1.2.0", "version=dev");
-  const QByteArray windows = QByteArray(Build).replace("version=1.2.0", "version=1.3.0");
+  const QByteArray windows = QByteArray(Build).replace("version=1.2.0", "version=1.3.1");
   // Exercise the encrypted handshake in each join order, including a pre-build sign-in.
   for (bool windows_first : {false, true}) {
     Net hub;
     hub->SetServerBuild("bb-build 1;version=dev;protocol=9;");
-    hub->SetCompatibleVersions({"dev", "1.3.0"});
+    hub->SetCompatibleVersions({"dev", "1.3.1"});
     auto result = hub.Receive(Kaniel, HelloFrom("Kaniel", {}), 0);
     CHECK(DecodeWelcome(SentTo(result, Kaniel).value(0))->accepted);
     result = hub.Receive(Kaniel, HelloFrom("Kaniel", windows_first ? windows : dev), 1);
@@ -517,7 +517,7 @@ int CompatibleVersions() {
     CHECK(welcome && welcome->accepted && welcome->text.contains("game files"));
     CHECK(hub->Members() == 2);
     // An unlisted release and a listed release with a different protocol stay out.
-    const QByteArray unlisted = QByteArray(windows).replace("version=1.3.0", "version=1.4.0");
+    const QByteArray unlisted = QByteArray(windows).replace("version=1.3.1", "version=1.4.0");
     result = hub.Receive(Eileen, HelloFrom("Eileen", unlisted), 3);
     welcome = DecodeWelcome(SentTo(result, Eileen).value(0));
     CHECK(welcome && !welcome->accepted && welcome->text.contains("version 1.4.0"));
@@ -530,7 +530,7 @@ int CompatibleVersions() {
   // A legacy exact HostedBuild remains exact even with compatible labels configured.
   Net exact;
   exact->SetRequiredBuild("specific-build");
-  exact->SetCompatibleVersions({"dev", "1.3.0"});
+  exact->SetCompatibleVersions({"dev", "1.3.1"});
   auto result = exact.Receive(Kaniel, HelloFrom("Kaniel", windows), 0);
   CHECK(!DecodeWelcome(SentTo(result, Kaniel).value(0))->accepted);
   std::cout << "server link compatible release labels: ok\n";
@@ -672,13 +672,18 @@ int Liveness() {
         quiet->endpoint == VirtualEndpointOf("Ada") &&
         quiet->online_id == "Ada" && quiet->gap_ms == 3500);
   CHECK(!result.log.isEmpty() && result.log[0].contains("Ada"));
+  // Kaniel 2026-10-25: the world hears of it too (a game gone a few seconds
+  // leaves its started team).
+  CHECK(result.quiet.size() == 1 && result.quiet[0] == Ada);
   hub.Receive(Kaniel, Encode(Kind::Ping, Ping{3, 4000}), 4000);
-  CHECK(SentTo(hub.Tick(4500), Kaniel).isEmpty());
+  result = hub.Tick(4500);
+  CHECK(SentTo(result, Kaniel).isEmpty() && result.quiet.isEmpty());
 
   // Heard again.
   result = hub.Receive(Ada, Encode(Kind::Ping, Ping{1, 6000}), 6000);
   const auto back = DecodeMember(SentTo(result, Kaniel).value(0));
   CHECK(back && back->state == MemberState::Back && back->gap_ms == 6000);
+  CHECK(result.back.size() == 1 && result.back[0] == Ada);
 
   // Kaniel's game is gone after a minute without a word; the build is free
   // again once nobody is linked.

@@ -174,6 +174,8 @@ std::optional<u32> EventFlagBits(s32 flag, u32 bits) {
 constexpr u64 RitualAltarsPointerOffset = 0x0553E9E8;
 constexpr u64 ReloadRitualAltarOffset = 0x01AA40E0;
 constexpr std::array<u8, 7> ReloadRitualAltarBytes{0x55, 0x48, 0x89, 0xE5, 0x41, 0x56, 0x53};
+// 0x01AA54D0 on that state, for a status 2-5: its dungeon goes (request 7), to status 1.
+constexpr u64 RemoveRitualAltarOffset = 0x01AA54D0;
 
 void ReloadRitualAltar(s32 altar) {
     if (altar < 0 || altar >= 7) {
@@ -204,6 +206,56 @@ void ReloadRitualAltar(s32 altar) {
     const bool asked = reinterpret_cast<Reload>(image_base + ReloadRitualAltarOffset)(state);
     LOG_INFO(Debug, "Bloodborne party: ritual altar {} loaded the team's record ({}, status {})",
              altar, asked ? "done" : "busy", ReadValue<s32>(state, 0x25C));
+}
+
+namespace {
+
+// Altar `altar`'s state, 0 when its object is not there.
+u64 RitualAltarState(s32 altar) {
+    const u64 altars = ReadValue<u64>(image_base + RitualAltarsPointerOffset, 0);
+    const u64 table = altars >= 0x10000 ? ReadValue<u64>(altars, 8) : 0;
+    const u64 object =
+        table >= 0x10000 && altar >= 0 && altar < 7 ? ReadValue<u64>(table, altar * 8) : 0;
+    const u64 state = object >= 0x10000 ? object + 0x108 : 0;
+    return state != 0 && HasMemoryAccess(state, 0x270, MemoryProt::CpuRead) ? state : 0;
+}
+
+} // namespace
+
+std::optional<s32> RitualAltarStatus(s32 altar) {
+    const u64 state = RitualAltarState(altar);
+    if (state == 0) {
+        return std::nullopt;
+    }
+    return ReadValue<s32>(state, 0x25C);
+}
+
+// A teammate took the chalice off altar `altar` and the flags here are empty now, but the altar's
+// object still holds the dungeon it loaded (status 5): its menu would warp into a dungeon that is
+// gone and the load never ends (rig 2026-10-30), so the object lets it go too.
+void EmptyRitualAltar(s32 altar) {
+    const u64 state = RitualAltarState(altar);
+    if (state == 0) {
+        LOG_WARNING(Debug,
+                    "Bloodborne party: ritual altar {} not found; it shows no chalice "
+                    "after the next load",
+                    altar);
+        return;
+    }
+    const s32 status = ReadValue<s32>(state, 0x25C);
+    if (status < 2 || status > 5) {
+        return;
+    }
+    if (std::memcmp(reinterpret_cast<const void*>(image_base + RemoveRitualAltarOffset),
+                    ReloadRitualAltarBytes.data(), ReloadRitualAltarBytes.size()) != 0) {
+        LOG_WARNING(Debug, "Bloodborne party: ritual altar {} keeps its dungeon: code differs",
+                    altar);
+        return;
+    }
+    using Remove = bool PS4_SYSV_ABI (*)(u64 state);
+    const bool asked = reinterpret_cast<Remove>(image_base + RemoveRitualAltarOffset)(state);
+    LOG_INFO(Debug, "Bloodborne party: ritual altar {} emptied ({}, status {} now {})", altar,
+             asked ? "done" : "busy", status, ReadValue<s32>(state, 0x25C));
 }
 
 // Kaniel 2026-10-18: a teammate who holds no chalice is given the chalice of the dungeon that came
@@ -255,6 +307,7 @@ std::optional<AltarRecord> ReadAltarFlags(s32 base) {
 
 void WriteAltarFlags(s32 base, const AltarRecord& record) {
     using SetFlag = void PS4_SYSV_ABI (*)(u64, s32, bool);
+    altar_written_ms.store(SteadyMilliseconds());
     for (size_t byte = 0; byte < record.size(); ++byte) {
         for (u32 bit = 0; bit < 8; ++bit) {
             reinterpret_cast<SetFlag>(image_base + PartyGhostSetEventFlagOffset)(
@@ -291,7 +344,181 @@ void GiveBackAltarChalices() {
     }
 }
 
+// The chalice map's altar (bloodborne_altar.h, ChaliceAltarPick): the pick, kept from the
+// game's flags each second and other members' warps, decides the altar a chalice map's load
+// builds (PickChaliceAltarAtLoad).
+std::mutex chalice_altar_mutex;
+ChaliceAltarPick chalice_altar_pick;
+
+void ObserveChaliceAltarPick(s64 now_ms) {
+    const Place place = CurrentPlace();
+    // A load's own flags (its save's, then the team world's) are no pick: seen first once it
+    // settled.
+    constexpr s64 LoadSettleMs = 5'000;
+    const bool settled =
+        place.state == PlaceState::Playing && now_ms - place.since_ms >= LoadSettleMs;
+    const auto own = settled ? EventFlagBits(AltarPickFlag, AltarPickFlagCount) : std::nullopt;
+    const std::vector<s32> team = TeamWorldFlagsOnForGuest();
+    std::scoped_lock lock{chalice_altar_mutex};
+    if (!settled) {
+        chalice_altar_pick.Loaded();
+    } else if (own) {
+        chalice_altar_pick.ObserveOwn(AltarOfPickBits(*own));
+    }
+    chalice_altar_pick.ObserveTeam(AltarPickedIn(team));
+}
+
+[[maybe_unused]] const bool chalice_altar_reset_registered =
+    RegisterLifecycleReset("chalice altar pick", {Lifecycle::NewCharacter}, [] {
+        std::scoped_lock lock{chalice_altar_mutex};
+        chalice_altar_pick.Reset();
+    });
+
+// The altars this player takes a chalice off (Kaniel 2026-10-30: the chalice stayed on the
+// teammates' altars), seen each second (KeepRitualAltarsWhole) on the game thread.
+AltarRemovals altar_removals;
+
+[[maybe_unused]] const bool altar_removals_reset_registered =
+    RegisterLifecycleReset("altar removals", {Lifecycle::NewCharacter}, [] {
+        std::scoped_lock lock{chalice_altar_mutex};
+        altar_removals.Reset();
+    });
+
+// Altar k's dungeon as the game keeps it while the altar is not the current one (the chalice
+// map's view 1290xxxx and its items 5290xxxx, + (11 + k) * 100000: 14k0xxxx, 54k0xxxx). A chalice
+// taken off ends the dungeon: its lamps lit (Shared, the team world relit them), bosses and
+// items go, so the next chalice placed there starts it new on every game.
+constexpr s32 ChaliceDungeonFlags = 10'000;
+size_t ClearAltarDungeon(s32 altar) {
+    using SetFlag = void PS4_SYSV_ABI (*)(u64, s32, bool);
+    size_t cleared = 0;
+    for (const s32 view : {12900000, 52900000}) {
+        const s32 base = view + (11 + altar) * 100000;
+        for (s32 byte = 0; byte < ChaliceDungeonFlags / 8; ++byte) {
+            const auto bits = EventFlagBits(base + byte * 8, 8);
+            if (!bits || (*bits & 0xFF) == 0) {
+                continue;
+            }
+            for (u32 bit = 0; bit < 8; ++bit) {
+                if ((*bits & (0x80u >> bit)) != 0) {
+                    reinterpret_cast<SetFlag>(image_base + PartyGhostSetEventFlagOffset)(
+                        0, base + byte * 8 + static_cast<s32>(bit), false);
+                    ++cleared;
+                }
+            }
+        }
+    }
+    return cleared;
+}
+
+// This player took the chalice off altar `altar`: the altar goes to the team empty, and its
+// dungeon ends here too.
+void ShareAltarRemovals(s64 now_ms) {
+    if (std::getenv("BB_RIG_NO_ALTAR_WATCH") != nullptr) {
+        return;
+    }
+    const Place place = CurrentPlace();
+    const AltarShareFrame frame{.playing = place.state == PlaceState::Playing,
+                                .map = place.map,
+                                .since_place_ms = now_ms - place.since_ms,
+                                .since_own_write_ms = now_ms - altar_written_ms.load()};
+    AltarRemovals::Kinds kinds{};
+    for (s32 altar = 0; altar < RitualAltarCount; ++altar) {
+        std::array<u8, 8> head{};
+        bool readable = true;
+        for (size_t byte = 0; byte < head.size() && readable; ++byte) {
+            const auto bits = EventFlagBits(AltarFlagBase(altar) + static_cast<s32>(byte * 8), 8);
+            readable = bits.has_value();
+            head[byte] = static_cast<u8>(bits.value_or(0));
+        }
+        if (readable) {
+            kinds[altar] = ClassifyAltarRecord(head);
+        }
+    }
+    std::vector<s32> emptied;
+    {
+        std::scoped_lock lock{chalice_altar_mutex};
+        emptied = altar_removals.Observe(kinds, SharesAltarRecord(frame));
+    }
+    for (const s32 altar : emptied) {
+        const auto record = ReadAltarFlags(AltarFlagBase(altar));
+        if (!record || ClassifyAltarRecord(*record) != AltarRecordKind::Empty) {
+            continue;
+        }
+        SendAltarRecord(altar, *record);
+        LOG_INFO(Debug,
+                 "Bloodborne team altar: the chalice was taken off altar {}: the altar goes to the "
+                 "team empty, its dungeon's {} flags here cleared",
+                 altar, ClearAltarDungeon(altar));
+    }
+}
+
+// The block registration 0x013BEAC0 of a chalice map's view (area 0x1D, block 0) reads the pick
+// flags (`call 0x013CFD80` with the manager in r12, 9020, 7) and points the view at altar
+// 47 - bit length's blocks; here, right after the read, eax is the value. A party trip's load
+// reads the save as written on disk, so this game's later pick goes in instead (Kaniel's playtest
+// 2026-10-28: krolebord's trip into altar 5's dungeon built altar 6's, whose 9026 his save still
+// had), only for an altar whose record names a dungeon.
+constexpr u64 ChaliceViewPickReadOffset = 0x013BEB4D;
+constexpr std::array<u8, 8> ChaliceViewPickRead{0x31, 0xC9, 0x85, 0xC0, 0x44, 0x8B, 0x75, 0xD4};
+
+void PS4_SYSV_ABI PickChaliceAltarAtLoad(u64, GuestRegisterSnapshot* registers) {
+    if (!InPartySession()) {
+        return;
+    }
+    const u32 bits = static_cast<u32>(registers->rax) & ((1u << AltarPickFlagCount) - 1);
+    const std::optional<s32> saved = AltarOfPickBits(bits);
+    std::optional<s32> altar;
+    {
+        std::scoped_lock lock{chalice_altar_mutex};
+        altar = chalice_altar_pick.ForLoad(saved);
+    }
+    if (!altar) {
+        return;
+    }
+    using ReadBits = u32 PS4_SYSV_ABI (*)(u64 manager, s32 flag, u32 bits);
+    const auto read = reinterpret_cast<ReadBits>(image_base + ReadEventFlagBitsOffset);
+    std::array<u8, 4> head{};
+    for (size_t byte = 0; byte < head.size(); ++byte) {
+        head[byte] = static_cast<u8>(
+            read(registers->r12, AltarFlagBase(*altar) + static_cast<s32>(byte * 8), 8));
+    }
+    if (!AltarRecordDungeon(head) || !ChaliceDungeonExists(*AltarRecordDungeon(head))) {
+        LOG_WARNING(Debug,
+                    "Bloodborne chalice map: altar {} was picked last but names no dungeon "
+                    "({:02X} {:02X} {:02X} {:02X}): the save's altar {} is built",
+                    *altar, head[0], head[1], head[2], head[3], saved.value_or(-1));
+        return;
+    }
+    registers->rax = (registers->rax & ~u64{0xFFFFFFFF}) | AltarPickBits(*altar);
+    LOG_INFO(Debug,
+             "Bloodborne chalice map: this load builds altar {}'s dungeon ({:02X} {:02X} {:02X} "
+             "{:02X}), picked last, not the save's altar {}",
+             *altar, head[0], head[1], head[2], head[3],
+             saved ? std::to_string(*saved) : std::string{"(none)"});
+}
+
 } // namespace
+
+void NoteAltarWarp(s32 altar) {
+    std::scoped_lock lock{chalice_altar_mutex};
+    chalice_altar_pick.Warps(altar);
+}
+
+void InstallChaliceAltarPick(u64 base, u64 image_size) {
+    if (!party_controller) {
+        return;
+    }
+    if (ChaliceViewPickReadOffset + ChaliceViewPickRead.size() > image_size ||
+        !InstallCoopHook(reinterpret_cast<void*>(base + ChaliceViewPickReadOffset),
+                         ChaliceViewPickRead, 0, PickChaliceAltarAtLoad)) {
+        coop_features.Skipped("chalice altar pick",
+                              SiteFailure(base, image_size, ChaliceViewPickReadOffset));
+        return;
+    }
+    coop_features.On("chalice altar pick");
+    LOG_INFO(Debug, "Bloodborne chalice map: a load builds the altar picked last");
+}
 
 void RepairRitualAltars() {
     const auto repair = [](s32 base, std::string_view which) {
@@ -335,6 +562,8 @@ void KeepRitualAltarsWhole() {
         return;
     }
     checked_ms = now_ms;
+    ObserveChaliceAltarPick(now_ms);
+    ShareAltarRemovals(now_ms);
     const auto broken = [](s32 base) {
         std::array<u8, 8> head{};
         for (size_t byte = 0; byte < head.size(); ++byte) {
@@ -1324,6 +1553,60 @@ void GiveDueNpcGifts(std::chrono::steady_clock::time_point now) {
     }
 }
 
+// See GivesNpcDeathDrop: every 2 s, a party guest gets the drop of an NPC that died on its map
+// (the host's world says so), as the host's event gave the host. The game's thread.
+void GiveNpcDeathDrops(bool in_session, u32 map) {
+    static s64 checked_ms = 0;
+    static int given_slot = -2;
+    static std::set<s32> given; // death flags, this character in this session
+    const s64 now_ms = SteadyMilliseconds();
+    if (const int slot = character_slot.load(); slot != given_slot || !in_session) {
+        given_slot = slot;
+        given.clear();
+    }
+    const bool guest = in_session && IsPartyGuestRole();
+    if (!guest || now_ms - checked_ms < 2'000 || GetLocalPlayer() < 0x10000 ||
+        !PlayerItemsReadable()) {
+        return;
+    }
+    checked_ms = now_ms;
+    using AwardItemLot = void PS4_SYSV_ABI (*)(u64, s32, u32);
+    using SetFlag = void PS4_SYSV_ABI (*)(u64, s32, bool);
+    for (const NpcDeathDrop& drop : NpcDeathDrops) {
+        if (drop.map != map) {
+            continue; // before reading anything
+        }
+        const s32 lot_flag = ItemLotFlag(drop.lot);
+        const bool lot_flag_on = lot_flag > 0 && EventFlagOn(lot_flag);
+        const bool lot_flag_hosts = lot_flag > 0 && ClearsNpcGiftLotFlag(lot_flag, true);
+        const bool holds =
+            drop.goods != 0 && TradeHeld({BloodborneCoop::TradeItemKind::Goods, drop.goods, 0}) > 0;
+        if (!GivesNpcDeathDrop(drop, guest, map, EventFlagOn(drop.death_flag), lot_flag_on,
+                               lot_flag_hosts, holds, given.contains(drop.death_flag))) {
+            continue;
+        }
+        const u64 item_man = ReadValue<u64>(image_base + MapItemManPointerOffset, 0);
+        if (!HasVtable(item_man, MapItemManVtable, "NPC death drop item lot")) {
+            return;
+        }
+        given.insert(drop.death_flag);
+        // The lot gives nothing while its flag is on: the host's (6671, the host holds the badge)
+        // is not this guest's.
+        if (lot_flag_on && lot_flag_hosts) {
+            reinterpret_cast<SetFlag>(image_base + PartyGhostSetEventFlagOffset)(0, lot_flag,
+                                                                                 false);
+        }
+        giving_deferred_item_lot = true;
+        reinterpret_cast<AwardItemLot>(image_base + AwardItemLotOffset)(item_man, drop.lot, 0);
+        giving_deferred_item_lot = false;
+        LOG_INFO(Debug,
+                 "Bloodborne party: NPC death flag {} on (map {:#x}); gave the guest its drop, "
+                 "item lot {} (its flag {} {})",
+                 drop.death_flag, map, drop.lot, lot_flag,
+                 lot_flag_on ? (lot_flag_hosts ? "was the host's" : "on") : "off");
+    }
+}
+
 void GiveDeferredBossItems() {
     std::vector<s32> due;
     {
@@ -1371,6 +1654,10 @@ void PS4_SYSV_ABI KeepLocalFlagsFromOthers(u64, GuestRegisterSnapshot* registers
         ((flag >= 12100000 && flag < 12110000) || (flag >= 72100000 && flag < 72110000))) {
         LOG_INFO(Debug, "Bloodborne party: the other player sends flag {} = {}", flag,
                  registers->r15 & 0xFF);
+        // Another member's warp into a chalice dungeon: the trip this game follows goes there.
+        if (const auto altar = AltarOfWarpRequest(flag)) {
+            NoteAltarWarp(*altar);
+        }
     }
     // A Dream headstone's flag: this game's own lamps decide, also for the message that carries
     // this game's own event's set in a session (HeadstoneLampsLit).
@@ -1637,23 +1924,41 @@ void SetPartyWorldChanges(bool sharing) {
     GiveBackAltarChalices();
     if (sharing) {
         const auto now = std::chrono::steady_clock::now();
-        // A teammate's ritual: its record goes in whole, and the altar loads it.
+        // A teammate's ritual: its record goes in whole, and the altar loads it. A teammate's
+        // chalice taken off: the altar empties and its dungeon ends (Kaniel 2026-10-30).
         for (const AltarRecordNews& news : TakeAltarRecords()) {
             const s32 base = AltarFlagBase(news.altar);
-            if (news.altar < 0 || news.altar >= RitualAltarCount ||
-                ClassifyAltarRecord(news.record) != AltarRecordKind::Dungeon) {
+            const auto mine = news.altar >= 0 && news.altar < RitualAltarCount
+                                  ? ReadAltarFlags(base)
+                                  : std::nullopt;
+            const TeamAltarTake take =
+                mine ? TakeTeamAltarRecord(*mine, news.record) : TeamAltarTake::LeftOut;
+            if (take == TeamAltarTake::LeftOut) {
                 LOG_WARNING(Debug,
                             "Bloodborne team altar: {}'s record for altar {} names no dungeon "
                             "({}); left out",
                             news.member, news.altar, RecordName(news.record));
                 continue;
             }
-            if (ReadAltarFlags(base) == news.record) {
+            if (take == TeamAltarTake::Same) {
                 LOG_INFO(Debug, "Bloodborne team altar: {}'s record for altar {} is this one's",
                          news.member, news.altar);
                 continue;
             }
             WriteAltarFlags(base, news.record);
+            if (take == TeamAltarTake::Clear) {
+                // The ritual took this player's chalice and the taker got its own back.
+                if (const auto chalice = AltarRecordChalice(*mine)) {
+                    std::scoped_lock lock{altar_chalices_mutex};
+                    altar_chalices_owed.push_back(*chalice);
+                }
+                LOG_INFO(Debug,
+                         "Bloodborne team altar: {} took the chalice off altar {}: emptied here "
+                         "too, its dungeon's {} flags cleared",
+                         news.member, news.altar, ClearAltarDungeon(news.altar));
+                EmptyRitualAltar(news.altar);
+                continue;
+            }
             altar_reloads[news.altar] = now + AltarRecordSettle;
             LOG_INFO(Debug, "Bloodborne team altar: altar {} has {}'s record ({})", news.altar,
                      news.member, RecordName(news.record));

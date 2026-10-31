@@ -85,6 +85,9 @@ public:
     std::optional<QString> GetUsername(int64_t userId);
     std::optional<QString> GetAvatarUrl(int64_t userId);
     QList<QPair<int64_t, QString>> GetUsernamesFromIds(const QSet<int64_t>& ids);
+    // Amanises 2026-10-25 (the lobby's player search): accounts not banned whose name holds
+    // `text` (any case), names starting with it first, at most `limit`.
+    QList<QPair<int64_t, QString>> SearchUsernames(const QString& text, int limit);
     bool UpdateLoginTime(int64_t userId);
     bool BanUser(int64_t userId, bool ban);
     bool DeleteUser(int64_t userId);

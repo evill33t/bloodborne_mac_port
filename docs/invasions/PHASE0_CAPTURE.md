@@ -220,7 +220,7 @@ Run: `py -3.12 tools\rig\run_scenario.py invade-native invade-native-host-dies i
 | R9 | Effect sets in the probe and in "local effects" lines on both sides through the run. |
 | Key items | `dump self` on the invader before and after the join, inventory `+0x58` (the key item list, `GiveBackPhantomKeyItems` `bloodborne_travel.cpp:1512`): does it change as for a white phantom? |
 | Echoes | The invader's "Bloodborne echoes: +N" lines (`NoteAddSouls`, `bloodborne_party_rules.cpp:859`) while the host kills an enemy: is the native kill reward paid to an invader? Add `attack nearest` on the host after the sync in one variant. |
-| Banner | Optional: a temporary passive hook on `SetTextEffect` (`SetTextEffectOffset`, used by `ShowDownedBanner`, `bloodborne_party_death.cpp:1056`) logging the text effect id on both sides gives the native "invaded" or "defeated" banner ids for the notice UI. |
+| Banner | Optional: a temporary passive hook on `SetTextEffect` (`SetTextEffectOffset`, used by the duels' `bloodborne_duel_game.cpp`) logging the text effect id on both sides gives the native "invaded" or "defeated" banner ids for the notice UI. |
 
 ## 6. Results template (fill in, attach to the PR or thread)
 

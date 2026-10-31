@@ -71,7 +71,18 @@ constexpr u64 CurrentMapListPointerOffset = 0x0553B148;
 
 namespace Coop {
 
+namespace {
+
+thread_local u64 memory_checks_here = 0;
+
+} // namespace
+
+u64 MemoryChecksOnThisThread() {
+    return memory_checks_here;
+}
+
 bool HasMemoryAccess(u64 address, size_t size, MemoryProt required) {
+    ++memory_checks_here;
     if (size == 0 || address > std::numeric_limits<u64>::max() - size) {
         return false;
     }
@@ -1065,12 +1076,52 @@ namespace Coop {
 CoopTimeMeter coop_time{30'000};
 CoopTimeMeter coop_tick_parts{30'000};
 
+namespace {
+
+TickSpikeLog& TickSpikes() {
+    static TickSpikeLog log{200, [] {
+                                const char* ms = std::getenv("BB_COOP_SPIKE_MS");
+                                const s64 value = ms != nullptr ? std::atoll(ms) : 0;
+                                return value > 0 ? value * 1'000'000
+                                                 : TickSpikeLog::DefaultThresholdNs;
+                            }()};
+    return log;
+}
+
+std::string_view RoleName(EnemyRole role) {
+    switch (role) {
+    case EnemyRole::Owner:
+        return "owner";
+    case EnemyRole::Follower:
+        return "follower";
+    default:
+        return "none";
+    }
+}
+
+s64 NanosecondsSince(std::chrono::steady_clock::time_point started) {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+                                                                started)
+        .count();
+}
+
+} // namespace
+
+void NoteTickSpike(std::string_view name, s64 ns, u64 memory_checks) {
+    if (const auto line = TickSpikes().Note(name, ns, SteadyMilliseconds(),
+                                            RoleName(CurrentEnemyRole()), memory_checks)) {
+        LOG_WARNING(Debug, "{}", *line);
+    }
+}
+
 TickPartTimer::~TickPartTimer() {
-    coop_tick_parts.Add(name,
-                        std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - started)
-                            .count(),
-                        SteadyMilliseconds());
+    const s64 ns = NanosecondsSince(started);
+    coop_tick_parts.Add(name, ns, SteadyMilliseconds());
+    NoteTickSpike(name, ns, MemoryChecksOnThisThread() - checks);
+}
+
+TickStepTimer::~TickStepTimer() {
+    NoteTickSpike(name, NanosecondsSince(started), MemoryChecksOnThisThread() - checks);
 }
 
 void ReportCoopTime(s64 now_ms) {
@@ -1124,7 +1175,7 @@ void TickPartyController() {
     TimeTickPart("ObserveLocalAliveState", ObserveLocalAliveState);
     {
         const auto started = std::chrono::steady_clock::now();
-        TickPartyDeath();
+        TimeTickPart("TickPartyDeath", TickPartyDeath);
         coop_time.Add("party death",
                       std::chrono::duration_cast<std::chrono::nanoseconds>(
                           std::chrono::steady_clock::now() - started)
