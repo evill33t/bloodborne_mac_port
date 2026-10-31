@@ -3,6 +3,7 @@
   <ItemGroup>
     <Compile Include="MapEnemySpawnsTests.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/MapCharacterAnimations.cs" Link="MapCharacterAnimations.cs"/>
     <Compile Include="../../editor/souls_import/NpcFace.cs" Link="NpcFace.cs"/>
     <Compile Include="../../editor/souls_import/NpcFaceMaterial.cs" Link="NpcFaceMaterial.cs"/>
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>

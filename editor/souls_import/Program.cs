@@ -46,6 +46,7 @@ internal static partial class Program {
             if(args[0]=="bake-skin")return BakeSkin(values,profile,root);
             if(args[0]=="plan-map")return PlanMap(values,profile,root);
             if(args[0]=="bake-map")return BakeMap(values,profile,root);
+            if(args[0]=="finalize-destination")return FinalizeDestination(values,profile,root);
             if(args[0]!="import")throw new ArgumentException("Expected profiles, self-test, maps or import");
             var map=Get("--map");
             if(!Regex.IsMatch(map,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid map identifier");
@@ -89,7 +90,7 @@ internal static partial class Program {
             Console.WriteLine($"IMPORTED {profile.Id} {map}: {placements.Count} placements, {models.Count} models, {indices/3} model triangles -> {output}");
             foreach(var n in Notices)Console.WriteLine(n);
             return 0;
-        } catch(Exception e) {Console.Error.WriteLine("Souls import: "+e.GetBaseException().Message);return 1;}
+        } catch(Exception e) {Console.Error.WriteLine("Souls import: "+(Environment.GetEnvironmentVariable("BBMAP_TRACE")=="1"?e.ToString():e.GetBaseException().Message));return 1;}
     }
     static int ListMaps(Profile profile,string root,string smithbox) {
         var type=Reader(profile)??throw new NotSupportedException("Update Smithbox: installed SoulsFormats has no reader for "+profile.Name);

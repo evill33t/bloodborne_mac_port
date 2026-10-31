@@ -128,7 +128,7 @@ internal static class MapTalk {
             talk.Files.Add(new BinderFile(donor.Flags,nextFile++,prefix+$"t{nextTalk}.esd",encoded));
             actor.TalkID=nextTalk;actors.Add(new Actor(plan.Name,plan.Entity,entity,plan.Talk,nextTalk,branches));++nextTalk;
         }
-        if(area!=24)throw new NotSupportedException("Imported Firelink voice registration currently targets native area24");
+        if(area is not(24 or 40))throw new NotSupportedException("Imported Firelink dialogue targets the verified replacement or additional-area allocation");
         var voiceOwners=actors.Select(a=>map.Parts.Enemies.Single(p=>p.EntityID==a.NativeEntity).ModelName)
             .Select(model=>new MapTalkVoices.Owner(model,voiceRows.Where(r=>r.Model==model).Select(r=>r.SourceVoice).ToArray())).ToArray();
         var voices=MapTalkVoices.Export(voiceOwners,readSource,NativeOptional,write);

@@ -30,6 +30,17 @@ static class MapEnemySpawnsTests {
         }
         static bool SameEvent(TAE.Event a,TAE.Event b)=>a.Type==b.Type&&a.StartTime==b.StartTime&&a.EndTime==b.EndTime&&a.Unk04==b.Unk04&&a.Group?.GroupType==b.Group?.GroupType&&SamePayload(a.GetParameterBytes(false),b.GetParameterBytes(false));
         int torchActors=0,nonTorchActors=0;
+        // Additional maps can choose a free entity range without changing any
+        // native behavior/skin/parameter files or the default replacement IDs.
+        var identitySource=MSB1.Read(Read("map/MapStudio/m10_01_00_00.msb")!);
+        var identityActor=identitySource.Parts.Enemies.First(p=>p.ModelName=="c2500"&&p.NPCParamID==250000&&p.InitAnimID==-1&&p.TalkID<=0&&p.CharaInitID<0);
+        identitySource.Parts.Enemies.RemoveAll(p=>p.Name!=identityActor.Name);
+        var identityDonor=MSBB.Read(File.ReadAllBytes(Path.Combine(native,"map/MapStudio/m24_01_00_01.msb.dcx")));
+        var identitySlots=new[]{identityDonor.Parts.Collisions.First()};var identityChunks=new[]{new MapCollisionBindings.Chunk(identityActor.CollisionName,[],[])};
+        var defaultIdentity=MapEnemySpawns.Bake(Read,identitySource,"m10_01_00_00",defs,native,new MSBB(),Vector3.Zero,identityChunks,identitySlots,baseline);
+        var ownedIdentity=MapEnemySpawns.Bake(Read,identitySource,"m10_01_00_00",defs,native,new MSBB(),Vector3.Zero,identityChunks,identitySlots,baseline,ordinaryFirstEntity:4039000);
+        Check(defaultIdentity.Spawns.Single().EntityID==2409000&&ownedIdentity.Spawns.Single().EntityID==4039000,"Optional ordinary entity range changed the replacement default or was ignored");
+        Check(defaultIdentity.Files.Count==ownedIdentity.Files.Count&&defaultIdentity.Files.All(f=>ownedIdentity.Files.TryGetValue(f.Key,out var b)&&f.Value.AsSpan().SequenceEqual(b)),"Ordinary entity remapping changed native asset/parameter bytes");
         foreach(var id in new[]{"m10_02_00_00","m10_01_00_00"}) {
             var source=MSB1.Read(Read("map/MapStudio/"+id+".msb")!);
             var map=MSBB.Read(File.ReadAllBytes(Path.Combine(native,"map/MapStudio/m24_01_00_01.msb.dcx")));MapReplacement.ParkActors(map);

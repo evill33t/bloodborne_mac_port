@@ -25,8 +25,12 @@ class ImportJobs(unittest.TestCase):
 from pathlib import Path
 command=sys.argv[1];args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 if command=='plan-map': print(json.dumps({'sourceMapSha256':'fixture'}))
+elif command=='finalize-destination':
+    out=Path(args['--output'])
+    if (Path(args['--root'])/'fail-travel').exists():sys.exit(11)
+    (out/'destination-travel.json').write_text(json.dumps({'composed':(out/'dvdroot_ps4/shared').read_text()}))
 else:
-    out=Path(args['--output']);out.mkdir();(out/'conversion.json').write_text(json.dumps({'spawnOffset':args.get('--spawn-offset'),'itemPolicy':args.get('--item-policy')}))
+    out=Path(args['--output']);out.mkdir();(out/'conversion.json').write_text(json.dumps({'spawnOffset':args.get('--spawn-offset'),'itemPolicy':args.get('--item-policy'),'destination':args.get('--destination'),'target':args['--target-map']}))
     (out/'artifact').write_text('complete')
     data=out/'dvdroot_ps4';data.mkdir()
     previous=Path(args['--native-overlay'])/'dvdroot_ps4/shared' if '--native-overlay' in args else None
@@ -123,6 +127,58 @@ else:
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.output.exists())
         self.assertEqual(list(self.output.parent.iterdir()), [])
+
+    def test_additional_destination_finalizes_both_composed_maps(self):
+        result = self.run_job("--destination", "additional", "--attach-undead-burg", "--import-items")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        job = json.loads((self.output / "import-job.json").read_text())
+        self.assertEqual(job["destination"], "additional")
+        self.assertEqual(job["target_map"], "m40_02_00_00")
+        self.assertEqual(job["connected_maps"], [{"source_map": "m10_01_00_00", "target_map": "m40_03_00_00"}])
+        for path, target in (("conversion.json", "m40_02_00_00"),
+                             ("maps/m10_01_00_00/conversion.json", "m40_03_00_00")):
+            report = json.loads((self.output / path).read_text())
+            self.assertEqual(report["destination"], "additional")
+            self.assertEqual(report["target"], target)
+        self.assertEqual(json.loads((self.output / "destination-travel.json").read_text())["composed"],
+                         "m10_02_00_00;m10_01_00_00;")
+        self.assertEqual(json.loads((self.output / "import-manifest.json").read_text())["destination"], "additional")
+
+    def test_switching_saved_replacement_job_migrates_fixed_allocation(self):
+        self.assertEqual(self.run_job("--attach-undead-burg").returncode, 0)
+        config = self.output / "import-job.json"
+        migrated = self.base / "Mods" / "Additional"
+        result = self.run_job("--config", config, "--destination", "additional", "--output", migrated)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        job = json.loads((migrated / "import-job.json").read_text())
+        self.assertEqual(job["target_map"], "m40_02_00_00")
+        self.assertEqual(job["connected_maps"][0]["target_map"], "m40_03_00_00")
+        rerun = self.base / "Mods" / "Rerun"
+        result = self.run_job("--config", migrated / "import-job.json", "--output", rerun)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((rerun / "destination-travel.json").is_file())
+
+    def test_travel_failure_never_publishes_a_partial_destination(self):
+        (self.source / "fail-travel").touch()
+        result = self.run_job("--destination", "additional", "--attach-undead-burg")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(list(self.output.parent.iterdir()), [])
+
+    def test_additional_destination_rejects_arbitrary_map_and_profile(self):
+        for extra in (("--target-map", "m21_00_00_00"), ("--profile", "DS2S"),
+                      ("--map", "m10_01_00_00")):
+            with self.subTest(extra=extra):
+                result = self.run_job("--destination", "additional", *extra)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.output.exists())
+
+    def test_additional_plan_avoids_assets_and_travel_finalizer(self):
+        (self.source / "fail-travel").touch()
+        result = self.run_job("--destination", "additional", "--attach-undead-burg", "--plan-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.output / "destination-travel.json").exists())
+        self.assertFalse((self.output / "dvdroot_ps4").exists())
 
     def test_plan_only_avoids_conversion(self):
         (self.source / "fail").touch()

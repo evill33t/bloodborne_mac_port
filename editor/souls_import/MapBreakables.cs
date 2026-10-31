@@ -41,7 +41,7 @@ internal static class MapBreakables {
 
     internal static Export BakeFirelink(string sourceRoot,string profile,string nativeDvdRoot,MSBB destination,
         IEnumerable<Placement> placements,Vector3 offset,FLVER2 surface,
-        Func<IFlverMaterial,FLVER2.Material> materialFactory,byte[]? gameParamOverride=null) {
+        Func<IFlverMaterial,FLVER2.Material> materialFactory,byte[]? gameParamOverride=null,MSBB.Part.GparamConfigStruct? defaultLightingGparam=null) {
         if(profile is not("DS1" or "DS1R"))throw new NotSupportedException("Destructible visual import currently supports DS1 Firelink urns");
         var selected=placements.Where(p=>Urns.Contains(p.Model)).ToArray();
         var files=new Dictionary<string,byte[]>();var names=new HashSet<string>(StringComparer.Ordinal);
@@ -113,7 +113,7 @@ internal static class MapBreakables {
                 actor.Position=sourcePart.Position+offset;actor.Rotation=sourcePart.Rotation;actor.Scale=sourcePart.Scale/fit;
                 actor.EntityID=-1;actor.InstanceID=instance-1;actor.CollisionName=null;
                 Array.Fill(actor.AnimIDs,(short)-1);Array.Fill(actor.DrawGroups,uint.MaxValue);Array.Fill(actor.BackreadGroups,uint.MaxValue);
-                actor.GparamConfigStruct=destination.Parts.MapPieces.First(p=>p.GparamConfig.LightSetID==0).GparamConfig.DeepCopy();
+                actor.GparamConfigStruct=(defaultLightingGparam??destination.Parts.MapPieces.First(p=>p.GparamConfig.LightSetID==0).GparamConfig).DeepCopy();
                 objects.Add(actor);names.Add(sourcePart.Name);sourceActors.Add(sourcePart.Name,actor.Name);
             }
             reports.Add(new(group.Key,target,sourceGroups.Count,targetGroups.Count,Vector3.One/fit,fragments));

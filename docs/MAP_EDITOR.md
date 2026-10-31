@@ -1028,14 +1028,57 @@ one. That run used the earlier collection-flag implementation. Persistence with 
 retail flags and pickup visual alignment remain unverified, so the item stage is opt-in.
 It is not enabled by existing import-job files unless `import_items` is set to `true`.
 
-A separate ignored prototype loads Firelink as `m40_02_00_00` through a native event warp
-and lands on imported collision with unchanged HP, while retaining the original Bloodborne
-maps. New-map pickup interaction, the additional Dream headstone menu, lamps and a return
-route remain unresolved. This prototype is not an importer output mode or the published
-playable demo; it does not establish a complete additional campaign.
+### Additional Firelink destination
 
-Current runtime conversion supports Firelink/Majula into `m24_01_00_01`, plus the
-explicit connected DS1R Burg allocation above.
+Use `--destination additional` to export Firelink alongside Bloodborne's original
+areas. Existing jobs retain their replacement allocation unless this option is
+explicitly selected. An old Firelink/Burg job can be migrated into a new output:
+
+```sh
+python3 scripts/import_souls_map.py \
+  --config /path/to/FirelinkShrine/import-job.json \
+  --destination additional --attach-undead-burg --import-items \
+  --output /path/to/private-test-data/Mods/Lordran
+```
+
+The fixed allocation is `m40_02_00_00` for Firelink and `m40_03_00_00` for Burg.
+Both maps keep the same source coordinate frame. New scenes contain imported
+records and their own event roots, collision archives, environment and texture
+resources. Original map MSBs, collision, environment and local event scripts stay
+in place. Shared parameters, materials and localized text are composed as before;
+the Dream receives an additional headstone with a menu for the imported lamps.
+
+Native lamp controllers, objects and common events provide activation and return
+travel. The Firelink entry is available initially; Burg appears after its lamp is
+activated. ReturnPoint rows use separate chair slots and retain native death
+checkpoint registration. Quest and item flag identities stay unchanged between
+replacement and additional exports; lamp state has a separate reservation.
+`destination-travel.json` records the versioned lamp/return-point/flag allocation
+and native dependency hashes. An occupied entity, flag, chair or text reservation
+fails the export before publication.
+
+The additional headstone faces the Dream's path. Its rotation preserves the
+model's visible center and base height; the messenger keeps its interaction
+position. Per-map load lists declare both connected scenes, and their dialogue
+is composed into the native loader's shared area talk bank.
+
+Copied-save gameplay checks cover the headstone menus, travel to each imported
+lamp, Burg lamp activation, native return to the Dream, Firelink death respawn,
+and normal save/quit followed by a fresh process. Burg's new unlock and the
+three Madman's Knowledge collected from Firelink's Humanity pickup persisted.
+The game files and original saves were unchanged.
+
+Walking between the maps remains incomplete: the neighbouring map's files load,
+but its floor was inactive at the aqueduct boundary in the tested build. Some
+source stair approaches also catch the player. These checks do not establish a
+complete Firelink-to-Burg walk. The collision encoder now bounds the actual
+quantized vertices, fixing BVH under-enclosure without changing the encoded
+geometry; the observed stair catch has not been attributed to that defect.
+This mode does not implement additional source doors, lifts, NPC quests, enemy
+movesets or navigation.
+
+Current runtime conversion supports Firelink/Majula into `m24_01_00_01`, the
+connected DS1R Burg replacement, and the additional Firelink/Burg allocation above.
 Supported preview/reader profiles do not imply full map conversion for every game. Source
 music/ambience, items, navigation, quests and complete NPC/enemy behavior remain work in
 progress; the manifest records missing stages. Test against copied saves and enable only

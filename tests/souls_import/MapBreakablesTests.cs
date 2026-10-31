@@ -45,6 +45,12 @@ internal static class MapBreakablesTests {
         var hashes=sourcePaths.ToDictionary(p=>p,p=>SHA256.HashData(File.ReadAllBytes(p)));
         var beforeMap=destination.Write();var beforeSurface=surface.Write();var offset=new Vector3(-143.8f,20.07f,164.63f);
         var export=MapBreakables.BakeFirelink(source,"DS1R",native,destination,placements,offset,surface,m=>Material(surface,m));
+        var lighting=destination.Parts.MapPieces.First(p=>p.GparamConfig.LightSetID==0).GparamConfig.DeepCopy();
+        var fresh=new MSBB();fresh.Parts.Objects.Add((MSBB.Part.Object)destination.Parts.Objects.First(p=>p.ModelName is "o240028" or "o240035").DeepCopy());
+        var additional=MapBreakables.BakeFirelink(source,"DS1R",native,fresh,placements,offset,surface,m=>Material(surface,m),defaultLightingGparam:lighting);
+        Check(fresh.Parts.MapPieces.Count==0&&additional.Objects.Count==export.Objects.Count,"Additional urns require native scenery in the destination");
+        Check(export.Files.Count==additional.Files.Count&&export.Files.All(f=>additional.Files.TryGetValue(f.Key,out var b)&&f.Value.AsSpan().SequenceEqual(b)),"Explicit fresh-scene lighting changed urn asset/parameter bytes");
+        Check(additional.Objects.All(p=>p.GparamConfigStruct.LightSetID==lighting.LightSetID&&!ReferenceEquals(p.GparamConfigStruct,lighting)),"Fresh-scene urn lighting was not independently copied");
         Check(export.Models.Count==3&&export.Objects.Count==25&&export.ConsumedNames.Count==25&&export.Files.Count==4,"Wrong Firelink urn export coverage");
         Check(destination.Write().SequenceEqual(beforeMap)&&surface.Write().SequenceEqual(beforeSurface),"Exporter mutated its caller inputs");
         foreach(var report in export.Reports) {

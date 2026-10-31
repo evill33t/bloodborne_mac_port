@@ -37,7 +37,8 @@ internal static class MapEnemySpawns {
     }
     internal static Result Bake(Func<string,byte[]?> sourceRead,MSB1 source,string sourceMap,string definitions,string nativeRoot,
         MSBB destination,Vector3 offset,IReadOnlyList<MapCollisionBindings.Chunk> chunks,IReadOnlyList<MSBB.Part.Collision> slots,
-        byte[] gameParamBytes,string? nativeMap=null,Func<string,byte[]?>? readNative=null) {
+        byte[] gameParamBytes,string? nativeMap=null,Func<string,byte[]?>? readNative=null,int? ordinaryFirstEntity=null) {
+        if(ordinaryFirstEntity is <10000 or >int.MaxValue-1000)throw new ArgumentOutOfRangeException(nameof(ordinaryFirstEntity));
         var selected=source.Parts.Enemies.Where(p=>p.TalkID<=0&&p.CharaInitID<0&&
             (SupportedParams.Contains(p.NPCParamID)&&p.ModelName=="c"+(p.NPCParamID/100)&&p.InitAnimID==-1||CemeterySkeleton(p,sourceMap))).ToArray();
         var names=selected.Select(p=>p.Name).ToHashSet(StringComparer.Ordinal);
@@ -60,7 +61,7 @@ internal static class MapEnemySpawns {
         var noTorchAnimation=WithoutDonorTorch(nativeAnimation);
         var game=BND4.Read(gameParamBytes);var npcFile=game.Files.Single(f=>Leaf(f.Name)=="NpcParam.param");var npcs=MapCharacters.NativeRows(npcFile.Bytes,false);
         var paramDonor=npcs.Rows.Single(r=>r.ID==templateParam);var used=npcs.Rows.Select(r=>r.ID).ToHashSet();
-        int nextModel=9600,nextSkeletonModel=9700,nextEntity=sourceMap=="m10_02_00_00"?2419800:2409000,nextSkeletonEntity=2419900;
+        int nextModel=9600,nextSkeletonModel=9700,nextEntity=ordinaryFirstEntity??(sourceMap=="m10_02_00_00"?2419800:2409000),nextSkeletonEntity=2419900;
         var entities=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).ToHashSet();
         foreach(var group in selected.GroupBy(p=>(p.ModelName,p.NPCParamID))) {
             bool skeleton=CemeterySkeleton(group.First(),sourceMap);
@@ -82,6 +83,7 @@ internal static class MapEnemySpawns {
             var model=(MSBB.Model.Enemy)donorMap.Models.Enemies.Single(m=>m.Name==template).DeepCopy();model.Name=target;model.SibPath=model.SibPath.Replace(template,target,StringComparison.OrdinalIgnoreCase);destination.Models.Enemies.Add(model);
             foreach(var sourceActor in group) {
                 int entity=skeleton?nextSkeletonEntity:nextEntity;while(entities.Contains(entity))entity++;
+                if(!skeleton&&ordinaryFirstEntity is {} first&&entity>=first+1000)throw new InvalidDataException("Imported ordinary enemy entity namespace exhausted");
                 if(skeleton){if(entity>=2420000)throw new InvalidDataException("Imported skeleton entity namespace exhausted");nextSkeletonEntity=entity+1;}else nextEntity=entity+1;
                 entities.Add(entity);
                 int collision=Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);

@@ -21,6 +21,10 @@ PRESETS = {
     ("DS2", "m10_04_00_00"): "9,6,-16",
     ("DS2S", "m10_04_00_00"): "9,6,-16",
 }
+DESTINATIONS = {
+    "replacement": ("m24_01_00_01", "m24_00_00_00"),
+    "additional": ("m40_02_00_00", "m40_03_00_00"),
+}
 
 
 def outside(path, roots):
@@ -47,6 +51,8 @@ def main(argv=None):
     parser.add_argument("--native-root", type=Path, help="Read-only Bloodborne game root")
     parser.add_argument("--map", dest="source_map")
     parser.add_argument("--target-map")
+    parser.add_argument("--destination", choices=tuple(DESTINATIONS),
+                        help="Replace the test area, or add Firelink alongside the original Bloodborne maps")
     parser.add_argument("--attach-undead-burg", action="store_true", help="Compose Firelink and Undead Burg with native collision-triggered loading")
     parser.add_argument("--import-items", action="store_true", help="Experimental DS1R consumable/key pickups and hollow loot conversion; copied test saves only")
     parser.add_argument("--source-anchor")
@@ -85,7 +91,22 @@ def main(argv=None):
     outside(output, (root, native))
     if output.exists() or output.is_symlink():
         raise FileExistsError("Choose a new output folder: " + str(output))
-    target = job.setdefault("target_map", "m24_01_00_01")
+    destination = job.setdefault("destination", "replacement")
+    if destination not in DESTINATIONS:
+        raise ValueError("Unknown destination mode: " + str(destination))
+    primary_target, secondary_target = DESTINATIONS[destination]
+    # Explicitly switching an old replacement job migrates its fixed allocation;
+    # arbitrary target IDs are never inferred or silently accepted.
+    migrating = (args.destination == "additional" and args.target_map is None and
+                 job.get("target_map") == DESTINATIONS["replacement"][0])
+    if migrating:
+        job["target_map"] = primary_target
+        if job.get("connected_maps") == [{"source_map": "m10_01_00_00", "target_map": DESTINATIONS["replacement"][1]}]:
+            job["connected_maps"] = [{"source_map": "m10_01_00_00", "target_map": secondary_target}]
+    target = job.setdefault("target_map", primary_target)
+    if destination == "additional" and (job["profile"] != "DS1R" or
+            job["source_map"] != "m10_02_00_00" or target != primary_target):
+        raise ValueError("The additional destination currently requires DS1R Firelink into " + primary_target)
     if args.import_items:
         job["import_items"] = True
     if "import_items" in job and not isinstance(job["import_items"], bool):
@@ -93,13 +114,13 @@ def main(argv=None):
     if job.get("import_items") and job["profile"] != "DS1R":
         raise ValueError("--import-items currently supports DS1R only")
     if args.attach_undead_burg:
-        if job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or target != "m24_01_00_01":
-            raise ValueError("--attach-undead-burg requires DS1R Firelink into m24_01_00_01")
-        job["connected_maps"] = [{"source_map": "m10_01_00_00", "target_map": "m24_00_00_00"}]
+        if job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or target != primary_target:
+            raise ValueError("--attach-undead-burg requires DS1R Firelink into " + primary_target)
+        job["connected_maps"] = [{"source_map": "m10_01_00_00", "target_map": secondary_target}]
     connected = job.get("connected_maps", [])
     if connected and (job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or
-                      connected != [{"source_map": "m10_01_00_00", "target_map": "m24_00_00_00"}]):
-        raise ValueError("Only the verified Firelink/Undead Burg connected-world allocation is supported")
+                      connected != [{"source_map": "m10_01_00_00", "target_map": secondary_target}]):
+        raise ValueError("Unsupported Firelink/Undead Burg allocation for " + destination)
     dotnet = job.get("dotnet") or shutil.which("dotnet") or "/usr/local/share/dotnet/dotnet"
     helper = Path(job.get("helper", str(REPO / "out/map-editor/souls-import/SoulsImport.dll"))).expanduser().resolve()
     env = dict(os.environ, DOTNET_CLI_HOME=str(REPO / "out/map-editor/dotnet-home"))
@@ -134,6 +155,8 @@ def main(argv=None):
             job.setdefault("target_anchor", "-195.6,-40.53,220.33")
             command = common + ["bake-map"] + source + ["--target-map", target, "--source-anchor", anchor,
                        "--target-anchor", job["target_anchor"], "--output", str(staging)]
+            if destination == "additional":
+                command += ["--destination", "additional"]
             if job["profile"] in ("DS1", "DS1R"):
                 for key, default in (("exposure_ev", -0.4), ("fog_mode", "calibrated"), ("fog_strength", 0.30),
                                      ("fog_distance", 80), ("fog_start", 25), ("fog_color_scale", 0.35)):
@@ -177,6 +200,12 @@ def main(argv=None):
                 conversion["connectedMaps"] = connected_reports
                 conversion["connectedLoadingValidation"] = "Native links exported; consult gameplay evidence for validation."
                 conversion_path.write_text(json.dumps(conversion, indent=2) + "\n")
+            if destination == "additional":
+                finalize = common + ["finalize-destination", "--profile", job["profile"],
+                    "--root", str(root), "--native-root", str(native), "--output", str(staging)]
+                if job.get("smithbox"):
+                    finalize += ["--smithbox", job["smithbox"]]
+                run(finalize, env)
         job.update(schema="bbmap-import-job-1", root=str(root), native_root=str(native), output=str(output), helper=str(helper))
         (staging / "import-job.json").write_text(json.dumps(job, indent=2) + "\n")
         (staging / "source-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
@@ -189,7 +218,8 @@ def main(argv=None):
             pending.append("additional area connections beyond Firelink/Undead Burg")
         pending.append("exact source fog/tonemap/cubemaps" if conversion.get("environmentRows") else "source sky/lighting")
         manifest = {"schema": "bbmap-import-manifest-1", "source": job["profile"], "map": job["source_map"],
-                    "target": target, "plan_only": args.plan_only,
+                    "target": target, "destination": destination, "plan_only": args.plan_only,
+                    "travel_report": "destination-travel.json" if destination == "additional" and not args.plan_only else None,
                     "source_map_sha256": plan["sourceMapSha256"],
                     "coverage": "Read conversion.json for implemented stages; source-plan.json inventories dependencies.",
                     "unconverted_runtime_systems": pending}
