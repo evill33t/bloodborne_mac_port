@@ -74,6 +74,12 @@ internal static class MapDestination {
     }
     internal static void Finish(MSBB map,Selection selection,Func<string,byte[]?> read,Action<string,byte[]> write) {
         if(!selection.Additional)return;
+        // A connected block can otherwise be resident with only one physical
+        // layer, leaving its walkable floor absent. Broaden collision residency
+        // while its block is loaded. Keep authored Display groups: maximizing
+        // those also exposes distant-view geometry over the detailed map.
+        // Events, enable flags, geometry and all other group arrays stay intact.
+        foreach(var collision in map.Parts.Collisions)Array.Fill(collision.DrawGroups,uint.MaxValue);
         map.Parts.Objects.RemoveAll(p=>p.Name==UrnSeed);
         var used=map.Parts.GetEntries().Select(p=>p.ModelName).ToHashSet(StringComparer.Ordinal);
         map.Models.MapPieces.RemoveAll(m=>!used.Contains(m.Name));map.Models.Objects.RemoveAll(m=>!used.Contains(m.Name));map.Models.Enemies.RemoveAll(m=>!used.Contains(m.Name));map.Models.Collisions.RemoveAll(m=>!used.Contains(m.Name));

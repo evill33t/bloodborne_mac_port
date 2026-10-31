@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 using SoulsFormats;
+using System.Numerics;
 
 internal static class MapMaterial {
+    // DS1 packed UVs use 1024 units per tile; BB uses 2048. Store half-sized
+    // coordinates so the original signed-short words fit, compensating in the
+    // material's per-texture scale to retain the effective sampling coordinates.
+    internal static float UVScale(string profile)=>profile is "DS1" or "DS1R"?.5f:1f;
+    internal static Vector2 NativeTilingScale(Vector2 source,string profile)=>source/UVScale(profile);
+
     internal static bool Cutout(string mtd,string profile)=>profile is "DS1" or "DS1R" &&
         (mtd.Contains("_Edge",StringComparison.OrdinalIgnoreCase)||mtd.Contains("Foliage",StringComparison.OrdinalIgnoreCase)||mtd.Contains("Ivy",StringComparison.OrdinalIgnoreCase));
 

@@ -211,7 +211,7 @@ def main(argv=None):
         (staging / "source-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
         conversion = json.loads((staging / "conversion.json").read_text()) if (staging / "conversion.json").is_file() else {}
         pending = ["source AI/quests/dialogue", "unsupported items/chests/conditional treasures" if conversion.get("items") else "source items", "source music/ambience", "source water rendering/physics",
-                   "source navigation"]
+                   "cross-mesh/cross-map navigation and stateful gates" if conversion.get("navigation") else "source navigation"]
         if not connected:
             pending.append("connected-map loading")
         else:

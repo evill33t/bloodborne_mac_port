@@ -110,23 +110,32 @@ internal static class MapCharacters {
     }
 
     internal static SkinBake Package(byte[] sourceModel,List<TPF.Texture> textures,string profile,string template,string target,
-        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false) {
+        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveEnemyProportions=false) {
         int id=int.Parse(target[1..]);
         var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
-        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610",allowLargeHumanoid:allowLargeHumanoid,preserveSourceDimensions:preserveSourceDimensions);visual.Bytes=bake.Model.Write();
+        var animation=BND4.Read(nativeAnimation);EnemyProportions.Plan? proportions=null;
+        if(preserveEnemyProportions) {
+            if(profile!="DS1R"||template!="c2610"||allowLargeHumanoid||preserveSourceDimensions)throw new InvalidDataException("Unsupported length-preserving enemy adapter");
+            var skeleton=animation.Files.Single(f=>f.ID==1000000);
+            proportions=EnemyProportions.Create(sourceModel,visual.Bytes.ToArray(),skeleton.Bytes.ToArray());
+            visual.Bytes=proportions.Model;skeleton.Bytes=proportions.Skeleton;
+            var clips=animation.Files.Where(f=>f.ID>=1000000000).ToArray();
+            if(clips.Length!=328)throw new InvalidDataException("Native hollow animation population changed");
+            foreach(var clip in clips)clip.Bytes=EnemyProportions.Clip(clip.Bytes.ToArray(),proportions);
+        }
+        var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610",allowLargeHumanoid:allowLargeHumanoid,preserveSourceDimensions:preserveSourceDimensions,preserveBoneLengths:proportions!=null);visual.Bytes=bake.Model.Write();
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
         if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native actor template reserves texture binder ID 100");
         character.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,100,@"N:\SPRJ\data\INTERROOT_ps4\chr\"+target+@"\"+target+".tpf",bake.Textures.Write(DCX.Type.None)));
         foreach(var file in character.Files)file.Name=file.Name.Replace(template,target,StringComparison.OrdinalIgnoreCase);
         character.Files.Sort((a,b)=>a.ID.CompareTo(b.ID));files.Add("chr/"+target+".chrbnd.dcx",character.Write(DCX.Type.DCX_DFLT_10000_44_9));
-        var animation=BND4.Read(nativeAnimation);
         foreach(var file in animation.Files) {
             file.Name=file.Name.Replace(template,target,StringComparison.OrdinalIgnoreCase);
             if(TAE.Is(file.Bytes.ToArray())){var tae=TAE.Read(file.Bytes);tae.ID=200000+id;file.Bytes=tae.Write();}
             else if(file.ID>=7000000&&file.ID<8000000)file.Bytes=SkinRetarget.RenameBehavior(file.Bytes,template,target);
         }
         files.Add("chr/"+target+".anibnd.dcx",animation.Write(DCX.Type.DCX_DFLT_10000_44_9));files.Add("action/script/"+target+".hks",nativeScript.ToArray());
-        return bake with {ProportionScale=SkinRetarget.HumanoidScale(FLVER2.Read(sourceModel).Nodes,bake.Model.Nodes,allowLargeHumanoid)};
+        return bake with {ProportionScale=proportions!=null?1:SkinRetarget.HumanoidScale(FLVER2.Read(sourceModel).Nodes,bake.Model.Nodes,allowLargeHumanoid)};
     }
 
     // Pure in-memory staging: callers compose the returned map entries and files

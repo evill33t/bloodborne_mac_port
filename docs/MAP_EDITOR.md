@@ -815,9 +815,13 @@ the original DS1 speech waveform; subtitle display alone was not used as audio p
 The ordinary-hollow adapter instantiates six Firelink enemies with source meshes,
 textures, equipment display masks and placements on independent native Hemwick humanoid
 rigs (`c2610`, native parameter/AI donor `261010`). The previous `c2630` donor has asymmetric
-reference arm lengths. Segment fitting now aligns both ends of a limb, compensates skin
-thickness for the actor's height scale, and binds source weapons/shields to the native
-hand attachments. The resulting animation and body proportions remain approximations.
+reference arm lengths. Ordinary hollows now retain source segment lengths in both the
+FLVER bind skeleton and Havok reference pose. Every native animation's positional
+channels receive the corresponding per-bone adjustment, including additive and
+multi-block clips. This corrects the long necks and arms without relying on enemy MSB
+scale. Segment fitting preserves joint continuity and binds source weapons/shields to
+the native hand attachments. Native rotations, timing, events and extracted locomotion
+remain unchanged; combat reach and physics remain approximations.
 The adapter also composes the six native rig AI scripts and their goal/global-name
 registries into each destination map's Lua binder. Existing destination scripts remain
 unchanged. Copying the character and animation binders alone left this donor standing
@@ -883,10 +887,11 @@ Burg accounts for all 670 source scenery placements: 640 static placements, 29 r
 with no render geometry and one filtered placement. It adds 116 paired player-solid H/L collision placements
 and 86 supported ordinary hollows. Nine hanging/special-pose hollows are deliberately
 skipped until their pose and activation behavior can be converted. Every omitted actor
-has a reason in `enemySpawns.Skipped`. Source bosses, quest NPCs, patrols, navigation,
+has a reason in `enemySpawns.Skipped`. Source bosses, quest NPCs, patrols,
 gates/lifts and event conditions are not ported. The source map includes the Parish, but
 its separate sub-area banner is not yet assigned. Imported hollow pursuit across source
-navigation and complete route traversal still require validation.
+navigation and complete route traversal still require validation. Additional DS1R
+destinations also convert static source NVM geometry as described below.
 Firelink also instantiates eleven ordinary cemetery skeletons (`c2900`, sword/shield
 and greatsword loadouts) and two giant skeletons (`c2910`). The adapter accepts only
 the three identified cemetery NPC/Think combinations and their source initial pose
@@ -1068,14 +1073,42 @@ and normal save/quit followed by a fresh process. Burg's new unlock and the
 three Madman's Knowledge collected from Firelink's Humanity pickup persisted.
 The game files and original saves were unchanged.
 
-Walking between the maps remains incomplete: the neighbouring map's files load,
-but its floor was inactive at the aqueduct boundary in the tested build; loading
-both additional scenes also crashed in subsequent manual tests. The stair test
-profile uses a self-only load list for each destination to isolate that issue.
-Both destinations remain accessible through the Dream headstone. These checks
-do not establish a complete Firelink-to-Burg walk. The collision encoder bounds
-the actual quantized vertices, fixing BVH under-enclosure without changing the
-encoded geometry.
+The connected additional maps now include real source navigation. DS1R NVM placements
+are baked into native Havok navigation meshes, trees and directed graphs, with matching
+NVA records. Firelink contributes 1,982 faces and Burg 7,026. Missing navigation caused
+the native adjacent-map unload path to index an empty mesh array. Native Bloodborne's
+tree-storage pointer also differs from the external DS3 serializer despite matching
+class signatures; emitted fixups use the retail Bloodborne offset and tests check the
+raw layout independently of deserializer readback.
+
+Navigation preserves reciprocal adjacency within each source mesh. Degenerate faces
+are omitted; gates, doors, ladders, event-controlled/disabled faces and mismatched
+portals are conservatively disconnected or blocked. Source MCG/MCP cross-mesh and
+cross-map links, dynamic obstacles and gate state machines remain unconverted. This
+does not establish source enemy pursuit across the whole map.
+
+Additional scenes broaden collision Draw groups so that both physical layers remain
+available at the aqueduct seam. Display groups, Backread groups, actor/scenery groups,
+geometry, lighting and scripted enable state are retained. Maximizing collision Display
+groups also exposed distant-view geometry over Burg's detailed buildings; the final
+policy preserves those authored groups. Both connected scenes can remain resident, so
+memory/backread behavior is still a bounded two-map approximation.
+
+The collision encoder bounds the actual quantized vertices, fixing BVH under-enclosure
+without changing encoded geometry. Copied-save gameplay checks with the corrected
+navigation and collision groups walk through the previously missing aqueduct floor and
+up the Burg stairs, then return through the corridor in the opposite direction.
+Setup warps/placements are separate from the subsequent ordinary analog traversal.
+The same Burg viewpoint no longer shows the overlapping distant
+wall panels. This covers the tested corridor and stairs, not every Firelink/Burg route.
+
+The corridor and exterior aqueduct texture streaks were a separate packed-UV overflow:
+DS1 uses 1,024 units per tile, while Bloodborne uses 2,048, halving the representable
+range. Only overflowing DS1/DS1R static meshes using the supported opaque/cutout native
+map materials store half-sized coordinates and double their texture tiling together.
+Meshes already in range, characters, sky and other profiles retain their existing
+paths. Raw serialized-word tests and native corridor views cover the repair; source
+geometry, vertex colors and triangle/LOD data are preserved.
 
 DS1R collision conversion now carries the source `100..199` stair material family
 through partitioning and native shape-key sorting. Bloodborne's separate
@@ -1095,11 +1128,12 @@ decoded vertices, triangle ordering and body transforms were identical in all
 four Firelink/Burg H/L archives (289,009 triangles). Regression fixtures check
 mixed material assignment after sorting, nested native data and fixups, unchanged
 geometry, and isolation from unrelated source material families. Source/native
-assets and seed saves remained hash-identical. Navigation and enemy size remain
-separate validation work.
+assets and seed saves remained hash-identical. The ordinary-hollow proportion adapter
+above also corrects the long native neck/arm segments; native combat reach remains an
+approximation.
 
-This mode does not implement additional source doors, lifts, NPC quests, enemy
-movesets or navigation.
+This mode does not implement additional source doors, lifts, full NPC quests, enemy
+movesets or cross-mesh/cross-map navigation.
 
 Current runtime conversion supports Firelink/Majula into `m24_01_00_01`, the
 connected DS1R Burg replacement, and the additional Firelink/Burg allocation above.
@@ -1112,8 +1146,12 @@ one replacement for this native area.
 read-only source guards and backend failure cleanup using an asset-free backend fixture.
 The installed-asset checks include `tests/test_map_import.sh` (native game root, optional
 DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
-`tests/test_npc_face.sh`, `tests/test_map_characters.sh`, `tests/test_map_enemy_spawns.sh`
-and `tests/test_skin_hair_alpha.sh`. `tests/test_source_animation.sh` accepts the DS1R
+`tests/test_npc_face.sh`, `tests/test_map_characters.sh`, `tests/test_map_enemy_spawns.sh`,
+`tests/test_enemy_proportions.sh`, `tests/test_static_map_uv.sh`,
+`tests/test_map_navigation.sh` and `tests/test_skin_hair_alpha.sh`.
+The proportion tests independently decode 3,996 posed frames across four source
+models and check all 328 native clips per model. NPC and cemetery-skeleton adapters
+remain separate. `tests/test_source_animation.sh` accepts the DS1R
 root and checks real source spline clips; `tests/test_native_animation.sh` also accepts
 the Bloodborne `dvdroot_ps4` root and independently decodes converted native packfiles,
 including the original native header layout and locomotion root. The animation exporter

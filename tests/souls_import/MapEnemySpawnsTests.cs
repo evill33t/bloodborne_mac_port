@@ -20,6 +20,8 @@ static class MapEnemySpawnsTests {
         byte[]? Native(string path)=>composedFiles.GetValueOrDefault(path)??(File.Exists(Path.Combine(native,path))?File.ReadAllBytes(Path.Combine(native,path)):null);
         var allModels=new HashSet<string>();int total=0;
         var donorAnimation=BND4.Read(File.ReadAllBytes(Path.Combine(native,"chr/c2610.anibnd.dcx")));
+        var donorCharacter=BND4.Read(File.ReadAllBytes(Path.Combine(native,"chr/c2610.chrbnd.dcx")));
+        var donorVisual=donorCharacter.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes.ToArray();
         static bool Torch(TAE.Event e)=>e.Type==100&&BitConverter.ToInt32(e.GetParameterBytes(false),0)==610250;
         // TAE stores parameter pointers rather than lengths. Removing a neighbour
         // can change the zero alignment padding included by its reader.
@@ -98,12 +100,19 @@ static class MapEnemySpawnsTests {
                 if(hasTorch)torchActors+=group.Count();else nonTorchActors+=group.Count();
                 var animation=BND4.Read(result.Files["chr/"+group.Key+".anibnd.dcx"]);
                 bool skeletonModel=group.First().SourceModel is "c2900" or "c2910";
+                var proportions=skeletonModel?null:EnemyProportions.Create(MapCharacters.Authored(Read,group.First().SourceModel).Model,donorVisual,donorAnimation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
+                Check(skeletonModel||group.All(p=>p.ProportionScale==1),"Ordinary hollow proportions still depend on MSB actor scale");
                 var wakeVariants=(from variant in Enumerable.Range(1,3) from slot in new[]{7004,7005} select (Variant:variant,Slot:slot,ID:(long)variant*1000000+slot)).ToArray();
                 Check(animation.Files.Count==donorAnimation.Files.Count+(skeletonModel?6:0)&&animation.Files.Select(f=>f.ID).Distinct().Count()==animation.Files.Count,"Skeleton wake clips changed the native binder outside six declared variants");
                 foreach(var original in donorAnimation.Files.Where(f=>!TAE.Is(f.Bytes.ToArray())&&!(f.ID>=7000000&&f.ID<8000000)&&
                     !(skeletonModel&&f.ID>=1000000000&&new[]{2014,2020,2040,7004,7005}.Contains((f.ID-1000000000)%1000000)))) {
                     var retained=animation.Files.Single(f=>f.ID==original.ID);
-                    Check(retained.Flags==original.Flags&&retained.Name==original.Name.Replace("c2610",group.Key,StringComparison.OrdinalIgnoreCase)&&retained.Bytes.Span.SequenceEqual(original.Bytes.Span),"Skeleton wake variants changed an unrelated native animation/rig entry");
+                    byte[] expectedClip=original.Bytes.ToArray();
+                    if(proportions!=null) {
+                        if(original.ID==1000000)expectedClip=proportions.Skeleton;
+                        else if(original.ID>=1000000000)expectedClip=EnemyProportions.Clip(expectedClip,proportions);
+                    }
+                    Check(retained.Flags==original.Flags&&retained.Name==original.Name.Replace("c2610",group.Key,StringComparison.OrdinalIgnoreCase)&&retained.Bytes.Span.SequenceEqual(expectedClip),"Enemy adapter changed an unrelated native entry or omitted its declared positional correction");
                 }
                 foreach(int metadata in new[]{7000300,7000400,7000500,7000501}) {
                     byte[] expectedMetadata=SkinRetarget.RenameBehavior(donorAnimation.Files.Single(f=>f.ID==metadata).Bytes,"c2610",group.Key);
@@ -214,6 +223,6 @@ static class MapEnemySpawnsTests {
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
         Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data; skeleton basic attacks also omit eight donor superarmor windows");
-        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons), source masks/shared textures, independent native rigs, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons), source masks/shared textures, source-length hollow rigs/animations, preserved skeleton path, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

@@ -76,7 +76,7 @@ internal static class MapEnemySpawns {
             // c2500 mask 1 is the authored torch loadout (NpcParam 250001).
             // Armoured c2540/c2550/c2560 variants carry other equipment.
             bool hasTorch=group.Key.ModelName=="c2500"&&masks.Contains(1);
-            var bake=MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910");
+            var bake=MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910",preserveEnemyProportions:!skeleton);
             if(skeleton)MapSkeletonAnimations.Apply(sourceRead,group.Key.ModelName,target,bake,files);
             var payload=MapCharacters.Payload(paramDonor);foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
             MapCharacters.CloneRow(npcs,paramDonor,paramID,(skeleton?"Imported cemetery skeleton ":"Imported hollow ")+group.Key,payload);
@@ -98,10 +98,10 @@ internal static class MapEnemySpawns {
         npcFile.Bytes=MapCharacters.WriteRows(npcs);files.Add("param/gameparam/gameparam.parambnd.dcx",game.Write(DCX.Type.DCX_DFLT_10000_44_9));
         string aiPath="script/"+(nativeMap??(sourceMap=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00"))+".luabnd.dcx";
         files.Add(aiPath,MapNativeAi.Merge(Native(aiPath),Native("script/m22_00_00_00.luabnd.dcx")));
-        return new(files,reports,skipped,["Source hollow appearance, display masks and placements use native Hemwick humanoid animation, attack/hitbox, AI and health. Segment fitting preserves joint continuity and compensates skin thickness for the actor's height scale. The item adapter replaces native donor loot where enabled. Source combat and weapon behavior are not reproduced.",
+        return new(files,reports,skipped,["Ordinary hollows retain source segment lengths in both their bind rig and every native animation's positional channels, without relying on MSB enemy scale. Native animation rotations, timing, events, extracted motion, attack/hitbox, AI and health remain in use. Native combat reach and physics are approximations; source combat and weapon behavior are not reproduced. The item adapter replaces native donor loot where enabled.",
             "Native donor torch-flame events are retained only for the source c2500 torch loadout. Hollow donor animation events and native combat/status parameters remain unchanged. Skeleton attack superarmor is aligned with the source basic attacks. Source torch placement, weapon movesets and fire damage are not converted.",
             "Firelink's identified c2900/c2910 cemetery skeletons retain source appearance, equipment masks, placement and stature. Source 9001/9061 bone-pile awakening and living heavy-hit 2014/2020/2040 motion are retargeted onto native playback slots, with source wake groups and protection windows. Combat AI, attacks, hitboxes, health, death and effects remain native; necromancer resurrection, original movesets and giant attack reach are not converted. Other special-pose enemies remain disabled.",
             "Only explicitly supported ordinary hollow and cemetery skeleton parameter rows are instantiated. Source quest actors, bosses, multiplayer phantoms and other unsupported actors remain disabled.",
-            "Source navigation, patrols and event activation are not converted. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation; native navigation is not source navigation."]);
+            "This enemy adapter does not convert source patrols or event activation. Consult the navigation report for static source navigation coverage. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation."]);
     }
 }

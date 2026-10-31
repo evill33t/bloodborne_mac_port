@@ -4,6 +4,7 @@
     <Compile Include="MapCharactersTests.cs"/>
     <Compile Include="NpcAnimationInspector.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/EnemyProportions.cs" Link="EnemyProportions.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacterAnimations.cs" Link="MapCharacterAnimations.cs"/>
     <Compile Include="../../editor/souls_import/NativeAnimation.cs" Link="NativeAnimation.cs"/>
     <Compile Include="../../editor/souls_import/NativeSpline.cs" Link="NativeSpline.cs"/>
