@@ -1069,11 +1069,35 @@ three Madman's Knowledge collected from Firelink's Humanity pickup persisted.
 The game files and original saves were unchanged.
 
 Walking between the maps remains incomplete: the neighbouring map's files load,
-but its floor was inactive at the aqueduct boundary in the tested build. Some
-source stair approaches also catch the player. These checks do not establish a
-complete Firelink-to-Burg walk. The collision encoder now bounds the actual
-quantized vertices, fixing BVH under-enclosure without changing the encoded
-geometry; the observed stair catch has not been attributed to that defect.
+but its floor was inactive at the aqueduct boundary in the tested build; loading
+both additional scenes also crashed in subsequent manual tests. The stair test
+profile uses a self-only load list for each destination to isolate that issue.
+Both destinations remain accessible through the Dream headstone. These checks
+do not establish a complete Firelink-to-Burg walk. The collision encoder bounds
+the actual quantized vertices, fixing BVH under-enclosure without changing the
+encoded geometry.
+
+DS1R collision conversion now carries the source `100..199` stair material family
+through partitioning and native shape-key sorting. Bloodborne's separate
+`CSSlopeCtrl` slides on ordinary floors above 35 degrees; its floor classifier
+disables sliding for this material family. Firelink's blocked hillside ramp uses
+`103`, also present in retail Bloodborne, but the old export assigned the donor's
+ordinary floor material to every triangle. Native material records are cloned
+with their nested array fixups; other source material families retain the donor.
+No world scale, hunter physics or stair geometry is changed.
+
+Copied-save controls reproduced the same catch with original H collision and
+with H replaced by the paired L mesh. Preserving source stair materials cleared
+it using ordinary analog movement. A fresh process with the full rebuilt import
+then climbed the higher hillside stairs to the aqueduct landing; the subsequent
+route automation stopped beside a hollow on its narrow ledge. Independently
+decoded vertices, triangle ordering and body transforms were identical in all
+four Firelink/Burg H/L archives (289,009 triangles). Regression fixtures check
+mixed material assignment after sorting, nested native data and fixups, unchanged
+geometry, and isolation from unrelated source material families. Source/native
+assets and seed saves remained hash-identical. Navigation and enemy size remain
+separate validation work.
+
 This mode does not implement additional source doors, lifts, NPC quests, enemy
 movesets or navigation.
 

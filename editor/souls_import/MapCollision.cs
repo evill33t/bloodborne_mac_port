@@ -6,7 +6,7 @@ using System.Numerics;
 using System.Text;
 
 internal static class MapCollision {
-    internal record Triangle(Vector3 A,Vector3 B,Vector3 C);
+    internal record Triangle(Vector3 A,Vector3 B,Vector3 C,uint? NativeMaterial=null);
     sealed class Node {public Vector3 Min,Max;public Node? Left,Right;public int Index;public bool Leaf=>Left==null;}
     static Node Tree(List<Node> nodes){
         if(nodes.Count==1)return nodes[0];var lo=nodes.Select(n=>n.Min).Aggregate(Vector3.Min);var hi=nodes.Select(n=>n.Max).Aggregate(Vector3.Max);var span=hi-lo;int axis=span.X>span.Y?(span.X>span.Z?0:2):(span.Y>span.Z?1:2);
@@ -88,8 +88,37 @@ internal static class MapCollision {
         for(int o=shape+40;o<shape+88;o+=4)Int(o,0);Int(shape+40,uint.MaxValue);Int(shape+80,uint.MaxValue);foreach(var key in fix.Keys.Where(k=>k>=shape+40&&k<shape+88).ToArray())fix.Remove(key);
         Array(shape+96,0,0);Int(shape+112,0);Array(shape+120,0,0);Int(shape+136,0);At(shape+18,()=>w.Write((byte)bits));
         Array(shape+160,Append(Make(b=>{foreach(var key in keys)b.Write((key<<(32-bits))|((1u<<(32-bits))-1));})),keys.Count);
-        // All generated triangles share the template's first physical surface material.
-        var surface=raw.AsSpan(data+fix[param+16],20).ToArray();var surfaces=new byte[(triangles.Count+1)*20];for(int i=0;i<=triangles.Count;++i)surface.CopyTo(surfaces,i*20);Array(param+16,Append(surfaces),triangles.Count+1);
+        // Geometry sorting changes triangle order. Carry material overrides in
+        // that same order, through the native triangle -> primitive indirection.
+        // In particular, 100..199 surfaces suppress CSSlopeCtrl sliding; using
+        // the donor's ordinary floor material makes authored stairs impassable.
+        var surface=raw.AsSpan(data+fix[param+16],20).ToArray();
+        var ordered=groups.SelectMany(g=>g).ToArray();
+        var overrides=ordered.Where(t=>t.NativeMaterial.HasValue).Select(t=>t.NativeMaterial!.Value).Distinct().ToArray();
+        var materialIndices=new Dictionary<uint,uint>();uint defaultPrimitive=BitConverter.ToUInt32(surface);
+        if(overrides.Length>0) {
+            int primitiveCount=(int)U(data+param+40),oldPrimitives=fix[param+32];
+            if(defaultPrimitive>=primitiveCount)throw new InvalidDataException("Invalid template physical material index");
+            int donor=oldPrimitives+checked((int)defaultPrimitive*56);
+            var primitive=raw.AsSpan(data+donor,56).ToArray();
+            var nested=fix.Where(p=>p.Key>=donor&&p.Key<donor+56).ToArray();
+            int primitiveAt=Append(Make(b=>{b.Write(raw, data+oldPrimitives, checked(primitiveCount*56));foreach(uint material in overrides){var copy=primitive.ToArray();BitConverter.GetBytes(material).CopyTo(copy,48);b.Write(copy);}}));
+            // Each hkArray inside the cloned material needs its own local fixup.
+            // Keep the original records too: other native references may use them.
+            var originalFixups=fix.Where(p=>p.Key>=oldPrimitives&&p.Key<oldPrimitives+primitiveCount*56).ToArray();
+            foreach(var p in originalFixups)fix.Add(primitiveAt+p.Key-oldPrimitives,p.Value);
+            for(int i=0;i<overrides.Length;i++) {
+                materialIndices.Add(overrides[i],checked((uint)(primitiveCount+i)));
+                foreach(var p in nested)fix.Add(primitiveAt+(primitiveCount+i)*56+p.Key-donor,p.Value);
+            }
+            Array(param+32,primitiveAt,primitiveCount+overrides.Length);
+        }
+        var surfaces=new byte[(triangles.Count+1)*20];
+        for(int i=0;i<=triangles.Count;++i) {
+            surface.CopyTo(surfaces,i*20);
+            if(i<ordered.Length&&ordered[i].NativeMaterial is {} material)BitConverter.GetBytes(materialIndices[material]).CopyTo(surfaces,i*20);
+        }
+        Array(param+16,Append(surfaces),triangles.Count+1);
         var body=fix[system+64];int bodies=(int)U(data+system+72);if(bodies!=1)throw new InvalidDataException("Expected one collision body");At(body+48,()=>{Vec(w,Vector3.Zero);w.Write(0f);w.Write(0f);w.Write(0f);w.Write(1f);});
         Pad();int newLocal=(int)stream.Position;foreach(var (from,to) in fix.OrderBy(p=>p.Key)){w.Write(from);w.Write(to);}while(stream.Position%16!=0)w.Write(uint.MaxValue);
         int newGlobal=(int)stream.Position;foreach(var (from,sid,to) in globals){w.Write(from);w.Write(sid);w.Write(to);}while(stream.Position%16!=0)w.Write(uint.MaxValue);

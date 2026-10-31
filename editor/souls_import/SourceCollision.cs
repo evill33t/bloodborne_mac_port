@@ -39,7 +39,10 @@ internal static class SourceCollision {
                 var transform=Matrix4x4.CreateScale(placement.Scale)*Matrix4x4.CreateRotationX(rotation.X)*Matrix4x4.CreateRotationZ(rotation.Z)*Matrix4x4.CreateRotationY(rotation.Y)*Matrix4x4.CreateTranslation(placement.Position+offset);
                 // DS1 collision winding is opposite Bloodborne's; mirror only the
                 // index order, preserving the original world-space positions.
-                var transformed=surfaces.Select(s=>new Surface(s.Material,s.Triangles.Select(t=>new MapCollision.Triangle(Vector3.Transform(t.A,transform),Vector3.Transform(t.C,transform),Vector3.Transform(t.B,transform))).ToArray())).ToArray();
+                // DS1R's 100..199 stair surfaces and Bloodborne's corresponding
+                // family disable slope sliding. Preserve this classification;
+                // other source material families still use the native donor.
+                var transformed=surfaces.Select(s=>new Surface(s.Material,s.Triangles.Select(t=>new MapCollision.Triangle(Vector3.Transform(t.A,transform),Vector3.Transform(t.C,transform),Vector3.Transform(t.B,transform),s.Material is >=100 and <200?s.Material:null)).ToArray())).ToArray();
                 parts.Add(new Part(placement.Name,model,placement.HitFilterID,layer,transformed));
             }
         }

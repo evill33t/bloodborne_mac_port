@@ -55,7 +55,50 @@ static class CollisionTests {
         Check(MapCollision.RenameBody(b,"h000010","h600000").Length==b.Length,"Body rename changed fixup offsets");Reject(()=>MapCollision.RenameBody(b,"h000010","bad"));Reject(()=>MapCollision.Bake(template,[]));Reject(()=>MapCollision.Bake(new byte[1],triangles));Reject(()=>MapCollision.Bake(template,[new(new(float.NaN,0,0),Vector3.Zero,Vector3.One)]));
         Check(before.SequenceEqual(System.Security.Cryptography.SHA256.HashData(template)),"Native template was modified");Check(MapCollision.Translate(b,Vector3.Zero).SequenceEqual(b),"Zero body translation changed bytes");
         QuantizedBounds(template);
+        MaterialOverrides(template);
         Console.WriteLine("PASS: native codec reads multi-section BVH; welding sentinel, reverse leaf indices, vertex cutoffs, partitions, body names and invalid inputs verified");
+    }
+
+    static void MaterialOverrides(byte[] template) {
+        // Scramble separate floor patches so section sorting cannot accidentally
+        // leave the source material list in input order. Decode the emitted
+        // position to identify each patch independently of exporter ordering.
+        var triangles=Enumerable.Range(0,192).OrderBy(i=>(i*73)%193).Select(i=>
+            new MapCollision.Triangle(new(i*2,0,0),new(i*2,0,1),new(i*2+1,0,0),i%4==0?103u:i%4==1?101u:null)).ToArray();
+        var bytes=MapCollision.Bake(template,triangles);
+        Check(PackingHash(bytes)==PackingHash(MapCollision.Bake(template,triangles.Select(t=>t with{NativeMaterial=null}).ToArray())),"Material preservation changed encoded geometry");
+        var (data,tree,fix)=Layout(bytes);uint U(int at)=>BitConverter.ToUInt32(bytes,data+at);
+        int section=BitConverter.ToInt16(bytes,62)+64,names=(int)BitConverter.ToUInt32(bytes,section+20),header=section+128;
+        int virt=BitConverter.ToInt32(bytes,header+32),end=BitConverter.ToInt32(bytes,header+36),param=-1,shape=-1;
+        for(int at=data+virt;at<data+end;at+=12)if(BitConverter.ToUInt32(bytes,at)!=uint.MaxValue) {
+            int name=names+BitConverter.ToInt32(bytes,at+8);string type=Encoding.ASCII.GetString(bytes,name,Array.IndexOf(bytes,(byte)0,name)-name);
+            if(type=="fsnpCustomMeshParameter")param=BitConverter.ToInt32(bytes,at);
+            if(type=="fsnpCustomParamCompressedMeshShape")shape=BitConverter.ToInt32(bytes,at);
+        }
+        Check(param>=0&&shape>=0,"Missing physical material metadata");
+        int rows=fix[param+16],primitives=fix[param+32],primitiveCount=(int)U(param+40),keyBits=(int)U(tree+52),checkedRows=0;
+        uint defaultIndex=U(rows+triangles.Length*20);Check(defaultIndex<primitiveCount,"Invalid default primitive index");
+        uint defaultMaterial=U(primitives+(int)defaultIndex*56+48);
+        for(int s=0;s<U(tree+72);s++) {
+            int sec=fix[tree+64]+s*96,first=(int)(U(sec+80)>>8),count=(int)(U(sec+80)&255),packedFirst=(int)U(sec+72),packedCount=(int)(U(sec+76)&255);
+            for(int i=0;i<count;i++) {
+                int row=first+i;uint key=U(fix[shape+160]+row*4)>>(32-keyBits);
+                Check(key==(uint)((s<<8)|(i<<1)),"Material rows do not follow native zero-based shape-key lookup");
+                int index=bytes[data+fix[tree+80]+row*4];Check(index<packedCount,"Separated floor fixture unexpectedly needs shared vertices");
+                uint word=U(fix[tree+112]+(packedFirst+index)*4);
+                float x=(word&2047)*BitConverter.ToSingle(bytes,data+sec+60)+BitConverter.ToSingle(bytes,data+sec+48);
+                int patch=(int)MathF.Round(x/2);uint expected=patch%4==0?103u:patch%4==1?101u:defaultMaterial;
+                uint physical=U(rows+row*20);Check(physical<primitiveCount&&U(primitives+(int)physical*56+48)==expected,"Physical material attached to the wrong triangle after BVH sorting");
+                if(expected!=defaultMaterial) {
+                    int donor=primitives+(int)defaultIndex*56,clone=primitives+(int)physical*56;
+                    Check(bytes.AsSpan(data+donor,48).SequenceEqual(bytes.AsSpan(data+clone,48))&&U(donor+52)==U(clone+52),"Material clone changed native contact data");
+                    for(int a=0;a<48;a+=16)Check(fix.GetValueOrDefault(donor+a,-1)==fix.GetValueOrDefault(clone+a,-1),"Material clone lost nested native array fixups");
+                }
+                checkedRows++;
+            }
+        }
+        Check(checkedRows==triangles.Length,"Material verification omitted triangles");
+        Console.WriteLine("PASS: mixed stair/floor materials follow native shape keys through section sorting; geometry, default materials and nested native data preserved");
     }
 
     static void QuantizedBounds(byte[] template) {
@@ -106,7 +149,7 @@ static class CollisionTests {
     internal static string PackingHash(byte[] bytes) {
         var (data,tree,fix)=Layout(bytes);using var stream=new MemoryStream();void Copy(int at,int count)=>stream.Write(bytes,data+at,count);
         Copy(tree+16,32);int sections=BitConverter.ToInt32(bytes,data+tree+72);for(int s=0;s<sections;s++)Copy(fix[tree+64]+s*96+48,42);
-        foreach(var (at,stride) in new[]{(tree+80,4),(tree+96,2),(tree+112,4),(tree+128,8)})Copy(fix[at],BitConverter.ToInt32(bytes,data+at+8)*stride);
+        foreach(var (at,stride) in new[]{(tree+80,4),(tree+96,2),(tree+112,4),(tree+128,8)}){int count=BitConverter.ToInt32(bytes,data+at+8);if(count>0)Copy(fix[at],count*stride);}
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream.ToArray()));
     }
 

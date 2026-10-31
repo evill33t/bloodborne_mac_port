@@ -24,6 +24,19 @@ static class SourceCollisionTests {
         var native=result.PlayerTriangles("h").Single();
         Check(native.A==new Vector3(113,2,3)&&native.B==new Vector3(113,2,5)&&native.C==new Vector3(115,2,3),"MSB instance/anchor transform or Bloodborne winding is wrong");
         Check(result.Parts.Single(p=>p.Layer=="h"&&p.HitFilter==9).Surfaces[0].Triangles[0].A==new Vector3(131,2,3),"Repeated source collision instance lost its own placement");
+        Check(native.NativeMaterial==null,"Unmapped source material must retain the native donor");
+        foreach(uint material in new uint[]{99,100,103,199,200,400}) {
+            foreach(var layer in new[]{"h","l"}) {
+                var binder=new BXF3();binder.Files.Add(new BinderFile(Binder.FileFlags.Flag1,0,$"{layer}0000B2A10.hkx.dcx",Fixture(material)));
+                binder.Write(out var header,out var body);files[$"map/m10_02_00_00/{layer}10_02_00_00.hkxbhd"]=header;files[$"map/m10_02_00_00/{layer}10_02_00_00.hkxbdt"]=body;
+            }
+            var stairs=SourceCollision.Read("DS1R","m10_02_00_00",files.GetValueOrDefault,new Vector3(100,0,0));
+            foreach(var layer in new[]{"h","l"}) {
+                var t=stairs.PlayerTriangles(layer).Single();
+                Check(t.NativeMaterial==(material is >=100 and <200?(uint?)material:null),"DS1R stair classification lost or unrelated material family mapped");
+                Check(t.A==native.A&&t.B==native.B&&t.C==native.C,"Material mapping changed collision geometry");
+            }
+        }
         var invalidIndex=raw.ToArray();BinaryPrimitives.WriteUInt16LittleEndian(invalidIndex.AsSpan(32+336,2),3);
         Reject(invalidIndex,"Out-of-range collision index accepted");
         var invalidReference=raw.ToArray();BinaryPrimitives.WriteUInt64LittleEndian(invalidReference.AsSpan(32,8),999);
@@ -37,7 +50,7 @@ static class SourceCollisionTests {
         try{SourceCollision.Decode(bytes);}catch(InvalidDataException){return;}catch(NotSupportedException){return;}
         throw new Exception(why);
     }
-    static byte[] Fixture() {
+    static byte[] Fixture(uint material=42) {
         // Minimal self-describing Havok 2015 collision fixture. Deliberately use
         // compact field layouts, so the reader must follow metadata, not retail
         // Firelink offsets or virtual object order.
@@ -68,7 +81,7 @@ static class SourceCollisionTests {
         void Float(int at,float value)=>BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(at,4),value);
         UInt64(0,2);for(int i=0;i<4;++i)Float(16+i*20,1);Float(16+48,10);
         UInt64(80,3);UInt64(96,4);UInt64(112,5);
-        UInt64(144,8);UInt64(176,9);UInt32(208,42);
+        UInt64(144,8);UInt64(176,9);UInt32(208,material);
         UInt32(224,1);BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(228,2),8);
         Float(240,1);Float(244,2);Float(248,3);Float(240+28,1);Float(240+32,2);Float(240+36,2);Float(240+40,2);
         Float(288+16,1);Float(288+32+8,1);
