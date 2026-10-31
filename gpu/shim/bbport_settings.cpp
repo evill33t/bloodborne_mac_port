@@ -38,7 +38,7 @@ bool OwnedKey(const std::string& key) {
         "menu_language", "compass", "compass_position", "bloodstains", "team_pings", "ping_key", "free_camera",
         "live_resolution", "shader_compile", "renderer", "fps_cap", "game_timing",
         "fullscreen", "metal_hud", "texture_compression",
-        "mouse_look", "mouse_sensitivity", "mouse_vertical", "mouse_invert_y"};
+        "mouse_look", "mouse_sensitivity", "mouse_vertical", "mouse_invert_y", "pad_menu_combo"};
     for (const char* k : owned) {
         if (key == k) {
             return true;
@@ -144,6 +144,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.mouse_vertical = Clamp(f, 0.25f, 4.0f);
     } else if (key == "mouse_invert_y") {
         v.mouse_invert_y = i != 0;
+    } else if (key == "pad_menu_combo") {
+        v.pad_menu_combo = i != 0;
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
     } else if (key == "map_view") {
@@ -402,7 +404,7 @@ void Save() {
                  "upscaler=%s\npreset=%d\nsharpen=%d\nsharpness=%.2f\njitter=%d\n"
                  "reactive=%d\nobject_motion=%d\nreactive_scale=%.2f\nreactive_threshold=%.2f\nreactive_max=%.2f\n"
                  "debug_view=%d\nshow_fps=%d\nframe_pacing=%d\nframegen=%d\nachievement_banners=%d\nmouse_look=%d\n"
-                 "mouse_sensitivity=%.2f\nmouse_vertical=%.2f\nmouse_invert_y=%d\n",
+                 "mouse_sensitivity=%.2f\nmouse_vertical=%.2f\nmouse_invert_y=%d\npad_menu_combo=%d\n",
                  UpscalerName(saved_upscaler), v.preset.load(), int(v.sharpen.load()),
                  v.sharpness.load(), int(v.jitter.load()), int(v.reactive.load()),
                  int(v.object_motion.load()),
@@ -411,7 +413,8 @@ void Save() {
                  int(v.framegen_forced ? v.saved_framegen : v.framegen.load()),
                  int(v.achievement_banners.load()),
                  int(v.mouse_look.load()), v.mouse_sensitivity.load(),
-                 v.mouse_vertical.load(), int(v.mouse_invert_y.load()));
+                 v.mouse_vertical.load(), int(v.mouse_invert_y.load()),
+                 int(v.pad_menu_combo.load()));
     // Read by patches.py at start.
     std::fprintf(file, "hdr=%d\nhdr_paper_white=%.2f\nhdr_peak=%.2f\n", int(v.hdr.load()),
                  v.hdr_paper_white.load(), v.hdr_peak.load());

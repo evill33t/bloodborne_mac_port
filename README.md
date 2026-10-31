@@ -8,7 +8,7 @@ This is an experimental development build. Included features and draft integrati
 
 Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
 
-Recent mainline sync: upstream **0.5.11** (`1c1ac7d`) retains preferred-display selection, cursor hiding, the updater shutdown fix and null-table GPU protection, and adds the larger graphics heap needed to draw the level at 5120×2160, stale-descriptor hardening (#98) and the absent graphics-bind guard (#100). [Upstream release notes and setup guide](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/1c1ac7d/README.md).
+Recent mainline sync: upstream **0.5.12** (`50274ee`) includes the shader-record unbind/query guards (#114), GPU completion-signal watchdog fix (#107), and optional L3+R3 menu shortcut (#104). It retains preferred-display selection, cursor hiding, the updater shutdown fix, null-table/stale-descriptor protection and 0.5.11's larger graphics heap for 5120×2160. [Upstream release notes and setup guide](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/50274ee/README.md).
 
 **Video guide:** Andrew Tsai’s [guide to this port](https://www.youtube.com/watch?v=_QgmfFyZbYo).
 
@@ -19,7 +19,7 @@ Recent mainline sync: upstream **0.5.11** (`1c1ac7d`) retains preferred-display 
 - Bundled fallback app icon from the Yharnam Together / Bloodborne Seamless Co-op website, replaced at runtime by the selected game’s icon when available. [Branding sources and credits](assets/branding/README.md).
 - Native SwiftUI launcher with **General, Advanced, Controls, Achievements and Online** pages; game-folder validation, save-folder selection, preferred-display selection with disconnected-display fallback, and remembered settings.
 - A persistent **Regular / Seamless Co-op** selector above the pages. New configurations start in Regular with online play off. Switching modes preserves each mode's saves, accounts and server settings; the choice also applies when the launcher is hidden.
-- In-game settings with **⌘,** or **L3 + R3**, native **Mac Settings** and **Exit Game** entries, and a launcher **Stop** button with process cleanup and crash-report recovery.
+- In-game settings with **⌘,** or **L3 + R3** (the stick shortcut can be disabled in **Controls**), native **Mac Settings** and **Exit Game** entries, and a launcher **Stop** button with process cleanup and crash-report recovery.
 - Keyboard, mouse and SDL3 gamepad support, including controller selection, touchpad gestures, keyboard text entry and mouse camera capture. Rebind keys, mouse buttons and wheel steps in **Controls**; clear individual actions, inspect shared bindings or restore defaults. Left Alt walks at half stick deflection. Mouse sensitivity, vertical multiplier, inversion and camera-key behavior are configurable. A still cursor hides over the game after three seconds.
 - Mods and cheats manager with import, enable/disable, ordering, conflict reporting, backups and private launch views. Community patches include frame-rate, camera, intro and visual options. Original game files remain the source for generated views. See [Mods](docs/MODS.md).
 - Local achievements browser, base-game platinum progression, DLC trophies, per-save-profile history, optional in-game banners and trophy artwork read from your own dump. Shared co-op unlocks use the same local history and achievement UI. See [Achievements](docs/ACHIEVEMENTS.md).
@@ -140,7 +140,7 @@ Update an existing checkout with `git pull --ff-only` and `git submodule update 
 
 | Control | Action |
 | --- | --- |
-| ⌘, / L3 + R3 | In-game settings |
+| ⌘, / L3 + R3 (when enabled) | In-game settings |
 | ⌘ while mouse camera is captured | Release the cursor |
 | F6 | Co-op team/menu |
 | F8 / hold touchpad | Multiplayer map |
@@ -165,6 +165,8 @@ Default data lives in `~/Library/Application Support/Bloodborne`:
 - Generated launch views, prepared images and map/shader caches are separate from the source game folder. `BB_DATA_DIR` and the documented save overrides support isolated setups.
 
 Use **Show Log** or **Crash Report…** after a failure. App session logs live under `~/Library/Logs/Bloodborne`; launch/configuration behavior is described in [the client guide](docs/SEAMLESS_COOP_CLIENT.md). Avoid publishing identity files, passwords or tokens with reports.
+
+**Upstream known issue (#115):** above 1920×1080 with the upscaler off, the game's own anti-aliasing may not reach the output. Use MetalFX with **Native AA** at those resolutions until that path is fixed.
 
 Some features require their documented supported executable/parameter layout and will reject conflicting hook bytes or keep a fallback. The gameplay tests recorded in this repository are bounded checks; full progression, every mod combination, long sessions and all hardware remain ongoing work. See [Known issues](docs/MACOS_BACKLOG.md), [Findings](docs/FINDINGS.md) and [Roadmap](docs/ROADMAP.md).
 

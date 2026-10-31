@@ -427,6 +427,18 @@ int main() {
         Expect(SavedUpscalerIs(config, "metalfx"), "returning to temporal saves metalfx");
         BbOverlay::HandleEvent(Key(SDLK_ESCAPE, SDL_KMOD_NONE, true));
 
+        // Disabling the chord keeps the keyboard route available, and an open
+        // menu can still be closed with the controller.
+        s.pad_menu_combo = false;
+        StickChord();
+        Expect(!BbOverlay::CapturesInput(), "disabled L3+R3 leaves the game in control");
+        BbOverlay::HandleEvent(Key(SDLK_COMMA, SDL_KMOD_GUI, true));
+        BbOverlay::HandleEvent(Key(SDLK_COMMA, SDL_KMOD_GUI, false));
+        Expect(BbOverlay::CapturesInput(), "Cmd+, opens the menu with the chord disabled");
+        StickChord();
+        Expect(!BbOverlay::CapturesInput(), "L3+R3 still closes an open menu when disabled");
+        s.pad_menu_combo = true;
+
         // The L3+R3 menu's frame-generation choice saves immediately, but the
         // current renderer retains its launch state until Apply and Restart.
         s.framegen = s.startup_framegen = false;

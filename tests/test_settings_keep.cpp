@@ -52,7 +52,9 @@ int main() {
     assert(Get().upscaler == UpscalerFsr3 && Get().preset == 2);
     assert(Get().mouse_look && Get().mouse_sensitivity == 2.5f && Get().mouse_invert_y);
     assert(Get().achievement_banners);
+    assert(Get().pad_menu_combo);
     Get().achievement_banners = false;
+    Get().pad_menu_combo = false;
     Get().mouse_look = true;
     Get().mouse_sensitivity = 2.25f;
     Get().mouse_vertical = 0.75f;
@@ -78,17 +80,20 @@ int main() {
     assert(Count(text, "hdr_highlights=0.75") == 0);
     assert(Get().startup_hdr); // menu edits do not change the running layer
     assert(Count(text, "achievement_banners=0") == 1);
+    assert(Count(text, "pad_menu_combo=0") == 1);
     assert(Count(text, "mouse_look=1") == 1);
     assert(Count(text, "mouse_sensitivity=2.25") == 1);
     assert(Count(text, "mouse_vertical=0.75") == 1);
     assert(Count(text, "mouse_invert_y=1") == 1);
     Get().achievement_banners = true;
+    Get().pad_menu_combo = true;
     Get().mouse_look = false;
     Get().mouse_sensitivity = 1.0f;
     Get().mouse_vertical = 1.0f;
     Get().mouse_invert_y = false;
     Load();
     assert(!Get().achievement_banners);
+    assert(!Get().pad_menu_combo);
     assert(Get().mouse_look && Get().mouse_sensitivity == 2.25f && Get().mouse_invert_y);
     assert(Get().mouse_vertical == 0.75f);
     assert(Count(text, "fps_cap=40") == 1 && Count(text, "fullscreen=1") == 1);
@@ -126,6 +131,7 @@ int main() {
     assert(Count(text, "mouse_look=1") == 1 && Count(text, "mouse_sensitivity=2.25") == 1 &&
            Count(text, "mouse_invert_y=1") == 1);
     assert(Count(text, "achievement_banners=0") == 1 && Count(text, "mouse_look=1") == 1);
+    assert(Count(text, "pad_menu_combo=0") == 1);
     assert(Count(text, "mouse_sensitivity=2.25") == 1 && Count(text, "mouse_invert_y=1") == 1);
     assert(Count(text, "mouse_vertical=0.75") == 1);
     setenv("BB_ULTRAWIDE_RES", "3840x1080", 1);
