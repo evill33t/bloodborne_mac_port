@@ -54,6 +54,66 @@ static class CollisionTests {
         var groups=MapCollision.Partition(triangles,7);Check(groups.Count==7&&groups.Sum(g=>g.Count)==triangles.Count,"Partition lost triangles");
         Check(MapCollision.RenameBody(b,"h000010","h600000").Length==b.Length,"Body rename changed fixup offsets");Reject(()=>MapCollision.RenameBody(b,"h000010","bad"));Reject(()=>MapCollision.Bake(template,[]));Reject(()=>MapCollision.Bake(new byte[1],triangles));Reject(()=>MapCollision.Bake(template,[new(new(float.NaN,0,0),Vector3.Zero,Vector3.One)]));
         Check(before.SequenceEqual(System.Security.Cryptography.SHA256.HashData(template)),"Native template was modified");Check(MapCollision.Translate(b,Vector3.Zero).SequenceEqual(b),"Zero body translation changed bytes");
+        QuantizedBounds(template);
         Console.WriteLine("PASS: native codec reads multi-section BVH; welding sentinel, reverse leaf indices, vertex cutoffs, partitions, body names and invalid inputs verified");
+    }
+
+    static void QuantizedBounds(byte[] template) {
+        // Long, shallow triangles make the 11/11/10-bit packing error exceed
+        // the old 1mm padding. Interior vertices pack locally; joined section
+        // edges exercise the independent 21/21/22-bit shared vertex pool.
+        var input=new List<MapCollision.Triangle>();
+        Vector3 Point(int x,int z)=>new(-200+x*13.371f,-40+x*.0037f+z*.029113f,70+z*113.153f);
+        for(int x=0;x<12;x++)for(int z=0;z<8;z++){input.Add(new(Point(x,z),Point(x,z+1),Point(x+1,z)));input.Add(new(Point(x+1,z),Point(x,z+1),Point(x+1,z+1)));}
+        var bytes=MapCollision.Bake(template,input);
+        VerifyBounds(bytes,input.Count);
+        Check(PackingHash(bytes)=="E2D14F01FB18EEA833FFC9A33E82E5B87ADB39977957B46C6655BD54522D2043", "BVH correction changed collision vertex encoding or its packing grids");
+        Console.WriteLine("PASS: quantized packed/shared vertices fit every section and top-level BVH ancestor; vertex encoding and packing domains preserved");
+    }
+
+    // Decode the emitted bytes independently, using double precision for the
+    // enclosure audit. The 0.05mm tolerance only covers float codec roundoff.
+    internal static void VerifyBounds(byte[] bytes,int expectedTriangles) {
+        var (data,tree,fix)=Layout(bytes);uint U(int at)=>BitConverter.ToUInt32(bytes,data+at);
+        double[] Vec(int at)=>Enumerable.Range(0,3).Select(i=>(double)BitConverter.ToSingle(bytes,data+at+i*4)).ToArray();
+        var domainLo=Vec(tree+16);var domainHi=Vec(tree+32);int sections=(int)U(tree+72),verticesChecked=0;
+        Check(sections>1&&U(tree+120)>0&&U(tree+136)>0,"Enclosure fixture must exercise packed and shared vertices in multiple sections");
+        var sectionVertices=new List<double[]>[sections];
+        void Contains(double[] lo,double[] hi,IEnumerable<double[]> vertices,string where){foreach(var v in vertices)for(int a=0;a<3;a++)Check(v[a]>=lo[a]-.00005&&v[a]<=hi[a]+.00005,$"Decoded vertex escapes {where} axis{a}: {v[a]} outside {lo[a]}..{hi[a]}");}
+        List<double[]> Walk(int nodes,int count,int index,double[] lo,double[] hi,bool top,Func<int,List<double[]>> leaf,HashSet<int> seen) {
+            Check(index>=0&&index<count&&seen.Add(index),"Invalid or repeated BVH node");int at=data+nodes+index*(top?5:4);var nlo=new double[3];var nhi=new double[3];
+            for(int a=0;a<3;a++){byte code=bytes[at+a];double unit=(hi[a]-lo[a])/226;nlo[a]=lo[a]+(code>>4)*(code>>4)*unit;nhi[a]=hi[a]-(code&15)*(code&15)*unit;}
+            int codeIndex=top?(bytes[at+3]<<8)|bytes[at+4]:bytes[at+3];bool branch=top?(codeIndex&32768)!=0:(codeIndex&1)!=0;List<double[]> points;
+            if(branch){int right=top?(codeIndex&32767)*2:codeIndex&254;points=Walk(nodes,count,index+1,nlo,nhi,top,leaf,seen);points.AddRange(Walk(nodes,count,index+right,nlo,nhi,top,leaf,seen));}
+            else points=new(leaf(top?codeIndex:codeIndex/2));
+            Contains(nlo,nhi,points,top?"top-level ancestor":"section ancestor");return points;
+        }
+        for(int s=0;s<sections;s++) {
+            int section=fix[tree+64]+s*96,packedStart=(int)U(section+72),sharedStart=(int)(U(section+76)>>8),packedCount=(int)(U(section+76)&255),firstPrimitive=(int)(U(section+80)>>8),primitiveCount=(int)(U(section+80)&255);
+            var offset=Vec(section+48);var scale=Vec(section+60);var triangles=new List<double[]>[primitiveCount];
+            double[] Vertex(int index) {
+                if(index<packedCount){uint word=U(fix[tree+112]+(packedStart+index)*4);return new[]{(word&2047)*scale[0]+offset[0],((word>>11)&2047)*scale[1]+offset[1],(word>>22)*scale[2]+offset[2]};}
+                int at=data+fix[tree+96]+(sharedStart+index-packedCount)*2;int shared=BitConverter.ToUInt16(bytes,at);Check(shared<U(tree+136),"Invalid shared vertex index");ulong value=BitConverter.ToUInt64(bytes,data+fix[tree+128]+shared*8);
+                return new[]{(value&2097151)*(domainHi[0]-domainLo[0])/2097151+domainLo[0],((value>>21)&2097151)*(domainHi[1]-domainLo[1])/2097151+domainLo[1],(value>>42)*(domainHi[2]-domainLo[2])/4194303+domainLo[2]};
+            }
+            for(int i=0;i<primitiveCount;i++){int at=data+fix[tree+80]+(firstPrimitive+i)*4;Check(bytes[at+2]==bytes[at+3],"Fixture triangle became a quad");triangles[i]=Enumerable.Range(0,3).Select(v=>Vertex(bytes[at+v])).ToList();verticesChecked+=3;}
+            var seen=new HashSet<int>();sectionVertices[s]=Walk(fix[section],(int)U(section+8),0,Vec(section+16),Vec(section+32),false,i=>triangles[i],seen);Check(seen.Count==U(section+8),"Section BVH omitted nodes");
+        }
+        var visited=new HashSet<int>();var all=Walk(fix[tree],(int)U(tree+8),0,domainLo,domainHi,true,i=>sectionVertices[i],visited);Contains(domainLo,domainHi,all,"shared vertex domain");
+        Check(visited.Count==U(tree+8)&&verticesChecked==expectedTriangles*3&&all.Count==verticesChecked,"BVH omitted or duplicated triangle vertices");
+    }
+
+    internal static string PackingHash(byte[] bytes) {
+        var (data,tree,fix)=Layout(bytes);using var stream=new MemoryStream();void Copy(int at,int count)=>stream.Write(bytes,data+at,count);
+        Copy(tree+16,32);int sections=BitConverter.ToInt32(bytes,data+tree+72);for(int s=0;s<sections;s++)Copy(fix[tree+64]+s*96+48,42);
+        foreach(var (at,stride) in new[]{(tree+80,4),(tree+96,2),(tree+112,4),(tree+128,8)})Copy(fix[at],BitConverter.ToInt32(bytes,data+at+8)*stride);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream.ToArray()));
+    }
+
+    static (int Data,int Tree,Dictionary<int,int> Fix) Layout(byte[] bytes) {
+        uint U(int at)=>BitConverter.ToUInt32(bytes,at);int section=BitConverter.ToInt16(bytes,62)+64,names=(int)U(section+20),header=section+128,data=(int)U(header+20),local=(int)U(header+24),global=(int)U(header+28),virt=(int)U(header+32),end=(int)U(header+36),tree=-1;
+        var fix=new Dictionary<int,int>();for(int at=data+local;at<data+global;at+=8)if(U(at)!=uint.MaxValue)fix.Add((int)U(at),(int)U(at+4));
+        for(int at=data+virt;at<data+end;at+=12)if(U(at)!=uint.MaxValue){int name=names+(int)U(at+8);if(Encoding.ASCII.GetString(bytes,name,Array.IndexOf(bytes,(byte)0,name)-name)=="hknpCompressedMeshShapeData")tree=(int)U(at)+16;}
+        Check(tree>=0,"Missing emitted collision tree");return(data,tree,fix);
     }
 }

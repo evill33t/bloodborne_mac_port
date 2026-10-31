@@ -56,23 +56,32 @@ internal static class MapCollision {
         var sharedMap=shared.Select((v,i)=>(v,i)).ToDictionary(p=>p.v,p=>checked((ushort)p.i));var sharedIndices=new List<ushort>();
         var domainMin=vertices.SelectMany(v=>v).Aggregate(Vector3.Min)-new Vector3(.001f);var domainMax=vertices.SelectMany(v=>v).Aggregate(Vector3.Max)+new Vector3(.001f);
         ulong SharedVertex(Vector3 v){v=(v-domainMin)/(domainMax-domainMin);return (ulong)Math.Clamp((long)MathF.Round(v.X*2097151),0,2097151)|((ulong)Math.Clamp((long)MathF.Round(v.Y*2097151),0,2097151)<<21)|((ulong)Math.Clamp((long)MathF.Round(v.Z*4194303),0,4194303)<<42);}
+        var sharedWords=shared.Select(SharedVertex).ToArray();
+        var sharedScale=(domainMax-domainMin)/new Vector3(2097151,2097151,4194303);
+        Vector3 SharedPosition(ulong word)=>new Vector3(word&2097151,(word>>21)&2097151,word>>42)*sharedScale+domainMin;
         for(int s=0;s<groups.Count;++s){var group=groups[s];var all=group.SelectMany(t=>new[]{t.A,t.B,t.C}).ToArray();var lo=all.Aggregate(Vector3.Min)-new Vector3(.001f);var hi=all.Aggregate(Vector3.Max)+new Vector3(.001f);var scale=(hi-lo)/new Vector3(2047,2047,1023);int first=packed.Count,prim=primitives.Count/4;
             uint Q(Vector3 p){p=(p-lo)/scale;return (uint)Math.Clamp((int)MathF.Round(p.X),0,2047)|((uint)Math.Clamp((int)MathF.Round(p.Y),0,2047)<<11)|((uint)Math.Clamp((int)MathF.Round(p.Z),0,1023)<<22);}
             var indices=new Dictionary<Vector3,byte>();foreach(var p in vertices[s].Where(p=>!sharedMap.ContainsKey(p))){indices.Add(p,checked((byte)indices.Count));packed.Add(Q(p));}
             int packedCount=indices.Count,sharedBase=sharedIndices.Count;foreach(var p in vertices[s].Where(sharedMap.ContainsKey)){indices.Add(p,checked((byte)indices.Count));sharedIndices.Add(sharedMap[p]);}
             int sharedCount=indices.Count-packedCount;
-            var leaves=new List<Node>();for(int i=0;i<group.Count;++i){var t=group[i];leaves.Add(new(){Min=Vector3.Min(t.A,Vector3.Min(t.B,t.C))-new Vector3(.001f),Max=Vector3.Max(t.A,Vector3.Max(t.B,t.C))+new Vector3(.001f),Index=i});primitives.AddRange(new[]{indices[t.A],indices[t.B],indices[t.C],indices[t.C]});
+            // Bounds must enclose the serialized vertices, which can move by
+            // half a packing step (well beyond 1mm on long, shallow triangles).
+            // Keep both packing grids unchanged; only the BVH domains change.
+            Vector3 PackedPosition(uint word)=>new Vector3(word&2047,(word>>11)&2047,word>>22)*scale+lo;
+            var positions=indices.ToDictionary(p=>p.Key,p=>p.Value<packedCount?PackedPosition(packed[first+p.Value]):SharedPosition(sharedWords[sharedMap[p.Key]]));
+            var boundsLo=Vector3.Max(domainMin,Vector3.Min(lo,positions.Values.Aggregate(Vector3.Min)-new Vector3(.001f)));var boundsHi=Vector3.Min(domainMax,Vector3.Max(hi,positions.Values.Aggregate(Vector3.Max)+new Vector3(.001f)));
+            var leaves=new List<Node>();for(int i=0;i<group.Count;++i){var t=group[i];var a=positions[t.A];var b=positions[t.B];var c=positions[t.C];leaves.Add(new(){Min=Vector3.Max(boundsLo,Vector3.Min(a,Vector3.Min(b,c))-new Vector3(.001f)),Max=Vector3.Min(boundsHi,Vector3.Max(a,Vector3.Max(b,c))+new Vector3(.001f)),Index=i});primitives.AddRange(new[]{indices[t.A],indices[t.B],indices[t.C],indices[t.C]});
                 // Native keys reserve bit zero for the second triangle of a
                 // quad. Our primitives have only their first triangle (C=D).
                 keys.Add((uint)((s<<8)|(i<<1)));}
-            var sectionTree=Tree(leaves);sectionTree.Min=lo;sectionTree.Max=hi;var codec=Codec(sectionTree,false);int nodeAt=Append(codec);
-            sectionBytes.Add(Make(b=>{b.Write(0UL);b.Write(codec.Length/4);b.Write((uint)(codec.Length/4)|0x80000000u);Vec(b,lo);Vec(b,hi);b.Write(lo.X);b.Write(lo.Y);b.Write(lo.Z);b.Write(scale.X);b.Write(scale.Y);b.Write(scale.Z);b.Write(first);b.Write((uint)((sharedBase<<8)|packedCount));b.Write((uint)((prim<<8)|group.Count));b.Write((uint)((s<<8)|1));b.Write((byte)packedCount);b.Write((byte)sharedCount);b.Write((ushort)0);b.Write(0u);}));
-            sections.Add(new(){Min=lo,Max=hi,Index=s});sectionNodeOffsets.Add(nodeAt);
+            var sectionTree=Tree(leaves);sectionTree.Min=boundsLo;sectionTree.Max=boundsHi;var codec=Codec(sectionTree,false);int nodeAt=Append(codec);
+            sectionBytes.Add(Make(b=>{b.Write(0UL);b.Write(codec.Length/4);b.Write((uint)(codec.Length/4)|0x80000000u);Vec(b,boundsLo);Vec(b,boundsHi);b.Write(lo.X);b.Write(lo.Y);b.Write(lo.Z);b.Write(scale.X);b.Write(scale.Y);b.Write(scale.Z);b.Write(first);b.Write((uint)((sharedBase<<8)|packedCount));b.Write((uint)((prim<<8)|group.Count));b.Write((uint)((s<<8)|1));b.Write((byte)packedCount);b.Write((byte)sharedCount);b.Write((ushort)0);b.Write(0u);}));
+            sections.Add(new(){Min=boundsLo,Max=boundsHi,Index=s});sectionNodeOffsets.Add(nodeAt);
         }
-        var top=Tree(sections);var leafNodes=new Dictionary<int,int>();var topBytes=Codec(top,true,leafNodes);foreach(var (index,node) in leafNodes)BitConverter.GetBytes(checked((ushort)node)).CopyTo(sectionBytes[index],90);int topAt=Append(topBytes);Array(tree,topAt,topBytes.Length/5);At(tree+16,()=>{Vec(w,top.Min);Vec(w,top.Max);});
+        var top=Tree(sections);top.Min=domainMin;top.Max=domainMax;var leafNodes=new Dictionary<int,int>();var topBytes=Codec(top,true,leafNodes);foreach(var (index,node) in leafNodes)BitConverter.GetBytes(checked((ushort)node)).CopyTo(sectionBytes[index],90);int topAt=Append(topBytes);Array(tree,topAt,topBytes.Length/5);At(tree+16,()=>{Vec(w,domainMin);Vec(w,domainMax);});
         int bits=32-System.Numerics.BitOperations.LeadingZeroCount(keys.Max()+1);Int(tree+48,(uint)triangles.Count);Int(tree+52,(uint)bits);Int(tree+56,keys.Max());
         int sectionAt=Append(sectionBytes.SelectMany(b=>b).ToArray());Array(tree+64,sectionAt,groups.Count);for(int s=0;s<groups.Count;++s)fix.Add(sectionAt+s*96,sectionNodeOffsets[s]);
-        Array(tree+80,Append(primitives.ToArray()),primitives.Count/4);Array(tree+96,Append(Make(b=>{foreach(var p in sharedIndices)b.Write(p);})),sharedIndices.Count);Array(tree+112,Append(Make(b=>{foreach(var p in packed)b.Write(p);})),packed.Count);Array(tree+128,Append(Make(b=>{foreach(var p in shared)b.Write(SharedVertex(p));})),shared.Length);
+        Array(tree+80,Append(primitives.ToArray()),primitives.Count/4);Array(tree+96,Append(Make(b=>{foreach(var p in sharedIndices)b.Write(p);})),sharedIndices.Count);Array(tree+112,Append(Make(b=>{foreach(var p in packed)b.Write(p);})),packed.Count);Array(tree+128,Append(Make(b=>{foreach(var p in sharedWords)b.Write(p);})),shared.Length);
         var runs=Make(b=>{foreach(var group in groups){b.Write(ushort.MaxValue);b.Write((byte)0);b.Write((byte)group.Count);}});Array(tree+144,Append(runs),groups.Count);
         // Keep the native disabled SIMD sentinel nodes; queries use the complete binary BVH.
         // Clear old welding and bit masks indexed by the previous mesh's shape keys.
