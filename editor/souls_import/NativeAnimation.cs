@@ -30,7 +30,11 @@ internal static class NativeAnimation {
         void Range(int at,int count){if(at<0||count<0||at>bytes.Length-count)throw new InvalidDataException("Truncated native animation packfile");}
         uint U(int at){Range(at,4);return BitConverter.ToUInt32(bytes,at);}
         int I(int at)=>unchecked((int)U(at));
-        string Text(int at){Range(at,1);int end=System.Array.IndexOf(bytes,(byte)0,at,Math.Min(256,bytes.Length-at));if(end<at)throw new InvalidDataException("Invalid native animation string");return Encoding.UTF8.GetString(bytes,at,end-at);}
+        string Text(int at){Range(at,1);int end=System.Array.IndexOf(bytes,(byte)0,at,Math.Min(256,bytes.Length-at));if(end<at)throw new InvalidDataException("Invalid native animation string");// Retail skeletons also contain Shift-JIS node names (c3130's
+            // Eyelid + fullwidth space). Decode strictly before falling back;
+            // replacement characters would break exact FLVER/Havok name links.
+            try{return new UTF8Encoding(false,true).GetString(bytes,at,end-at);}
+            catch(DecoderFallbackException){Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);return Encoding.GetEncoding(932,EncoderFallback.ExceptionFallback,DecoderFallback.ExceptionFallback).GetString(bytes,at,end-at);}}
         internal int Object(string name)=>objects.TryGetValue(name,out int at)?at:throw new InvalidDataException("Missing native animation object: "+name);
         internal int Pointer(int offset)=>local.TryGetValue(offset,out int at)?at:throw new InvalidDataException("Missing native animation pointer");
         internal string String(int offset)=>Text(Data+Pointer(offset));
@@ -41,9 +45,9 @@ internal static class NativeAnimation {
             int count=Int(offset+8);if(count<0||count>limit)throw new InvalidDataException("Native animation array exceeds budget");
             int at=count==0?0:Pointer(offset);if(at<0||(long)at+(long)count*stride>Size)throw new InvalidDataException("Truncated native animation array");return(at,count);
         }
-        internal Matrix4x4 Transform(int at) {
+        internal Matrix4x4 Transform(int at,bool allowMirroredScale=false) {
             var p=new Vector3(Float(at),Float(at+4),Float(at+8));var q=new Quaternion(Float(at+16),Float(at+20),Float(at+24),Float(at+28));var s=new Vector3(Float(at+32),Float(at+36),Float(at+40));
-            if(Math.Abs(q.LengthSquared()-1)>.01f||s.X<=0||s.Y<=0||s.Z<=0)throw new InvalidDataException("Invalid native reference transform");
+            if(Math.Abs(q.LengthSquared()-1)>.01f||Math.Abs(s.X)<.000001f||Math.Abs(s.Y)<.000001f||Math.Abs(s.Z)<.000001f||!allowMirroredScale&&(s.X<0||s.Y<0||s.Z<0))throw new InvalidDataException("Invalid native reference transform");
             return Matrix4x4.CreateScale(s)*Matrix4x4.CreateFromQuaternion(Quaternion.Normalize(q))*Matrix4x4.CreateTranslation(p);
         }
     }
@@ -52,11 +56,11 @@ internal static class NativeAnimation {
         Matrix4x4 At(int i){if(i<0||i>=local.Count)throw new InvalidDataException("Invalid animation parent");if(state[i]==2)return output[i];if(state[i]==1)throw new InvalidDataException("Cyclic animation hierarchy");state[i]=1;output[i]=local[i]*(parents[i]<0?Matrix4x4.Identity:At(parents[i]));state[i]=2;return output[i];}
         for(int i=0;i<local.Count;i++)At(i);return output;
     }
-    internal static Rig Skeleton(byte[] bytes) {
+    internal static Rig Skeleton(byte[] bytes,bool allowMirroredScale=false) {
         var p=new Pack(bytes);int obj=p.Object("hkaSkeleton");var bones=p.Array(obj+40,16,256);var parents=p.Array(obj+24,2,256);var poses=p.Array(obj+56,48,256);
         if(bones.Count<1||bones.Count!=parents.Count||bones.Count!=poses.Count)throw new InvalidDataException("Native animation skeleton arrays disagree");
         var names=new string[bones.Count];var parent=new int[bones.Count];var local=new Matrix4x4[bones.Count];
-        for(int i=0;i<names.Length;i++){names[i]=p.String(bones.At+i*16);parent[i]=p.Short(parents.At+i*2);if(parent[i]<-1||parent[i]>=names.Length)throw new InvalidDataException("Invalid native animation parent");local[i]=p.Transform(poses.At+i*48);}
+        for(int i=0;i<names.Length;i++){names[i]=p.String(bones.At+i*16);parent[i]=p.Short(parents.At+i*2);if(parent[i]<-1||parent[i]>=names.Length)throw new InvalidDataException("Invalid native animation parent");local[i]=p.Transform(poses.At+i*48,allowMirroredScale);}
         if(names.Distinct(StringComparer.Ordinal).Count()!=names.Length)throw new InvalidDataException("Repeated native animation bone name");
         return new(p.String(obj+16),names,parent,local,Worlds(local,parent));
     }
@@ -65,7 +69,7 @@ internal static class NativeAnimation {
         var rig=Skeleton(skeleton);var sourceNames=clip.Bones.Select((b,i)=>(b.Name,i)).ToDictionary(p=>p.Name,p=>p.i,StringComparer.Ordinal);
         var targetNames=rig.Names.Select((n,i)=>(n,i)).ToDictionary(p=>p.n,p=>p.i,StringComparer.Ordinal);var map=Enumerable.Repeat(-1,rig.Names.Length).ToArray();
         foreach(var m in mappings.Where(m=>m.Direct))if(sourceNames.TryGetValue(m.Source,out int s)&&targetNames.TryGetValue(m.Target,out int t)) {
-            if(map[t]!=-1&&map[t]!=s)throw new InvalidDataException("Animation retarget maps two source bones to one target");map[t]=s;
+            if(map[t]!=-1&&map[t]!=s)throw new InvalidDataException("Animation retarget maps two source bones to one target: "+clip.Bones[map[t]].Name+" / "+m.Source+" -> "+m.Target);map[t]=s;
         }
         if(preserveSourceWorld) {
             if(map.Count(i=>i>=0)<19)throw new InvalidDataException("NPC pose has too few explicit skin mappings");

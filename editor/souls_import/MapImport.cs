@@ -73,10 +73,6 @@ internal static partial class Program {
             byte[]? ReadStaged(string relative){var p=Path.Combine(stage.FullName,"dvdroot_ps4",relative);return File.Exists(p)?File.ReadAllBytes(p):ReadNative(relative);}
             MapDestination.Seed(destination,ReadNative,Write);
             MapNavigation.Export? navigation=null;
-            if(destination.Additional) {
-                navigation=MapNavigation.Bake(profile.Id,map,target,sourceMap.ReadAsset,offset);
-                foreach(var (path,bytes) in navigation.Files)Write(path,bytes);
-            }
             if(target=="m24_00_00_00") {
                 var script=EMEVD.Read(ReadNative("event/"+baseMap+".emevd.dcx")??throw new FileNotFoundException("Native map script unavailable"));
                 script.Events.Clear();script.Events.Add(new EMEVD.Event(0));script.Events.Add(new EMEVD.Event(50));
@@ -242,6 +238,18 @@ internal static partial class Program {
                 Write(eventPath,MapQuestState.Initialize(availability.Script,sourceMap.ReadAsset("event/common.emevd.dcx")??throw new FileNotFoundException("Source initial quest states unavailable")));
                 dialogue=MapTalk.Export(msb,profile.Id,map,nativeRoot,definitions!,sourceMap.ReadAsset,MapQuestState.Flag,actors,Write,readNative:ReadStaged,nativeMap:baseMap);
             }
+            MapDeathBoundaries.Result? deathBoundaries=null;
+            if(profile.Id=="DS1R"&&legacyMap!=null&&sourceCollision!=null)
+                deathBoundaries=MapDeathBoundaries.Apply(profile.Id,legacyMap,sourceCollision,msb,ReadNative,targetMap:target);
+            if(destination.Additional) {
+                if(boundCollision==null||boundCollision.Count!=slots.Length)throw new InvalidDataException("Additional navigation requires source collision bindings");
+                // Native NVA row ordinals address this exact collision array,
+                // including records without source navigation and fall sensors.
+                var sourceByModel=slots.Select((slot,i)=>(slot.ModelName,Source:boundCollision[i].SourceName)).ToDictionary(p=>p.ModelName,p=>p.Source,StringComparer.Ordinal);
+                var bindings=msb.Parts.Collisions.Select(c=>new MapNavigation.CollisionBinding(c.Name,sourceByModel.GetValueOrDefault(c.ModelName))).ToArray();
+                navigation=MapNavigation.Bake(profile.Id,map,target,sourceMap.ReadAsset,offset,bindings);
+                foreach(var (path,bytes) in navigation.Files)Write(path,bytes);
+            }
             foreach(var prefix in new[]{"h","l"}){
                 var groups=boundCollision==null?MapCollision.Partition(prefix=="h"?highTriangles:lowTriangles,slots.Length):boundCollision.Select(c=>(prefix=="h"?c.High:c.Low).ToList()).ToList();
                 var archiveMap=destination.Additional?destination.TemplateBase:baseMap;
@@ -252,6 +260,7 @@ internal static partial class Program {
                 using var templates=new BXF4Reader(File.ReadAllBytes(reference+"bhd"),reference+"bdt");
                 var template=templates.ReadFile(templates.Files.Single(f=>f.Name.EndsWith("000010.hkx.dcx",StringComparison.Ordinal))).ToArray();const string templateName="000010";
                 var converted=new Dictionary<string,byte[]>();for(int i=0;i<slots.Length;++i){var number=slots[i].ModelName[1..];var hkx=MapCollision.Bake(template,groups[i]);hkx=MapCollision.RenameBody(hkx,prefix+templateName,prefix+number);converted[number]=DCX.Compress(hkx,DCX.Type.DCX_DFLT_10000_44_9);}
+                if(deathBoundaries!=null)foreach(var deathBody in deathBoundaries.Bodies)converted.Add(deathBody.Model[1..],prefix=="h"?deathBody.High:deathBody.Low);
                 void Replace(BXF4 binder,bool add){
                     var done=new HashSet<string>();foreach(var file in binder.Files){var number=Leaf(file.Name).Split('_').Last().Split('.')[0];if(converted.TryGetValue(number,out var bytes)){file.Bytes=bytes;done.Add(number);}else file.Bytes=DCX.Compress(MapCollision.Translate(file.Bytes.ToArray(),new Vector3(0,-10000,0)),DCX.Type.DCX_DFLT_10000_44_9);}
                     if(add)foreach(var (number,bytes) in converted)if(!done.Contains(number))binder.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,binder.Files.Select(f=>f.ID).DefaultIfEmpty(-1).Max()+1,baseMap+"\\"+prefix+baseMap[1..]+"_"+number+".hkx.dcx",bytes));
@@ -265,9 +274,13 @@ internal static partial class Program {
             foreach(var point in msb.Events.GetEntries().OfType<MSBB.Event.SpawnPoint>()){var region=msb.Regions.GetEntries().Single(r=>r.Name==point.SpawnPointName);region.Position=spawn;region.Rotation=Vector3.Zero;}
             var textures=MapDestination.TextureArchive(destination,ReadNative);int nextTexture=textures.Files.Select(f=>f.ID).DefaultIfEmpty(-1).Max()+1;foreach(var texture in convertedTextures.Values){var tpf=new TPF{Platform=TPF.TPFPlatform.PS4,Encoding=1,Flag2=3};tpf.Textures.Add(texture);var encoded=tpf.Write(DCX.Type.DCX_DFLT_10000_44_9);var existing=textures.Files.SingleOrDefault(f=>Leaf(f.Name)==texture.Name+".tpf.dcx");if(existing==null)textures.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,nextTexture++,texture.Name+".tpf.dcx",encoded));else if(!existing.Bytes.Span.SequenceEqual(encoded))throw new InvalidDataException("Shared imported texture conflicts: "+texture.Name);}textures.Write(out var texHeader,out var texData);Write($"map/{area}/{area}_0003.tpfbhd",texHeader);Write($"map/{area}/{area}_0003.tpfbdt",texData);
             var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadStaged);
+            // Fall sensors retain retail metadata; they must not become area
+            // banner/lighting floors merely because the area-name stage visits
+            // every collision record.
+            if(deathBoundaries!=null)foreach(var body in deathBoundaries.Bodies)body.Part.MapNameID=-1;
             var destinations=values.TryGetValue("--connection-targets",out var connectionsPath)?JsonSerializer.Deserialize<Dictionary<string,string>>(File.ReadAllText(connectionsPath))!:new Dictionary<string,string>();
             MapRuntimeLinks.Result? runtimeLinks=null;
-            if(legacyMap!=null&&boundCollision!=null)runtimeLinks=MapRuntimeLinks.Apply(msb,legacyMap,boundCollision,slots,destinations);
+            if(legacyMap!=null&&boundCollision!=null)runtimeLinks=MapRuntimeLinks.Apply(msb,legacyMap,boundCollision,slots,destinations,approachSourceMap:destination.Additional?map:null);
             else msb.Parts.ConnectCollisions.Clear();
             MapDestination.Finish(msb,destination,ReadStaged,Write);
             if(destination.Additional)MapDestination.VerifyNativeEntityReservations(nativeRoot,msb);
@@ -284,6 +297,7 @@ internal static partial class Program {
                 if(legacyMap!=null&&boundCollision!=null)MapRuntimeLinks.Apply(variant,legacyMap,boundCollision,MapRuntimeLinks.MirrorCollisionBindings(variant,slots),destinations);
                 else variant.Parts.ConnectCollisions.Clear();
                 if(worldState!=null)MapWorldState.Mirror(variant,worldState);
+                if(deathBoundaries!=null)MapDeathBoundaries.Mirror(variant,deathBoundaries);
                 Write("map/MapStudio/"+Path.GetFileName(variantPath),variant.Write(DCX.Type.DCX_DFLT_10000_44_9));
             }
             var breakableTargets=breakables?.Objects.ToDictionary(p=>p.Name,StringComparer.Ordinal);
@@ -306,7 +320,7 @@ internal static partial class Program {
             var report=new{source=profile.Id,map,target,destination=destination.Additional?"additional":"replacement",templateMap=destination.TemplateMap,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
                 placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot},
                 worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=worldState==null?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,npcAvailability},dialogue,
-                collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",navigation=navigation?.Report,
+                collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",navigation=navigation?.Report,deathBoundaries=deathBoundaries?.Report,
                 collisionResidency=destination.Additional?"Collision Draw groups retain both physical layers in loaded imported blocks. Original Display/Backread and actor/scenery groups, enable flags and geometry are preserved. Connected-scene residency is broader; multi-area memory/culling behavior remains approximate.":"Original source collision groups retained",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
                 breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,posedCorpses,characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,

@@ -7,7 +7,7 @@ using System.Text;
 // Encode sampled source motion as clamped degree-one splines using the retail
 // THREECOMP40 quaternion and sixteen-bit translation/scale quantization profile.
 internal static class NativeSpline {
-    internal static byte[] Encode(IReadOnlyList<Matrix4x4> samples,int trackCount,int frameCount,float frameDuration,string skeletonName,IReadOnlyList<string> trackNames) {
+    internal static byte[] Encode(IReadOnlyList<Matrix4x4> samples,int trackCount,int frameCount,float frameDuration,string skeletonName,IReadOnlyList<string> trackNames,bool allowMirroredScale=false) {
         if(trackCount is <1 or >256||frameCount is <2 or >256||samples.Count!=trackCount*frameCount||
             !float.IsFinite(frameDuration)||frameDuration is <.00001f or >1||string.IsNullOrEmpty(skeletonName)||skeletonName.Length>128||skeletonName.Any(char.IsControl)||
             trackNames.Count!=trackCount||trackNames.Any(n=>string.IsNullOrEmpty(n)||n.Length>256||n.Any(char.IsControl))||trackNames.Distinct(StringComparer.Ordinal).Count()!=trackCount)
@@ -21,7 +21,7 @@ internal static class NativeSpline {
             for(int frame=0;frame<frameCount;++frame) {
                 var m=samples[frame*trackCount+track];
                 if(!float.IsFinite(m.M14)||!float.IsFinite(m.M24)||!float.IsFinite(m.M34)||!float.IsFinite(m.M44)||Math.Abs(m.M14)>.000001f||Math.Abs(m.M24)>.000001f||Math.Abs(m.M34)>.000001f||Math.Abs(m.M44-1)>.000001f||
-                    !Matrix4x4.Decompose(m,out var s,out var q,out var p)||!Finite(p)||!Finite(s)||s.X<=0||s.Y<=0||s.Z<=0||!float.IsFinite(q.LengthSquared())||Math.Abs(q.LengthSquared()-1)>.01f)
+                    !Matrix4x4.Decompose(m,out var s,out var q,out var p)||!Finite(p)||!Finite(s)||Math.Abs(s.X)<.000001f||Math.Abs(s.Y)<.000001f||Math.Abs(s.Z)<.000001f||!allowMirroredScale&&(s.X<0||s.Y<0||s.Z<0)||!float.IsFinite(q.LengthSquared())||Math.Abs(q.LengthSquared()-1)>.01f)
                     throw new InvalidDataException("Native spline contains an unrepresentable sampled transform");
                 q=Quaternion.Normalize(q);if(frame>0&&Quaternion.Dot(rotations[track][frame-1],q)<0)q=-q;
                 positions[track][frame]=p;rotations[track][frame]=q;scales[track][frame]=s;

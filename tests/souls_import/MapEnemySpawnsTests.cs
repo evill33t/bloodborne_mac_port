@@ -60,7 +60,7 @@ static class MapEnemySpawnsTests {
             Check(goals.Goals.Any(g=>g.ID==261010)&&goals.Goals.Any(g=>g.ID==261000),"Imported rig lacks native logic/battle goal registration");
             Check(MapNativeAi.Merge(result.Files[aiPath],donorAi).SequenceEqual(result.Files[aiPath]),"Native AI composition is not idempotent");
             Check(afterAi.Files.Count(f=>Leaf(f.Name).StartsWith("2610")&&Leaf(f.Name).EndsWith(".lua"))==6,"Native rig AI companion scripts were omitted");
-            Check(result.Spawns.Count==(id=="m10_02_00_00"?19:86),"Enemy selection changed or conditional populations were included");
+            Check(result.Spawns.Count==(id=="m10_02_00_00"?19:88),"Enemy selection changed or conditional populations were included");
             Check(result.Skipped.Count+result.Spawns.Count==source.Parts.Enemies.Count,"Source actors were not completely accounted for");
             Check(result.Spawns.All(p=>p.SourceInitAnimID==source.Parts.Enemies.Single(s=>s.Name==p.SourceName).InitAnimID&&
                 (p.SourceInitAnimID==-1||id=="m10_02_00_00"&&p.SourceInitAnimID==9001&&p.SourceModel is "c2900" or "c2910")),"An unadapted hanging/special-pose actor was spawned standing");
@@ -95,11 +95,19 @@ static class MapEnemySpawnsTests {
             for(int i=0;i<oldNpcs.Rows.Count;i++)Check(npcs.Rows[i].ID==oldNpcs.Rows[i].ID&&MapCharacters.Payload(npcs.Rows[i]).SequenceEqual(MapCharacters.Payload(oldNpcs.Rows[i])),"Existing composed NPC row changed");
             foreach(var group in result.Spawns.GroupBy(p=>p.TargetModel)) {
                 Check(allModels.Add(group.Key),"Two maps reuse an imported character namespace");
+                if(group.First().NativeAdapter!=null) {
+                    Check(group.All(p=>p.SourceEquipmentMounts==null),"Ordinary equipment adapter affected a Parish special enemy");
+                    foreach(var spawn in group){var actor=map.Parts.Enemies.Single(a=>a.EntityID==spawn.EntityID);var sourceActor=source.Parts.Enemies.Single(a=>a.Name==spawn.SourceName);Check(actor.Position==sourceActor.Position+offset&&actor.Rotation==sourceActor.Rotation&&actor.Scale==sourceActor.Scale&&spawn.ProportionScale==1&&spawn.DirectWeightShare>.999999,"Parish special actor lost its source transform/skin");}
+                    continue; // Full source-rig/channel/AI assertions have their own installed-asset fixture.
+                }
                 bool hasTorch=group.First().SourceNPCParamID==250001;
                 Check(group.All(p=>p.HasSourceTorch==hasTorch),"Source torch loadout was misclassified");
                 if(hasTorch)torchActors+=group.Count();else nonTorchActors+=group.Count();
                 var animation=BND4.Read(result.Files["chr/"+group.Key+".anibnd.dcx"]);
                 bool skeletonModel=group.First().SourceModel is "c2900" or "c2910";
+                Check(skeletonModel?group.All(p=>p.SourceEquipmentMounts==null):group.All(p=>p.SourceEquipmentMounts is {} e&&e.SourceModel==p.SourceModel&&e.Mounts.Count>0),"Source idle equipment report is missing or affected the skeleton path");
+                if(group.First().SourceModel=="c2560")Check(group.All(p=>p.SourceClothPose is {Bodies:57,Constraints:119} c&&c.ChangedVertices>0&&c.MaximumPivotError<.005f&&c.MaximumPenetration<.001f),"Balder Knight source capsule-cloth pose was not integrated");
+                else Check(group.All(p=>p.SourceClothPose==null),"Source cloth adapter affected another enemy model");
                 var proportions=skeletonModel?null:EnemyProportions.Create(MapCharacters.Authored(Read,group.First().SourceModel).Model,donorVisual,donorAnimation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
                 Check(skeletonModel||group.All(p=>p.ProportionScale==1),"Ordinary hollow proportions still depend on MSB actor scale");
                 var wakeVariants=(from variant in Enumerable.Range(1,3) from slot in new[]{7004,7005} select (Variant:variant,Slot:slot,ID:(long)variant*1000000+slot)).ToArray();
@@ -223,6 +231,6 @@ static class MapEnemySpawnsTests {
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
         Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data; skeleton basic attacks also omit eight donor superarmor windows");
-        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons), source masks/shared textures, source-length hollow rigs/animations, preserved skeleton path, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon), source masks/shared textures, source-length hollow rigs/animations, preserved skeleton path, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

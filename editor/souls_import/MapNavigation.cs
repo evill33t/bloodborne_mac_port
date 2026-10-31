@@ -9,21 +9,49 @@ using SoulsFormats;
 // SprjWorldBlockNvm's unload loop indexes count-1 without handling count zero.
 // See corridor-fixes/native-streaming for the shipped-binary evidence.
 internal static class MapNavigation {
-    internal record MeshReport(string SourcePart,string SourceModel,int ModelID,int NameID,int Vertices,int SourceFaces,int Faces,int OmittedDegenerateFaces,int BlockedFaces,int SourceEntities,int DisconnectedSourceEdges);
-    internal record Report(string SourceMap,string TargetMap,IReadOnlyList<MeshReport> Meshes,IReadOnlyList<string> Limits);
+    internal record CollisionBinding(string TargetName,string? SourceName);
+    internal record MeshReport(string SourcePart,string SourceModel,int ModelID,int NameID,int Vertices,int SourceFaces,int Faces,int OmittedDegenerateFaces,int BlockedFaces,int SourceEntities,int DisconnectedSourceEdges,int CollisionIndex,string TargetCollision);
+    internal record EmptyReport(int CollisionIndex,string TargetCollision,string? SourceCollision,string Reason);
+    internal record Report(string SourceMap,string TargetMap,IReadOnlyList<MeshReport> Meshes,IReadOnlyList<EmptyReport> EmptyEntries,IReadOnlyList<string> UnmappedSourceNavmeshes,IReadOnlyList<string> Limits);
     internal record Export(IReadOnlyDictionary<string,byte[]> Files,Report Report);
     const NVM.TriangleFlags Unsupported=NVM.TriangleFlags.INSIDE_WALL|NVM.TriangleFlags.BLOCK_GATE|NVM.TriangleFlags.CLOSED_DOOR|NVM.TriangleFlags.DOOR|NVM.TriangleFlags.HOLE|NVM.TriangleFlags.LADDER|NVM.TriangleFlags.FLOOR_TO_WALL|NVM.TriangleFlags.DEGENERATE|NVM.TriangleFlags.WALL|NVM.TriangleFlags.BLOCK|NVM.TriangleFlags.GATE|NVM.TriangleFlags.DISABLE|NVM.TriangleFlags.EVENT;
 
-    internal static Export Bake(string profile,string map,string target,Func<string,byte[]?> readSource,Vector3 offset) {
+    internal static Export Bake(string profile,string map,string target,Func<string,byte[]?> readSource,Vector3 offset,IReadOnlyList<CollisionBinding> bindings) {
         if(profile!="DS1R")throw new NotSupportedException("Source navigation conversion currently supports DS1 Remastered only");
         if(!Regex.IsMatch(map,@"^m\d{2}_\d{2}_\d{2}_\d{2}$")||!Regex.IsMatch(target,@"^m\d{2}_\d{2}_\d{2}_\d{2}$")||!Finite(offset))throw new InvalidDataException("Invalid navigation map/frame");
+        if(bindings.Count is <1 or >512||bindings.Any(b=>b==null||string.IsNullOrWhiteSpace(b.TargetName)||b.SourceName!=null&&string.IsNullOrWhiteSpace(b.SourceName))||bindings.Select(b=>b.TargetName).Distinct(StringComparer.Ordinal).Count()!=bindings.Count)throw new InvalidDataException("Navigation requires a unique ordered destination collision binding for every MSB collision");
         var msb=MSB1.Read(readSource($"map/MapStudio/{map}.msb")??readSource($"map/MapStudio/{map}.msb.dcx")??throw new FileNotFoundException("Source navigation MSB unavailable"));
         if(msb.Parts.Navmeshes.Count is <1 or >512)throw new InvalidDataException("Navigation requires 1..512 source placements per map");
+        var collisions=msb.Parts.Collisions.ToDictionary(p=>p.Name,StringComparer.Ordinal);
+        if(bindings.Any(b=>b.SourceName!=null&&!collisions.ContainsKey(b.SourceName)))throw new InvalidDataException("Navigation binding references an unknown source collision");
+        var navParts=msb.Parts.Navmeshes.ToDictionary(p=>p.Name,StringComparer.Ordinal);var used=new HashSet<string>(StringComparer.Ordinal);
         var source=BND3.Read(readSource($"map/{map}/{map}.nvmbnd.dcx")??throw new FileNotFoundException("Source NVM binder unavailable"));
         var members=source.Files.ToDictionary(f=>Path.GetFileName(f.Name.Replace('\\','/')),StringComparer.OrdinalIgnoreCase);
-        var binder=new BND4{Version="07D7R6"};var nva=new NVA{Version=NVA.NVAVersion.DarkSouls3,SectionCount=9,NavmeshInfoEntries=new(3)};var reports=new List<MeshReport>();
+        var binder=new BND4{Version="07D7R6"};var nva=new NVA{Version=NVA.NVAVersion.DarkSouls3,SectionCount=9,NavmeshInfoEntries=new(3)};var reports=new List<MeshReport>();var empty=new List<EmptyReport>();
         int code=int.Parse(target.Substring(1,2))*100+int.Parse(target.Substring(4,2));
-        foreach(var part in msb.Parts.Navmeshes) {
+        for(int model=0;model<bindings.Count;model++) {
+            var binding=bindings[model];int name=checked(code*100000+model*10);
+            // Native 1e254ec passes the NVA ordinal to 1e1f080 (+12c).
+            // 1556756..6793 then indexes WorldHit collisions with that ordinal.
+            // A compact list silently applies another floor's display mask.
+            MSB1.Part.Navmesh? part=null;
+            if(binding.SourceName!=null) {
+                navParts.TryGetValue("n"+binding.SourceName[1..],out part);
+                if(part==null) {
+                    var collision=collisions[binding.SourceName];string? paired=collision.ModelName is {Length:>1}?"n"+collision.ModelName[1..]:null;
+                    var candidates=navParts.Values.Where(p=>p.ModelName==paired&&p.Position==collision.Position&&p.Rotation==collision.Rotation&&p.Scale==collision.Scale).ToArray();
+                    if(candidates.Length>1)throw new InvalidDataException("Ambiguous source navmesh/collision placement: "+binding.SourceName);
+                    part=candidates.SingleOrDefault();
+                }
+            }
+            if(part==null) {
+                var emptyRoot=Empty();byte[] emptyBytes;using(var stream=new MemoryStream()){new PackFileSerializer().Serialize(emptyRoot,new BinaryWriterEx(false,stream));emptyBytes=stream.ToArray();}emptyBytes[18]=1;
+                var emptyMesh=ReadMesh(emptyBytes);if(emptyMesh.m_faces.Count!=0||emptyMesh.m_edges.Count!=0||emptyMesh.m_vertices.Count!=0)throw new InvalidDataException("Empty navigation acquired geometry");
+                binder.Files.Add(new(Binder.FileFlags.Flag1,10000+model,$@"N:\SPRJ\data\INTERROOT_ps4\map\{target}\navimesh\bind6\n{target[1..]}_{model:D6}.hkx",emptyBytes));
+                nva.NavmeshInfoEntries.Add(new(){NameID=name,ModelID=model,Position=Vector3.Zero,Rotation=Vector3.Zero,Scale=Vector3.One,FaceDataIndex=nva.FaceDataEntries.Count,FaceCount=0,Unk4C=true});
+                empty.Add(new(model,binding.TargetName,binding.SourceName,binding.SourceName==null?"No source collision navigation binding":"Source collision has no authored paired navmesh"));continue;
+            }
+            used.Add(part.Name);
             if(part.ModelName==null||!Regex.IsMatch(part.ModelName,@"^n\d{4}B\d$"))throw new InvalidDataException("Unsupported source navigation model: "+part.ModelName);
             string file=part.ModelName+"A"+map.Substring(1,2)+".nvm";
             if(!members.TryGetValue(file,out var member))throw new FileNotFoundException("Source navmesh unavailable: "+file);
@@ -32,7 +60,6 @@ internal static class MapNavigation {
             var nvm=NVM.Read(raw);var rot=part.Rotation*(MathF.PI/180);
             if(!Finite(part.Position)||!Finite(rot)||!Finite(part.Scale)||part.Scale.X<=0||part.Scale.Y<=0||part.Scale.Z<=0)throw new InvalidDataException("Invalid navigation placement transform");
             var transform=Matrix4x4.CreateScale(part.Scale)*Matrix4x4.CreateRotationX(rot.X)*Matrix4x4.CreateRotationZ(rot.Z)*Matrix4x4.CreateRotationY(rot.Y)*Matrix4x4.CreateTranslation(part.Position+offset);
-            int model=reports.Count,name=checked(code*100000+model*10);
             var (root,faces,blocked,omitted,disconnected)=Build(nvm,transform);
             var mesh=(hkaiNavMesh)root.m_namedVariants[0].m_variant;
             byte[] bytes;using(var stream=new MemoryStream()){new PackFileSerializer().Serialize(root,new BinaryWriterEx(false,stream));bytes=stream.ToArray();}
@@ -45,10 +72,20 @@ internal static class MapNavigation {
             binder.Files.Add(new(Binder.FileFlags.Flag1,10000+model,memberName,bytes));
             nva.NavmeshInfoEntries.Add(new(){NameID=name,ModelID=model,Position=Vector3.Zero,Rotation=Vector3.Zero,Scale=Vector3.One,FaceDataIndex=nva.FaceDataEntries.Count,FaceCount=faces});
             for(int i=0;i<faces;i++)nva.FaceDataEntries.Add(new());
-            reports.Add(new(part.Name,part.ModelName,model,name,mesh.m_vertices.Count,nvm.Triangles.Count,faces,omitted,blocked,nvm.Entities.Count,disconnected));
+            reports.Add(new(part.Name,part.ModelName,model,name,mesh.m_vertices.Count,nvm.Triangles.Count,faces,omitted,blocked,nvm.Entities.Count,disconnected,model,binding.TargetName));
         }
+        if(reports.Count==0)throw new InvalidDataException("No source navigation is bound to a destination collision");
         var files=new Dictionary<string,byte[]>(StringComparer.Ordinal){[$"map/{target}/{target}.nva.dcx"]=nva.Write(DCX.Type.DCX_DFLT_10000_44_9),[$"map/{target}/{target}.nvmhktbnd.dcx"]=binder.Write(DCX.Type.DCX_DFLT_10000_44_9)};
-        return new(files,new(map,target,reports,["Within-mesh source adjacency only; source MCG/MCP cross-mesh and cross-map navigation connections are not converted.","Source gates, doors, ladders, event-controlled faces and disabled/wall/hole faces are conservatively blocked; their state machines and NVM entities are not ported.","Degenerate source triangles are omitted; source portals whose authored endpoints differ are disconnected and counted as directed edges. Native graph nodes correspond to individual source faces; no paths are fabricated between disconnected islands.","Source NvmGroups, dynamic obstacles, user edges and navmesh erosion/agent-size compatibility are not converted; native erosionRadius remains zero for already-authored source geometry."]));
+        return new(files,new(map,target,reports,empty,navParts.Keys.Where(n=>!used.Contains(n)).Order(StringComparer.Ordinal).ToArray(),["NVA entries retain exact destination MSB collision order. Collisions without authored navigation use retail-compatible zero-face mesh/graph entries; no walkable geometry is invented.","Within-mesh source adjacency only; source MCG/MCP cross-mesh and cross-map navigation connections are not converted.","Source gates, doors, ladders, event-controlled faces and disabled/wall/hole faces are conservatively blocked; their state machines and NVM entities are not ported.","Degenerate source triangles are omitted; source portals whose authored endpoints differ are disconnected and counted as directed edges. Native graph nodes correspond to individual source faces; no paths are fabricated between disconnected islands.","Source NvmGroups, dynamic obstacles, user edges and navmesh erosion/agent-size compatibility are not converted; native erosionRadius remains zero for already-authored source geometry."]));
+    }
+
+    static hkRootLevelContainer Empty() {
+        // Retail m24_01 model147 and m21 model7000 contain only these two
+        // variants, zero geometry and no AABB tree. An empty entry must never
+        // contain a borrowed retail floor or a fabricated triangle.
+        var mesh=new hkaiNavMesh{m_faces=[],m_edges=[],m_vertices=[],m_streamingSets=[],m_faceData=[],m_edgeData=[],m_faceDataStriding=1,m_edgeDataStriding=1,m_aabb=new()};
+        var graph=new hkaiDirectedGraphExplicitCost{m_positions=[],m_nodes=[],m_edges=[],m_nodeData=[],m_edgeData=[],m_streamingSets=[]};
+        return new(){m_namedVariants=[new(){m_name="hkaiNavMesh",m_className="hkaiNavMesh",m_variant=mesh},new(){m_name="hkaiDirectedGraphExplicitCost",m_className="hkaiDirectedGraphExplicitCost",m_variant=graph}]};
     }
 
     internal static hkaiNavMesh ReadMesh(byte[] bytes) {
@@ -73,6 +110,11 @@ internal static class MapNavigation {
         if(names<0||data<0||local<0||global<local||virt<global||end<virt||data>bytes.Length-end)throw new InvalidDataException("Invalid navigation fixup ranges");
         var classes=new Dictionary<int,string>();
         for(int p=data+virt;p<=data+end-12;p+=12)if(U(p)!=-1){if(U(p+4)!=0)throw new InvalidDataException("Invalid navigation class section");classes.Add(U(p),Text(checked(names+U(p+8))));}
+        if(!classes.ContainsValue("hkcdStaticAabbTree")) {
+            int mesh=classes.Single(p=>p.Value=="hkaiNavMesh").Key;
+            if(classes.Count!=3||!classes.ContainsValue("hkRootLevelContainer")||!classes.ContainsValue("hkaiDirectedGraphExplicitCost")||U(data+mesh+24)!=0||U(data+mesh+40)!=0||U(data+mesh+56)!=0)throw new InvalidDataException("Missing navigation tree for nonempty mesh");
+            return;
+        }
         int tree=classes.Single(p=>p.Value=="hkcdStaticAabbTree").Key,storage=classes.Single(p=>p.Value=="hkcdStaticTreeDefaultTreeStorage6").Key,found=-1;
         for(int p=data+global;p<=data+virt-12;p+=12) {
             int at=U(p);if(at==-1)continue;

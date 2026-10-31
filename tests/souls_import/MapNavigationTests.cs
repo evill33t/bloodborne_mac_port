@@ -26,20 +26,36 @@ static class MapNavigationTests {
             var name=Encoding.ASCII.GetBytes(obj.GetType().Name+"\0");int pos=retailHkx.AsSpan().IndexOf(name);
             Check(pos>=5&&retailHkx[pos-1]==9&&BitConverter.ToUInt32(retailHkx,pos-5)==obj.Signature,"Serializer class signature differs from retail BB: "+obj.GetType().Name);
         }
+        foreach(var map in new[]{"m21_00_00_00","m24_01_00_00","m24_00_00_00","m24_02_00_00"}) {
+            var nva=NVA.Read(Read(Path.Combine(args[1],$"map/{map}/{map}.nva.dcx")));var scene=MSBB.Read(Read(Path.Combine(args[1],$"map/MapStudio/{map}.msb.dcx")));
+            Check(nva.NavmeshInfoEntries.Count==scene.Parts.Collisions.Count,"Retail NVA/collision ordinal contract changed");
+            for(int i=0;i<nva.NavmeshInfoEntries.Count;i++)Check(nva.NavmeshInfoEntries[i].ModelID==int.Parse(scene.Parts.Collisions[i].ModelName![1..]),"Retail NVA entry does not correspond to collision at same ordinal");
+        }
+        var retailEmpty=retail.Files.Single(f=>f.Name.EndsWith("_007000.hkx",StringComparison.Ordinal)).Bytes.ToArray();var er=Root(retailEmpty);var em=MapNavigation.ReadMesh(retailEmpty);
+        Check(er.m_namedVariants.Count==2&&em.m_faces.Count==0&&em.m_edges.Count==0&&em.m_vertices.Count==0&&!er.m_namedVariants.Any(v=>v.m_variant is hkcdStaticAabbTree),"Retail zero-face placeholder contract changed");
         Fixture();
         var offset=new Vector3(-143.8f,20.07f,164.63f);var reports=new List<object>();
         foreach(var (map,target) in new[]{("m10_02_00_00","m40_02_00_00"),("m10_01_00_00","m40_03_00_00")}) {
-            var export=MapNavigation.Bake("DS1R",map,target,Source,offset);
             var msb=MSB1.Read(Source($"map/MapStudio/{map}.msb")!);var originals=BND3.Read(Source($"map/{map}/{map}.nvmbnd.dcx")!);
+            // Deliberate gaps/reordering expose the old compact-NVA ordinal
+            // bug independently of the converter's model/name allocation.
+            var bindings=msb.Parts.Collisions.Where(c=>c.HitFilterID==8).Reverse().Select((c,i)=>new MapNavigation.CollisionBinding("owned_"+i,c.Name)).ToList();
+            bindings.Insert(1,new("gap-before-source",null));bindings.Add(new("sensor-without-nav",null));
+            var export=MapNavigation.Bake("DS1R",map,target,Source,offset,bindings);
             var binder=BND4.Read(export.Files[$"map/{target}/{target}.nvmhktbnd.dcx"]);var nva=NVA.Read(export.Files[$"map/{target}/{target}.nva.dcx"]);
             Check(export.Files.Count==2&&nva.Version==NVA.NVAVersion.DarkSouls3&&nva.SectionCount==9&&nva.NavmeshInfoEntries.Version==3,"Wrong native NVA package/schema");
-            Check(binder.Files.Count==msb.Parts.Navmeshes.Count&&nva.NavmeshInfoEntries.Count==binder.Files.Count&&binder.Files.Count>0,"Native streamable navmesh count differs from source placements");
+            Check(binder.Files.Count==bindings.Count&&nva.NavmeshInfoEntries.Count==bindings.Count&&export.Report.EmptyEntries.Count>=2,"NVA ordinal/collision correspondence lost empty records");
+            Check(export.Report.Meshes.All(m=>m.CollisionIndex==m.ModelID&&bindings[m.CollisionIndex].TargetName==m.TargetCollision&&"n"+msb.Parts.Collisions.Single(c=>c.Name==bindings[m.CollisionIndex].SourceName).ModelName![1..]==m.SourceModel),"Native NVA ordinal selects the wrong physical collision");
+            Check(export.Report.UnmappedSourceNavmeshes.Order().SequenceEqual(msb.Parts.Navmeshes.Select(p=>p.Name).Except(export.Report.Meshes.Select(m=>m.SourcePart)).Order()),"Unmapped authored navigation is not reported");
             int totalFaces=0,totalGraphEdges=0;
             for(int i=0;i<binder.Files.Count;i++) {
-                var part=msb.Parts.Navmeshes[i];var data=originals.Files.Single(f=>f.Name.Replace('\\','/').EndsWith('/'+part.ModelName+"A10.nvm",StringComparison.Ordinal)).Bytes.ToArray();var source=NVM.Read(data);
-                var raw=binder.Files[i].Bytes.ToArray();int treeFixup=NativeContract(raw);var rr=Root(raw);var mesh=rr.m_namedVariants.Select(v=>v.m_variant).OfType<hkaiNavMesh>().Single();var graph=rr.m_namedVariants.Select(v=>v.m_variant).OfType<hkaiDirectedGraphExplicitCost>().Single();var tree=rr.m_namedVariants.Select(v=>v.m_variant).OfType<hkcdStaticAabbTree>().Single().m_treePtr;
-                if(i==0){var broken=raw.ToArray();BitConverter.TryWriteBytes(broken.AsSpan(treeFixup,4),BitConverter.ToInt32(broken,treeFixup)+8);Reject(()=>Root(broken));}
-                var row=nva.NavmeshInfoEntries[i];Check(row.ModelID==i&&binder.Files[i].Name.EndsWith($"n{target[1..]}_{i:D6}.hkx",StringComparison.Ordinal),"NVA ModelID does not bind native member filename");
+                var row=nva.NavmeshInfoEntries[i];var raw=binder.Files[i].Bytes.ToArray();
+                Check(row.ModelID==i&&binder.Files[i].Name.EndsWith($"n{target[1..]}_{i:D6}.hkx",StringComparison.Ordinal),"NVA ModelID does not bind native member filename");
+                if(row.FaceCount==0){var emptyRoot=Root(raw);var emptyMesh=MapNavigation.ReadMesh(raw);Check(emptyMesh.m_faces.Count==0&&emptyMesh.m_edges.Count==0&&emptyMesh.m_vertices.Count==0&&emptyRoot.m_namedVariants.Count==2&&!emptyRoot.m_namedVariants.Any(v=>v.m_variant is hkcdStaticAabbTree),"Gap acquired phantom navigation geometry/tree");Check(export.Report.EmptyEntries.Single(e=>e.CollisionIndex==i).TargetCollision==bindings[i].TargetName&&row.FaceDataIndex==totalFaces,"Empty collision index/range lost");continue;}
+                var sourcePart=export.Report.Meshes.Single(m=>m.CollisionIndex==i).SourcePart;
+                var part=msb.Parts.Navmeshes.Single(p=>p.Name==sourcePart);var data=originals.Files.Single(f=>f.Name.Replace('\\','/').EndsWith('/'+part.ModelName+"A10.nvm",StringComparison.Ordinal)).Bytes.ToArray();var source=NVM.Read(data);
+                int treeFixup=NativeContract(raw);var rr=Root(raw);var mesh=rr.m_namedVariants.Select(v=>v.m_variant).OfType<hkaiNavMesh>().Single();var graph=rr.m_namedVariants.Select(v=>v.m_variant).OfType<hkaiDirectedGraphExplicitCost>().Single();var tree=rr.m_namedVariants.Select(v=>v.m_variant).OfType<hkcdStaticAabbTree>().Single().m_treePtr;
+                if(totalFaces==0){var broken=raw.ToArray();BitConverter.TryWriteBytes(broken.AsSpan(treeFixup,4),BitConverter.ToInt32(broken,treeFixup)+8);Reject(()=>Root(broken));}
                 Check(row.NameID==(int.Parse(target.Substring(1,2))*100+int.Parse(target.Substring(4,2)))*100000+i*10&&row.Position==Vector3.Zero&&row.Scale==Vector3.One&&row.Rotation==Vector3.Zero,"NVA frame/NameID changed");
                 Check(row.FaceDataIndex==totalFaces&&row.FaceCount==mesh.m_faces.Count,"NVA face data range does not match real mesh faces");
                 Check(row.ConnectedNavmeshIDs.Count==0&&row.GateNodes.Count==0&&nva.ConnectorEntries.Count==0,"Unconverted cross-mesh paths were fabricated");
@@ -59,10 +75,21 @@ static class MapNavigationTests {
             Check(nva.FaceDataEntries.Count==totalFaces,"Native NVA face data length mismatch");
             Check(NVA.Read(nva.Write()).NavmeshInfoEntries.Count==nva.NavmeshInfoEntries.Count,"Native NVA roundtrip changed entries");
             reports.Add(new{map,target,placements=binder.Files.Count,faces=totalFaces,graphEdges=totalGraphEdges,report=export.Report});
-            Console.WriteLine($"PASS: {map}: {binder.Files.Count} source placements, {totalFaces} native faces, {totalGraphEdges} source-adjacency graph edges");
+            Console.WriteLine($"PASS: {map}: {binder.Files.Count} collision-aligned entries ({export.Report.Meshes.Count} source meshes, {export.Report.EmptyEntries.Count} empty), {totalFaces} native faces, {totalGraphEdges} source-adjacency graph edges");
+            if(map=="m10_02_00_00") {
+                var alias=MSB1.Read(Source($"map/MapStudio/{map}.msb")!);var nav=alias.Parts.Navmeshes[0];var physical=alias.Parts.Collisions.Single(c=>"n"+c.ModelName![1..]==nav.ModelName);physical.Position=nav.Position;physical.Rotation=nav.Rotation;physical.Scale=nav.Scale;string collision=physical.Name;nav.Name="authored-nav-alias";
+                byte[]? AliasSource(string path)=>path==$"map/MapStudio/{map}.msb"?alias.Write():Source(path);
+                var renamed=MapNavigation.Bake("DS1R",map,target,AliasSource,offset,[new("alias-destination",collision)]);
+                Check(renamed.Report.Meshes.Single().SourcePart==nav.Name,"Unique authored model/frame alias was not bound");
+                var duplicate=(MSB1.Part.Navmesh)nav.DeepCopy();duplicate.Name="ambiguous-nav-alias";alias.Parts.Navmeshes.Add(duplicate);
+                Reject(()=>MapNavigation.Bake("DS1R",map,target,AliasSource,offset,[new("alias-destination",collision)]));
+            }
         }
-        Reject(()=>MapNavigation.Bake("DS2S","m10_02_00_00","m40_02_00_00",_=>throw new Exception("Unsupported profile read source"),offset));
-        Reject(()=>MapNavigation.Bake("DS1R","bad","m40_02_00_00",Source,offset));
+        Reject(()=>MapNavigation.Bake("DS2S","m10_02_00_00","m40_02_00_00",_=>throw new Exception("Unsupported profile read source"),offset,[]));
+        Reject(()=>MapNavigation.Bake("DS1R","bad","m40_02_00_00",Source,offset,[]));
+        Reject(()=>MapNavigation.Bake("DS1R","m10_02_00_00","m40_02_00_00",Source,offset,[]));
+        Reject(()=>MapNavigation.Bake("DS1R","m10_02_00_00","m40_02_00_00",Source,offset,[new("dup",null),new("dup",null)]));
+        Reject(()=>MapNavigation.Bake("DS1R","m10_02_00_00","m40_02_00_00",Source,offset,[new("unknown","h_missing")]));
         foreach(var p in hashes)Check(Hash(File.ReadAllBytes(p.Key))==p.Value,"Original navigation asset was changed");
         string folder="out/map-editor/map-navigation-tests";Directory.CreateDirectory(folder);File.WriteAllText(Path.Combine(folder,"report.json"),JsonSerializer.Serialize(new{reports,preserved=hashes,limitations="Fixture/format proof only; native streaming and AI execution require gameplay QA."},new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine("PASS: retail names/class contracts and BB tree-pointer offsets, source geometry/adjacency, complete BVH containment, NVA binding, blocked islands, invalid inputs and original asset hashes");

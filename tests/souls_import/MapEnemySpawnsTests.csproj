@@ -2,6 +2,8 @@
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
   <ItemGroup>
     <Compile Include="MapEnemySpawnsTests.cs"/>
+    <Compile Include="../../editor/souls_import/NativeRigAppend.cs" Link="NativeRigAppend.cs"/>
+    <Compile Include="../../editor/souls_import/NonHumanoidEnemies.cs" Link="NonHumanoidEnemies.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
     <Compile Include="../../editor/souls_import/EnemyProportions.cs" Link="EnemyProportions.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacterAnimations.cs" Link="MapCharacterAnimations.cs"/>
@@ -11,6 +13,8 @@
     <Compile Include="../../editor/souls_import/NpcBodyShape.cs" Link="NpcBodyShape.cs"/>
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
     <Compile Include="../../editor/souls_import/MapEnemySpawns.cs" Link="MapEnemySpawns.cs"/>
+    <Compile Include="../../editor/souls_import/SourceClothPose.cs" Link="SourceClothPose.cs"/>
+    <Compile Include="../../editor/souls_import/SourceEquipmentMounts.cs" Link="SourceEquipmentMounts.cs"/>
     <Compile Include="../../editor/souls_import/MapSkeletonAnimations.cs" Link="MapSkeletonAnimations.cs"/>
     <Compile Include="../../editor/souls_import/NativeSpline.cs" Link="NativeSpline.cs" />
     <Compile Include="../../editor/souls_import/NativeAnimation.cs" Link="NativeAnimation.cs"/>

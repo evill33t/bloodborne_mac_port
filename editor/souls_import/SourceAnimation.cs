@@ -20,7 +20,7 @@ using System.Text;
 // Reads source animations without changing their archives. Restrict this path
 // to non-additive transform-only DS1R TAG0 splines; animation event conversion
 // and Bloodborne skeleton retargeting belong to the export stage.
-internal sealed class SourceAnimation {
+internal sealed partial class SourceAnimation {
     internal sealed record Bone(string Name,int Parent,Vector3 Translation,Quaternion Rotation,Vector3 Scale);
     internal IReadOnlyList<Bone> Bones {get;}
     internal float Duration {get;}

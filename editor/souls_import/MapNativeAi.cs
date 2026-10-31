@@ -5,10 +5,11 @@ using SoulsFormats;
 // Keep existing destination scripts; append only the chosen native rig's goals.
 internal static class MapNativeAi {
     static string Leaf(string path)=>path.Replace('\\','/').Split('/').Last();
-    internal static byte[] Merge(byte[] destination,byte[] donor) {
+    internal static byte[] Merge(byte[] destination,byte[] donor,int model=2610) {
+        if(model is <1000 or >8999)throw new ArgumentOutOfRangeException(nameof(model));
         var target=BND4.Read(destination);var source=BND4.Read(donor);
         var ids=target.Files.Select(f=>f.ID).ToHashSet();int next=1000;
-        foreach(var f in source.Files.Where(f=>Leaf(f.Name).StartsWith("2610",StringComparison.Ordinal)&&Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal))) {
+        foreach(var f in source.Files.Where(f=>Leaf(f.Name).StartsWith(model.ToString(System.Globalization.CultureInfo.InvariantCulture),StringComparison.Ordinal)&&Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal))) {
             var existing=target.Files.SingleOrDefault(t=>Leaf(t.Name)==Leaf(f.Name));
             if(existing!=null){if(!existing.Bytes.Span.SequenceEqual(f.Bytes.Span))throw new InvalidDataException("Conflicting native AI script: "+Leaf(f.Name));continue;}
             while(ids.Contains(next))next++;ids.Add(next);
@@ -17,7 +18,7 @@ internal static class MapNativeAi {
         BinderFile Entry(BND4 binder,string suffix)=>binder.Files.Single(f=>Leaf(f.Name).EndsWith(suffix,StringComparison.Ordinal));
         var infoEntry=Entry(target,".luainfo");var info=LUAINFO.Read(infoEntry.Bytes);var original=LUAINFO.Read(Entry(source,".luainfo").Bytes);
         if(info.BigEndian!=original.BigEndian||info.LongFormat!=original.LongFormat)throw new InvalidDataException("Incompatible native AI goal registries");
-        foreach(var goal in original.Goals.Where(g=>g.ID is >=261000 and <261100)) {
+        foreach(var goal in original.Goals.Where(g=>g.ID>=model*100&&g.ID<model*100+100)) {
             var existing=info.Goals.SingleOrDefault(g=>g.ID==goal.ID&&g.Name==goal.Name);
             if(existing!=null) {
                 if(existing.BattleInterrupt!=goal.BattleInterrupt||existing.LogicInterrupt!=goal.LogicInterrupt||existing.LogicInterruptName!=goal.LogicInterruptName)throw new InvalidDataException("Conflicting native AI goal: "+goal.Name);

@@ -23,7 +23,7 @@ static class SkinHairAlphaTests {
         } else Check(a.Length==b.Length&&a.Zip(b).All(p=>p.First.SequenceEqual(p.Second)),"Hair compressed image/alpha/mip payload changed");
     }
     static string Json(object value)=>JsonSerializer.Serialize(value);
-    static string Expected(string sourceMtd)=>Leaf(sourceMtd).ToLowerInvariant() switch {"ps_hair[ds]_edge.mtd"=>"C[ARSN]_e.mtd","ps_hair[ds]_alp.mtd"=>"C[ARSN]_al.mtd",_=>"C[ARSN].mtd"};
+    static string Expected(string sourceMtd)=>Leaf(sourceMtd).EndsWith("_Edge.mtd",StringComparison.OrdinalIgnoreCase)?"C[ARSN]_e.mtd":Leaf(sourceMtd).ToLowerInvariant() switch {"ps_hair[ds]_edge.mtd"=>"C[ARSN]_e.mtd","ps_hair[ds]_alp.mtd"=>"C[ARSN]_al.mtd",_=>"C[ARSN].mtd"};
     static List<TPF.Texture> Textures(List<BinderFile> files)=>files.Where(f=>TPF.Is(f.Bytes.ToArray())).SelectMany(f=>TPF.Read(f.Bytes).Textures).ToList();
     public static void Main(string[] args) {
         string sourceRoot=args[0],nativeRoot=args[1];var hashes=new Dictionary<string,byte[]>();

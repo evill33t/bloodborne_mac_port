@@ -906,7 +906,7 @@ actors are not forced to awaken. Their meshes, textures, equipment masks, positi
 retained, with all weighted bones directly matched to the native rig. Giant stature
 uses an explicit larger scale allowance; ordinary imports retain their original
 proportion bounds. Separate `c9700` model and `2419900` entity reservations preserve
-existing hollow identities. There are 105 imported enemies across the two maps.
+existing hollow identities. The cemetery and ordinary hollow cohorts retain their 105 imported enemy identities across the two maps. The additional Parish boar/Titanite adapter below adds two actors.
 Skeletons still use the native donor's health, combat AI, attacks, hitboxes, death and
 effects. Living heavy-hit slots `2014`, `2020` and `2040`, including their native weapon
 variants, play the corresponding source motion. The first two include bone scattering
@@ -1131,6 +1131,60 @@ geometry, and isolation from unrelated source material families. Source/native
 assets and seed saves remained hash-identical. The ordinary-hollow proportion adapter
 above also corrects the long native neck/arm segments; native combat reach remains an
 approximation.
+
+The Parish armored boar (`c3460`) and Titanite Demon (`c2300`) now have explicit
+adapters, bringing the two-map enemy total to 107. They keep source geometry, skin
+weights, segment lengths, placement and animation poses on appended playback tracks.
+Native donor tracks, locomotion, AI, combat timing, HP and hitboxes remain in use;
+source armor, lightning/projectiles, unique death flags and original movesets are
+not reproduced. Source capsule dimensions replace only the three matching native
+capsule fields. Existing ordinary/skeleton IDs are unchanged. Unsupported enemies,
+quest actors and special poses remain reported omissions. In particular, nine
+Gravelord phantoms are disabled by source events, and the omitted hollow archer
+requires a ranged adapter rather than the native melee behavior.
+
+The native character ABI imposes two additional requirements on appended rigs:
+borrowed `hkStringPtr` bone names must have even addresses, and render FLVER nodes
+must keep active bones before disabled helper nodes. Offline string/pose decoding
+alone missed both rules. A copied-save boar encounter reproduced the bad string
+ownership crash during respawn; the aligned-string build completed native death,
+unload and Firelink lamp respawn. A two-file render-order control removed the
+long stretched geometry from both new enemies without changing Havok tracks or
+source geometry. Serialized regression checks retain named bone/vertex/dummy
+relationships through the render-node permutation.
+
+Ordinary hollow equipment uses the source hand/forearm attachment frame instead
+of the donor torch sockets. Where the source animation differs from its bind
+mount, the authored constant idle equipment frame supplies the resting grip; source
+attack-local equipment motion is not reproduced. DS1R cutout armor and cape edge materials use the
+supported native cutout shader. The c2560 cape's legacy capsule physics is not a
+native Bloodborne cloth resource: its 57 bodies and 119 authored constraints are
+settled offline under gravity. A single torso anchor preserves that static drape
+through native arm animation; this is rigid attached scenery, not dynamic cloth.
+Source vertices and faces remain present. Combat poses and weapon movesets still
+follow the native donor.
+
+Source collision filters 13/14 (fall camera) and 15 (instant death) are now exported
+as separate paired H/L sensor bodies with matching native filter metadata, rather
+than omitted or added to the walkable layer. Eight source sensor placements retain
+574 H/L triangles. The original player-solid geometry is unchanged. A copied-save
+fall through Firelink's authored filter-15 surface triggered native death and
+respawn at its lamp. Event-controlled changes to those sensors, including source
+Firelink flag 710 and Burg's cutscene toggle, are not adapted.
+
+Native NVA entry ordinals directly address the corresponding MSB collision array.
+The previous compact navigation list could select a different collision's visibility
+and connection data even while the physical floor was correct. Navigation now binds
+to the final collision order, using native-compatible zero-face mesh/graph entries
+for gaps and sensors. No walkable geometry is invented for those gaps. Source meshes
+without an emitted collision binding are explicitly reported. An additional connection
+requests the authored Burg aqueduct visibility group from Firelink's lower hillside
+floor, retaining the original source connectors and scenery groups.
+A fresh-process native control loaded the aqueduct's low collision at the lower
+stair base (ready state 6 within the observed half-second polling interval),
+before entering the corridor. The earlier compact-order build left that floor
+unrequested at the same point until the upper hillside connector. Setup placement
+was separate from subsequent ordinary analog route traversal.
 
 This mode does not implement additional source doors, lifts, full NPC quests, enemy
 movesets or cross-mesh/cross-map navigation.

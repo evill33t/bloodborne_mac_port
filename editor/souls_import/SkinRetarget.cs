@@ -49,8 +49,12 @@ internal static class SkinRetarget {
     // and vertex inputs as C[ARSN]. Their MTD selects alpha-test/blend behavior;
     // both also explicitly disable adaptive tessellation.
     // Source material labels are unreliable: an "_Alp" label may use an Edge MTD.
-    static string CharacterMtd(string sourceMtd,string nativeMtd) {
-        string suffix=Leaf(sourceMtd).ToLowerInvariant() switch {
+    static string CharacterMtd(string sourceMtd,string nativeMtd,string? profile) {
+        string leaf=Leaf(sourceMtd).ToLowerInvariant();
+        // DS1's torn armour and capes use the same authored edge contract as
+        // hair. Retaining their alpha-tested MTD preserves ragged silhouettes.
+        if(profile is "DS1" or "DS1R"&&leaf.EndsWith("_edge.mtd",StringComparison.Ordinal))return nativeMtd[..^4]+"_e.mtd";
+        string suffix=leaf switch {
             "ps_hair[ds]_edge.mtd"=>"_e",
             "ps_hair[ds]_alp.mtd"=>"_al",
             _=>""
@@ -166,29 +170,54 @@ internal static class SkinRetarget {
         float s=ratio-1;var stretch=new Matrix4x4(1+s*u.X*u.X,s*u.X*u.Y,s*u.X*u.Z,0,s*u.Y*u.X,1+s*u.Y*u.Y,s*u.Y*u.Z,0,s*u.Z*u.X,s*u.Z*u.Y,1+s*u.Z*u.Z,0,0,0,0,1);
         return rigid*Matrix4x4.CreateTranslation(-targetStart)*stretch*Matrix4x4.CreateFromQuaternion(rotation)*Matrix4x4.CreateTranslation(targetStart);
     }
-    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveBoneLengths=false){
+    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveBoneLengths=false,IReadOnlyDictionary<int,string>? rigidMeshAnchors=null,IReadOnlyDictionary<string,Matrix4x4>? equipmentMounts=null){
         if(!Regex.IsMatch(textureOwner,@"\Ac\d{4,5}\z"))throw new ArgumentException("Invalid texture owner");
         string OwnedTexture(string name)=>textureOwner+"_import_"+name;
         IFlver source=FLVER2.Is(sourceBytes.ToArray())?FLVER2.Read(sourceBytes):FLVER0.Is(sourceBytes.ToArray())?FLVER0.Read(sourceBytes):throw new InvalidDataException("Unsupported source FLVER");
         var native=FLVER2.Read(nativeBytes);if(native.Header.Version is not(0x20013 or 0x20014) || native.Header.BigEndian)throw new InvalidDataException("Choose a Bloodborne template FLVER");
         if(source.Meshes.Count>10000 || source.Meshes.Sum(m=>(long)m.Vertices.Count)>VertexLimit)throw new InvalidDataException("Source character exceeds the mesh budget");
+        var rigidAnchors=new Dictionary<int,int>();
+        if(rigidMeshAnchors!=null) {
+            if(sourceProfile!="DS1R"||!fitSegments||!preserveBoneLengths||preserveSourceDimensions||allowLargeHumanoid||!source.Nodes.Any(n=>n.Name=="c2560_weapon")||rigidMeshAnchors.Count!=2)
+                throw new InvalidDataException("Static cape anchors require the authored ordinary DS1R c2560 adapter");
+            foreach(var (meshIndex,name) in rigidMeshAnchors) {
+                if(meshIndex<0||meshIndex>=source.Meshes.Count||source.Materials[source.Meshes[meshIndex].MaterialIndex].Name!="#07#"||name!="Spine1")throw new InvalidDataException("Invalid source static cape mesh/anchor");
+                var matches=source.Nodes.Select((n,i)=>(n.Name,i)).Where(n=>n.Name==name).ToArray();if(matches.Length!=1)throw new InvalidDataException("Static cape body anchor is not unique");rigidAnchors.Add(meshIndex,matches[0].i);
+            }
+        }
         var sw=World(source.Nodes);var tw=World(native.Nodes);var targets=native.Nodes.Select((n,i)=>(key:BoneName(n.Name),i)).GroupBy(v=>v.key).ToDictionary(g=>g.Key,g=>g.First().i);
         var names=native.Nodes.Select((n,i)=>(n.Name,i)).GroupBy(v=>v.Name).ToDictionary(g=>g.Key,g=>g.First().i);var mapping=Enumerable.Repeat(-1,source.Nodes.Count).ToArray();var direct=new bool[mapping.Length];var bindSource=Enumerable.Repeat(-1,mapping.Length).ToArray();
-        var aliases=new Dictionary<string,string>{{"lforearmtwist","lforetwist"},{"rforearmtwist","rforetwist"},{"lforearmtwist1","lforetwist"},{"rforearmtwist1","rforetwist"},{"luparmtwist1","luparmtwist"},{"ruparmtwist1","ruparmtwist"}};
+        bool authoredEquipment=fitSegments&&sourceProfile=="DS1R"&&preserveBoneLengths;
+        if(equipmentMounts!=null) {
+            if(!authoredEquipment||preserveSourceDimensions||allowLargeHumanoid)throw new InvalidDataException("Source equipment mounts require ordinary DS1R enemy proportions");
+            foreach(var (name,mount) in equipmentMounts)if(source.Nodes.Count(n=>n.Name==name)!=1||!Regex.IsMatch(BoneName(name),@"\A(?:rweapon\d*|lweapon\d*|lshield|sword|bpw00)\z")||!Finite(mount.Translation)||!float.IsFinite(mount.GetDeterminant())||Math.Abs(mount.M14)+Math.Abs(mount.M24)+Math.Abs(mount.M34)+Math.Abs(mount.M44-1)>.00001f||!Matrix4x4.Decompose(mount,out var scale,out var rotation,out _)||!float.IsFinite(rotation.LengthSquared())||Vector3.Distance(scale,Vector3.One)>.001f)
+                throw new InvalidDataException("Invalid authored source equipment mount");
+        }
         var attachments=new Dictionary<string,string>{{"rweapon","weapon00"},{"sword","weapon00"},{"lweapon","weapon01"},{"lshield","weapon01"},{"bpw00","weapon01"}};
+        var aliases=new Dictionary<string,string>{{"lforearmtwist","lforetwist"},{"rforearmtwist","rforetwist"},{"lforearmtwist1","lforetwist"},{"rforearmtwist1","rforetwist"},{"luparmtwist1","luparmtwist"},{"ruparmtwist1","ruparmtwist"}};
         for(int i=0;i<mapping.Length;++i){
             var name=source.Nodes[i].Name;var key=BoneName(name);
             if(overrides?.TryGetValue(name,out var target)==true){if(!names.TryGetValue(target,out mapping[i]))throw new InvalidDataException("Mapped target bone does not exist: "+target);}
             else {
                 if(aliases.TryGetValue(key,out var alias))key=alias;
                 if(targets.TryGetValue(key,out var n))mapping[i]=n;
-                else if(fitSegments&&sourceProfile=="DS1R"&&attachments.TryGetValue(key,out var attachment)&&targets.TryGetValue(attachment,out n))mapping[i]=n;
+                else if(!authoredEquipment&&fitSegments&&sourceProfile=="DS1R"&&attachments.TryGetValue(key,out var attachment)&&targets.TryGetValue(attachment,out n))mapping[i]=n;
             }
             direct[i]=mapping[i]>=0;if(direct[i])bindSource[i]=i;
         }
         int Match(int i){
             if(i<0 || i>=mapping.Length)throw new InvalidDataException("Vertex references an invalid source bone");if(mapping[i]>=0)return mapping[i];
-            var p=source.Nodes[i].ParentIndex;if(p<0)throw new InvalidDataException("No compatible destination bone for "+source.Nodes[i].Name+". Supply an explicit bone mapping.");mapping[i]=Match(p);bindSource[i]=bindSource[p];return mapping[i];
+            var p=source.Nodes[i].ParentIndex;
+            // Ordinary proportion-corrected enemies retain the source grip in
+            // its authored anatomical frame. A DS1 shield is strapped to
+            // Forearm; the donor's Weapon_01 is beyond Hand and rotates as a
+            // held torch. Resolve lazily: unreferenced equipment helpers may
+            // intentionally have no parent. Explicit user maps take priority.
+            if(authoredEquipment&&Regex.IsMatch(BoneName(source.Nodes[i].Name),@"\A(?:rweapon\d*|lweapon\d*|lshield|sword|bpw00)\z")) {
+                if(p<0||BoneName(source.Nodes[p].Name) is not("lhand" or "rhand" or "lforearm" or "rforearm"))throw new InvalidDataException("Unsupported source equipment attachment: "+source.Nodes[i].Name);
+                mapping[i]=Match(p);bindSource[i]=p;direct[i]=true;return mapping[i];
+            }
+            if(p<0)throw new InvalidDataException("No compatible destination bone for "+source.Nodes[i].Name+". Supply an explicit bone mapping.");mapping[i]=Match(p);bindSource[i]=bindSource[p];return mapping[i];
         }
         // Resolve every referenced bone lazily: unreferenced source helper nodes need no mapping.
         var changed=new Matrix4x4[mapping.Length];var normals=new Matrix4x4[mapping.Length];var ready=new bool[mapping.Length];
@@ -205,8 +234,12 @@ internal static class SkinRetarget {
         int Target(int i){
             var target=Match(i);if(target>255)throw new InvalidDataException("Destination bone index exceeds the template's byte layout");
             if(!ready[i]){
-                int anchor=bindSource[i];if(!Matrix4x4.Invert(sw[anchor],out var inverse))throw new InvalidDataException("Singular source bind pose");changed[i]=inverse*Matrix4x4.CreateScale(thicknessScale)*tw[target];
-                if(fitSegments&&endpoints.TryGetValue(BoneName(source.Nodes[anchor].Name),out var end)&&sourceNames.TryGetValue(end,out int child)&&direct[child])
+                int anchor=bindSource[i];var mount=Matrix4x4.Identity;bool authoredMount=equipmentMounts?.TryGetValue(source.Nodes[i].Name,out mount)==true;
+                if(authoredMount) {
+                    if(anchor!=source.Nodes[i].ParentIndex||!Matrix4x4.Invert(sw[i],out var inverse))throw new InvalidDataException("Source equipment mount does not match its anatomical parent");
+                    changed[i]=inverse*mount*tw[target];
+                } else {if(!Matrix4x4.Invert(sw[anchor],out var inverse))throw new InvalidDataException("Singular source bind pose");changed[i]=inverse*Matrix4x4.CreateScale(thicknessScale)*tw[target];}
+                if(!authoredMount&&fitSegments&&endpoints.TryGetValue(BoneName(source.Nodes[anchor].Name),out var end)&&sourceNames.TryGetValue(end,out int child)&&direct[child])
                     changed[i]=FitSegment(changed[i],sw[anchor].Translation,sw[child].Translation,tw[target].Translation,tw[mapping[child]].Translation);
                 if(!Matrix4x4.Invert(changed[i],out var inv))throw new InvalidDataException("Singular retarget transform");normals[i]=Matrix4x4.Transpose(inv);ready[i]=true;
             }return target;
@@ -217,10 +250,11 @@ internal static class SkinRetarget {
         bool packedShininess=sourceProfile is "DS1R" or "DS2" or "DS2S";
         var result=FLVER2.Read(nativeBytes);result.Meshes.Clear();result.Materials.Clear();
         var low=new Vector3(float.MaxValue);var high=new Vector3(float.MinValue);double exact=0,total=0;int vertices=0,triangles=0;
-        foreach(var mesh in source.Meshes){
+        for(int sourceMeshIndex=0;sourceMeshIndex<source.Meshes.Count;sourceMeshIndex++){
+            var mesh=source.Meshes[sourceMeshIndex];bool rigidCape=rigidAnchors.TryGetValue(sourceMeshIndex,out int rigidAnchor);
             if(mesh.MaterialIndex<0 || mesh.MaterialIndex>=source.Materials.Count)throw new InvalidDataException("Invalid source material index");var src=source.Materials[mesh.MaterialIndex];
             var mask=Regex.Match(src.Name,@"#(\d+)#");if(masks!=null && mask.Success && !masks.Contains(int.Parse(mask.Groups[1].Value)))continue;
-            var mat=new FLVER2.Material("Imported_"+result.Materials.Count,CharacterMtd(src.MTD,material.MTD),material.Index){GXIndex=material.GXIndex,Textures=material.Textures.Select(Copy).ToList()};
+            var mat=new FLVER2.Material("Imported_"+result.Materials.Count,CharacterMtd(src.MTD,material.MTD,sourceProfile),material.Index){GXIndex=material.GXIndex,Textures=material.Textures.Select(Copy).ToList()};
             foreach(var texture in mat.Textures){
                 // Remastered/DS2 g_Specular is packed shininess, not native RGB
                 // reflectance (the same distinction is made by Smithbox).
@@ -246,16 +280,16 @@ internal static class SkinRetarget {
             foreach(var vertex in mesh.Vertices){
                 var v=new FLVER.Vertex(vertex);if(!Finite(v.Position) || !Finite(v.Normal))throw new InvalidDataException("Non-finite source vertex");
                 var weights=new Dictionary<int,double>();var position=Vector3.Zero;var normal=Vector3.Zero;var tangent=new Vector3[vertex.Tangents.Count];double sum=0;
-                for(int n=0;n<(mesh.Dynamic==1?4:1);++n){
-                    var weight=mesh.Dynamic==1?vertex.BoneWeights[n]:1f;if(!float.IsFinite(weight) || weight<0)throw new InvalidDataException("Invalid skin weight");if(weight==0)continue;
+                for(int n=0;n<(rigidCape?1:mesh.Dynamic==1?4:1);++n){
+                    var weight=rigidCape?1f:mesh.Dynamic==1?vertex.BoneWeights[n]:1f;if(!float.IsFinite(weight) || weight<0)throw new InvalidDataException("Invalid skin weight");if(weight==0)continue;
                     var index=mesh.Dynamic==1?vertex.BoneIndices[n]:mesh is FLVER0.Mesh?vertex.BoneIndices[0]:vertex.NormalW;
-                    var bone=Bone(mesh,index);var target=Target(bone);var original=mesh.Dynamic==1?vertex.Position:Vector3.Transform(vertex.Position,sw[bone]);
+                    var bone=rigidCape?rigidAnchor:Bone(mesh,index);var target=Target(bone);var original=rigidCape||mesh.Dynamic==1?vertex.Position:Vector3.Transform(vertex.Position,sw[bone]);
                     position+=Vector3.Transform(original,changed[bone])*weight;
                     var normalTransform=normals[bone];var tangentTransform=changed[bone];
-                    if(mesh.Dynamic!=1){if(!Matrix4x4.Invert(sw[bone],out var invWorld))throw new InvalidDataException("Singular rigid source bind pose");normalTransform=Matrix4x4.Transpose(invWorld)*normalTransform;tangentTransform=sw[bone]*tangentTransform;}
+                    if(!rigidCape&&mesh.Dynamic!=1){if(!Matrix4x4.Invert(sw[bone],out var invWorld))throw new InvalidDataException("Singular rigid source bind pose");normalTransform=Matrix4x4.Transpose(invWorld)*normalTransform;tangentTransform=sw[bone]*tangentTransform;}
                     normal+=Vector3.TransformNormal(vertex.Normal,normalTransform)*weight;
                     for(int t=0;t<tangent.Length;++t){var p=new Vector3(vertex.Tangents[t].X,vertex.Tangents[t].Y,vertex.Tangents[t].Z);tangent[t]+=Vector3.TransformNormal(p,tangentTransform)*weight;}
-                    weights[target]=weights.GetValueOrDefault(target)+weight;sum+=weight;total+=weight;if(direct[bone])exact+=weight;
+                    weights[target]=weights.GetValueOrDefault(target)+weight;sum+=weight;total+=weight;if(!rigidCape&&direct[bone])exact+=weight;
                 }
                 if(sum<.0001 || weights.Count>4)throw new InvalidDataException("Vertex has no usable skin weights");v.Position=position/(float)sum;
                 if(!Finite(v.Position) || normal.LengthSquared()<1e-12f)throw new InvalidDataException("Invalid retargeted vertex");v.Normal=Vector3.Normalize(normal);v.NormalW=0;v.BoneIndices=new();v.BoneWeights=new();
