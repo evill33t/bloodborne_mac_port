@@ -1290,14 +1290,17 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             if (lighting_encoded) lighting_encoded->store(drew, std::memory_order_release);
         },
         IsTessellated(*render_pipeline));
+    // Depth-only draws legitimately have no fragment program. Reject non-display draws
+    // before looking at shader memory, just as pipeline selection rejects absent stages.
     if (auto frame = upscaler->FrameForDisplay(); frame &&
-        BbShader::Fingerprint(AmdGpu::GetParams(regs.ps_program).code) == 0x86a2e9eb1700b3c1ull &&
-        BbShader::Fingerprint(AmdGpu::GetParams(regs.vs_program).code) == 0xd4cbe93c97d2197aull &&
         !is_indexed && (num_indices == 3 || num_indices == 4) && num_instances == 1 &&
         !state.depth.texture && !regs.blend_control[0].enable &&
         draw_state.scissor_x == 0 && draw_state.scissor_y == 0 &&
         draw_state.scissor_width >= state.width && draw_state.scissor_height >= state.height &&
-        std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
+        std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1 &&
+        regs.ps_program.Address<u32*>() && regs.vs_program.Address<u32*>() &&
+        BbShader::Fingerprint(AmdGpu::GetParams(regs.ps_program).code) == 0x86a2e9eb1700b3c1ull &&
+        BbShader::Fingerprint(AmdGpu::GetParams(regs.vs_program).code) == 0xd4cbe93c97d2197aull) {
         scheduler.EndRendering();
         scheduler.Record([generator = upscaler->FrameGenerator(), frame,
                           display = state.colors[0].texture, resources](Metal::Encoder& e) {
