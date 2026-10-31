@@ -47,6 +47,7 @@ int main() {
     Get().achievement_banners = false;
     Get().mouse_look = true;
     Get().mouse_sensitivity = 2.25f;
+    Get().mouse_vertical = 0.75f;
     Get().mouse_invert_y = true;
     Get().preset = 3;
     Save();
@@ -54,14 +55,17 @@ int main() {
     assert(Count(text, "achievement_banners=0") == 1);
     assert(Count(text, "mouse_look=1") == 1);
     assert(Count(text, "mouse_sensitivity=2.25") == 1);
+    assert(Count(text, "mouse_vertical=0.75") == 1);
     assert(Count(text, "mouse_invert_y=1") == 1);
     Get().achievement_banners = true;
     Get().mouse_look = false;
     Get().mouse_sensitivity = 1.0f;
+    Get().mouse_vertical = 1.0f;
     Get().mouse_invert_y = false;
     Load();
     assert(!Get().achievement_banners);
     assert(Get().mouse_look && Get().mouse_sensitivity == 2.25f && Get().mouse_invert_y);
+    assert(Get().mouse_vertical == 0.75f);
     assert(Count(text, "fps_cap=40") == 1 && Count(text, "fullscreen=1") == 1);
     assert(Count(text, "renderer=") == 0); // the removed renderer setting is dropped
     assert(Count(text, "preset=3") == 1 && Count(text, "preset=2") == 0);
@@ -72,6 +76,7 @@ int main() {
     assert(Count(text, "preset=3") == 1);
     assert(Count(text, "achievement_banners=0") == 1 && Count(text, "mouse_look=1") == 1);
     assert(Count(text, "mouse_sensitivity=2.25") == 1 && Count(text, "mouse_invert_y=1") == 1);
+    assert(Count(text, "mouse_vertical=0.75") == 1);
     setenv("BB_ULTRAWIDE_RES", "3840x1080", 1);
     f = std::fopen(path, "w");
     assert(f);

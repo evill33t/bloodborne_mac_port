@@ -126,10 +126,65 @@ do {
     check(file["metal_hud"] == "1", "apply writes the Metal HUD key")
     check(file["texture_compression"] == "1", "apply writes the texture compression key")
     check(file["game_timing"] == "fixed", "apply writes the game timing key")
+    check(file["display"] == nil, "main display: no display key")
+    let uuid = "37D8832A-2D66-02CA-B9F7-8F30A301B230"
+    var onDisplay = GameSettings(ini: IniFile(text: "display=\(uuid.lowercased())\n"))
+    check(onDisplay.display == uuid, "read display, normalised to upper case")
+    check(GameSettings(ini: IniFile(text: "display=main\n")).display == nil, "invalid display -> main")
+    var displayFile = IniFile(text: "display=\(uuid)\n")
+    onDisplay.display = nil
+    onDisplay.apply(to: &displayFile)
+    check(displayFile["display"] == nil, "main display removes the key")
+    let screens = [GameDisplay(uuid: uuid, name: "Built-in (main)")]
+    check(GameDisplay.choices(connected: screens, saved: nil) == screens, "choices: connected displays")
+    check(GameDisplay.choices(connected: screens, saved: uuid) == screens, "choices: saved and connected")
+    let missing = "11111111-2222-3333-4444-555555555555"
+    check(GameDisplay.choices(connected: screens, saved: missing).last == GameDisplay(uuid: missing, name: "Display not connected"),
+          "choices: a saved display that isn't connected stays listed")
     check(file.text.hasPrefix("# header\n"), "header kept")
     // Review focus 3: reloading after the game's menu changed the file picks up its values.
     file["preset"] = "3"
     check(GameSettings(ini: file).preset == 3, "reload sees the menu's change")
+}
+
+// Bindings and mouse (src/runtime_bindings.c reads the same keys; tests/test_pad.c checks the
+// defaults and key names against it and SDL).
+do {
+    let defaults = GameSettings(ini: IniFile())
+    check(defaults.bindings.isDefault && defaults.mouseSensitivity == 1 && defaults.mouseVertical == 1 && !defaults.mouseInvertY && defaults.cameraKeysDpad, "default controls")
+    var untouched = IniFile(text: "upscaler=off\n")
+    defaults.apply(to: &untouched)
+    check(!untouched.text.contains("bind_") && untouched["camera_keys_dpad"] == nil, "defaults write no bind_ keys")
+    check(untouched["mouse_sensitivity"] == "1.00" && untouched["mouse_vertical"] == "1.00" && untouched["mouse_invert_y"] == "0", "mouse keys written")
+
+    let cross = Bindings.actions.first { $0.key == "bind_cross" }!
+    let dpadDown = Bindings.actions.first { $0.key == "bind_dpad_down" }!
+    let r1 = Bindings.actions.first { $0.key == "bind_r1" }!
+    let read = GameSettings(ini: IniFile(text: "bind_cross= k , mouse left,Bogus,Left GUI\r\nbind_dpad_down=\nmouse_sensitivity=40\nmouse_vertical=0.5\ncamera_keys_dpad=0\n"))
+    check(read.bindings[cross] == ["K", "Mouse Left"], "names canonical; unknown and Cmd dropped")
+    check(read.bindings[dpadDown] == [], "empty value unbinds")
+    check(read.mouseSensitivity == 10 && read.mouseVertical == 0.5 && !read.cameraKeysDpad, "mouse values read, clamped")
+    check(read.bindings.others(using: "Mouse Left", besides: cross) == [r1], "shared input reported")
+    var file = IniFile(text: "# header\n")
+    read.apply(to: &file)
+    check(file["bind_cross"] == "K,Mouse Left" && file["bind_dpad_down"] == "" && file["bind_r1"] == nil && file["camera_keys_dpad"] == "0", "only changes written")
+    check(GameSettings(ini: file).bindings == read.bindings, "bindings round trip")
+
+    var b = Bindings()
+    b.set(r1, slot: 1, to: "Mouse Left") // already in slot 0: moved, not duplicated
+    check(b[r1] == ["3", "Mouse Left"], "no duplicate within an action")
+    b = Bindings()
+    b.set(r1, slot: 0, to: "G")
+    check(b[r1] == ["G", "3"], "replace a slot")
+    b.set(r1, slot: 5, to: "H")
+    check(b[r1] == ["G", "3", "H"], "past the end appends")
+    b.set(r1, slot: 0, to: nil)
+    check(b[r1] == ["3", "H"] && !b.isDefault, "clear a slot")
+    var restored = IniFile(text: "bind_r1=G\n")
+    Bindings().apply(to: &restored)
+    check(restored["bind_r1"] == nil, "back to the default removes the key")
+    check(KeyCodes.name(keyCode: 0x0D) == "W" && KeyCodes.keyCode(name: "Left Shift") == 0x38 && KeyCodes.name(keyCode: 0x3F) == nil, "key codes")
+    check(Bindings.canonical("left gui") == nil && Bindings.canonical("wheel up") == "Wheel Up", "reserved and mouse names")
 }
 
 // Shell quoting and launch.conf (review focus 1: spaces, quotes; bash must source it).
@@ -373,11 +428,18 @@ do {
         check(Resolution.ultrawideMemoryWarning(size, memoryBytes: 24 * gib) == nil, "24 GB boundary")
         check(Resolution.ultrawideMemoryWarning(size, memoryBytes: 64 * gib) == nil, "64 GB wide selection")
     }
+    // 5120x2160 has a 9 GiB GPU arena (#93): warned up to 32 GB, with its own text.
+    let big = PixelSize(5120, 2160)
+    check(Resolution.ultrawideMemoryWarning(big, memoryBytes: 24 * gib)?.contains("9 GB") == true
+          && Resolution.ultrawideMemoryWarning(big, memoryBytes: 16 * gib) != nil, "5120x2160 below 32 GB")
+    check(Resolution.ultrawideMemoryWarning(big, memoryBytes: 32 * gib) == nil
+          && Resolution.ultrawideMemoryWarning(big, memoryBytes: 36 * gib) == nil, "32 GB boundary")
     check(Resolution.ultrawideMemoryWarning(PixelSize(3840, 1080), memoryBytes: 16 * gib) == nil, "1080p wide selection")
     check(Resolution.ultrawideMemoryWarning(PixelSize(2560, 1600), memoryBytes: 16 * gib) != nil
           && Resolution.ultrawideMemoryWarning(PixelSize(1920, 1200), memoryBytes: 16 * gib) == nil, "16:10 memory warning")
     check(Resolution.wideLabel(PixelSize(1920, 1200)) == "1920 × 1200 · 16:10" && Resolution.wideLabel(PixelSize(3440, 1440)).hasSuffix("21:9")
-          && Resolution.wideLabel(PixelSize(2560, 1080)).hasSuffix("21:9") && Resolution.wideLabel(PixelSize(5120, 1440)).hasSuffix("32:9"), "aspect labels")
+          && Resolution.wideLabel(PixelSize(2560, 1080)).hasSuffix("21:9") && Resolution.wideLabel(PixelSize(5120, 1440)).hasSuffix("32:9")
+          && Resolution.wideLabel(PixelSize(5120, 2160)).hasSuffix("21:9"), "aspect labels")
     let sixteen = GameSettings(ini: IniFile(text: "ultrawide_res=2560x1600\n"))
     check(sixteen.ultrawide && sixteen.wideOutput == PixelSize(2560, 1600), "16:10 from bbport.ini")
 }
@@ -872,8 +934,46 @@ do {
     check(env["BB_GAME_DIR"] == nil && env["BB_UPDATE_CHECKED"] == nil && env["OTHER"] == nil && env["bb_lower"] == nil, "launcher keys and others stay out")
 }
 
+// The relaunch after an update: the new copy opens only once the old one has exited.
+do {
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent("launcher-relaunch-\(getpid())")
+    try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    let marker = dir.appendingPathComponent("opened.txt")
+    let opener = dir.appendingPathComponent("fake-open.sh")
+    try? "#!/bin/sh\necho \"$*\" > '\(marker.path)'\n".write(to: opener, atomically: true, encoding: .utf8)
+    try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: opener.path)
+    let app = URL(fileURLWithPath: "/Applications/My Games/Bloodborne.app")
+    func run(oldCopyLives seconds: Double, wait: TimeInterval) -> (opened: String?, oldExited: Bool, took: Double) {
+        try? fm.removeItem(at: marker)
+        let old = Process() // stands in for the old copy
+        old.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        old.arguments = [String(seconds)]
+        try? old.run()
+        let command = Updates.relaunchCommand(pid: old.processIdentifier, bundle: app, opener: opener.path, wait: wait)
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: command[0])
+        helper.arguments = Array(command.dropFirst())
+        let start = Date()
+        try? helper.run()
+        // (the old copy's exit is reaped by Process; kill -0 then fails)
+        helper.waitUntilExit()
+        let took = Date().timeIntervalSince(start)
+        let opened = try? String(contentsOf: marker, encoding: .utf8)
+        let exited = !old.isRunning
+        old.terminate()
+        return (opened?.trimmingCharacters(in: .newlines), exited, took)
+    }
+    let normal = run(oldCopyLives: 0.6, wait: 10)
+    check(normal.opened == "\(app.path) --args --updated", "opens the new copy with --updated: \(normal.opened ?? "nothing")")
+    check(normal.oldExited && normal.took >= 0.5 && normal.took < 3, "only after the old copy exited (\(normal.took) s)")
+    let stuck = run(oldCopyLives: 30, wait: 0.5)
+    check(stuck.opened != nil && !stuck.oldExited && stuck.took < 3, "a stuck old copy: opens anyway after the wait (\(stuck.took) s)")
+    try? fm.removeItem(at: dir)
+}
+
 if failures > 0 {
     print("FAIL: launcher model, \(failures) failed")
     exit(1)
 }
-print("PASS: launcher model (ini, resolutions, settings, launch.conf, saves, launch plan, crash report, updates, session logs, native crashes, benchmark, mods and cheats)")
+print("PASS: launcher model (ini, resolutions, settings, launch.conf, saves, launch plan, crash report, updates, session logs, native crashes, benchmark, mods and cheats, controls)")

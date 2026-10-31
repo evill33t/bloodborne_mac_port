@@ -9,7 +9,6 @@ struct LauncherView: View {
     @ObservedObject var model: LauncherModel
 
     private typealias Page = LauncherPage
-    @State private var showingControls = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +20,7 @@ struct LauncherView: View {
             Picker("", selection: $model.page) {
                 Text("General").tag(Page.general)
                 Text("Advanced").tag(Page.advanced)
+                Text("Controls").tag(Page.controls)
                 Text("Achievements").tag(Page.achievements)
             }
             .pickerStyle(.segmented)
@@ -31,6 +31,7 @@ struct LauncherView: View {
                 switch model.page {
                 case .general: general
                 case .advanced: advanced
+                case .controls: ControlsView(model: model)
                 case .achievements: AchievementsView(model: model)
                 }
             }
@@ -124,6 +125,14 @@ struct LauncherView: View {
                         Text("Full screen").tag(true)
                     }
                     .pickerStyle(.segmented)
+                    if model.showsDisplayChoice {
+                        Picker("Display", selection: $model.settings.display) {
+                            Text("Main display").tag(String?.none)
+                            ForEach(model.displayChoices) { Text($0.name).tag(Optional($0.uuid)) }
+                        }
+                        Text("The game opens on this display, in a window or full screen. If it isn't connected, the main display is used.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Picker("Frame rate cap", selection: $model.settings.frameCap) {
                         ForEach(FrameCap.allCases) { Text($0.label).tag($0) }
                     }
@@ -178,26 +187,6 @@ struct LauncherView: View {
                               choose: model.chooseGameFolder, reset: model.resetGameFolder)
                     FolderRow(title: "Save folder", path: model.saveDir.path, problem: model.saveProblem,
                               choose: model.chooseSaveFolder, reset: model.resetSaveFolder)
-                }
-                Section("Controls") {
-                    HStack {
-                        Toggle("Mouse camera", isOn: $model.settings.mouseLook)
-                            .help(model.settings.mouseLook
-                                  ? "Click in the game window to turn the camera with the mouse; \u{2318} gives the cursor back. The arrow keys are the d-pad (menus, weapons, items)."
-                                  : "Off: the arrow keys turn the camera. Controllers always work.")
-                        Spacer()
-                        Button("Keyboard and Mouse…") { showingControls = true }
-                            .popover(isPresented: $showingControls, arrowEdge: .bottom) {
-                                Form {
-                                    ForEach(Controls.rows(mouseLook: model.settings.mouseLook), id: \.0) { row in
-                                        LabeledContent(row.0, value: row.1)
-                                    }
-                                }
-                                .formStyle(.grouped)
-                                .frame(width: 440)
-                                .fixedSize(horizontal: false, vertical: true)
-                            }
-                    }
                 }
             }
             .formStyle(.grouped)

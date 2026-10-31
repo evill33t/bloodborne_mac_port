@@ -21,6 +21,27 @@ Each item: what was done for now, what the refinement is, and where it lives.
 
 ## 1. Stability
 
+- **8 GB Macs (2026-10-26, owner question).** The owner saw under 6 GB in Activity Monitor at
+  540p → 1080p (FSR 3.1). Today an 8 GB Mac stops at start: `buffer_cache.cpp` asserts a 5 GiB
+  Metal buffer, and maxBufferLength is ~60% of memory (~4.5 GiB). The `runs` layout (default on
+  ≤ 24 GB since 0.5.9) never needs one buffer that large (largest run ~3.3 GiB), so the assert
+  should apply to `legacy` only. The real risk is the ~3.5 GB of pinned GPU memory on top of macOS
+  and the game (the #69 swap slide). Simulate on the M4 Max as for #69: `iogpu.wired_limit_mb`
+  ~5300, a helper locking ~40 GB, `BB_MAX_BUFFER_GIB=4`, 540p → 1080p; ship only if it holds
+  30+ FPS without swapping.
+- **`tests/test_run_settings.py` fails on master, and no build script runs it (2026-10-26, found
+  by evill33t on #90).** `test_outputs_other_than_1080p_patch_the_render_size_and_restarts_recompute_it`: the third restart
+  (back to 1080p) expects `BB_RENDER_RES` 640x360 and gets none. Run it with
+  `cd tests && python3 -m unittest test_run_settings` (it imports `paths` from `tests/`). Decide
+  whether run.sh or the expectation is wrong, then add the suite to `build_macos.sh --test` so
+  restart-settings regressions show up.
+- **Opening-movie freeze and crash on new games (#46, #50, #51, #24, #84): fixed 2026-10-26 on
+  branch `cutscene-race`, for the 0.5.x hotfix.** Two causes (FINDINGS 2026-10-26): the AvPlayer
+  stop request missed a decoder whose `jthread` the demuxer had taken to join (freeze in
+  `sceAvPlayerClose`), and the main thread recorded into GXRenderThread's immediate context from
+  `0x28fe7c0` outside the context lock (crash at `0x26c01c3`, GPU process crash in `SignalEop`).
+  *Watch:* new-game reports on 16-18 GB Macs after the update; the hang report and the "outside
+  the context lock" line name any remaining path.
 - **Life after Rosetta: evaluate bloodborne-recomp (2026-10-24, after 0.6.0).** The game side
   (bb-probe and the HLE runtime in `src/`) runs under Rosetta 2, which Apple supports fully only
   through macOS 27. github.com/bloodborne-native/bloodborne-recomp (GPL-2.0-or-later) recompiles
@@ -502,7 +523,9 @@ Each item: what was done for now, what the refinement is, and where it lives.
 - **Metal-native (M5): `BB_GPU_CAPTURE` crashes with the default 16 GiB arena.** Apple's
   GPUToolsCapture segfaults in `stopCapture` (`GTTraceDump_writeUnsortedCapture`) while writing
   the `.gputrace` (bbgpu-host dies). Workaround: `BB_ARENA_GIB=4` (884 MB capture in the city,
-  FINDINGS 2026-10-17 Task 10). Proper fix: capture with a smaller arena automatically, or a
+  FINDINGS 2026-10-17 Task 10); since the arena is sized to the game (0.5.2) it must hold the
+  game's 4.8 GiB, so 4 stops at startup: `BB_ARENA_GIB=5` (6 with the native ultrawide pool).
+  Proper fix: capture with a smaller arena automatically, or a
   `MTLCaptureScope` that leaves the arena out if Apple's tool allows it.
 
 - ~~**The game process grows ~80 MB/min during play (both renderers, 2026-10-18).**~~ Fixed
@@ -542,11 +565,34 @@ Each item: what was done for now, what the refinement is, and where it lives.
 
 ## 2. Performance
 
+- **Watch after 0.5.11: performance reports against #98 (2026-10-29, owner).** #98 guards
+  GPU-thread descriptor reads with a local fault recovery (`gpu/shim/bbport_guest_memory.h`):
+  about 2.4 ns more per read on an M4 Max, estimated ~0.1% of a 60 FPS frame on slower Macs, and
+  the A/B (native 1080p uncapped) showed no cost. If players report lower FPS after 0.5.11, A/B
+  0.5.10 against 0.5.11 on the benchmark route first; the guard can be skipped for reads whose
+  table pointer is already known valid.
+
 - **16–18 GB Macs on macOS 27 run at 5–17 FPS (2026-10-25, top priority, the 0.5.x hotfix).**
   Not GPU-bound: the GPU idles ~60% of each frame (FINDINGS "the slow Macs are 16–18 GB Macs on
   macOS 27"). Needs a slow Mac to test: the kernel log for `required > max`, raising
   `iogpu.wired_limit_mb`, then BB_GC_BUDGET_MB / BB_ARENA_GIB / BB_ARENA_LAZY / BB_FRAMES_AHEAD with
   the benchmark. Likely fix if wiring: size the arena and its residency by RAM, or a growing arena.
+  *2026-10-26:* cause found (pinned GPU memory, FINDINGS #69); fix = #85 + #86 runs layout on Macs
+  with 24 GB or less, branch `memory-16gb`, test build mac-v0.5.9-test1. First tester result: an
+  M4 Air 16 GB went from 11-16 to 57-60 FPS (#83); #69 and #84 confirmed. Released in 0.5.9.
+
+- **The overlook above the carriage in Central Yharnam doesn't hold the cap on an M4 Max
+  (2026-10-26).** Owner's save, full screen, 2560x1440 output (drawable 3840x2160), upscaler off:
+  0.5.6 at a 120 cap 70.9 FPS / GPU 9.4 ms (Game Mode on), 0.5.9-test1 62.6 / 10.1 ms (Game Mode
+  off, local app, camera not identical). At a 60 cap it drops frames and stutters. GPU time is
+  well under 16.7 ms, so look at the CPU side (draw recording, faults, pacing) with
+  `BB_FRAME_STATS=1` / `BB_SAMPLE_MS=1` there. Owner doesn't remember this spot being so
+  demanding: compare older releases (0.5.0-0.5.5) at the same spot and settings, Game Mode on in
+  both, before calling it a regression.
+- **Benchmark scenes at the most demanding spots.** The traversal route and the throughput stand
+  don't include the heaviest areas (e.g. the overlook above). Add scripted scenes there
+  (owner will record routes / lantern 360 spins), some uncapped, so regressions in demanding
+  areas show up in the report.
 
 - **Tessellated draws split their render pass (2026-10-21).** City at 1440p MetalFX: 67 render
   pass splits per frame, all from `Runs::DrawTessellated` (`BB_ENCODER_STATS=1`): each run of
@@ -817,6 +863,21 @@ Each item: what was done for now, what the refinement is, and where it lives.
 
 ## 3. Mac GUI
 
+- **Fixed in 0.5.10: the old launcher stayed open after an update (#96, 2026-10-27).** AppKit
+  refuses to quit while a sheet is attached: `NSApp.terminate` returns without asking the
+  delegate, so 0.5.9-test1 stayed on "Installing…" (⌘Q dead too) beside the new copy. Reproduced
+  with the real 0.5.9-test1 → 0.5.9 update in a scratch folder. #87 (after 0.5.9) hides the
+  windows first, which takes the sheet down; `Updater.install` now also `exit(0)`s if terminate
+  still returns. Verified: the old copy exits ~7 s after Install, the new one opens alone.
+  *Still open:* the fix runs in the *old* copy, so updating **from** 0.5.9 to 0.5.10 shows the
+  bug once more (say so in the 0.5.10 notes: quit the old window with Force Quit). Also, ⌘Q is
+  ignored whenever a launcher sheet is open (any sheet, not only updates): standard AppKit, but
+  players read it as a hang; consider ending the sheet in `applicationShouldTerminate`'s path.
+
+- **Local apps from `make_app.sh` never get Game Mode (2026-10-26).** Its `bbgpu-host*` are
+  symlinks into `out/`, so macOS sees anonymous processes outside the bundle and gamepolicyd only
+  recognises the launcher (packaged apps: all three processes, "Plist category type"). Copy or
+  hard-link the executables into the bundle so local tests match what players get.
 - **Launcher: the Controls section pushes Locations off the bottom of the window** (0.5.7, the
   window is sized for a 13" Air). Move the bindings list to Advanced or make Controls one row.
 
@@ -825,11 +886,9 @@ Each item: what was done for now, what the refinement is, and where it lives.
   UI Fixes" mod (Nexus 207) replaces them; consider pointing to it from the launcher when 16:10
   is chosen (the mod manager can load it).
 
-- **Preferred display (#60, 2026-10-24).** The window always opens centred on the main display
-  (`gpu/shim/window.cpp`, `SDL_WINDOWPOS_CENTERED`) and the default resolution comes from it
-  (`gpu/shim/bbgpu.cpp`). Add a `display=` setting chosen in the launcher, applied with
-  `SDL_WINDOWPOS_CENTERED_DISPLAY(id)`, and keep resolution/ultrawide per display so docking does
-  not reset them.
+- **Resolution per display (#60, 2026-10-24).** The display choice is done (2026-10-26: launcher
+  `display=` UUID → `BB_DISPLAY`, window centred on it, vblank from it). Still open: keep
+  resolution/ultrawide per display so docking does not reset them.
 - **Leftover game processes (#71, 2026-10-24).** After a force-quit of a hung game, `bb-probe`
   and a GPU host stuck in exit stay alive and the launcher refuses to start ("only one copy").
   `stop_host` no longer waits forever after SIGKILL (fixes-0.5.6); the launcher should also offer
@@ -897,6 +956,18 @@ Each item: what was done for now, what the refinement is, and where it lives.
     the default layout in the README.
   - Split mode: mouse events live in the GPU host's window; extend the shared block's keyboard
     bridge (`bbgpu_split_keyboard`) with mouse deltas and buttons.
+  *2026-10-27 (branch `input-bindings`, docs/DESIGN_INPUT.md):* rebindable keys and mouse buttons
+  (`bind_*` in bbport.ini, `src/runtime_bindings.c`), the wheel, a walk key, a launcher Controls
+  page, vertical mouse speed. Still open, in order:
+  - **Mouse too slow (player feedback):** the mouse is a right stick, so it can never turn faster
+    than the stick at full deflection (reached at 650 points/s). Calibrate turn rate per stick
+    value with the pad file (`rx=`), linearise the curve with that table, shorten the 33 ms speed
+    window, then a test build for players.
+  - **Direct camera (spike, about a day):** find the camera's yaw/pitch in game memory and add the
+    mouse motion to them while the camera is free (not locked on, not in cutscenes or menus);
+    stick fallback otherwise. No speed ceiling, 1:1 feel.
+  - Rebinding in the in-game menu (today: the launcher, applied at the next start); controller
+    button remapping on the same model.
 
 - **Updater trust (2026-10-20, launcher About + updates).** The launcher's updater
   (`launcher/App/Updater.swift`) checks the download against GitHub's SHA-256 asset digest, the

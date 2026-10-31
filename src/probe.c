@@ -162,6 +162,7 @@ static void *hang_watchdog(void *arg) {
             char why[160];
             snprintf(why, sizeof why, "the game stopped responding (no new frame for %u seconds, %" PRIu64
                      " frames before; BB_HANG_SECONDS)", limit, flips);
+            runtime_thread_dump_all(); /* where each guest thread is stuck (#46) */
             crash_exit(why, GPU_PROCESS_EXIT_HANG);
         }
     }
@@ -934,6 +935,7 @@ int main(int argc, char **argv) {
     }
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     runtime_install_context_lock(image, size);
+    runtime_install_render_guard(image, size);
     protect(thunks, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;

@@ -94,10 +94,12 @@ if [[ ${1:-} == --test ]]; then
     arch -x86_64 out/trophy-bridge-test
     python3 -m unittest discover -s tests -p test_trophies.py
     python3 tests/test_launcher_stop.py
-    "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_host.c "${libraries[@]}" -Wl,-rpath,"$PREFIX/lib" -o out/pad-test
+    "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_bindings.c src/runtime_host.c "${libraries[@]}" -Wl,-rpath,"$PREFIX/lib" -o out/pad-test
     out/pad-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test
     out/runtime-test
+    "$CC" "${cflags[@]}" -I. -Isrc tests/test_render_guard.c src/runtime_render_guard.c -o out/render-guard-test
+    out/render-guard-test
     "$CC" "${cflags[@]}" -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
@@ -126,6 +128,9 @@ if [[ ${1:-} == --test ]]; then
             -Wall -Wextra -Werror tests/test_srt_walker.cpp -L"${walker#*:}" -lbbgpu \
             -Wl,-rpath,"$ROOT/${walker#*:}" -o "out/srt-walker-test-${walker%%:*}"
         "out/srt-walker-test-${walker%%:*}"
+        # Vertex/tessellation descriptor reads use the same bounded guest-fault recovery.
+        cmake --build "${walker#*:}" --target shader-userdata-test >/dev/null
+        "${walker#*:}/shader-userdata-test"
     done
     # Metal-native M1: Metal::Object, Device ticks and limits, Metal::Encoder (arm64, no window);
     # again under Metal's validation layer.
