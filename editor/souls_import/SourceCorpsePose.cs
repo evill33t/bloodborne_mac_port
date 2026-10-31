@@ -7,8 +7,45 @@ using System.Text;
 // standing FLVER bind pose. Bake each selected clip before static conversion;
 // keep the original model name for texture lookup and group by model + clip.
 internal static class SourceCorpsePose {
-    internal static bool Supports(string profile,string model,int animation)=>
-        profile=="DS1R"&&model=="o0500"&&animation is 10 or 20 or 31 or 42 or 50 or 81;
+    internal sealed record Placement(string Name,string Model,int InitAnimation,int Animation,int? SourceEvent);
+    internal sealed record Plan(IReadOnlyList<Placement> Placements,IReadOnlyList<string> Limits);
+    internal static bool IsCorpse(string profile,string model)=>profile=="DS1R"&&model is "o0500" or "o0502" or "o0504";
+    internal static bool Supports(string profile,string model,int animation)=>profile=="DS1R"&&(model switch {
+        "o0500"=>animation is 10 or 11 or 20 or 21 or 31 or 35 or 42 or 50 or 51 or 81 or 100,
+        "o0502"=>animation is 10 or 41 or 42,
+        "o0504"=>animation is 61 or 81,
+        _=>false
+    });
+
+    // Object variants have their own authored geometry/materials; they are not
+    // character modelDispMask loadouts. Only ordinary Object records participate.
+    // DummyObject/DummyEnemy records must not be made visible by this adapter.
+    internal static Plan Resolve(string profile,string map,MSB1? source,Func<string,byte[]?> read) {
+        if(profile!="DS1R"||source==null)return new([],[]);
+        var objects=source.Parts.Objects.Where(p=>IsCorpse(profile,p.ModelName??"")).ToArray();
+        var selected=new List<Placement>();EMEVD? events=null;
+        foreach(var part in objects) {
+            int animation=part.InitAnimID;int? sourceEvent=null;
+            if(animation==-1) {
+                // Burg's three barrel-supported bodies are held in pose100 by
+                // source event11010400 until the support breaks (then anim101).
+                // Resolve the actual parameterized constructor call and verify
+                // its initial branch instead of guessing a default floor pose.
+                if(map!="m10_01_00_00"||part.ModelName!="o0500"||part.EntityID<0)throw new InvalidDataException("Corpse has no verified initial pose: "+part.Name);
+                events??=EMEVD.Read(read("event/"+map+".emevd.dcx")??throw new FileNotFoundException("Source corpse event unavailable"));
+                var constructor=events.Events.Single(e=>e.ID==0);var candidates=constructor.Instructions.Where(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length==16&&BitConverter.ToInt32(i.ArgData,4)==11010400&&BitConverter.ToInt32(i.ArgData,8)==part.EntityID).ToArray();
+                var entry=events.Events.Single(e=>e.ID==11010400);
+                if(candidates.Length!=1||entry.Instructions.Count!=9||entry.Instructions[5].Bank!=2003||entry.Instructions[5].ID!=18||
+                    !entry.Instructions[5].ArgData.SequenceEqual(new byte[]{0,0,0,0,100,0,0,0,1,0,0,0})||
+                    !entry.Parameters.Any(p=>p.InstructionIndex==5&&p.TargetStartByte==0&&p.SourceStartByte==0&&p.ByteCount==4)||
+                    entry.Parameters.Any(p=>p.InstructionIndex==5&&p.TargetStartByte+p.ByteCount>4))throw new InvalidDataException("Source barrel corpse initializer changed: "+part.Name);
+                animation=100;sourceEvent=11010400;
+            }
+            if(!Supports(profile,part.ModelName!,animation))throw new NotSupportedException($"No verified static corpse pose for {map}/{part.Name}: {part.ModelName} animation {animation}");
+            selected.Add(new(part.Name,part.ModelName!,part.InitAnimID,animation,sourceEvent));
+        }
+        return new(selected,["Preserves each source corpse object's actual model, every authored mesh/material, placement groups and selected static pose; no character model or armor loadout is substituted.","Source dummy object/enemy records remain excluded. Barrel-supported corpses retain their initial source event11010400 pose100; support-breaking motion101, physics and source treasure-state changes are not converted."]);
+    }
 
     internal static FLVER2 Load(Func<string,byte[]?> read,string profile,string model,int animation) {
         if(!Supports(profile,model,animation))throw new NotSupportedException($"No verified static corpse pose decoder for {profile} {model} animation {animation}");

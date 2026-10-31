@@ -109,6 +109,7 @@ static class MapEnemySpawnsTests {
                 if(group.First().SourceModel=="c2560")Check(group.All(p=>p.SourceClothPose is {Bodies:57,Constraints:119} c&&c.ChangedVertices>0&&c.MaximumPivotError<.005f&&c.MaximumPenetration<.001f),"Balder Knight source capsule-cloth pose was not integrated");
                 else Check(group.All(p=>p.SourceClothPose==null),"Source cloth adapter affected another enemy model");
                 var proportions=skeletonModel?null:EnemyProportions.Create(MapCharacters.Authored(Read,group.First().SourceModel).Model,donorVisual,donorAnimation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
+                var sourceEquipment=skeletonModel?null:SourceEquipmentMounts.Load(Read,"DS1R",group.First().SourceModel,MapCharacters.Authored(Read,group.First().SourceModel).Model,group.First().DisplayMasks.ToHashSet());
                 Check(skeletonModel||group.All(p=>p.ProportionScale==1),"Ordinary hollow proportions still depend on MSB actor scale");
                 var wakeVariants=(from variant in Enumerable.Range(1,3) from slot in new[]{7004,7005} select (Variant:variant,Slot:slot,ID:(long)variant*1000000+slot)).ToArray();
                 Check(animation.Files.Count==donorAnimation.Files.Count+(skeletonModel?6:0)&&animation.Files.Select(f=>f.ID).Distinct().Count()==animation.Files.Count,"Skeleton wake clips changed the native binder outside six declared variants");
@@ -118,7 +119,10 @@ static class MapEnemySpawnsTests {
                     byte[] expectedClip=original.Bytes.ToArray();
                     if(proportions!=null) {
                         if(original.ID==1000000)expectedClip=proportions.Skeleton;
-                        else if(original.ID>=1000000000)expectedClip=EnemyProportions.Clip(expectedClip,proportions);
+                        else if(original.ID>=1000000000) {
+                            expectedClip=EnemyProportions.Clip(expectedClip,proportions);
+                            if(sourceEquipment?.Grip is {Count:>0} grip)expectedClip=SourceEquipmentMounts.ApplyGrip(expectedClip,NativeAnimation.Skeleton(proportions.Skeleton),grip);
+                        }
                     }
                     Check(retained.Flags==original.Flags&&retained.Name==original.Name.Replace("c2610",group.Key,StringComparison.OrdinalIgnoreCase)&&retained.Bytes.Span.SequenceEqual(expectedClip),"Enemy adapter changed an unrelated native entry or omitted its declared positional correction");
                 }

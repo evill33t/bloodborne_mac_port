@@ -22,6 +22,14 @@ internal static class MapCollisionBindingsTests {
             new("ramp","l",8,"l",[new(1,Part("ramp","l",2,0).Surfaces[0].Triangles.Concat(Part("ramp","l",20,100).Surfaces[0].Triangles).ToArray())])]);
         var paired=MapCollisionBindings.Partition(ramp,2);
         Check(paired[0].High.Concat(paired[0].Low).All(t=>t.A.X<50)&&paired[1].High.Concat(paired[1].Low).All(t=>t.A.X>50),"Fine/coarse ramp sections occupy different ends of a native collision record");
+        MapCollision.Triangle Floor(float y)=>new(new(-10,y,-10),new(10,y,-10),new(0,y,10));
+        MapCollisionBindings.Chunk[] floors=[new("lower",[Floor(0)],[Floor(0)]),new("upper",[Floor(8)],[Floor(8)])];
+        Check(MapCollisionBindings.ObjectSlot(floors,null,new(0,8.1f,0))==1,"An unbound upstairs prop was attached to the downstairs floor");
+        Check(MapCollisionBindings.ObjectSlot(floors,"render-piece",new(0,.1f,0))==0,"A render-piece source reference did not resolve spatially");
+        Check(MapCollisionBindings.ObjectSlot(floors,"lower",new(0,8.1f,0))==0,"An explicit source collision reference was discarded");
+        MapCollisionBindings.Chunk[] split=[new("same",[Floor(0)],[Floor(0)]),new("same",[Floor(8)],[Floor(8)])];
+        Check(MapCollisionBindings.ObjectSlot(split,"same",new(0,8.1f,0))==1,"A partitioned source collision picked the first chunk regardless of position");
+        Reject(()=>MapCollisionBindings.ObjectSlot([],null,Vector3.Zero));
         Console.WriteLine("PASS: native collision chunks retain paired source H/L lighting regions and all triangles");
     }
 }

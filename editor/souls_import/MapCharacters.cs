@@ -110,9 +110,10 @@ internal static class MapCharacters {
     }
 
     internal static SkinBake Package(byte[] sourceModel,List<TPF.Texture> textures,string profile,string template,string target,
-        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveEnemyProportions=false,IReadOnlyDictionary<int,string>? staticClothAnchors=null,IReadOnlyDictionary<string,Matrix4x4>? equipmentMounts=null) {
+        byte[] nativeCharacter,byte[] nativeAnimation,byte[] nativeScript,Dictionary<string,byte[]> files,IReadOnlySet<int>? masks=null,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveEnemyProportions=false,IReadOnlyDictionary<int,string>? staticClothAnchors=null,IReadOnlyDictionary<string,Matrix4x4>? equipmentMounts=null,IReadOnlyDictionary<string,Matrix4x4>? equipmentGrip=null) {
         if(staticClothAnchors!=null&&(profile!="DS1R"||template!="c2610"||!preserveEnemyProportions||allowLargeHumanoid||preserveSourceDimensions))throw new InvalidDataException("Static source cape anchors require ordinary DS1R hollow proportions");
         if(equipmentMounts!=null&&(profile!="DS1R"||template!="c2610"||!preserveEnemyProportions||allowLargeHumanoid||preserveSourceDimensions))throw new InvalidDataException("Authored source equipment mounts require ordinary DS1R hollow proportions");
+        if(equipmentGrip!=null&&(profile!="DS1R"||template!="c2610"||!preserveEnemyProportions||allowLargeHumanoid||preserveSourceDimensions||equipmentMounts==null))throw new InvalidDataException("Source shield holding poses require authored ordinary DS1R equipment mounts");
         int id=int.Parse(target[1..]);
         var character=BND4.Read(nativeCharacter);var visual=character.Files.Single(f=>IsModel(f.Name));
         var animation=BND4.Read(nativeAnimation);EnemyProportions.Plan? proportions=null;
@@ -123,7 +124,11 @@ internal static class MapCharacters {
             visual.Bytes=proportions.Model;skeleton.Bytes=proportions.Skeleton;
             var clips=animation.Files.Where(f=>f.ID>=1000000000).ToArray();
             if(clips.Length!=328)throw new InvalidDataException("Native hollow animation population changed");
-            foreach(var clip in clips)clip.Bytes=EnemyProportions.Clip(clip.Bytes.ToArray(),proportions);
+            var rig=NativeAnimation.Skeleton(proportions.Skeleton);
+            foreach(var clip in clips) {
+                var bytes=EnemyProportions.Clip(clip.Bytes.ToArray(),proportions);
+                clip.Bytes=equipmentGrip is {Count:>0}?SourceEquipmentMounts.ApplyGrip(bytes,rig,equipmentGrip):bytes;
+            }
         }
         var bake=SkinRetarget.Bake(sourceModel,visual.Bytes,textures,masks:masks,textureOwner:target,sourceProfile:profile,fitSegments:profile=="DS1R"&&template=="c2610",allowLargeHumanoid:allowLargeHumanoid,preserveSourceDimensions:preserveSourceDimensions,preserveBoneLengths:proportions!=null,rigidMeshAnchors:staticClothAnchors,equipmentMounts:equipmentMounts);visual.Bytes=bake.Model.Write();
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));

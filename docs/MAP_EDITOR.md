@@ -1164,6 +1164,54 @@ through native arm animation; this is rigid attached scenery, not dynamic cloth.
 Source vertices and faces remain present. Combat poses and weapon movesets still
 follow the native donor.
 
+Shield loadouts also retain the source idle left wrist and six shared finger
+tracks while the native forearm moves. The native torch grip otherwise separates
+the glove from the shield handle even with the correct forearm mount. Only those
+seven tracks change; additive grip tracks are neutral. Source combat hand gestures
+remain unconverted. Independent decoding covers all 328 native clips for each of
+seven shield variants, including additive clips and actual shield/gauntlet contact.
+
+The armored boar has a separate DS1R workflow-1 material adapter. The shipped
+shader's `IF_Z` selects its legacy RGB-specular branch for this authored workflow.
+The adapter gamma-decodes specular RGB with the source MTD tint into native
+reflectance, instead of using the zero-valued native dummy reflectance. Specular
+alpha supplies roughness; matching highlight half-width converts that to native
+shininess. Source cutout materials remain cutouts. Native lighting, cubemap
+contents and BRDF behavior still differ from DS1R.
+Additional-map reflection textures use the destination block name required by
+the native `GILM%04d` lookup: Firelink keeps its four declared donor cubemaps under
+`m40_02`, and Burg its two under `m40_03`. Sequential map exports merge these
+owned aliases and reject conflicting data. The complete eight canonical area
+texture names remain available for native scenery; the combined archive has 12
+entries. Renaming only the area prefix left Burg without its requested reflection
+textures. Color grading is unchanged.
+
+All 44 placed corpse objects in Firelink/Burg retain their distinct source models
+(`o0500`, armored `o0502`, and `o0504`) and 16 selected static poses. Burg's three
+barrel-supported corpses resolve their initial pose 100 from the verified source
+constructor/event 11010400. Unknown corpse poses fail explicitly instead of using
+the standing bind pose. Their support-breaking animation 101, physics and treasure
+state changes remain unconverted. Source dummy objects stay excluded.
+
+The ordinary Burg breakable adapter emits 351 native object actors across 29
+source models, preserving the authored intact/broken visuals and 630 distinct
+source fragments. Each fragment uses a separate native rigid body. Fitted native
+donors approximate collision shape, mass, impulses and sounds. Existing Firelink
+urn bundles/IDs remain unchanged. Object residency binds to an emitted source
+collision reference or the closest actual collision geometry, rather than the
+map's first collision slot; split and stacked floor fixtures cover that selection.
+Donors are restricted to the source prop family: chairs, tables, benches,
+barrels, wooden cargo/planks, pails/baskets and stone pillars. Fifty-six Burg props
+remain static scenery without separate object colliders: ten event-addressed
+objects need explosion/trap/support-breaking adapters, and two wagons, five
+bookcases and 39 fabric sacks lack a suitable native fragment rig. The conversion
+report lists these objects and limits explicitly. A copied-save native check
+showed the converted wooden cargo supporting the hunter about one metre above
+the floor, and barrels breaking into debris during an ordinary enemy encounter.
+The barrel check does not isolate the player as the source of the hit. Native
+views also showed the corrected shield grip, armored corpse pose and metallic
+boar material; these bounded checks do not establish every combat pose or prop.
+
 Source collision filters 13/14 (fall camera) and 15 (instant death) are now exported
 as separate paired H/L sensor bodies with matching native filter metadata, rather
 than omitted or added to the walkable layer. Eight source sensor placements retain
@@ -1202,7 +1250,8 @@ The installed-asset checks include `tests/test_map_import.sh` (native game root,
 DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
 `tests/test_npc_face.sh`, `tests/test_map_characters.sh`, `tests/test_map_enemy_spawns.sh`,
 `tests/test_enemy_proportions.sh`, `tests/test_static_map_uv.sh`,
-`tests/test_map_navigation.sh` and `tests/test_skin_hair_alpha.sh`.
+`tests/test_map_navigation.sh`, `tests/test_skin_hair_alpha.sh`,
+`tests/test_shield_grip.sh` and `tests/test_boar_materials.sh`.
 The proportion tests independently decode 3,996 posed frames across four source
 models and check all 328 native clips per model. NPC and cemetery-skeleton adapters
 remain separate. `tests/test_source_animation.sh` accepts the DS1R

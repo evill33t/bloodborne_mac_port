@@ -13,6 +13,7 @@ static class SourceCorpsePoseTests {
     static string Leaf(string path)=>path.Replace('\\','/').Split('/').Last();
     public static void Main(string[] args) {
         string root=args.Single();string path=Path.Combine(root,"obj/o0500.objbnd.dcx");var bytes=File.ReadAllBytes(path);var hash=SHA256.HashData(bytes);
+        SourceCorpseVariantsTests.Run(root);
         byte[]? Read(string relative)=>relative=="obj/o0500.objbnd.dcx"?bytes:null;
         var original=BND3.Read(bytes);var source=FLVER2.Read(original.Files.Single(f=>Leaf(f.Name)=="o0500.flver").Bytes);
         // Independently sampled with Smithbox's existing spline decoder. These

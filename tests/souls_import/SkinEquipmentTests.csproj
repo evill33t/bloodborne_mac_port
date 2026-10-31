@@ -6,6 +6,7 @@
     <Compile Include="../../editor/souls_import/SourceAnimation.cs" Link="SourceAnimation.cs" />
     <Compile Include="../../editor/souls_import/NativeAnimation.cs" Link="NativeAnimation.cs" />
     <Compile Include="../../editor/souls_import/NativeSpline.cs" Link="NativeSpline.cs" />
+    <Compile Include="../../editor/souls_import/NativeRigAppend.cs" Link="NativeRigAppend.cs" />
     <Compile Include="../../editor/souls_import/SourceCollision.cs" Link="SourceCollision.cs" />
     <Compile Include="../../editor/souls_import/MapCollision.cs" Link="MapCollision.cs" />
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs" />

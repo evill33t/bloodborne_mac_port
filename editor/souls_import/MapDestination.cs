@@ -42,6 +42,47 @@ internal static class MapDestination {
         if(text.Split(['\r','\n'],StringSplitOptions.RemoveEmptyEntries).Any(line=>line.Split('#')[0].Trim()==entry))return bytes.ToArray();
         return [..bytes,..Encoding.ASCII.GetBytes((bytes.Length>0&&bytes[^1]!=10?"\r\n":"")+entry+"\r\n")];
     }
+    internal static byte[] EnvironmentMaps(Selection selection,byte[] donorBytes,byte[]? existingBytes) {
+        if(!selection.Additional)throw new ArgumentException("Environment aliases require an additional destination");
+        var donor=TPF.Read(donorBytes);var canonical=TPF.Read(donorBytes);
+        string area=selection.TemplateMap[..3]+"_";
+        foreach(var texture in canonical.Textures)texture.Name=texture.Name.Replace(area,selection.Area+"_",StringComparison.Ordinal);
+        // Keep the complete area resource set: native scenery also relies on
+        // compatibility entries outside the selected block's reflection maps.
+        var result=existingBytes==null?canonical:TPF.Read(existingBytes);
+        if(result.Platform!=donor.Platform||result.Encoding!=donor.Encoding||result.Flag2!=donor.Flag2)
+            throw new InvalidDataException("Additional environment texture metadata conflicts");
+        var names=new HashSet<string>(StringComparer.Ordinal);
+        if(result.Textures.Any(t=>!names.Add(t.Name)))throw new InvalidDataException("Repeated additional environment texture name");
+        // Native 0x221da2f builds <map-block>_GILM; 0xe92b03..3e
+        // appends the four-digit EnvMapID and performs an exact texture lookup.
+        // Area-only renaming leaves Burg m40_03 without any reflection maps.
+        string from=selection.TemplateBase[..6]+"_GILM",to=selection.BaseMap[..6]+"_GILM";
+        var selected=donor.Textures.Where(t=>t.Name.StartsWith(from,StringComparison.Ordinal)&&t.Name.Length==from.Length+4&&t.Name[from.Length..].All(c=>c is >= '0' and <= '9')).ToArray();
+        if(selected.Length==0)throw new InvalidDataException("Destination donor has no matching block environment maps: "+from);
+        byte[] Record(TPF owner,TPF.Texture texture) {
+            var one=new TPF{Platform=owner.Platform,Encoding=owner.Encoding,Flag2=owner.Flag2};one.Textures.Add(texture);return one.Write();
+        }
+        int added=0;
+        foreach(var texture in canonical.Textures)if(names.Add(texture.Name)){result.Textures.Add(texture);added++;}
+        foreach(var texture in selected) {
+            texture.Name=to+texture.Name[from.Length..];
+            var old=result.Textures.SingleOrDefault(t=>t.Name==texture.Name);
+            if(old!=null) {
+                if(Record(result,old).AsSpan().SequenceEqual(Record(donor,texture)))continue;
+                // A fresh area's m40_02 compatibility entries came from
+                // retail m24_02. Only this explicitly owned destination block
+                // may replace its exact canonical records with its m24_01 donor.
+                var original=canonical.Textures.SingleOrDefault(t=>t.Name==texture.Name);
+                if(original==null||!Record(result,old).AsSpan().SequenceEqual(Record(canonical,original)))throw new InvalidDataException("Additional environment texture name conflicts: "+texture.Name);
+                result.Textures[result.Textures.IndexOf(old)]=texture;added++;
+                continue;
+            }
+            if(!names.Add(texture.Name))throw new InvalidDataException("Repeated donor environment texture name: "+texture.Name);
+            result.Textures.Add(texture);added++;
+        }
+        return added==0&&existingBytes!=null?existingBytes.ToArray():result.Write(DCX.Type.DCX_DFLT_10000_44_9);
+    }
     internal static void Seed(Selection selection,Func<string,byte[]?> read,Action<string,byte[]> write) {
         if(!selection.Additional)return;
         byte[] Required(string path)=>read(path)??throw new FileNotFoundException("Destination template unavailable",path);
@@ -56,8 +97,10 @@ internal static class MapDestination {
             foreach(var file in binder.Files)file.Name=file.Name.Replace(selection.TemplateBase,selection.BaseMap,StringComparison.Ordinal);
             write(folder+selection.BaseMap+kind,binder.Write(DCX.Type.DCX_DFLT_10000_44_9));
         }
-        foreach(string suffix in new[]{"_envmap.tpf.dcx","_cgrading.tpf.dcx"}) {
-            string donorArea=selection.TemplateMap[..3],path=$"map/{selection.Area}/{selection.Area}{suffix}";
+        string envPath=$"map/{selection.Area}/{selection.Area}_envmap.tpf.dcx",donorArea=selection.TemplateMap[..3];
+        write(envPath,EnvironmentMaps(selection,Required($"map/{donorArea}/{donorArea}_envmap.tpf.dcx"),read(envPath)));
+        foreach(string suffix in new[]{"_cgrading.tpf.dcx"}) {
+            string path=$"map/{selection.Area}/{selection.Area}{suffix}";
             var tpf=TPF.Read(Required($"map/{donorArea}/{donorArea}{suffix}"));
             foreach(var texture in tpf.Textures)texture.Name=texture.Name.Replace(donorArea+"_",selection.Area+"_",StringComparison.Ordinal);
             var bytes=tpf.Write(DCX.Type.DCX_DFLT_10000_44_9);var existing=read(path);

@@ -123,6 +123,7 @@ internal static class NonHumanoidEnemies {
         render.BufferLayouts=shader.BufferLayouts;render.GXLists=shader.GXLists;render.Materials=shader.Materials;render.Meshes=shader.Meshes;
         var bake=SkinRetarget.Bake(source.Model,render.Write(),source.Textures,masks,overrides,target,"DS1R",preserveBoneLengths:true);
         if(bake.DirectWeightShare<.999999)throw new InvalidDataException("Authored enemy skin lost direct source bone weights");
+        if(profile==Boar)BoarMaterials.Apply(readSource,source.Model,source.Textures,bake,target);
         OrderRenderNodes(bake.Model);
         visual.Bytes=bake.Model.Write();skeleton.Bytes=plan.Skeleton;
         var clips=animation.Files.Where(f=>f.ID>=1000000000).ToArray();if(clips.Length!=profile.Clips)throw new InvalidDataException("Native enemy donor clip population changed");

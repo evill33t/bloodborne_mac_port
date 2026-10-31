@@ -94,7 +94,7 @@ internal static class MapEnemySpawns {
             // c2500 mask 1 is the authored torch loadout (NpcParam 250001).
             // Armoured c2540/c2550/c2560 variants carry other equipment.
             bool hasTorch=group.Key.ModelName=="c2500"&&masks.Contains(1);
-            var bake=special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910",preserveEnemyProportions:!skeleton,staticClothAnchors:clothResult?.Anchors,equipmentMounts:equipment?.Frames);
+            var bake=special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910",preserveEnemyProportions:!skeleton,staticClothAnchors:clothResult?.Anchors,equipmentMounts:equipment?.Frames,equipmentGrip:equipment?.Grip);
             var actorMap=special!=null?MSBB.Read(Native("map/MapStudio/"+special.Map+".msb.dcx")):donorMap;
             var actorDonor=special!=null?actorMap.Parts.Enemies.First(p=>p.ModelName==special.Native):donor;
             var rowDonor=special!=null?npcs.Rows.Single(r=>r.ID==special.Npc):paramDonor;

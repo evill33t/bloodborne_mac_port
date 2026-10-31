@@ -1,10 +1,37 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 using SoulsFormats;
+using System.Numerics;
 
 // Keep H/L chunks associated with the same source placement, so lighting and
 // area metadata still follow source collision regions after native partitioning.
 internal static class MapCollisionBindings {
     internal record Chunk(string SourceName,IReadOnlyList<MapCollision.Triangle> High,IReadOnlyList<MapCollision.Triangle> Low);
+    // Object records often name a render piece (or nothing) in their source
+    // collision field. Native object residency requires an emitted collision
+    // record. Resolve real source references first, then the closest actual
+    // floor geometry; never attach every object to the map's first record.
+    internal static int ObjectSlot(IReadOnlyList<Chunk> chunks,string? sourceName,Vector3 position) {
+        if(chunks.Count==0||!float.IsFinite(position.X)||!float.IsFinite(position.Y)||!float.IsFinite(position.Z))
+            throw new InvalidDataException("Invalid object collision binding");
+        var candidates=Enumerable.Range(0,chunks.Count).Where(i=>chunks[i].SourceName==sourceName).ToArray();
+        if(candidates.Length==0)candidates=Enumerable.Range(0,chunks.Count).ToArray();
+        float Distance(int index)=>chunks[index].High.Select(t=>DistanceSquared(position,t)).DefaultIfEmpty(float.PositiveInfinity).Min();
+        int result=candidates.MinBy(Distance);
+        if(!float.IsFinite(Distance(result)))throw new InvalidDataException("Object has no solid collision region");
+        return result;
+    }
+    static float DistanceSquared(Vector3 p,MapCollision.Triangle t) {
+        var ab=t.B-t.A;var ac=t.C-t.A;var n=Vector3.Cross(ab,ac);float nn=n.LengthSquared();
+        if(nn>1e-16f) {
+            var q=p-n*(Vector3.Dot(p-t.A,n)/nn);
+            float d00=Vector3.Dot(ab,ab),d01=Vector3.Dot(ab,ac),d11=Vector3.Dot(ac,ac);
+            float d20=Vector3.Dot(q-t.A,ab),d21=Vector3.Dot(q-t.A,ac),den=d00*d11-d01*d01;
+            float v=(d11*d20-d01*d21)/den,w=(d00*d21-d01*d20)/den;
+            if(v>=0&&w>=0&&v+w<=1)return Vector3.DistanceSquared(p,q);
+        }
+        float Edge(Vector3 a,Vector3 b) {var d=b-a;float l=d.LengthSquared();return Vector3.DistanceSquared(p,a+d*(l>0?Math.Clamp(Vector3.Dot(p-a,d)/l,0,1):0));}
+        return Math.Min(Edge(t.A,t.B),Math.Min(Edge(t.B,t.C),Edge(t.C,t.A)));
+    }
     internal static IReadOnlyList<Chunk> Partition(SourceCollision.Result source,int slots) {
         var high=source.Parts.Where(p=>p.Layer=="h"&&p.PlayerSolid).ToDictionary(p=>p.Name,StringComparer.Ordinal);
         var low=source.Parts.Where(p=>p.Layer=="l"&&p.PlayerSolid).ToDictionary(p=>p.Name,StringComparer.Ordinal);

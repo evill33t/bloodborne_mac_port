@@ -60,12 +60,31 @@ static class NonHumanoidEnemiesTests {
         byte[]? Source(string p)=>File.Exists(Path.Combine(source,p))?ReadFile(Path.Combine(source,p)):null;
         byte[] Native(string p)=>ReadFile(Path.Combine(native,p));
         var sourceMap=MSB1.Read(Source("map/MapStudio/m10_01_00_00.msb")!);var sourceGame=BND3.Read(Source("param/GameParam/GameParam.parambnd.dcx")!);var sourceRows=PARAM.Read(sourceGame.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes);sourceRows.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(defs,"NpcParam.xml")));
+        // Primary bytecode regression: the old textual disassembler lost IF_Z.
+        // In the shipped shader, workflow0 enters the packed PBR branch;
+        // authored workflow1 takes ELSE legacy RGB specular/alpha roughness.
+        var sourceShaders=BND3.Read(Source("shader/FRPG_FlverPBL_fpo_DX11.shaderbnd.dcx")!);var shader=sourceShaders.Files.Single(f=>Leaf(f.Name)=="FRPG_Phn_DifSpcBmp__________HemEnv.fpo").Bytes.ToArray();
+        int dxbc=shader.AsSpan().IndexOf("DXBC"u8);Check(dxbc>=0,"Source shader DXBC missing");int shex=-1;
+        for(int i=0;i<BitConverter.ToInt32(shader,dxbc+28);i++){int at=dxbc+BitConverter.ToInt32(shader,dxbc+32+i*4);if(shader.AsSpan(at,4).SequenceEqual("SHEX"u8))shex=at+8;}
+        Check(shex>=0&&BitConverter.ToUInt32(shader,shex+0x09f0)==0x0400001f&&BitConverter.ToUInt32(shader,shex+0x09f4)==0x0020800a&&BitConverter.ToInt32(shader,shex+0x09f8)==0&&BitConverter.ToInt32(shader,shex+0x09fc)==85,"Source MaterialWorkflow branch is not the verified IF_Z(cb0[85].x)");
         var result=new List<object>();int checkedClips=0,checkedPoses=0;float maxPoseError=0;
         foreach(var profile in new[]{NonHumanoidEnemies.Boar,NonHumanoidEnemies.Demon}) {
             var actor=sourceMap.Parts.Enemies.Single(a=>a.ModelName==profile.Source);Check(NonHumanoidEnemies.Select(actor,"m10_01_00_00")==profile&&NonHumanoidEnemies.Select(actor,"m10_02_00_00")==null,"Nonhumanoid source contract is not explicit");
             var row=sourceRows.Rows.Single(r=>r.ID==actor.NPCParamID);var masks=Enumerable.Range(0,16).Where(i=>Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="modelDispMask"+i).Value)!=0).ToHashSet();
             var files=new Dictionary<string,byte[]>();string target=profile==NonHumanoidEnemies.Boar?"c8801":"c8800";
             var skin=NonHumanoidEnemies.Package(Source,Native,profile,target,masks,files);Check(skin.DirectWeightShare>=.999999&&skin.ProportionScale==1,"Source body relies on native proportions or actor scaling");
+            if(profile==NonHumanoidEnemies.Boar) {
+                var owned=TPF.Read(skin.Textures.Write());var specular=skin.Model.Materials.Select(m=>Leaf(m.Textures.Single(t=>t.ParamName=="g_SpecularTexture").Path).Split('.')[0]).ToArray();
+                Check(specular.All(n=>n.StartsWith(target+"_source_f0_",StringComparison.Ordinal))&&specular.Distinct().Count()==5,"Boar source reflection was discarded or duplicate inputs were not shared");
+                foreach(string name in specular.Distinct()){var texture=owned.Textures.Single(t=>t.Name==name);var dds=texture.HeaderizeExt(out _);Check((int)new DDS(dds).GetDXGIFormat()==28&&SkinRetarget.DdsMipImages(dds)[0].subImages[0].Where((_,i)=>i%4!=3).Any(x=>x>0),"Boar reflection is missing, black or gamma-tagged");}
+                var shininess=skin.Model.Materials.Select(m=>Leaf(m.Textures.Single(t=>t.ParamName=="g_ShininessTexture").Path).Split('.')[0]).ToArray();Check(shininess.All(n=>n.StartsWith(target+"_source_shine_",StringComparison.Ordinal))&&shininess.Distinct().Count()==2,"Source boar alpha roughness was left in RGB-packed material form");
+                Check(skin.Model.Materials.Where(m=>m.MTD.EndsWith("_e.mtd",StringComparison.Ordinal)).Count()==2,"Source boar edge materials lost alpha testing");
+                var sourceTextures=MapCharacters.Authored(Source,profile.Source).Textures;
+                foreach(string packed in new[]{"c3469_1_s","c3469_2_s"}) {
+                    var originalPacked=SkinRetarget.DdsMipImages(sourceTextures.Single(t=>t.Name==packed).HeaderizeExt(out _))[0].subImages;var nativePacked=SkinRetarget.DdsMipImages(owned.Textures.Single(t=>t.Name==target+"_import_"+packed).HeaderizeExt(out _))[0].subImages;
+                    Check(originalPacked.Count==nativePacked.Count&&originalPacked.Zip(nativePacked).All(p=>p.First.SequenceEqual(p.Second)),"Boar fix changed source shininess/material mip payloads");
+                }
+            } else Check(skin.Model.Materials.All(m=>m.Textures.Single(t=>t.ParamName=="g_SpecularTexture").Path.EndsWith("SYSTEX_DummyReflectance.tga",StringComparison.Ordinal)),"Boar material policy affected the Titanite Demon");
             CheckRenderOrder(FLVER2.Read(skin.Model.Write()));var permuted=FLVER2.Read(skin.Model.Write());Permute(permuted,permuted.Nodes.Select(n=>n.Name).Reverse());var canonical=Canonical(permuted);var namedWorld=permuted.Nodes.Select((n,i)=>(n.Name,world:SkinRetarget.World(permuted.Nodes)[i])).ToDictionary(x=>x.Name,x=>x.world);
             NonHumanoidEnemies.OrderRenderNodes(permuted);CheckRenderOrder(permuted);Check(canonical.AsSpan().SequenceEqual(Canonical(permuted)),"Render permutation changed serialized named node/vertex/mesh/palette/dummy/geometry records");var orderedWorld=SkinRetarget.World(permuted.Nodes);
             Check(permuted.Nodes.Select((n,i)=>namedWorld[n.Name]==orderedWorld[i]).All(x=>x),"Render permutation changed a named bind matrix");

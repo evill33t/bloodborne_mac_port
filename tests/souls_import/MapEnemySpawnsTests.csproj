@@ -4,6 +4,7 @@
     <Compile Include="MapEnemySpawnsTests.cs"/>
     <Compile Include="../../editor/souls_import/NativeRigAppend.cs" Link="NativeRigAppend.cs"/>
     <Compile Include="../../editor/souls_import/NonHumanoidEnemies.cs" Link="NonHumanoidEnemies.cs"/>
+    <Compile Include="../../editor/souls_import/BoarMaterials.cs" Link="BoarMaterials.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacters.cs" Link="MapCharacters.cs"/>
     <Compile Include="../../editor/souls_import/EnemyProportions.cs" Link="EnemyProportions.cs"/>
     <Compile Include="../../editor/souls_import/MapCharacterAnimations.cs" Link="MapCharacterAnimations.cs"/>

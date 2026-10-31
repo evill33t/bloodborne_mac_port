@@ -92,6 +92,7 @@ internal static class MapBreakablesTests {
         destination.Parts.Objects.AddRange(export.Objects);var reread=MSBB.Read(destination.Write());
         Check(export.Objects.All(o=>reread.Parts.Objects.Any(p=>p.Name==o.Name&&p.ModelName==o.ModelName)),"MSB actor/model references did not survive serialization");
         foreach(var path in sourcePaths)Check(SHA256.HashData(File.ReadAllBytes(path)).SequenceEqual(hashes[path]),"Original game asset changed");
+        MapBreakableBurgTests.Run(source,native,surface,export);
         Console.WriteLine("Map breakables passed: 25 urn actors, 3 native object/parameter bundles, rigid fragment/physics references and original assets verified. Gameplay remains unverified.");return 0;
     }
 }
