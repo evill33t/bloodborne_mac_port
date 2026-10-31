@@ -57,7 +57,7 @@ void HunterCards(const BbCoopUi& s) {
         auto* draw=ImGui::GetWindowDrawList();const auto at=ImGui::GetCursorScreenPos();
         const float width=ImGui::GetContentRegionAvail().x,height=224*scale;
         const ImVec2 end(at.x+width,at.y+height),center(at.x+width*.5f,at.y+72*scale);
-        const auto* member=i<std::clamp(lobby.member_count,0,4)?&lobby.members[i]:nullptr;
+        const auto* member=i<std::clamp<int>(lobby.member_count,0,4)?&lobby.members[i]:nullptr;
         const bool mine=member && !std::strcmp(member->id,lobby.me);
         const bool ready=member && (member->ready || member->state==BBCOOP_LOBBY_PLAYING);
         BbCoopStyle::Card(draw,at,end,mine);
@@ -104,12 +104,79 @@ void Preferences() {
     }
     if(changed) BbSettings::Save();
 }
+// v1.3.1 social actions use the same bounded cross-process lobby commands as invitations.
+void SocialPlayer(const bbcoop_lobby_entry& player, const bbcoop_lobby& lobby) {
+    ImGui::PushID(player.id);
+    ImGui::TextUnformatted(Hunter(player.name)); ImGui::SameLine();
+    ImGui::TextDisabled("%s", T(player.state == BBCOOP_LOBBY_PLAYING ? "In the hunt" :
+                               player.state == BBCOOP_LOBBY_OFFLINE ? "Away" : "Choosing a character"));
+    if (player.relation == BBCOOP_FRIEND_RECEIVED) {
+        if (ImGui::SmallButton(T("Accept friend request"))) Lobby(BBCOOP_TEAM_FRIEND_ADD, player.id);
+        ImGui::SameLine();
+        if (ImGui::SmallButton(T("Decline"))) Lobby(BBCOOP_TEAM_FRIEND_DECLINE, player.id);
+    } else if (player.relation == BBCOOP_FRIEND_SENT) {
+        if (ImGui::SmallButton(T("Cancel friend request"))) Lobby(BBCOOP_TEAM_FRIEND_REMOVE, player.id);
+    } else if (player.relation == BBCOOP_FRIEND_YES) {
+        if (ImGui::SmallButton(T("Remove friend..."))) ImGui::OpenPopup(Popup("Remove friend?"));
+        if (ImGui::BeginPopupModal(Popup("Remove friend?"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted(Hunter(player.name));
+            if (BbCoopStyle::Button("Remove")) { Lobby(BBCOOP_TEAM_FRIEND_REMOVE, player.id); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine(); if (BbCoopStyle::Button("Cancel")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+    } else if (player.relation != BBCOOP_FRIEND_SELF && std::strcmp(player.id, lobby.me)) {
+        if (ImGui::SmallButton(T("Add friend"))) Lobby(BBCOOP_TEAM_FRIEND_ADD, player.id);
+    }
+    if (player.relation != BBCOOP_FRIEND_SELF && std::strcmp(player.id, lobby.me)) {
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!lobby.in_team || player.in_my_team || player.state == BBCOOP_LOBBY_OFFLINE ||
+                             lobby.member_count >= std::clamp<int>(lobby.team_size, 1, BBCOOP_LOBBY_TEAM));
+        if (ImGui::SmallButton(T("Invite"))) Lobby(BBCOOP_TEAM_INVITE, player.id);
+        ImGui::EndDisabled();
+    }
+    ImGui::Separator(); ImGui::PopID();
+}
+void Friends(const bbcoop_lobby& lobby) {
+    if (!ImGui::BeginPopupModal(Popup("Friends"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    static char query[40]{};
+    const bool entered = ImGui::InputText(T("Hunter's name"), query, sizeof(query), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (BbCoopStyle::Button("Search") || entered) Lobby(BBCOOP_TEAM_SEARCH, query);
+    ImGui::SameLine();
+    if (BbCoopStyle::Button("Clear")) { query[0] = 0; Lobby(BBCOOP_TEAM_SEARCH); }
+    ImGui::BeginChild("social lists", ImVec2(std::min(650*BbCoopStyle::Scale(), ImGui::GetIO().DisplaySize.x-100*BbCoopStyle::Scale()), 300*BbCoopStyle::Scale()), ImGuiChildFlags_Borders);
+    const auto list = [&](const char* title, const auto& entries, int count) {
+        ImGui::PushID(title); ImGui::SeparatorText(T(title));
+        for (int i=0; i<std::clamp(count, 0, int(std::size(entries))); ++i) SocialPlayer(entries[i], lobby);
+        ImGui::PopID();
+    };
+    list("Your friends", lobby.friends, lobby.friend_count);
+    list("Friend requests", lobby.requests, lobby.request_count);
+    list("Sent requests", lobby.sent, lobby.sent_count);
+    list("Search results", lobby.search, lobby.search_count);
+    ImGui::EndChild();
+    if (BbCoopStyle::Button("Back") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+void OpenTeams(const bbcoop_lobby& lobby) {
+    if (lobby.in_team || !lobby.open_count) return;
+    if (!ImGui::TreeNode(T("Open teams"))) return;
+    for (int i=0; i<std::clamp<int>(lobby.open_count,0,BBCOOP_LOBBY_OPEN); ++i) {
+        const auto& team=lobby.open_teams[i]; ImGui::PushID(team.id);
+        ImGui::Text("%s (%d/%d)", Hunter(team.name), team.members, std::clamp<int>(lobby.team_size,1,BBCOOP_LOBBY_TEAM));
+        ImGui::SameLine();
+        if (team.asked) { if (ImGui::SmallButton(T("Cancel request"))) Lobby(BBCOOP_TEAM_ASK_CANCEL,team.id); }
+        else if (ImGui::SmallButton(T(team.open?"Join":"Ask to join"))) Lobby(BBCOOP_TEAM_ASK_JOIN,team.id);
+        ImGui::PopID();
+    }
+    ImGui::TreePop();
+}
 void WorldPicker(const BbCoopUi& s) {
     const auto& lobby=s.lobby;const auto display=ImGui::GetIO().DisplaySize;const float scale=BbCoopStyle::Scale();
     ImGui::SetNextWindowSize(ImVec2(std::min(display.x-60*scale,1100.f*scale),std::min(display.y-60*scale,750.f*scale)),ImGuiCond_Appearing);
     if(!ImGui::BeginPopupModal(Popup("Choose a world"),nullptr,ImGuiWindowFlags_NoCollapse)) return;
     ImGui::TextWrapped(T("%s"),T("Every hunt in a world shares its progress. Your character keeps its own equipment."));
-    static char selected[40]{};static char forget[40]{};
+    static char selected[40]{};static char forget[40]{};static char reset[40]{};
     if(ImGui::BeginChild("world list",ImVec2(0,std::max(150.f,ImGui::GetContentRegionAvail().y-100*scale)),ImGuiChildFlags_Borders)) {
         if(ImGui::Selectable(T("A new world"),lobby.world<0)) {Lobby(BBCOOP_TEAM_WORLD);ImGui::CloseCurrentPopup();}
         ImGui::TextWrapped(T("%s"),T("Starts from the leader's save; kept on the server from the first hunt."));
@@ -125,6 +192,12 @@ void WorldPicker(const BbCoopUi& s) {
         }
     } ImGui::EndChild();
     if(lobby.world>=0 && lobby.world<lobby.world_count && !lobby.worlds[lobby.world].busy) {
+        if(BbCoopStyle::Button("Reset lamps...")) { std::snprintf(reset,sizeof(reset),"%s",lobby.worlds[lobby.world].id); ImGui::OpenPopup(Popup("Reset lamps?")); }
+        if(ImGui::BeginPopupModal(Popup("Reset lamps?"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextWrapped("%s",T("Extinguish every lamp in this world? Character equipment is kept."));
+            if(BbCoopStyle::Button("Reset lamps")) { Lobby(BBCOOP_TEAM_RESET_LAMPS,reset); ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine();if(BbCoopStyle::Button("Cancel")) ImGui::CloseCurrentPopup();ImGui::EndPopup();
+        }
         if(BbCoopStyle::Button("Forget this world")) {std::snprintf(forget,sizeof(forget),"%s",lobby.worlds[lobby.world].id);ImGui::OpenPopup(Popup("Forget world?"));}
         if(ImGui::BeginPopupModal(Popup("Forget world?"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::TextWrapped(T("%s"),T("Forgotten worlds go off the list; the server keeps their files aside."));
@@ -145,6 +218,20 @@ void Team(const BbCoopUi& s) {
     bool open=true;
     if(BbCoopStyle::Begin("Co-op Team",lobby.menu?&open:nullptr)) {
         ImGui::TextUnformatted(T(lobby.signed_in?"Connected":"Connecting to the co-op server..."));
+        ImGui::BeginDisabled(!lobby.signed_in);
+        if(BbCoopStyle::Button("Friends")) ImGui::OpenPopup(Popup("Friends"));
+        ImGui::SameLine();
+        const auto cog=ImGui::GetCursorScreenPos(); const float cog_side=32*scale;
+        if(ImGui::InvisibleButton("Team settings",ImVec2(cog_side,cog_side))) ImGui::OpenPopup(Popup("Team settings"));
+        BbCoopStyle::Art(ImGui::GetWindowDrawList(),BbCoopArt::Piece::Settings,cog,ImVec2(cog.x+cog_side,cog.y+cog_side));
+        if(ImGui::IsItemHovered() || ImGui::IsItemFocused()) ImGui::SetTooltip("%s",T("Team settings"));
+        ImGui::EndDisabled();
+        Friends(lobby);
+        if(ImGui::BeginPopupModal(Popup("Team settings"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            Preferences();
+            if(BbCoopStyle::Button("Back") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
         if(*lobby.notice) ImGui::TextWrapped(T("%s"),lobby.notice);
         if(!lobby.signed_in) ImGui::TextWrapped("%s",T("Check the server address and connection if this persists. You can return to offline play from the launcher."));
         if(lobby.in_team) {
@@ -164,8 +251,19 @@ void Team(const BbCoopUi& s) {
             bool invaders=lobby.allow_invaders!=0;
             if(ImGui::Checkbox(T("Allow invasions"),&invaders)) Send(BB_COOP_ALLOW_INVADERS,invaders);
             ImGui::EndDisabled();
+            int join=std::clamp<int>(lobby.join,0,2); const char* modes[]={T("Invite only"),T("Ask to join"),T("Open")};
+            ImGui::BeginDisabled(!lobby.leader);
+            if(ImGui::Combo(T("Team joining"),&join,modes,3)) { const char* values[]={"0","1","2"};Lobby(BBCOOP_TEAM_OPEN,values[join]); }
+            for(int i=0; i<std::clamp<int>(lobby.ask_count,0,BBCOOP_LOBBY_ASKS); ++i) {
+                const auto& ask=lobby.asks[i]; ImGui::PushID(ask.id); ImGui::TextUnformatted(Hunter(ask.name)); ImGui::SameLine();
+                if(ImGui::SmallButton(T("Accept"))) Lobby(BBCOOP_TEAM_ASK_ACCEPT,ask.id);
+                ImGui::SameLine(); if(ImGui::SmallButton(T("Decline"))) Lobby(BBCOOP_TEAM_ASK_DECLINE,ask.id);
+                ImGui::PopID();
+            }
+            ImGui::EndDisabled();
             std::string rules;
             auto rule=[&](bool on,const char* text) {if(on) {if(!rules.empty()) rules+=" · ";rules+=T(text);}};
+            rule(lobby.rule_tempo==1,"Boss tempo: Aggressive");rule(lobby.rule_tempo==2,"Boss tempo: Relentless");
             rule(lobby.rule_rot,"Rot");rule(lobby.rule_travel,lobby.rule_vote?"Travel together (vote)":"Travel together");rule(lobby.rule_scale,"Enemies scale with the team");
             ImGui::TextWrapped("%s%s",T("Host rules: "),rules.empty()?T("none"):rules.c_str());
             if(!lobby.menu && lobby.leader && !lobby.started) {
@@ -200,6 +298,7 @@ void Team(const BbCoopUi& s) {
             }
             ImGui::EndDisabled();
         }
+        OpenTeams(lobby);
         if(lobby.invite_count || lobby.in_team) ImGui::SeparatorText(T("Invitations"));
         for(int i=0;i<std::clamp<int>(lobby.invite_count,0,BBCOOP_LOBBY_INVITES);++i) {
             const auto& invite=lobby.invites[i];ImGui::PushID(100+i);ImGui::Separator();ImGui::Text(T("Invitation from %s"),Hunter(invite.name));
@@ -209,8 +308,9 @@ void Team(const BbCoopUi& s) {
             static char name[40]{};ImGui::InputText(T("Invite by name"),name,sizeof(name));ImGui::SameLine();if(BbCoopStyle::Button("Invite")) Lobby(BBCOOP_TEAM_INVITE_NAME,name);
         }
         if(ImGui::TreeNode(T("Hunters online"))) {
+            static ImGuiTextFilter hunters_filter; hunters_filter.Draw(T("Find hunter"));
             for(int i=0;i<std::clamp<int>(lobby.player_count,0,BBCOOP_LOBBY_PLAYERS);++i) {
-                const auto& p=lobby.players[i];ImGui::PushID(200+i);ImGui::TextUnformatted(Hunter(p.name));ImGui::SameLine();
+                const auto& p=lobby.players[i];if(!hunters_filter.PassFilter(p.name)) continue;ImGui::PushID(200+i);ImGui::TextUnformatted(Hunter(p.name));ImGui::SameLine();
                 ImGui::TextDisabled(T("%s"),T(p.state==BBCOOP_LOBBY_PLAYING?"In the hunt":p.state==BBCOOP_LOBBY_OFFLINE?"Away":"Choosing a character"));ImGui::SameLine();
                 ImGui::BeginDisabled(!lobby.in_team || lobby.member_count>=4);
                 if(ImGui::SmallButton(T("Invite"))) Lobby(BBCOOP_TEAM_INVITE,p.id);
@@ -228,7 +328,6 @@ void Team(const BbCoopUi& s) {
             if(BbCoopStyle::Button(lobby.playing?"Return to game":"Return to title")) CloseTeam();
             ImGui::SetItemDefaultFocus();
         }
-        Preferences();
         BbCoopStyle::Guide({{"Options","F6","Co-op"},{"TouchLeft","F8","Map"},{"Circle","Esc","Back"}});
     }
     ImGui::End();if(!open) CloseTeam();

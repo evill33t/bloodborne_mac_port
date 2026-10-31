@@ -1,7 +1,6 @@
 {
   "repository": "https://github.com/lKaniel/bloodborne-server",
-  "upstream_base": "8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1",
-  "deployed_source_commit": "9e60cec70e589a199cf86771de4844fe556562d4",
+  "upstream_base": "5d2305ee611ef1e03be39ff925f0da75c9a70393",
   "files": [
     {
       "path": "backend/README.txt",
@@ -41,7 +40,7 @@
     {
       "path": "docs/HOSTED_SERVER.md",
       "source": "docs/HOSTED_SERVER.md",
-      "sha256": "cd108f51c0f6c049732fed2f8229b037c5207f1af9d07089e01f27ccfb4d6c24"
+      "sha256": "1e68738f2e14133337f485f25a4e978d388243e62c0ea497ab6517c920992c88"
     },
     {
       "path": "docs/SCALING.md",
@@ -51,17 +50,18 @@
     {
       "path": "docs/invasions/COVENANT_REWARDS_EVIDENCE.json",
       "source": "docs/invasions/COVENANT_REWARDS_EVIDENCE.json",
-      "sha256": "447a542bebe289b8ec69fbd7061d01432af4a59909384aa7d66585e1f8fba1ba"
+      "sha256": "447a542bebe289b8ec69fbd7061d01432af4a59909384aa7d66585e1f8fba1ba",
+      "source_commit": "9e60cec70e589a199cf86771de4844fe556562d4"
     },
     {
       "path": "docs/invasions/GAME_SIDE_PLAN.md",
       "source": "docs/invasions/GAME_SIDE_PLAN.md",
-      "sha256": "07c5e517fdb9e309e3e00970f0acb3484df5f3e5ff10095fc7899c656b60bbe2"
+      "sha256": "e0d123a7aaed3abfbceaf22694d37aa6989906106994d80b9da0366c7b87bda1"
     },
     {
       "path": "docs/invasions/PHASE0_CAPTURE.md",
       "source": "docs/invasions/PHASE0_CAPTURE.md",
-      "sha256": "a9edb34bb443b0900ab4bd9f987b431a21ac9dd494124e0ac89254378b0a8e96"
+      "sha256": "6919c99fcb01d092bb3240f1bc89eefa0b499c783a298a083da319a363d75aec"
     },
     {
       "path": "server/.github/workflows/build.yml",
@@ -77,7 +77,7 @@
     {
       "path": "server/CMakeLists.txt",
       "source": "server/CMakeLists.txt",
-      "sha256": "bf8ada7ee76d819cd11b983dd8793286ad68c737a671e61cc9242ee70772332c"
+      "sha256": "573ddbdb440de35e43f7ffb80a324b8fe4b99f7ef0ed2c926969dc0f98eb703b"
     },
     {
       "path": "server/CMakePresets.json",
@@ -269,7 +269,8 @@
     {
       "path": "server/coop/coop.proto",
       "source": "server/coop/coop.proto",
-      "sha256": "e18ff1fccc0fadb9d819c5981b7193b68f7057ed38e74dd3344310218a3faadc"
+      "sha256": "f857ddf7e4d13dc4d498a519de582bddf3cca2d0ca2096d365a3b173f367646c",
+      "adapted_sha256": "6acbe8760012067abd7adfdbfb483aba5879a1fe2cfe93b64002f96567a1937e"
     },
     {
       "path": "server/coop/coop_messages.cpp",
@@ -309,12 +310,14 @@
     {
       "path": "server/coop/invasions.cpp",
       "source": "server/coop/invasions.cpp",
-      "sha256": "1c651029962c90ef930a50c8399ef50225d8d63bde0d14bb6d91aace0bb5de3c"
+      "sha256": "87e8528dceac2b381b7121ccd979682b70e93e1de94fa70dbf3f79739932b3cb",
+      "adapted_sha256": "1c651029962c90ef930a50c8399ef50225d8d63bde0d14bb6d91aace0bb5de3c"
     },
     {
       "path": "server/coop/invasions.h",
       "source": "server/coop/invasions.h",
-      "sha256": "abe013b566fbfb5093b772395e7391c752bf60cbcf2c2b14797c3f540d09d779"
+      "sha256": "09d4f4d7d3125a550c4d9f53daf8292ea53cd68b399053dd344574ca5687f7e8",
+      "adapted_sha256": "abe013b566fbfb5093b772395e7391c752bf60cbcf2c2b14797c3f540d09d779"
     },
     {
       "path": "server/coop/link_auth.h",
@@ -364,22 +367,24 @@
     {
       "path": "server/coop/team_lobby.cpp",
       "source": "server/coop/team_lobby.cpp",
-      "sha256": "26e1a2c5a02741c7a40c4907b36946eb8c9f4e14480a2e95f4d36d397712847a"
+      "sha256": "410da64f50e28c8294c9ec6992f7b98b1be4e8912b03f082933e10de53c3cdc9"
     },
     {
       "path": "server/coop/team_lobby.h",
       "source": "server/coop/team_lobby.h",
-      "sha256": "f9892ed9e65232ef2035f3556ddf79871224b4106126994606a87b20e6cf377f"
+      "sha256": "c6f12ea9501b39caf7301de916a823c21431cf7ddbe780a8db7ceafebb6ab42b"
     },
     {
       "path": "server/coop/trade.cpp",
       "source": "server/coop/trade.cpp",
-      "sha256": "fd2dd0fd9eb2895eacf7671f911fb2ece943f3cbb8ef2290061cef2e36b5d71e"
+      "sha256": "3dbd8b15c9a3d66f29f68ea570151a2aab583898968453c780b45355c8eda874",
+      "adapted_sha256": "fd2dd0fd9eb2895eacf7671f911fb2ece943f3cbb8ef2290061cef2e36b5d71e"
     },
     {
       "path": "server/coop/trade.h",
       "source": "server/coop/trade.h",
-      "sha256": "897bd810b8358bfdf4914cc39315fa28b0673b72bbb70b322baaaf200ecc1e74"
+      "sha256": "9b19d9bec023fa765feba4c296877d39901d0a9d18a928e5000a43a7e22117cd",
+      "adapted_sha256": "897bd810b8358bfdf4914cc39315fa28b0673b72bbb70b322baaaf200ecc1e74"
     },
     {
       "path": "server/coop/world_log.cpp",
@@ -440,7 +445,7 @@
       "path": "server/hosting/Dockerfile",
       "source": "server/hosting/Dockerfile",
       "sha256": "cbaa8f02eacde2bce586fb077fcf085cebc7ea9602ada14b16c08a67d420cf47",
-      "adapted_sha256": "576e81b1d29fed999767fe05462c6bf57d7db1c28c66a4da628d1f95ec32f749"
+      "adapted_sha256": "b7b25d1cc8d929ea059e1e5fbf57534a3f4bfa8ef4b252895a4bec4ae7ed7c28"
     },
     {
       "path": "server/hosting/Dockerfile.backup",
@@ -631,12 +636,14 @@
     {
       "path": "server/src/bloodborne_world.cpp",
       "source": "server/src/bloodborne_world.cpp",
-      "sha256": "274b1f849ca3de79182a89353b5ba5baaede112181a86ab9c371dcc0855d95aa"
+      "sha256": "6e34aabb2872db6653985d3692ca50f0d94bf579331867c1b69579a173d47325",
+      "adapted_sha256": "b6159cd488b76a289d57565404ce477b57c1ff52ffb56dcd4c9f0318512843e0"
     },
     {
       "path": "server/src/bloodborne_world.h",
       "source": "server/src/bloodborne_world.h",
-      "sha256": "6a2687df220692aef058918595684433b48122bc52e8fad396ede5fe2cb9a19d"
+      "sha256": "eb0d5126ec77f5dc597e1a024bcb8990e552b339ec7cdca451a862e180f683e7",
+      "adapted_sha256": "4dddee3cbe4a689a0e4d64e65e6133d1a6c6bb416c15a73197f87623b4a4a6ae"
     },
     {
       "path": "server/src/client_session.cpp",
@@ -683,12 +690,12 @@
     {
       "path": "server/src/database.cpp",
       "source": "server/src/database.cpp",
-      "sha256": "32e3fa392f8a331a23306803dc274748489206e88bff978a19a040c0a5863d83"
+      "sha256": "a9ba9d60af9779c53746c773371fe533e816dbec0f8fcc338c4c749892df6a71"
     },
     {
       "path": "server/src/database.h",
       "source": "server/src/database.h",
-      "sha256": "6642bb785a97e9c60b7cacfb8f7babd58005845f97f6153151c70f83977aa1a8"
+      "sha256": "f0bd4ba8c7e9f7ff32e8f7cd4c66ba0fea970dd81ebe165663a6eaa4193b14a0"
     },
     {
       "path": "server/src/directory_client.cpp",
@@ -713,13 +720,13 @@
     {
       "path": "server/src/link_server.cpp",
       "source": "server/src/link_server.cpp",
-      "sha256": "01725f1ee668e820f1b8a0e973fa6134268e58f58683069245473b463e897115",
-      "adapted_sha256": "706be4bc59d2994465b3874a376298248895c1f001d8ed5d3ecc7028b6234921"
+      "sha256": "7c7e5743578770f85d026652855fab151961c1c5d5efde865bb01b8b6ee43965",
+      "adapted_sha256": "ba125e7e2210517e710ee5fccd31ccd8492fb131b2f4867efa04df5a9035f2a4"
     },
     {
       "path": "server/src/link_server.h",
       "source": "server/src/link_server.h",
-      "sha256": "0cc9786016a84492513b3b482929e82e574958e12b0224f8cd27606394ccecda"
+      "sha256": "4e406a1c5c50294ed5153a503f2587f8667221d5f19eca2d7932e032f31bbf1d"
     },
     {
       "path": "server/src/main.cpp",
@@ -804,14 +811,14 @@
     {
       "path": "server/src/server_link.cpp",
       "source": "server/src/server_link.cpp",
-      "sha256": "3d9b10b0e0c4babb06773bdc6e9677aa00f7ab5784c69722eb941f7dd2168b28",
-      "adapted_sha256": "480750c3d979fec85f9934928097882b1329ceb6d10dc9ee0195539003da4b90"
+      "sha256": "f7e04e883e77a4353afc5b3947b7296d3f5470a53a99da440585d8f35fbd22a9",
+      "adapted_sha256": "57ee94cbeaa51ddc64bdb3d62e403f8644069232ea68b540b0030c2763198a53"
     },
     {
       "path": "server/src/server_link.h",
       "source": "server/src/server_link.h",
-      "sha256": "17b1c66b4b9a0af7f6df5da68393b80b27a97e63cf63b1e63fd8b7b884ff6b16",
-      "adapted_sha256": "edcc1b62153b3c6ac5e8d2d00bf31d995a1c442357705f89e0b1c84a15f7d708"
+      "sha256": "fad5865da4e26784423708b1cd9ace06cc61e3db4717e25197bf8bb882ac1873",
+      "adapted_sha256": "579bacec62a4bd114d01e51a312ca9b494db1db0541d67ef4356dca2d10717ef"
     },
     {
       "path": "server/src/shadnet.proto",
@@ -1011,18 +1018,20 @@
     {
       "path": "server/tests/test_bloodborne_trade.cpp",
       "source": "server/tests/test_bloodborne_trade.cpp",
-      "sha256": "5cc65561e4ea667acf61f61b3653bc1679338ae100f0ca797fcd4a5092887d9a"
+      "sha256": "267b25e1da934f62f99f79bfc6cb54047be31cf2627ca14c3d83eace2efdf6af",
+      "adapted_sha256": "5cc65561e4ea667acf61f61b3653bc1679338ae100f0ca797fcd4a5092887d9a"
     },
     {
       "path": "server/tests/test_bloodborne_world.cpp",
       "source": "server/tests/test_bloodborne_world.cpp",
-      "sha256": "c645fab8ca7da99c0ccdaa2a36eadce1d8313ccd924871a2248011da8707de57"
+      "sha256": "406450f1ba8dd6a73d33510e857720715b21b9f907977fb2a9be5ad4f955f79d",
+      "adapted_sha256": "05cbc5615fbeff709539445ee5181c6c3017fae68fe3a020fda2bacf0e6631f4"
     },
     {
       "path": "server/tests/test_build_fingerprint.cpp",
       "source": "server/tests/test_build_fingerprint.cpp",
       "sha256": "29db8ea9e4503d5486cf937b8e5bb9803b192715f34286a3fdeeb12193ae18a7",
-      "adapted_sha256": "a41adf6d8229ee5c93d76f2b2070e37d02e80ec80e3e9fe907a61614a488c7d6"
+      "adapted_sha256": "840f6ff525f6d9375cc87f445403db2840dc58363f739f0f836ee11d2b4a196f"
     },
     {
       "path": "server/tests/test_fuzz_decoders.cpp",
@@ -1077,8 +1086,8 @@
     {
       "path": "server/tests/test_server_link.cpp",
       "source": "server/tests/test_server_link.cpp",
-      "sha256": "41c7b9d2333c488e330ea7fdf7f4847ded8e3fbffc24583eac41c31aeee06142",
-      "adapted_sha256": "268023cb8ec345f24cbb662e4d3c536fa8e68003a7820f2ec8b7a70d10bb1803"
+      "sha256": "11f526ecae7ecf0ee1b8aabe11eeef4eb27b995328ba1d8b57cbae6f27adbdef",
+      "adapted_sha256": "bf53782c7a4d588cb0289e4ce9ecb1ff584ab4ff08f3c6fcca88454b1bd4d65e"
     },
     {
       "path": "server/tests/test_ss_info_path.cpp",
@@ -1093,7 +1102,7 @@
     {
       "path": "server/tests/test_team_lobby.cpp",
       "source": "server/tests/test_team_lobby.cpp",
-      "sha256": "3727b178c7d2ae1f4fadd783716ddcfe6c312618d6e853e5ed3bc95054aeedae"
+      "sha256": "b0750ac5de3c634bdc31d3342088b17ce4c239d037309ca5d83bac1a89cae8d1"
     },
     {
       "path": "server/tests/test_watchdog.cpp",
@@ -1103,7 +1112,8 @@
     {
       "path": "server/tests/test_world_writer.cpp",
       "source": "server/tests/test_world_writer.cpp",
-      "sha256": "9d8f0b6be8043c9f4ea25c29bb28e5f38461d962b2587aba767603f17a346808"
+      "sha256": "f97d43c2301860d6f0402c8e464c57703826004fcbc2d01ac017712da5761193",
+      "adapted_sha256": "9d8f0b6be8043c9f4ea25c29bb28e5f38461d962b2587aba767603f17a346808"
     },
     {
       "path": "server/worlds.cfg",
@@ -1118,7 +1128,33 @@
     {
       "path": "docs/INVASIONS.md",
       "source": "docs/INVASIONS.md",
-      "sha256": "ac0740c92af26fb9e03b4f6285c687baa1a5b610fe2ce69dd899d16dc9058a5b"
+      "sha256": "bb5961be1dec3df5a30f793982470fbede1f108faa735bbd864391a938bb5d10",
+      "adapted_sha256": "ac0740c92af26fb9e03b4f6285c687baa1a5b610fe2ce69dd899d16dc9058a5b"
+    },
+    {
+      "path": "server/tests/test_lobby_friends_db.cpp",
+      "source": "server/tests/test_lobby_friends_db.cpp",
+      "sha256": "1ef165f811ca52c7465ca5e7e0a9729b4624ec3b665c8a5df67b4e7d26e79584"
+    },
+    {
+      "path": "server/src/lobby_friends_db.h",
+      "source": "server/src/lobby_friends_db.h",
+      "sha256": "721115705e72dadfc3a6ccc2a08273f5b71c3cd4951cfac99e903f3a088b748b"
+    },
+    {
+      "path": "server/src/lobby_friends.cpp",
+      "source": "server/src/lobby_friends.cpp",
+      "sha256": "1c013de6cb7bfa4451c11e2e5e1adba4f02e7cae2880e21f3acf43c223abcd93"
+    },
+    {
+      "path": "server/src/lobby_friends.h",
+      "source": "server/src/lobby_friends.h",
+      "sha256": "488dbfafac52118bb30709fc44f3003065dcff4718a470791dd826ca38af0806"
+    },
+    {
+      "path": "server/src/lobby_friends_db.cpp",
+      "source": "server/src/lobby_friends_db.cpp",
+      "sha256": "23f31c945b825a0cffc61d92399ac8c695ec4897b2ca8c45084f4e87cf7cc281"
     }
   ],
   "submodules": [
@@ -1149,5 +1185,7 @@
       "patch": "server/upstream-changes/0004-9e60cec7.patch",
       "sha256": "de2382047fbdda5308ae448f4d17f163fc85b6a5d809f40c2c6d2edbfa7addbc"
     }
-  ]
+  ],
+  "previous_upstream_base": "8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1",
+  "local_extension_base": "9e60cec70e589a199cf86771de4844fe556562d4"
 }

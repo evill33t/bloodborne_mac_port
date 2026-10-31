@@ -470,8 +470,9 @@ Estimate: **1.5 d** (+1 d if ending the effect still leaves a native popup).
     "Invader defeated" or "You were slain by the invader";
   - invader: "Invading `<host>`'s world", then "Returning home".
   Use the same red as party "down" text (`Party::Blood`, `:3832`).
-- **Optional native banner.** `ShowDownedBanner` (`bloodborne_party_death.cpp:1056`) queues
-  `SetTextEffect` (`SetTextEffectOffset`) with a text effect id. **[guess]** The game has native "invaded" / "adversary
+- **Optional native banner.** The duels (`bloodborne_duel_game.cpp`) queue `SetTextEffect`
+  (`SetTextEffectOffset`) with a text effect id (the ids are listed by it in `bloodborne_party.h`; 17 is NIGHTMARE
+  SLAIN, not a free PvP banner). **[guess]** The game has native "invaded" / "adversary
   defeated" text effects. Phase 0 can record which id retail shows (section "Optional" in
   PHASE0).
 - **Emulator.** shadPS4 has no overlay. There, use log lines and the native banner only.

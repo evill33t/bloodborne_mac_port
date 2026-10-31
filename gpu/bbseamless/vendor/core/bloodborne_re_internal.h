@@ -326,6 +326,9 @@ std::optional<u32> EventFlagBits(s32 flag, u32 bits);
 std::optional<s32> CurrentRitualAltar();
 // Ritual altar `altar` (0-6) loads its dungeon again from its flags.
 void ReloadRitualAltar(s32 altar);
+void EmptyRitualAltar(s32 altar);
+// The altar object's status (+0x25C of its state: 0 not loaded yet, 1 no dungeon, 5 a dungeon).
+std::optional<s32> RitualAltarStatus(s32 altar);
 // Team altars (bloodborne_altar.h): the current altar's view changed (`changed` flags); a ritual's
 // or a join's record goes to the team whole (SharesAltarRecord), anything else stays here.
 void ShareRitualAltarRecord(size_t changed);
@@ -419,8 +422,15 @@ extern std::atomic<bool> wipe_trip_respawn_pending;
 // A guest's dead copies of what the host's map generator brought back (BroughtBackByTheHost):
 // the bonfire respawn brings exactly those back, at most once every BringBackEvery. The game's
 // thread only.
-void BringBackWhatTheHostBroughtBack(std::span<const u32> handles);
+// Whether that respawn started (not too soon after the last one, no other respawn running).
+bool BringBackWhatTheHostBroughtBack(std::span<const u32> handles);
+// When the session host last moved to another game (SteadyMilliseconds, 0: never): see
+// HoldsBringBacks.
+extern std::atomic<s64> session_host_moved_ms;
 void MoveToRespawnPoint(bool arriving_from_trip);
+// The respawn load's restock of vials and bullets from the storage box, for the deaths and trips
+// that skip it. The game's thread only.
+bool RestockFromStorage(std::string_view why);
 extern std::optional<std::chrono::steady_clock::time_point> guest_lamp_trip_at;
 constexpr u64 WarpNextStageBonfireOffset = 0x0132E050;
 void InstallLampsAsCampfires(u64 base, u64 image_size);
@@ -657,6 +667,12 @@ void MakeEnemiesHarder();
 // this game plays by (its team's while in one, else its own).
 const HostRules& OwnHostRules();
 HostRules ActiveHostRules();
+// Kaniel 2026-10-28, the boss tempo rule (bloodborne_boss_tempo.cpp): the tuning this game
+// plays by (its rules' level and the dev setting); the hook at AddSubGoalLifeHookOffset, and the
+// game thread's step that finds the bosses on the map.
+BossTempoTuning ActiveBossTempoTuning();
+void PS4_SYSV_ABI BossTempoGoal(u64 tag, const GuestRegisterSnapshot* registers);
+void TickBossTempo();
 // The hunters on this player's map (1 alone, or when the party's map board is old).
 std::size_t HuntersOnMyMap();
 // The server's rot for this player once its lobby said it (taken once), and this player's rot
@@ -695,6 +711,11 @@ void InstallSolidNpcsInParty(u64 base, u64 image_size);
 void InstallFloorGuard(u64 base, u64 image_size);
 // A flag value read over a flag block that is missing reads as zeros (bloodborne_party_rules.cpp).
 void InstallFlagBlockGuard(u64 base, u64 image_size);
+// A chalice map's load builds the ritual altar picked last (ChaliceAltarPick), not always the
+// save's (bloodborne_flags_store.cpp).
+void InstallChaliceAltarPick(u64 base, u64 image_size);
+// A warp request (this player's or another member's) into ritual altar `altar`'s dungeon.
+void NoteAltarWarp(s32 altar);
 void InstallMemberPacketGuard(u64 base, u64 image_size);
 
 // Diagnostics for shared loot (RE trace only): the map item module (MapItemMan, 0x017D-0x017E)
@@ -789,6 +810,8 @@ void GiveDeferredBossItems();
 // A party guest's own talk set an NPC gift's trigger (GivesGuestNpcGift): its lot is given and the
 // trigger cleared NpcGiftDelay later, on the game's thread (GiveDeferredBossItems).
 void QueueGuestNpcGift(const NpcGift& gift);
+// See GivesNpcDeathDrop; `map` the packed map this game plays (0 none). The game's thread.
+void GiveNpcDeathDrops(bool in_session, u32 map);
 void InstallKeepLocalFlags(u64 base, u64 image_size);
 void InstallDeferredBossItems(u64 base, u64 image_size);
 extern std::atomic<s64> world_changed_ms;
@@ -921,6 +944,13 @@ bool HoldTitleLoadForTeam(u32 slot, bool fresh = false);
 void NoteSaveOpenedForName();
 // The title menu is up again: the next load asks the team again.
 void TeamBackAtTitle();
+// The rig's quit-title: how often the title menu came up, and whether the lobby (its state as it
+// last came) still has this player playing in its team (the lobby has not heard of the title).
+u64 TeamTitleVisits();
+bool TeamLobbySaysPlaying();
+// Kaniel 2026-10-25: this game took its team's host role in play (the host left: the room came
+// here, or the lobby made it the leader); until it leaves the team or the world.
+bool TeamHostTookOver();
 // Kaniel 2026-10-16: a save loads from the title: what the last one's story removed is forgotten
 // (HoldStoryRemovals).
 void ForgetStoryRemovals();
@@ -1095,6 +1125,9 @@ void SendPeerHello();
 void TickPortraits();
 bool ShowPartyPortrait(int slot, std::string_view member);
 void KeepEnemyDeathsInStep(bool sharing);
+// Whether the kill reward paid now for `character` is one the kill step's own kill of a party kill
+// caused (see QuietKills): it pays nothing.
+bool TakesQuietKillReward(u64 character);
 void SnapshotHostMapState(bool sharing);
 void TeleportLocalPlayer(const LampPosition& at, float heading = 0.0f);
 // Has every camera jump to where it should be on its next update (see PlacementCalls).
@@ -1185,8 +1218,14 @@ extern PartyDeathRun party_death_run;
 extern CoopTimeMeter coop_time;
 // The co-op tick's parts, the slowest few logged after the Co-op time line.
 extern CoopTimeMeter coop_tick_parts;
+// HasMemoryAccess calls made on this thread so far (the spike lines' memory checks).
+u64 MemoryChecksOnThisThread();
+// A part or a step that took `ns`: a "Co-op tick spike" warning when it is over the threshold
+// (TickSpikeLog; BB_COOP_SPIKE_MS lowers it, for the rig on a fast PC).
+void NoteTickSpike(std::string_view name, s64 ns, u64 memory_checks);
 // One part of the co-op tick, into coop_tick_parts (AtiniirSpectre 2026-10-23: the tick grew
-// after a death and the log could not say which part), until the end of the scope.
+// after a death and the log could not say which part), until the end of the scope. A spike line
+// too when it is slow.
 class TickPartTimer {
 public:
     explicit TickPartTimer(std::string_view name) : name{name} {}
@@ -1196,8 +1235,28 @@ public:
 
 private:
     std::string_view name;
+    u64 checks = MemoryChecksOnThisThread();
     std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
 };
+// A step inside a part (TickPartyDeath's, a once-a-second scan), only for the spike lines: a
+// stalled part's line is followed by the step that stalled it.
+class TickStepTimer {
+public:
+    explicit TickStepTimer(std::string_view name) : name{name} {}
+    TickStepTimer(const TickStepTimer&) = delete;
+    TickStepTimer& operator=(const TickStepTimer&) = delete;
+    ~TickStepTimer();
+
+private:
+    std::string_view name;
+    u64 checks = MemoryChecksOnThisThread();
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+};
+template <typename Step>
+void TimeTickStep(std::string_view name, Step&& step) {
+    const TickStepTimer timer{name};
+    step();
+}
 void ReportCoopTime(s64 now_ms);
 void InstallPartyDeath(u64 base, u64 image_size);
 void ApplyHealingFountainHostAvailability(const GuestRegisterSnapshot& registers);

@@ -186,6 +186,10 @@ public:
         QList<Coop> coop;
         QList<Coop> rpc;      // phase 11: the Rpc stream's datagram bodies, the same way
         QList<Endpoint> gone; // links forgotten
+        // Kaniel 2026-10-25: links newly quiet and heard again (the world's teams: a game gone a
+        // few seconds leaves its started team).
+        QList<Endpoint> quiet;
+        QList<Endpoint> back;
         // Phase 11: links silent for lost_ms (once a silence): their game's sign-in session ends,
         // as its TCP connection's did when its game died. A blip under that rides out.
         QList<Endpoint> lost;

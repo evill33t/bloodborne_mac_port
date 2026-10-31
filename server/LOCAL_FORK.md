@@ -7,17 +7,18 @@ Linux service. The Mac app does not launch or package the server.
 
 ## Source and changes
 
-Original upstream base: `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`.
-Imported deployed source: `9e60cec70e589a199cf86771de4844fe556562d4`.
+Current upstream base: **v1.3.1**, `5d2305ee611ef1e03be39ff925f0da75c9a70393`.
+Previous upstream base: `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`.
+Retained local extension base: `9e60cec70e589a199cf86771de4844fe556562d4`.
 The imported baseline is retained by its original hashes. Local hosting and server
 adaptations are listed by `adapted_sha256` in [SOURCE_MANIFEST.json](SOURCE_MANIFEST.json).
 
 The local server also supports `CompatibleClientVersions` in `shadnet.cfg`. To admit the
-Mac `dev` label and Windows `1.3.0` together, set:
+Mac `dev` label and Windows `1.3.1` together, set:
 
 ```ini
 CheckServerBuild=true
-CompatibleClientVersions=dev,1.3.0
+CompatibleClientVersions=dev,1.3.1
 ```
 
 Restart the server after changing this setting. Both release labels must be listed to allow
@@ -56,7 +57,7 @@ docker build --build-arg BUILD_JOBS=2 -f server/hosting/Dockerfile -t bloodborne
 
 The Dockerfile retains Kaniel's multi-stage build and our tested ARM64 selection for
 micromamba; its default conda toolchain supports ARM64 and amd64. It builds Qt >= 6.8 HTTP
-services and runs the ten focused CTest suites during the build. The optional upstream
+services and runs the eleven focused CTest suites, including SQLite friendship persistence during the build. The optional upstream
 `QT_FROM=aqt` path was not validated here. Build dependencies require network access.
 The compiled revision defaults to the imported server source revision, rather than the
 unrelated Mac repository commit. New server changes should set `SOURCE_REVISION` explicitly.

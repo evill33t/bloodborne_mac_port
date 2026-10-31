@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -156,6 +157,26 @@ private:
     std::vector<Section> sections;
 };
 
+// One warning line for each co-op tick part slower than the threshold (guest stutter 2026-10-27,
+// v1.3.0: about one 500 ms stall a second on an enemy follower; CoopTimeMeter's maxima could not
+// say when nor in which step): its name, its time, the time since boot, the enemy role and the
+// memory checks (HasMemoryAccess) it made, to tell many checks from slow ones. At most `cap` lines
+// a game, the last one saying so. Thread-safe.
+class TickSpikeLog {
+public:
+    static constexpr s64 DefaultThresholdNs = 8'000'000;
+    explicit TickSpikeLog(size_t cap, s64 threshold_ns = DefaultThresholdNs)
+        : cap{cap}, threshold_ns{threshold_ns} {}
+    std::optional<std::string> Note(std::string_view part, s64 ns, s64 now_ms,
+                                    std::string_view role, u64 memory_checks);
+
+private:
+    std::mutex mutex;
+    size_t cap;
+    s64 threshold_ns;
+    size_t lines = 0;
+};
+
 class CoopFeatureReport {
 public:
     void On(std::string_view feature);
@@ -185,6 +206,8 @@ struct GhostDeathCalls {
     bool PS4_SYSV_ABI (*set_event_flag)(u64 unused, s32 flag, bool on) = nullptr;
     void (*clear_return_state)() = nullptr; // ours: [SprjEventMan+0x10]+8, set by OnEvent_4000
     bool PS4_SYSV_ABI (*request_full_recover)() = nullptr;
+    // ours: the death's respawn load's restock of vials and bullets (see LampRestCalls)
+    void (*restock_from_storage)() = nullptr;
     bool PS4_SYSV_ABI (*update_blood_mark)() = nullptr;
     bool PS4_SYSV_ABI (*revive_player)() = nullptr;
     void PS4_SYSV_ABI (*revive_local_character)() = nullptr;
@@ -502,6 +525,34 @@ constexpr s64 BringBackAfterMs = 3'000;
 std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
                                       std::span<const DeadCopy> dead_here,
                                       const std::unordered_set<u32>& party_kills, s64 now_ms);
+// Kaniel's DLC playtest 2026-10-28 (1.3.1): the host left, the session went to Lisara (#403), and
+// her copy had krolebord's dead enemies alive. His game brought them back every BringBackEvery,
+// and each time they died again at once by the game's own kill (and other enemies the respawn
+// woke with them), paying echoes: 16 respawns, 218 deaths, ~109,500 echoes, and every unkill went
+// to the server's log. An enemy brought back here that dies again within StaysBackMs while the
+// host's copy never died meanwhile does not stay back: it is not brought back again this visit.
+// One the host's copy dies and comes back again (the bell-ringing woman's skeletons) is a new
+// bring-back.
+class BringBackGuard {
+public:
+    static constexpr s64 StaysBackMs = 5'000;
+    // `back` (BroughtBackByTheHost) without the enemies that did not stay back; `host` is the
+    // host's board now, `dead_here` this guest's dead copies.
+    std::vector<u32> Filter(u64 visit, std::span<const u32> back,
+                            std::span<const CharacterShown> host,
+                            std::span<const DeadCopy> dead_here);
+    // The respawn for `handles` started.
+    void Brought(std::span<const u32> handles, s64 now_ms);
+
+private:
+    u64 visit = 0;
+    std::map<u32, s64> brought_at;
+    std::set<u32> refused;
+};
+// For a while after the session host moved to another game (a host left, #403), its board is the
+// old copy of a former guest: no bring-backs from it until HostMovedHoldMs passed.
+constexpr s64 HostMovedHoldMs = 15'000;
+bool HoldsBringBacks(s64 now_ms, std::optional<s64> host_moved_ms);
 // The same for the character state flags (+0x1E0) the scripts set and the respawn clears.
 constexpr u64 ScriptCharacterFlags = 0x4000 | 0x20000 | 0x40000000;
 u64 RestoreScriptFlagsAfterRespawn(u64 flags_before, u64 flags_after, s32 hp_before);
@@ -740,6 +791,42 @@ bool NoOneElseOnMap(std::span<const MemberMap> board, std::string_view self, u32
 // A party of three: the boards know a member by its online id, hex-encoded (board member names
 // are letters and digits only), and a session member's identity object holds its online id.
 std::string BoardMemberOfOnlineId(std::string_view online_id);
+// Where SessionMemberBoardName found each member's online id (guest stutter 2026-10-27, v1.3.0:
+// the full scan, two pointer levels under a member's identity and about a thousand memory checks a
+// member, ran every second and stalled a slow PC ~500 ms each time). A found member has only that
+// block read again; one whose id was not found is scanned again after MissRetryMs, twice as long
+// after each miss in a row up to MissRetryMaxMs, or at once when the board's online ids change.
+// Keyed by the identity object; the latest `Members` are kept.
+class SessionNameCache {
+public:
+    static constexpr s64 MissRetryMs = 10'000;
+    static constexpr s64 MissRetryMaxMs = 60'000;
+    static constexpr std::size_t Members = 16;
+    struct Block {
+        u64 address = 0;
+        u64 size = 0;
+    };
+    enum class Plan : u8 { Scan, Recheck, StillMissing };
+    struct Look {
+        Plan plan = Plan::Scan;
+        Block block;
+    };
+    Look Lookup(u64 identity, std::span<const std::string> online_ids, s64 now_ms) const;
+    void Found(u64 identity, std::span<const std::string> online_ids, Block where);
+    void Missed(u64 identity, std::span<const std::string> online_ids, s64 now_ms);
+    void Forget(u64 identity);
+
+private:
+    struct Entry {
+        u64 identity = 0;
+        std::vector<std::string> online_ids;
+        std::optional<Block> where;
+        s64 missed_at = 0;
+        int misses = 0;
+    };
+    void Keep(Entry entry);
+    std::vector<Entry> entries;
+};
 std::string OnlineIdOfBoardMember(std::string_view member); // "" if it is not one
 // The one candidate found in `bytes` as a whole NUL-terminated name, or nothing.
 std::optional<std::string> FindOnlineIdIn(std::span<const u8> bytes,
@@ -1145,6 +1232,8 @@ struct EchoBoardAnswer {
 // `posts`: a party member in the session is on another map (the game shares the echoes with the
 // ones on this map itself) and this member is the one here that posts them (PostsKillEchoes).
 bool SharesKillEchoes(u64 caller_offset, bool posts);
+// Where the enemy kill reward (0x018FC860) returns from its AddSouls call.
+constexpr u64 EnemyKillRewardOffset = 0x018FC99B;
 // The other members' kill echoes read from the board, and which of them this member is owed:
 // all but those the game paid it itself, being on the kill's map then (a kill reward of the same
 // echoes on that map, PaidWindowMs before the post was read up to ReceivedGraceMs after; each
@@ -1761,6 +1850,21 @@ std::vector<CharacterSwitch> SwitchedLikeTheHost(std::span<const CharacterShown>
                                                  const std::unordered_set<u32>& switched_off,
                                                  const std::unordered_set<u32>& kill_hidden,
                                                  const std::unordered_set<u32>& off_for_good = {});
+// The bell woman's summons in Yahar'gul (m28_00 12804500) are switched on by the host's event
+// with their rise (animation 6200); a guest's board had the host's switch before the guest's own
+// event got its flag, so its copies stood there with no rise (Provi's report, rig 2026-10-27).
+// Of SwitchedLikeTheHost's `changes`, the ones to make now: switching off, and back on what this
+// member switched off itself (`switched_off`), at once; switching on one its own story has off
+// only once proposed for WaitMs in a row, for its own event to do it first.
+class SwitchOnWait {
+public:
+    static constexpr s64 WaitMs = 2'000;
+    std::vector<CharacterSwitch> Due(std::span<const CharacterSwitch> changes,
+                                     const std::unordered_set<u32>& switched_off, s64 now_ms);
+
+private:
+    std::map<u32, s64> since;
+};
 // The Hemwick woods' mist ambush (m22_00 event 12204000, a slot per enemy 2200500-2200508): the
 // slot's done flag of `entity`, if it is one. With the flag on and the host's copy off, the event
 // switched it off for good (unarmed: a host under 15 Insight), so a guest follows that far from
@@ -1994,6 +2098,53 @@ private:
     std::map<u32, u32> killed_on;         // this visit's kills -> the map each died on
     std::map<u32, std::vector<u32>> held; // map -> kills of an earlier visit standing there
 };
+// The copies this game's own generator brought back (seen dead, then alive again): while the
+// party still has one dead (another member's generator has not run yet), the kill step hides it
+// rather than kill it again, which would replay its death (the bell summons' blood burst).
+class LocalRevives {
+public:
+    void See(u32 handle, s32 hp);
+    bool Revived(u32 handle) const {
+        return revived.contains(handle);
+    }
+    void Clear();
+
+private:
+    std::unordered_set<u32> dead;
+    std::unordered_set<u32> revived;
+};
+// A map generator brought back one of this member's kills (VisitKills::Observe takes it back),
+// but the party's kills (the log's, the server's) still have it until this member's unkill has
+// gone round: while they do, the kill step would kill or hide the risen enemy again (Provi's
+// report, Yahar'gul's bell summons). Its handle stays out of the party's kills until they drop it,
+// at most HoldMs.
+class TakenBackKills {
+public:
+    static constexpr s64 HoldMs = 10'000;
+    void TakeBack(u32 handle, s64 now_ms);
+    // The handles to leave out of `party_kills` now, sorted; forgets the ones the party's kills
+    // dropped and the ones held HoldMs.
+    std::vector<u32> Holding(const std::unordered_set<u32>& party_kills, s64 now_ms);
+
+private:
+    std::map<u32, s64> since;
+};
+// The copies the kill step puts down with the game's kill (DiesInsteadOfHiding) are kills the
+// party has already: the game's death of any character worth echoes pays the local player
+// (0x018C5084 calls the kill reward 0x018FC860 with the dying character, kept in r14 up to its
+// AddSouls call at 0x018FC995), so a death respawn's reload paid every kill near the lamp again,
+// and the party got them too (Provi's report, v1.3.0: about 10k echoes each time the host died).
+// A copy noted here (Killed) pays nothing: the kill reward for it within QuietMs is taken.
+class QuietKills {
+public:
+    static constexpr s64 QuietMs = 10'000;
+    void Killed(u64 character, s64 now_ms);
+    // Whether the kill reward the game pays now for `character` is taken (once per Killed).
+    bool Takes(u64 character, s64 now_ms);
+
+private:
+    std::unordered_map<u64, s64> since;
+};
 std::string EncodeEchoUpdate(std::string_view member, s64 since,
                              std::span<const KillEchoes> echoes);
 std::optional<EchoBoardAnswer> ParseEchoBoard(std::string_view body);
@@ -2148,10 +2299,55 @@ inline constexpr std::array NpcGifts{
     NpcGift{73500322, 43020, NpcGiftAfter::SetDoneFlag, 13501922}, // a rune (Research Hall)
     NpcGift{73500320, 43000, NpcGiftAfter::ClearTrigger},          // Blood of Adeline
     NpcGift{73600300, 43600, NpcGiftAfter::KeepTrigger},           // Accursed Brew
+    // Simon's Bowblade and Valtr's One-eyed Iron Helm: their events (m34 13400953, m35 13500953,
+    // m36 13600954, m27 12700908) give the lot once the talk sets the trigger, or once the NPC
+    // is dead (NpcDeathDrops)
+    NpcGift{73400430, 43200, NpcGiftAfter::KeepTrigger}, // Simon's Bowblade
+    NpcGift{73400431, 43210, NpcGiftAfter::KeepTrigger},
+    NpcGift{73500630, 43200, NpcGiftAfter::KeepTrigger},
+    NpcGift{73600530, 43220, NpcGiftAfter::KeepTrigger},
+    NpcGift{72700330, 43110, NpcGiftAfter::KeepTrigger}, // Valtr's One-eyed Iron Helm
 };
 std::optional<NpcGift> NpcGiftFor(s32 trigger);
 std::optional<s32> NpcGiftLot(s32 trigger);
 bool GivesGuestNpcGift(bool in_party_session, bool summoned_guest, s32 flag);
+// NPC death drops: map events that wait for an NPC's death flag and award an item lot, but end
+// for a client (1003:6 state 1) or unless the local player is alive (4:3 player 10000 type 0), so
+// never for a party guest (Kaniel's DLC playtest 2026-10-28: only the host got the Hunter's
+// Nightmare beast hunter's Firing Hammer Badge, m34 13400995, and krolebord no Gatling Gun, m34
+// 13400980 slot 1). A guest on the NPC's map (`map`, packed; 0 any) while the death flag is on
+// gets the lot from us, once: while the lot's own flag (a map pickup flag, the guest's own list)
+// is off, or for a lot whose flag is the host's world (6671 "holds the Firing Hammer Badge"),
+// while it does not hold `goods`. The host's own events give the host its own, unchanged.
+struct NpcDeathDrop {
+    s32 death_flag;
+    s32 lot;
+    u32 map;
+    u32 goods = 0; // the item a lot with a host-world flag gives
+};
+inline constexpr std::array NpcDeathDrops{
+    // m34 13400970 sets 13400970 + slot as its NPC dies
+    NpcDeathDrop{13400970, 43800, 0x22000000, 4120}, // beast hunter: Firing Hammer Badge (13400995)
+    NpcDeathDrop{13400971, 43810, 0x22000000},       // Gatling Gun (13400980 slot 1)
+    // m35 13501900 sets 13501900 + slot as its NPC dies; 13501920 slots 3-5
+    NpcDeathDrop{13501900, 43830, 0x23000000}, // an attire
+    NpcDeathDrop{13501903, 43820, 0x23000000}, // a weapon
+    NpcDeathDrop{13501905, 43710, 0x23000000}, // a helm
+    // events that set their own flag once their NPC is dead
+    NpcDeathDrop{12700909, 43840, 0x1B000000},   // m27 12700909
+    NpcDeathDrop{12420700, 2420900, 0x18020000}, // m24_02 12420700
+    // Simon's death flags (Bowblade), Valtr's (One-eyed Iron Helm): see NpcGifts
+    NpcDeathDrop{1710, 43200, 0x22000000},
+    NpcDeathDrop{1711, 43210, 0x22000000},
+    NpcDeathDrop{1712, 43200, 0x23000000},
+    NpcDeathDrop{1713, 43220, 0x24000000},
+    NpcDeathDrop{1790, 43110, 0x1B000000},
+};
+// Whether this game gives `drop` now: a party guest in a session on its map, the death flag on,
+// not given yet (`given`: this character, this session), and the lot not the guest's already
+// (`lot_flag_on` with a flag of the guest's own, `holds_goods` with a host-world flag).
+bool GivesNpcDeathDrop(const NpcDeathDrop& drop, bool guest_in_session, u32 map, bool death_flag_on,
+                       bool lot_flag_on, bool lot_flag_hosts, bool holds_goods, bool given);
 // Held this long after the talk sets the trigger, as for the boss items: the gift's dialog comes
 // once the talk has moved on.
 constexpr auto NpcGiftDelay = std::chrono::seconds{2};
@@ -2178,6 +2374,22 @@ constexpr float PartySummonSlotHoldSeconds = 15.0f;
 // A loaded PARAM file: the type name at +0x0C, the row count (u16) at +0x0A and sorted 24-byte
 // row entries (id, padding, data offset) at +0x40.
 bool IsParamOfType(std::span<const u8> param, std::string_view type);
+// The param repository's slot each PARAM type was last found in (FindLoadedParam), looked at
+// before the whole repository (guest stutter 2026-10-27, v1.3.0: 1024 slots, three memory checks
+// each, several scans a second for harder enemies, Rot and the party UI, up to 60 ms each on a
+// slow PC). The caller checks that the slot still holds the type.
+// A loaded PARAM file's size: its header and row entries (`rows` of 24 bytes from +0x40, each
+// with its row's data offset at +8), up to the furthest row's data plus `row_size`. `param` holds
+// at least the header and the entries.
+u64 ParamTableSize(std::span<const u8> param, u16 rows, u64 row_size);
+class LoadedParamSlots {
+public:
+    std::optional<u64> Slot(std::string_view type) const;
+    void Found(std::string_view type, u64 slot);
+
+private:
+    std::vector<std::pair<std::string, u64>> slots;
+};
 std::optional<u64> FindParamRow(std::span<const u8> param, s32 id);
 // An enemy's one-time drop: NpcParam +0x2C is its item lot, ItemLotParam +0x80 the flag a lot
 // that drops once sets (0: a random drop). A member's kill gives the others that lot while their
@@ -2302,6 +2514,21 @@ const std::vector<CodePatch>& QuietSummonBannerPatches();
 // chimes): the network banner (0x01BFFE80, message id in edi) shows none of them.
 constexpr std::array<u8, 8> ShowNetworkBannerPrologue{0x55, 0x48, 0x89, 0xE5,
                                                       0x41, 0x57, 0x41, 0x56};
+// Kaniel 2026-10-25: nor the notice of a member that left (NetSync's member leave, 0x0178D1CD
+// and 0x01E50BCD call it with the leaving character in rsi): its text by that character's type
+// (table 0x0553D750 +0x4C, "Bell silenced. Returning to own world." 20000406 when the host left a
+// guest), shown through its own message window, which held the guest's pad until Cross (rig
+// host-quits-title: the new host landed no hit).
+constexpr u64 MemberLeftNoticeOffset = 0x0178B0E0;
+// And the session's end (0x0138A590, the leave that runs OnLeave_Limit for a phantom): "Session
+// lost." (category 204, 5001) in a message window, unless FrpgNetMan +0xA05 bit 0 is set; that
+// window held the guest's pad when its host quit to the title (rig host-quits-title 2026-10-25).
+// Hooked at the bit's test (`test byte [rax + 0xA05], 1`), rax pointed at a stand-in with it set
+// (rax is set again before its next use).
+constexpr u64 SessionLostTestOffset = 0x0138A602;
+constexpr std::array<u8, 7> SessionLostTest{0xF6, 0x80, 0x05, 0x0A, 0x00, 0x00, 0x01};
+constexpr std::array<u8, 8> MemberLeftNoticePrologue{0x55, 0x48, 0x89, 0xE5,
+                                                     0x41, 0x57, 0x41, 0x56};
 // Kaniel 2026-10-23: the item-received popup ("Oedon Tomb Key 1 / OK") and its pickup sound
 // (menu sound 300) come from one function: the give (GiveItems, 0x017D89F0) calls it for each
 // item it put in the inventory (0x017D9348) and each it sent to the storage (0x017D94C7) with
@@ -2309,6 +2536,13 @@ constexpr std::array<u8, 8> ShowNetworkBannerPrologue{0x55, 0x48, 0x89, 0xE5,
 // popup's queue. Its result is never read. Skipped while SilentItemGets lives (see there).
 constexpr u64 ItemGetQueuedOffset = 0x016D8850;
 constexpr std::array<u8, 8> ItemGetQueuedPrologue{0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56};
+// Kaniel 2026-10-15: a cutscene under the team's loading screen is skipped (NoteRemoStep).
+// SprjRemoMan's step methods, Init .. EpilogWait (its step table, filled at 0x01CFBA91), and
+// their first instructions.
+constexpr std::array<u64, 7> SprjRemoManStepOffsets{0x01CFA050, 0x01CFA310, 0x01CFA4C0, 0x01CFA670,
+                                                    0x01CFB060, 0x01CFB350, 0x01CFB5F0};
+constexpr std::array<u8, 8> RemoStepEntry{0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56};
+constexpr std::array<u8, 7> RemoEpilogWaitEntry{0x55, 0x48, 0x89, 0xE5, 0x41, 0x56, 0x53};
 // The game's bullet creation (CreateBullet: rdi the bullet manager, rsi the request: +0x00 the
 // owner's handle, +0x04 the bullet's BulletParam id). No enemy bullet is ever sent: an enemy's
 // (EnemyIns vtable +0x1A8 returns 0, so the request's network bit 0x10 stays off) and an event's
@@ -2950,10 +3184,30 @@ constexpr s64 HandOutFreshMs = 1'000;
 // guest ran the enemies by that guest a second more, two changes of hands instead of none).
 constexpr s64 HandOverSettleMs = 1'000;
 constexpr u32 HandOutHeldEntry = 0xFFFF;
+// Kaniel 2026-10-28 (passive bosses): the owner's game handed a boss to the member nearest it and
+// took it back every few seconds, against the boss pick (BossRunnerPick), and each change of hands
+// restarted its AI with no target. A boss (by +0x90 index) goes by the pick: held from every member
+// but the pick's runner (`runner`, "" for the game's own). The runner's game keeps it only while
+// the hand-out names it (a follower's game sets every enemy word to 0xFFFF on each hand-out and 1
+// for those it names, 0x018ED0ED and 0x018ED146, reading the low 16 bits only), so the runner gets
+// it in its hand-out even when the game names it to nobody (GiveBosses).
+struct BossHand {
+    u32 index = 0;
+    std::string runner;
+};
+// The bosses a hand-out to `member` holds (HandOutSettle::Filter's `bosses`).
+std::vector<u32> BossesKeptFrom(std::span<const BossHand> bosses, std::string_view member);
+// The bosses the pick gives `member`.
+std::vector<u32> BossesGivenTo(std::span<const BossHand> bosses, std::string_view member);
+// `entries` (a hand-out, settled) with each `given` boss that is not in it put in place of a held
+// entry, else of the last enemy that is not a given boss; as many as there is room for.
+std::vector<u32> GiveBosses(std::vector<u32> entries, std::span<const u32> given);
 class HandOutSettle {
 public:
-    // The game's hand-out to `member` (the payload's entries): the entries to send.
-    std::vector<u32> Filter(const std::string& member, std::span<const u32> entries, s64 now_ms);
+    // The game's hand-out to `member` (the payload's entries): the entries to send. `bosses` (by
+    // +0x90 index, see BossesKeptFrom) are held always.
+    std::vector<u32> Filter(const std::string& member, std::span<const u32> entries, s64 now_ms,
+                            std::span<const u32> bosses = {});
 
 private:
     struct Member {
@@ -3165,11 +3419,16 @@ s32 DownedAnimation(const char* setting);
 // nameplate bar the others see over it (RemotePCTag, fed by the synced HP) fill with the revive.
 s32 DownedHp(s32 max, u32 landed, u32 needed);
 // The game's SetTextEffect (event binding; this, id): queues one of the HUD's big banners, ids 1
-// to 17 (1 NIGHTMARE SLAIN, 2 YOU DIED, 5 PREY SLAUGHTERED, 17 the PvP Draw). The party HUD
-// (bbport/scripts/hud_patch.py) makes the Draw banner the yellow YOU ARE DOWN.
+// to 17 (its TE_* list; slot = id): 1 PREY SLAUGHTERED (a boss's kill, fe.gfx
+// TextEffect_KillDemon), 2 YOU DIED, 4 BLOOD ECHOES RETRIEVED, 5 PREY SLAUGHTERED again
+// (TextEffect_KillTarget), 7 ADVERSARY EXPUNGED, 15 UNLOCKED, 16 a wordless one, 17 NIGHTMARE SLAIN
+// (TE_Draw's slot: TextEffect_Draw, text 522007; Mergo's Wet Nurse, Gehrman, the Orphan of Kos).
+// Every banner the HUD has is in use. Party death takes 15 (fe.gfx TextEffect_YouWin, the same
+// timeline and layers as NIGHTMARE SLAIN's): the party HUD (bbport/scripts/hud_patch.py) makes it
+// the yellow YOU ARE DOWN, and the event patch drops its one game event (m29 12900192).
 constexpr u64 SetTextEffectOffset = 0x013360B0;
 constexpr std::array<u8, 6> SetTextEffectStart{0x8D, 0x46, 0xFF, 0x83, 0xF8, 0x10};
-constexpr s32 DownedBannerTextEffect = 17;
+constexpr s32 DownedBannerTextEffect = 15;
 
 // The party HUD's nameplates: the game's tag over each remote player (fe.gfx RemotePCTag0-6). The
 // HUD tick updates each tag from a TagData (0x01B59E20: rdi the tag, rsi its data), and its one
@@ -3700,6 +3959,10 @@ constexpr float BossLeaveMetres = 45.0f;
 // own runner if it is in the arena, else the nearest standing member within BossEnterMetres.
 constexpr u64 NpcTypeOffset = 0x12E;
 constexpr u8 NpcTypeBoss = 1;
+// Boss tempo (Kaniel 2026-10-28): NpcParam's turnVellocity (degrees a second; Father Gascoigne
+// 120), the boss rows' (npcType 1) times `factor`; how many rows changed.
+constexpr u64 NpcTurnVelocityOffset = 0x0C;
+std::size_t ScaleBossTurnSpeed(std::span<u8> param, float factor);
 bool HandsOutBoss(std::optional<u8> npc_type, bool boss_sized);
 class BossRunnerPick {
 public:
@@ -3809,6 +4072,15 @@ bool SkipsHitReaction(bool down, u64 victim, u64 local_player);
 constexpr u64 EnemyBarDamageOffset = 0x016F9A50;
 constexpr std::array<u8, 8> EnemyBarDamageStart{0x45, 0x31, 0xC0, 0x48, 0x89, 0xF8, 0x31, 0xC9};
 bool SkipsEnemyBarDamage(u32 handle, std::span<const u32> downed_bodies);
+// Provi's report (v1.2.0): the shaft of the Yahar'gul lamp's lift put a fallen player down at its
+// foot, where the lift's first-use event (m28_00 12800607) saw it inside its area (3:2) and
+// unlocked the call lever; a fall that kills never gets there. Event condition 3:2 asks
+// EntityInArea (0x013189A0: event manager rdi, entity esi, area edx; true when inside). A downed
+// local player (LocalPlayerEntity) is in no area, unless its body is in the void (a pit's kill
+// area still takes it).
+constexpr u64 EntityInAreaOffset = 0x013189A0;
+constexpr std::array<u8, 8> EntityInAreaStart{0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56};
+bool AreaMissesDownedPlayer(s32 entity, bool down, bool in_void);
 // The boss bars: BossGaugeSlots at [0x05562878] +0x1658 (BossGaugesOffset), BossGaugeSize bytes
 // each: name id, the boss's handle (-1 for none), two numbers and a shown byte (+0x10). The game's
 // ClearBossGauge (0x01336D00, also inlined in Failed_BossAreaMission 0x0138B2D0) puts them back

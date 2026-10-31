@@ -272,14 +272,30 @@ void bbcoop_trophy_unlocked(int32_t trophy_id);
  * (the team screen, bbport_overlay.cpp). Names are UTF-8; `id` is what a request names (a
  * player's lobby member, a team's id). */
 enum { BBCOOP_LOBBY_TEAM = 4, BBCOOP_LOBBY_PLAYERS = 16, BBCOOP_LOBBY_INVITES = 8,
-       BBCOOP_LOBBY_WORLDS = 16 };
+       BBCOOP_LOBBY_WORLDS = 16, BBCOOP_LOBBY_FRIENDS = 32, BBCOOP_LOBBY_REQUESTS = 8,
+       BBCOOP_LOBBY_SEARCH = 20, BBCOOP_LOBBY_OPEN = 12, BBCOOP_LOBBY_ASKS = 8 };
 enum { BBCOOP_LOBBY_OFFLINE, BBCOOP_LOBBY_TITLE, BBCOOP_LOBBY_PLAYING };
+/* Amanises 2026-10-25: what a listed player is to this one (LobbyPlayer.Relation). */
+enum { BBCOOP_FRIEND_NONE, BBCOOP_FRIEND_YES, BBCOOP_FRIEND_SENT, BBCOOP_FRIEND_RECEIVED,
+       BBCOOP_FRIEND_SELF };
 typedef struct bbcoop_lobby_entry {
     char name[40];
     char id[40];
-    int state; /* BBCOOP_LOBBY_*: a player's or a member's */
-    int ready; /* a member's */
+    int state;    /* BBCOOP_LOBBY_*: a player's or a member's */
+    int ready;    /* a member's */
+    int relation; /* BBCOOP_FRIEND_*: a player's, a friend's, a search result's */
+    int in_my_team; /* a friend's or a search result's: in this player's team already */
 } bbcoop_lobby_entry;
+/* Amanises 2026-10-25: an open team as a player in no team sees it (`id` its team, `name` its
+ * leader's). */
+typedef struct bbcoop_lobby_open {
+    char name[40];
+    char id[40];
+    int members;
+    int started; /* its hunt is on */
+    int asked;   /* this player asked to join it */
+    int open;    /* anyone joins at once (else its leader takes the ones who ask) */
+} bbcoop_lobby_open;
 /* Kaniel 2026-10-17: one of the server's worlds (each kept apart on the server; any team plays
  * any of them). */
 typedef struct bbcoop_lobby_world {
@@ -319,8 +335,25 @@ typedef struct bbcoop_lobby {
     /* Kaniel 2026-10-25: the host rules, the team's (its leader's launcher's); before a team,
      * this player's own launcher's. */
     int rule_rot, rule_travel, rule_vote, rule_scale;
+    /* Kaniel 2026-10-28: the boss tempo (0 Vanilla, 1 Aggressive, 2 Relentless). */
+    int rule_tempo;
     /* Kaniel 2026-10-25: the team's death mode, the leader's pick (BBCOOP_DEATH_*). */
     int death_mode;
+    /* Amanises 2026-10-25: friends (online first), the friend requests waiting for an answer, the
+     * ones sent, and the last player search (its text and what it found, online or not). */
+    int friend_count, request_count, sent_count, search_count;
+    bbcoop_lobby_entry friends[BBCOOP_LOBBY_FRIENDS];
+    bbcoop_lobby_entry requests[BBCOOP_LOBBY_REQUESTS];
+    bbcoop_lobby_entry sent[BBCOOP_LOBBY_REQUESTS];
+    bbcoop_lobby_entry search[BBCOOP_LOBBY_SEARCH];
+    char search_query[40];
+    /* Amanises 2026-10-25, open teams: the most a team holds (the server's), the leader's team
+     * listed to all, the open teams (to a player in no team), who asked to join (to a leader). */
+    int team_size;
+    int join; /* BBCOOP_JOIN_*: how the team is joined (its leader says) */
+    int open_count, ask_count;
+    bbcoop_lobby_open open_teams[BBCOOP_LOBBY_OPEN];
+    bbcoop_lobby_entry asks[BBCOOP_LOBBY_ASKS];
 } bbcoop_lobby;
 enum { BBCOOP_DEATH_DOWN = 0, BBCOOP_DEATH_SPECTATE = 1 };
 /* Fills `lobby`; 0 when the team lobby is off. */
@@ -366,7 +399,21 @@ enum { BBCOOP_TEAM_CREATE = 1, BBCOOP_TEAM_INVITE = 2, BBCOOP_TEAM_ACCEPT = 3,
        BBCOOP_TEAM_JOIN_CODE = 12 /* join the team of a typed code (`id`) */,
        BBCOOP_TEAM_NEW_CODE = 13 /* the leader: a fresh code, the old one joins no more */,
        BBCOOP_TEAM_INVITE_NAME = 14 /* invite the player of a typed name (`id`) */,
-       BBCOOP_TEAM_DEATH_MODE = 18 /* the leader picks the team's death mode (`id`: "0" or "1") */ };
+       BBCOOP_TEAM_DEATH_MODE = 18 /* the leader picks the team's death mode (`id`: "0" or "1") */,
+       /* Amanises 2026-10-25, friends: `id` a player's id; SEARCH's `id` is the text to find
+        * ("" clears the results). */
+       BBCOOP_TEAM_FRIEND_ADD = 19 /* ask, or accept its request */,
+       BBCOOP_TEAM_FRIEND_REMOVE = 20 /* unfriend, or take a sent request back */,
+       BBCOOP_TEAM_FRIEND_DECLINE = 21, BBCOOP_TEAM_SEARCH = 22,
+
+       /* Amanises 2026-10-25, open teams: OPEN's `id` is a BBCOOP_JOIN_* ("0" invite only,
+        * "1" ask, "2" open); ASK_JOIN (an open team: joins it) and ASK_CANCEL name a team,
+        * ASK_ACCEPT and ASK_DECLINE the one who asked. */
+       BBCOOP_TEAM_OPEN = 23, BBCOOP_TEAM_ASK_JOIN = 24, BBCOOP_TEAM_ASK_CANCEL = 25,
+       BBCOOP_TEAM_ASK_ACCEPT = 26, BBCOOP_TEAM_ASK_DECLINE = 27,
+       /* Provi 2026-10-29: the leader puts out every lamp of a world (`id`) not played now. */
+       BBCOOP_TEAM_RESET_LAMPS = 28 };
+enum { BBCOOP_JOIN_INVITE_ONLY = 0, BBCOOP_JOIN_ASK = 1, BBCOOP_JOIN_OPEN = 2 };
 void bbcoop_lobby_request(int action, const char *id);
 /* The title holds a save's load for the team: the team screen is up (bbport_overlay.cpp). */
 int bbcoop_team_screen(void);

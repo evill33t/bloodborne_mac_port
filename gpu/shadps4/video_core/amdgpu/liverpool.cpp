@@ -550,6 +550,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
+        const u32 packet_words = header->type3.NumWords() + 1; // snapshot before guest signaling
         const auto* it_body = reinterpret_cast<const u32*>(header) + 1;
         switch (opcode) {
         case PM4ItOpcode::Nop: {
@@ -600,7 +601,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
             UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
                             static_cast<u32>(opcode), count);
         }
-        ccb = NextPacket(ccb, header->type3.NumWords() + 1);
+        ccb = NextPacket(ccb, packet_words);
     }
 
     FIBER_EXIT;
@@ -1509,7 +1510,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 dcb = dcb.last(0);
                 continue;
             }
-            dcb = NextPacket(dcb, header->type3.NumWords() + 1);
+            dcb = NextPacket(dcb, count + 1); // use the pre-dispatch snapshot (shadPS4 #5541)
             break;
         }
     }

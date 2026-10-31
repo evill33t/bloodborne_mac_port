@@ -5,6 +5,8 @@ ground), from the pictures to what the port embeds. A developer tool, run after 
 
   coop_art.py cut --sigils S --badges B --medallions M --card C --dividers D --marks K --frame F --backdrop G
       cuts the generated sheets into the pieces in gpu/art/coop/ (PNG, the flat ground made clear);
+  coop_art.py cut-icon --settings S
+      cuts one icon (Kaniel 2026-10-29: the team screen's settings button, silver on a flat ground) into its piece;
   coop_art.py pack
       packs the pieces into gpu/art/coop_art.bin (the overlay's atlas: the team screen and the team loading screen)
       and puts the badges and the portrait frame into the party HUD's strip (scripts/party_hud_icons.bin,
@@ -26,7 +28,9 @@ HUD_STRIP = PORT / 'scripts/party_hud_icons.bin'
 # atlas (one scale for pieces drawn over each other: the two medallions' rings stay the same size).
 PIECES = (('sigil0', 0.64), ('sigil1', 0.64), ('sigil2', 0.64), ('sigil3', 0.64),
           ('medallion', 0.6), ('medallion-ready', 0.6), ('card', 0.7), ('divider', 0.52), ('title-ornament', 0.7),
-          ('mark-ready', 0.42), ('mark-leader', 0.42), ('mark-invite', 0.42), ('backdrop', 1.0))
+          ('mark-ready', 0.42), ('mark-leader', 0.42), ('mark-invite', 0.42), ('backdrop', 1.0), ('settings', 1.0))
+# An icon's piece, at most this many pixels a side (the settings button is about 60 at 1080p, 120 at 4K).
+ICON_SIDE = 256
 ATLAS_SIDE = 2048
 # The party HUD strip (party_icons_atlas.py): 128-pixel frames none, hunter, elsewhere, fallen, the downed drop with
 # its ring red to 0%, 10%, ... 100%, then the portraits' frame.
@@ -152,6 +156,13 @@ def cut(args):
         print(f'{name}: {image.size}')
 
 
+def cut_icon(args):
+    PIECE_DIR.mkdir(parents=True, exist_ok=True)
+    image = fit(square(trim(key_ground(picture(args.settings)))), ICON_SIDE)
+    image.save(PIECE_DIR / 'settings.png', optimize=True)
+    print(f'settings: {image.size}')
+
+
 def fit(image, longest):
     """The picture no more than `longest` pixels on its longer side."""
     w, h = image.size
@@ -249,9 +260,10 @@ def main():
     cut_parser = commands.add_parser('cut')
     for name in ('sigils', 'badges', 'medallions', 'card', 'dividers', 'marks', 'frame', 'backdrop'):
         cut_parser.add_argument(f'--{name}', required=True)
+    commands.add_parser('cut-icon').add_argument('--settings', required=True)
     commands.add_parser('pack')
     args = parser.parse_args()
-    {'cut': cut, 'pack': pack}[args.command](args)
+    {'cut': cut, 'cut-icon': cut_icon, 'pack': pack}[args.command](args)
 
 
 if __name__ == '__main__':

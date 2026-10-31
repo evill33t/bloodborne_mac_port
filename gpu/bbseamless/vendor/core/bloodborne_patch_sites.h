@@ -66,6 +66,7 @@ inline constexpr auto CoopFeatures = std::to_array<CoopFeature>({
     {"enemy owner", false},
     {"team lobby", false},
     {"team join", false},
+    {"cutscene skip", false},
     {"no multiplayer banners", false},
     {"silent key items", false},
     {"character names", false},
@@ -100,6 +101,7 @@ inline constexpr auto CoopFeatures = std::to_array<CoopFeature>({
     {"real revive hits", false},
     {"no hit reaction while down", false},
     {"no damage number on downed bodies", false},
+    {"no area events while down", false},
     {"party nameplates", false},
     {"party list in the HUD", false},
     {"sign timers", true},
@@ -107,9 +109,11 @@ inline constexpr auto CoopFeatures = std::to_array<CoopFeature>({
     {"server owns leaves", true},
     {"floor guard", false},
     {"flag block guard", false},
+    {"chalice altar pick", false},
     {"packet guard", false},
     {"co-op camera", false},
     {"boss fight deaths", false},
+    {"boss tempo", false},
 });
 
 inline constexpr auto CoopSites = std::to_array<CoopSite>({
@@ -319,9 +323,26 @@ inline constexpr auto CoopSites = std::to_array<CoopSite>({
     // Phase 5: the title's save load held for the team, and the title menu seen again.
     {"title load state", "team lobby", CoopSiteKind::Hook, 0x0195B480, "55 48 89 E5 41 57"},
     {"title menu state", "team lobby", CoopSiteKind::Hook, 0x0195AE80, "55 48 89 E5 41 57"},
+    // Kaniel 2026-10-15: the cutscene player's (SprjRemoMan) steps, Init .. EpilogWait
+    // (SprjRemoManStepOffsets): a cutscene under the team's loading screen is skipped.
+    {"cutscene step init", "cutscene skip", CoopSiteKind::Hook, 0x01CFA050,
+     "55 48 89 E5 41 57 41 56"},
+    {"cutscene step 2", "cutscene skip", CoopSiteKind::Hook, 0x01CFA310, "55 48 89 E5 41 57 41 56"},
+    {"cutscene step 3", "cutscene skip", CoopSiteKind::Hook, 0x01CFA4C0, "55 48 89 E5 41 57 41 56"},
+    {"cutscene step 4", "cutscene skip", CoopSiteKind::Hook, 0x01CFA670, "55 48 89 E5 41 57 41 56"},
+    {"cutscene step 5", "cutscene skip", CoopSiteKind::Hook, 0x01CFB060, "55 48 89 E5 41 57 41 56"},
+    {"cutscene step 6", "cutscene skip", CoopSiteKind::Hook, 0x01CFB350, "55 48 89 E5 41 57 41 56"},
+    {"cutscene step epilog wait", "cutscene skip", CoopSiteKind::Hook, 0x01CFB5F0,
+     "55 48 89 E5 41 56 53"},
     // Kaniel 2026-10-16: the network banner, none in a party (ShowNetworkBannerPrologue).
     {"network banner", "no multiplayer banners", CoopSiteKind::Hook, 0x01BFFE80,
      "55 48 89 E5 41 57 41 56"},
+    // Kaniel 2026-10-25: the left member's notice (MemberLeftNoticePrologue).
+    {"member left notice", "no multiplayer banners", CoopSiteKind::Hook, 0x0178B0E0,
+     "55 48 89 E5 41 57 41 56"},
+    // And the session's end's "Session lost." window (SessionLostTest).
+    {"session lost window", "no multiplayer banners", CoopSiteKind::Hook, 0x0138A602,
+     "F6 80 05 0A 00 00 01"},
     // Website shots 2026-10-19: the game names players by their characters, not online ids
     // (PlayerNameForTextOffset).
     {"name by online id switch", "character names", CoopSiteKind::Patch, 0x01AE8713, "75 14",
@@ -332,6 +353,10 @@ inline constexpr auto CoopSites = std::to_array<CoopSite>({
     // (ItemGetQueuedOffset).
     {"item get popup", "silent key items", CoopSiteKind::Hook, 0x016D8850,
      "55 48 89 E5 41 57 41 56"},
+    // Kaniel 2026-10-28: a boss's breathers shorten with the boss tempo rule
+    // (AddSubGoalLifeHookOffset).
+    {"AddSubGoal life", "boss tempo", CoopSiteKind::Hook, 0x0124CCAC, "49 89 FE 31 C9"},
+    {"AddSubGoal_Front life", "boss tempo", CoopSiteKind::Hook, 0x0124D53C, "49 89 FE 31 C9"},
     // Kaniel 2026-10-18: no "Lost connection to the network" popup in a party (LanCutError...).
     {"lan cut error", "no lost-connection popup", CoopSiteKind::Hook, 0x01387130,
      "55 48 89 E5 41 56"},
@@ -520,6 +545,8 @@ inline constexpr auto CoopSites = std::to_array<CoopSite>({
      "55 48 89 E5 41 57 41 56"},
     {"enemy bar damage", "no damage number on downed bodies", CoopSiteKind::Hook, 0x016F9A50,
      "45 31 C0 48 89 F8 31 C9"},
+    {"entity in area", "no area events while down", CoopSiteKind::Hook, 0x013189A0,
+     "55 48 89 E5 41 57 41 56"},
     {"HUD tag update exit", "party nameplates", CoopSiteKind::Hook, 0x01B5A3AE,
      "48 81 C4 C8 00 00 00"},
     {"HUD tags done", "party list in the HUD", CoopSiteKind::Hook, 0x01BF8A50,
@@ -588,6 +615,12 @@ inline constexpr auto CoopSites = std::to_array<CoopSite>({
      "41 FF C9 44 89 C9 C1 E9 03"},
     {"flag value second block", "flag block guard", CoopSiteKind::Hook, 0x013CFFEC,
      "45 29 D0 41 8D 58 FF 89 D8"},
+
+    // A chalice map's view registration reads the current altar's pick flags 9020-9026
+    // (InstallChaliceAltarPick): a load builds the altar picked last, not the save's (Kaniel's
+    // playtest 2026-10-28: a party trip built altar 6's old dungeon in altar 5's).
+    {"chalice view pick read", "chalice altar pick", CoopSiteKind::Hook, 0x013BEB4D,
+     "31 C9 85 C0 44 8B 75 D4"},
 
     // The game's per-character receive of a remote player's state (InstallMemberPacketGuard): only
     // the newest copy of a member takes its packets (Kaniel's playtest 2026-10-19).

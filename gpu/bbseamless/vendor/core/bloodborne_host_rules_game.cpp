@@ -90,6 +90,7 @@ void ApplyRotEffects(u64 player, const Rot& now) {
     static std::array<float, RotKinds> written{};
     static bool rows_ok = false;
     static u64 rows_table = 0;
+    const TickStepTimer step{"ApplyRotEffects"};
     const RotEffect effect = now.Effect();
     const u64 table = FindLoadedParam("SP_EFFECT_PARAM_ST");
     if (table == 0) {
@@ -164,6 +165,7 @@ RotView ReadRotView() {
 
 void TickHostRules() {
     MakeEnemiesHarder(); // the enemy scaling rule follows the hunters on this map
+    TickBossTempo();
     TickTeamTravel();
     static s64 next_ms = 0;
     const s64 now_ms = SteadyMilliseconds();

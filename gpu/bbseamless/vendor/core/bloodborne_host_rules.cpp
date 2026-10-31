@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
+#include "common/float_chars.h"
 #include <cstring>
 
 #include "core/bloodborne_host_rules.h"
@@ -40,6 +42,10 @@ HostRules ParseHostRules(std::string_view setting) {
             rules.travel_vote = true;
         } else if (word == "scale") {
             rules.enemy_scaling = true;
+        } else if (word == "aggressive") {
+            rules.boss_tempo = BossTempo::Aggressive;
+        } else if (word == "relentless") {
+            rules.boss_tempo = BossTempo::Relentless;
         }
         if (comma == std::string_view::npos) {
             break;
@@ -62,6 +68,8 @@ std::string HostRulesText(const HostRules& rules) {
     add(rules.travel_together, "travel");
     add(rules.travel_vote && rules.travel_together, "vote");
     add(rules.enemy_scaling, "scale");
+    add(rules.boss_tempo == BossTempo::Aggressive, "aggressive");
+    add(rules.boss_tempo == BossTempo::Relentless, "relentless");
     return text.empty() ? "off" : text;
 }
 
@@ -259,6 +267,72 @@ std::size_t HuntersOnMap(std::span<const MemberMap> board, std::string_view self
            static_cast<std::size_t>(std::count_if(board.begin(), board.end(), [&](const auto& m) {
                return m.member != self && map != 0 && m.map == map;
            }));
+}
+
+std::optional<BossTempoTuning> ParseBossTempoTuning(std::string_view setting) {
+    std::array<float, 4> values{};
+    std::size_t count = 0;
+    while (true) {
+        const std::size_t comma = setting.find(',');
+        const std::string_view part = Trimmed(setting.substr(0, comma));
+        float value = 0.0f;
+        const auto [end, error] = BbSeamless::FloatChars(part.data(), part.data() + part.size(), value);
+        if (count == values.size() || part.empty() || error != std::errc{} ||
+            end != part.data() + part.size()) {
+            return std::nullopt;
+        }
+        values[count++] = value;
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        setting.remove_prefix(comma + 1);
+    }
+    const BossTempoTuning tuning{values[0], values[1], values[2], values[3]};
+    const auto speed = [](float rate) { return rate >= 0.5f && rate <= 4.0f; };
+    if (count != values.size() || !(tuning.gap > 0.0f && tuning.gap <= 1.0f) ||
+        !(tuning.odds >= 0.0f && tuning.odds <= 1.0f) || !speed(tuning.turn) ||
+        !speed(tuning.anim)) {
+        return std::nullopt;
+    }
+    return tuning;
+}
+
+BossTempoTuning BossTempoTuningFor(BossTempo level, const std::optional<BossTempoTuning>& tuned) {
+    switch (level) {
+    case BossTempo::Vanilla:
+        break;
+    case BossTempo::Aggressive:
+        return tuned ? *tuned : BossTempoTuning{.gap = 0.5f, .odds = 0.5f, .turn = 1.3f};
+    case BossTempo::Relentless:
+        return tuned ? *tuned : BossTempoTuning{.gap = 0.25f, .odds = 0.25f, .turn = 1.6f};
+    }
+    return {};
+}
+
+const char* BossTempoName(BossTempo level) {
+    switch (level) {
+    case BossTempo::Vanilla:
+        break;
+    case BossTempo::Aggressive:
+        return "Aggressive";
+    case BossTempo::Relentless:
+        return "Relentless";
+    }
+    return "Vanilla";
+}
+
+bool IsBossTempoGoal(s32 goal) {
+    return goal == GoalCommonWait || goal == GoalCommonTurn || goal == GoalCommonLeaveTarget ||
+           goal == GoalCommonSidewayMove;
+}
+
+float BossGoalLife(s32 goal, float life, const BossTempoTuning& tuning, u32 roll) {
+    if (!IsBossTempoGoal(goal) || !(life > 0.0f) || !tuning.Changes()) {
+        return life;
+    }
+    const bool cut =
+        goal != GoalCommonTurn && static_cast<float>(roll % 100) >= tuning.odds * 100.0f;
+    return std::min(life, cut ? CutGoalLife : life * tuning.gap);
 }
 
 } // namespace Core::Bloodborne

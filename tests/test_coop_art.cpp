@@ -57,6 +57,9 @@ int main() {
         assert(part.x0 >= 0.0f && part.x1 <= 1.0f && part.x0 < part.x1);
         assert(part.y0 >= 0.0f && part.y1 <= 1.0f && part.y0 < part.y1);
     }
+    // Kaniel 2026-10-29, the settings button's silver cog: clear corners, its hub drawn.
+    assert(AlphaAt(*atlas, Piece::Settings, 0.01f, 0.01f) == 0 && AlphaAt(*atlas, Piece::Settings, 0.99f, 0.99f) == 0);
+    assert(AlphaAt(*atlas, Piece::Settings, 0.5f, 0.5f) == 255);
     // The backdrop: a picture, opaque everywhere.
     assert(AlphaAt(*atlas, Piece::Backdrop, 0.0f, 0.0f) == 255 && AlphaAt(*atlas, Piece::Backdrop, 1.0f, 1.0f) == 255);
     // Kaniel 2026-10-18: the team screens in the souls counter's grey. The gold turns that grey (as

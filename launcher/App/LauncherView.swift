@@ -398,7 +398,7 @@ struct LauncherView: View {
             if on { selected.insert(name) } else { selected.remove(name) }
             if name == "vote", on { selected.insert("travel") }
             if name == "travel", !on { selected.remove("vote") }
-            model.online.seamlessHostRules = selected.isEmpty ? "off" : ["rot", "travel", "vote", "scale"].filter(selected.contains).joined(separator: ",")
+            model.online.seamlessHostRules = selected.isEmpty ? "off" : ["rot", "travel", "vote", "scale", "aggressive", "relentless"].filter(selected.contains).joined(separator: ",")
         })
     }
 
@@ -412,6 +412,19 @@ struct LauncherView: View {
         Toggle("Offer to travel together", isOn: seamlessRule("travel"))
         Toggle("Vote before travelling together", isOn: seamlessRule("vote"))
         Toggle("Scale enemies with team size", isOn: seamlessRule("scale"))
+        Picker("Boss tempo", selection: Binding(get: {
+            model.online.seamlessHostRules.split(separator: ",").contains("relentless") ? "relentless" :
+            model.online.seamlessHostRules.split(separator: ",").contains("aggressive") ? "aggressive" : "vanilla"
+        }, set: { tempo in
+            var rules = model.online.seamlessHostRules.split(separator: ",").map(String.init)
+            rules.removeAll { ["off", "aggressive", "relentless"].contains($0) }
+            if tempo != "vanilla" { rules.append(tempo) }
+            model.online.seamlessHostRules = rules.isEmpty ? "off" : rules.joined(separator: ",")
+        })) {
+            Text("Vanilla").tag("vanilla")
+            Text("Aggressive").tag("aggressive")
+            Text("Relentless").tag("relentless")
+        }
         TextField("Enemy HP, damage, poise multipliers", text: $model.online.seamlessHarderEnemies, prompt: Text("off or 3,1.5,3"))
         Text("Host rules apply when you lead a team. Set each enemy multiplier from 1 to 10, or use off for the original difficulty.")
             .font(.caption).foregroundStyle(.secondary)

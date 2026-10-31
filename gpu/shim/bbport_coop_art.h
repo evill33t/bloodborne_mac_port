@@ -26,6 +26,7 @@ enum class Piece {
     MarkLeader,
     MarkInvite,
     Backdrop,
+    Settings, // Kaniel 2026-10-29: the team screen's settings button (silver, kept as drawn)
     Count
 };
 

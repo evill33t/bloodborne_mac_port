@@ -92,11 +92,12 @@ struct FlagRange {
 // The flag each boss fog's host event sets and its phantom event waited for (found by
 // party_boss_events.py's open_boss_fog_for_guests in the 01.09 map event files). Party guests
 // set it too, and it holds for one map visit; the flag after it is "a phantom entered" (local
-// music).
-inline constexpr std::array<s32, 21> BossFogEntryFlags{
-    12104800, 12104850, 12204800, 12304700, 12304800, 12404800, 12414700,
-    12414800, 12424700, 12424800, 12504800, 12604800, 12604850, 12704800,
-    12804800, 13304800, 13404808, 13404858, 13504808, 13504858, 13604808,
+// music). Rom's lake (13204800) has no fog of that shape: its host flag is the dive's (a host
+// walking into the drop, let_guests_dive_first), which a guest's dive now sets too.
+inline constexpr std::array<s32, 22> BossFogEntryFlags{
+    12104800, 12104850, 12204800, 12304700, 12304800, 12404800, 12414700, 12414800,
+    12424700, 12424800, 12504800, 12604800, 12604850, 12704800, 12804800, 13204800,
+    13304800, 13404808, 13404858, 13504808, 13504858, 13604808,
 };
 
 // A door's flags: a map event that waits for an object act (5:2: a door, gate, lever, kicked
@@ -409,6 +410,26 @@ inline constexpr std::array FirstRows{
 
 // Rows after the boss fogs': the general ranges the earlier rows cut into.
 inline constexpr std::array LastRows{
+    Range(12900000, 12909999, FlagOwner::Session, 0,
+          "a chalice map's flags (m29, 1290xxxx): the current altar's view, the game keeps them "
+          "in altar k's (14k0xxxx, +(11 + k) * 100000) and points the view there when the altar "
+          "is picked (flags 9020-9026); each game's own, as the host's world they carried an "
+          "earlier dungeon's lamps and went over a teammate's dungeon on another altar (Kaniel's "
+          "playtest 2026-10-28)"),
+    Range(52900000, 52909999, FlagOwner::Session, 0,
+          "a chalice map's item flags (5290xxxx): the current altar's view, kept in altar k's "
+          "(54k0xxxx)"),
+    FlagRange{.first = 14007810,
+              .last = 14608191,
+              .period = 100000,
+              .low = 7810,
+              .high = 8191,
+              .stride = 20,
+              .width = 2,
+              .rule = {FlagOwner::Shared, FlagCarriesHome},
+              .why = "a chalice dungeon's lamp's active flag and the one after, as altar k keeps "
+                     "them (14k07810 + lamp * 20, the view's 12907810 + lamp * 20): the game "
+                     "does not sync them"},
     FlagRange{.first = 12107810,
               .last = 13998191,
               .period = 10000,

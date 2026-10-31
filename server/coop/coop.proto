@@ -679,6 +679,24 @@ message TeamRequest {
         // Kaniel 2026-10-25: the leader picks how its team's deaths play out (`death_mode`,
         // Team.death_mode), at any time.
         DEATH_MODE = 18;
+        // Amanises 2026-10-25, friends (shadNet's friend table, the same the game's own friend
+        // list reads): `member` is the other player's lobby member (its online id in hex).
+        FRIEND_ADD = 19;     // a friend request to `member`, or accepting the one it sent
+        FRIEND_REMOVE = 20;  // `member` off the friends, or the request sent to it taken back
+        FRIEND_DECLINE = 21; // the request `member` sent refused
+        SEARCH = 22;         // the server's accounts whose name holds `query` (empty: clear)
+        // Amanises 2026-10-25, open teams: the leader says how its team is joined (`join`); a
+        // player in no team joins an open team or asks to join one that asks (`team`), or takes
+        // the ask back; the leader takes the one who asked (`member`) in, or says no.
+        OPEN = 23;
+        ASK_JOIN = 24;
+        ASK_CANCEL = 25;
+        ASK_ACCEPT = 26;
+        ASK_DECLINE = 27;
+        // Provi 2026-10-29: the leader puts out every lamp of one of the server's worlds (`world`),
+        // the way to mend a world whose new playthrough kept the old one's lamps (asked for twice
+        // in the picker). Not while a team plays it.
+        RESET_LAMPS = 28;
     }
     Action action = 1;
     string member = 2;
@@ -692,6 +710,8 @@ message TeamRequest {
     TeamRules rules = 10;
     repeated uint32 rot = 11; // RotKind values, the oldest first
     uint32 death_mode = 12; // DEATH_MODE
+    string query = 13; // SEARCH
+    Team.Join join = 14; // OPEN
 }
 
 // Kaniel 2026-10-25: the host rules, the leader's choice for its whole team, all off by default.
@@ -705,6 +725,14 @@ message TeamRules {
     // Enemies grow from the vanilla game (alone) to the harder defaults (a full team) with the
     // hunters on their map, over the player's own enemy setting.
     bool enemy_scaling = 4;
+    // Kaniel 2026-10-28: bosses rest less between attacks and turn faster.
+    BossTempo boss_tempo = 5;
+}
+
+enum BossTempo {
+    BOSS_TEMPO_VANILLA = 0;    // the game's
+    BOSS_TEMPO_AGGRESSIVE = 1; // half the breathers, x1.3 turn speed
+    BOSS_TEMPO_RELENTLESS = 2; // a quarter of the breathers, x1.6 turn speed
 }
 
 // The Rot rule's penalties (one each per death, picked at random).
@@ -723,10 +751,19 @@ message LobbyPlayer {
         TITLE = 1;
         PLAYING = 2;
     }
+    // Amanises 2026-10-25: what this player is to the one the state is for.
+    enum Relation {
+        NONE = 0;
+        FRIEND = 1;
+        REQUEST_SENT = 2;     // a friend request to it waits
+        REQUEST_RECEIVED = 3; // it sent one that waits
+        SELF = 4;             // a search found the player itself
+    }
     string member = 1;
     string name = 2;
     State state = 3;
     string team = 4; // the team it is in, if any
+    Relation relation = 5;
 }
 
 message TeamMember {
@@ -784,6 +821,30 @@ message Team {
     // one for the whole team (the leader's pick): 0 it goes down until struck back up (party
     // death), 1 it spectates its teammates until one uses a lamp or the area's boss dies.
     uint32 death_mode = 11;
+    // Amanises 2026-10-25: how the team is joined (TeamRequest.OPEN): by invite only (not
+    // listed), asked (listed; its leader takes them in) or open (listed; anyone joins).
+    enum Join {
+        INVITE_ONLY = 0;
+        ASK = 1;
+        OPEN = 2;
+    }
+    Join join = 12;
+}
+
+// Amanises 2026-10-25: an open team as a player in no team sees it.
+message OpenTeam {
+    string team = 1;
+    string leader_name = 2;
+    uint32 members = 3;
+    bool started = 4; // its hunt is on (a new member joins it in its world)
+    bool asked = 5;   // this player asked to join it
+    Team.Join join = 6; // ASK or OPEN
+}
+
+// Amanises 2026-10-25: one who asked to join the leader's team.
+message TeamAsk {
+    string member = 1;
+    string name = 2;
 }
 
 message TeamInvite {
@@ -803,6 +864,20 @@ message LobbyState {
     // Kaniel 2026-10-17: the world a player not in a team picked (its team takes it when it makes
     // one; empty: a new one).
     string world = 6;
+    // Amanises 2026-10-25: the player's friends (online first, then by name), the friend requests
+    // waiting for its answer, the ones it sent, and its last search (its text and what it found,
+    // online or not).
+    repeated LobbyPlayer friends = 7;
+    repeated LobbyPlayer friend_requests = 8;
+    repeated LobbyPlayer friend_requests_sent = 9;
+    string search_query = 10;
+    repeated LobbyPlayer search = 11;
+    // Amanises 2026-10-25, open teams: to a player in no team, the open teams with room (and
+    // whether it asked one); to a leader, who asked to join its team; the most a team holds
+    // (the server's, for "2/4").
+    repeated OpenTeam open_teams = 12;
+    repeated TeamAsk asks = 13;
+    uint32 team_size = 14;
 }
 
 // server -> game: load your save and play the team's world. To every ready member at Start, and

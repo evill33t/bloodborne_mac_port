@@ -127,7 +127,7 @@ def launch_environment(environ, data):
     for name in ('SHADPS4_BLOODBORNE_PARTY', 'SHADPS4_BLOODBORNE_PARTY_ROLE'):
         env.pop(name, None)
     rules = settings.get('seamless_host_rules', 'off')
-    if not re.fullmatch(r'off|(?:rot|travel|vote|scale)(?:,(?:rot|travel|vote|scale))*', rules):
+    if not re.fullmatch(r'off|(?:rot|travel|vote|scale|aggressive|relentless)(?:,(?:rot|travel|vote|scale|aggressive|relentless))*', rules):
         raise ValueError('Invalid seamless_host_rules setting.')
     env.setdefault('SHADPS4_BLOODBORNE_HOST_RULES', rules)
     harder = settings.get('seamless_harder_enemies', 'off')

@@ -164,7 +164,8 @@ void TeamGate::Reset() {
 }
 
 TeamPlayStep TeamPlayStepOf(const bbcoop::LobbyState* lobby, std::string_view party,
-                            const bbcoop::TeamStart* start, const std::string& me) {
+                            const bbcoop::TeamStart* start, const std::string& me, bool hosts,
+                            std::string_view session_host) {
     if (lobby == nullptr) {
         return TeamPlayStep::None; // no word from the lobby yet
     }
@@ -172,7 +173,18 @@ TeamPlayStep TeamPlayStepOf(const bbcoop::LobbyState* lobby, std::string_view pa
     const std::string mine = lobby->has_team() ? lobby->team().party() : std::string{};
     const auto in_mine = [&](std::string_view key) { return !mine.empty() && key == mine; };
     if (!party.empty()) {
-        return in_mine(party) ? TeamPlayStep::None : TeamPlayStep::Leave;
+        if (!in_mine(party)) {
+            return TeamPlayStep::Leave;
+        }
+        const std::string& leader = lobby->team().leader();
+        if (me.empty() || leader.empty()) {
+            return TeamPlayStep::None;
+        }
+        if (!hosts && leader == me) {
+            return TeamPlayStep::Lead;
+        }
+        return hosts && leader != me && session_host == leader ? TeamPlayStep::Follow
+                                                               : TeamPlayStep::None;
     }
     if (start == nullptr || !in_mine(start->party())) {
         return TeamPlayStep::None;
@@ -181,6 +193,14 @@ TeamPlayStep TeamPlayStepOf(const bbcoop::LobbyState* lobby, std::string_view pa
     const bool ready = std::ranges::any_of(
         members, [&](const bbcoop::TeamMember& m) { return m.member() == me && m.ready(); });
     return ready ? TeamPlayStep::Adopt : TeamPlayStep::None;
+}
+
+std::string TeamHostOf(const bbcoop::LobbyState* lobby, const bbcoop::TeamStart& start) {
+    if (lobby != nullptr && lobby->has_team() && lobby->team().id() == start.team() &&
+        !lobby->team().leader().empty()) {
+        return lobby->team().leader();
+    }
+    return start.host();
 }
 
 std::vector<bbcoop::TeamRequest> TeamJoinHuntRequests(const bbcoop::LobbyState& lobby,
@@ -224,6 +244,7 @@ bbcoop::TeamRequest TeamMenuRequest(bbcoop::TeamRequest::Action action, const st
         break;
     case Action::WORLD:
     case Action::FORGET_WORLD:
+    case Action::RESET_LAMPS:
         request.set_world(id);
         break;
     case Action::JOIN_CODE: {
@@ -238,6 +259,19 @@ bbcoop::TeamRequest TeamMenuRequest(bbcoop::TeamRequest::Action action, const st
         break;
     case Action::DEATH_MODE:
         request.set_death_mode(id == "1" ? 1 : 0); // Kaniel 2026-10-25: "1" spectate, "0" down
+        break;
+    // Amanises 2026-10-25, open teams.
+    case Action::OPEN: // the join mode's number
+        request.set_join(id == "2"   ? bbcoop::Team::OPEN
+                         : id == "1" ? bbcoop::Team::ASK
+                                     : bbcoop::Team::INVITE_ONLY);
+        break;
+    case Action::ASK_JOIN:
+    case Action::ASK_CANCEL:
+        request.set_team(id);
+        break;
+    case Action::SEARCH:
+        request.set_query(id); // Amanises 2026-10-25: the player search's text
         break;
     default:
         request.set_member(id);
@@ -453,6 +487,13 @@ bool TakesTeamWorldBlock(u32 block, const std::set<u32>& taken, std::span<const 
            std::binary_search(covered.begin(), covered.end(), block);
 }
 
+bool PlaythroughWatch::NextPlaythrough(int slot, s32 clear_count) {
+    const auto it = seen.find(slot);
+    const bool next = it != seen.end() && clear_count > it->second;
+    seen[slot] = clear_count;
+    return next;
+}
+
 std::vector<s32> TeamWorldLamps(u32 flags_per_block, std::span<const u32> blocks,
                                 const WorldFlags& target) {
     std::vector<s32> lamps;
@@ -461,7 +502,7 @@ std::vector<s32> TeamWorldLamps(u32 flags_per_block, std::span<const u32> blocks
         if (std::find(blocks.begin(), blocks.end(), block) == blocks.end()) {
             continue;
         }
-        if (const auto lamp = LampOfActiveFlag(flag)) {
+        if (const auto lamp = LampOfActiveFlag(flag); lamp && SharedWithParty(flag)) {
             lamps.push_back(*lamp);
         }
     }
@@ -471,7 +512,8 @@ std::vector<s32> TeamWorldLamps(u32 flags_per_block, std::span<const u32> blocks
 std::vector<s32> TeamLampFlagsToSet(const WorldFlags& team, const std::function<bool(s32)>& on) {
     std::vector<s32> flags;
     for (const s32 flag : team.on) {
-        if ((LampOfActiveFlag(flag) || LampOfActiveFlag(flag - 1)) && !on(flag)) {
+        if ((LampOfActiveFlag(flag) || LampOfActiveFlag(flag - 1)) && SharedWithParty(flag) &&
+            !on(flag)) {
             flags.push_back(flag);
         }
     }

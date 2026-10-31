@@ -60,8 +60,13 @@ LinkServer::LinkServer(SharedState* shared, const QString& db_path, quint16 tcp_
       m_linkTimer(new QTimer(this)),
       m_world(shared->config ? shared->config->GetBloodborneWorldPath() : QString{}),
       m_worldTimer(new QTimer(this)), m_db(QStringLiteral("link_sign_in")), m_tcpPort(tcp_port) {
+    // This listener is Internet-facing in Seamless Hunt: lobby/world identities come only from
+    // the account authenticated by the server-link hello, never from a later client field.
+    m_world.RequireAuthenticatedIdentity();
     if (!m_db.Open(db_path))
         qCritical() << "Link: the accounts did not open:" << m_db.lastError();
+    else
+        m_world.SetFriendBook(&m_friends);
     // Link version 4: hellos are encrypted to the server's static key, made at the first start and
     // kept (the launcher pins its public half): one that does not read stops the link from
     // starting.
@@ -854,6 +859,11 @@ void LinkServer::Apply(const ServerLink::Hub::Result& result) {
         m_socket->writeDatagram(send.datagram, QHostAddress(send.to.ipv4), send.to.port);
     for (const auto& line : result.log)
         qInfo().noquote() << line;
+    // Kaniel 2026-10-25: a game gone a few seconds leaves its started team (the world's lobby).
+    for (const auto& quiet : result.quiet)
+        m_world.Quiet(quiet, true, QDateTime::currentMSecsSinceEpoch());
+    for (const auto& back : result.back)
+        m_world.Quiet(back, false, QDateTime::currentMSecsSinceEpoch());
     for (const auto& gone : result.gone) {
         Apply(m_world.Forget(gone));
         if (const auto found = m_linkAddress.constFind(gone.Key());

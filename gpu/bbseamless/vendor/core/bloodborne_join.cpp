@@ -1267,15 +1267,21 @@ bool HostHasRoomForMore() {
 }
 
 // The board name of a session member: its identity object (the member id's first pointer), or an
-// object it points to, holds its online id (see FindOnlineIdIn).
+// object it points to, holds its online id (see FindOnlineIdIn). Where it was found is read again
+// next time, a full scan only when that block lost it (SessionNameCache).
 std::optional<std::string> SessionMemberBoardName(u64 member,
                                                   const std::vector<std::string>& online_ids) {
+    std::optional<SessionNameCache::Block> where;
     const auto scan = [&](u64 address, u64 size) -> std::optional<std::string> {
         if (address < 0x10000 || !HasMemoryAccess(address, size, MemoryProt::CpuRead)) {
             return std::nullopt;
         }
-        return FindOnlineIdIn(std::span<const u8>{reinterpret_cast<const u8*>(address), size},
-                              online_ids);
+        auto found = FindOnlineIdIn(std::span<const u8>{reinterpret_cast<const u8*>(address), size},
+                                    online_ids);
+        if (found) {
+            where = SessionNameCache::Block{address, size};
+        }
+        return found;
     };
     // The objects the identity points at, two levels down (a guest found the host's name only
     // deeper than a host found a guest's, rig 2026-10-09).
@@ -1293,6 +1299,23 @@ std::optional<std::string> SessionMemberBoardName(u64 member,
         return found;
     };
     const u64 identity = ReadValue<u64>(member, 0);
+    static std::mutex cache_mutex;
+    static SessionNameCache cache;
+    std::scoped_lock lock{cache_mutex};
+    const s64 now_ms = SteadyMilliseconds();
+    switch (const SessionNameCache::Look look = cache.Lookup(identity, online_ids, now_ms);
+            look.plan) {
+    case SessionNameCache::Plan::StillMissing:
+        return std::nullopt;
+    case SessionNameCache::Plan::Recheck:
+        if (const auto found = scan(look.block.address, look.block.size)) {
+            return BoardMemberOfOnlineId(*found);
+        }
+        cache.Forget(identity);
+        break;
+    case SessionNameCache::Plan::Scan:
+        break;
+    }
     std::optional<std::string> found = scan(identity, 0x200);
     for (const u64 first : found ? std::vector<u64>{} : pointers(identity, 0x100)) {
         if ((found = scan(first, 0x100))) {
@@ -1308,6 +1331,7 @@ std::optional<std::string> SessionMemberBoardName(u64 member,
         }
     }
     if (!found) {
+        cache.Missed(identity, online_ids, now_ms);
         static std::unordered_set<u64> logged;
         if (logged.insert(identity).second && logged.size() < 16 && identity >= 0x10000 &&
             HasMemoryAccess(identity, 0x40, MemoryProt::CpuRead)) {
@@ -1317,6 +1341,7 @@ std::optional<std::string> SessionMemberBoardName(u64 member,
         }
         return std::nullopt;
     }
+    cache.Found(identity, online_ids, *where);
     return BoardMemberOfOnlineId(*found);
 }
 

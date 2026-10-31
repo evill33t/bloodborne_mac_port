@@ -605,7 +605,9 @@ void TickOffscreenPortrait(bool wanted, bool captured, s64 now) {
 namespace Coop {
 
 std::string OwnCharacterName() {
-    const u64 data = PlayerGameDataNow();
+    // PlayerGameDataNow is part of the optional party-HUD renderer. Character names are also
+    // needed by headless/non-HUD builds, so use the shared game-data accessor here.
+    const u64 data = OwnGameData();
     if (data < 0x10000 || !HasMemoryAccess(data + PlayerGameNameHolderAt, 8, MemoryProt::CpuRead)) {
         return {};
     }

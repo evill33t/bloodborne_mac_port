@@ -64,6 +64,11 @@ struct SubresourceExtent {
     u32 layers = 1;
 
     auto operator<=>(const SubresourceExtent&) const = default;
+
+    // shadPS4 #5524 / Kaniel v1.3.1: lexicographic ordering cannot check both dimensions.
+    bool Contains(const SubresourceExtent& other) const noexcept {
+        return levels >= other.levels && layers >= other.layers;
+    }
 };
 
 struct SubresourceRange {

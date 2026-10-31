@@ -583,6 +583,7 @@ GhostDeathCalls MakeReviveCalls() {
             },
         .request_full_recover =
             reinterpret_cast<bool PS4_SYSV_ABI (*)()>(image_base + RequestFullRecoverOffset),
+        .restock_from_storage = [] { RestockFromStorage("a death"); },
         .update_blood_mark = UpdateGuestBloodMark,
         .revive_player = reinterpret_cast<bool PS4_SYSV_ABI (*)()>(image_base + RevivePlayerOffset),
         .revive_local_character =
@@ -1134,6 +1135,14 @@ bool PS4_SYSV_ABI SkipBossFightKill(u64, const GuestRegisterSnapshot* registers)
     return true;
 }
 
+// A downed local player is in no event's area (AreaMissesDownedPlayer): EntityInArea answers
+// false for it.
+bool PS4_SYSV_ABI SkipDownedPlayerInArea(u64, const GuestRegisterSnapshot* registers) {
+    const bool down = party_death_down.load(std::memory_order_relaxed);
+    return AreaMissesDownedPlayer(static_cast<s32>(registers->rsi), down,
+                                  down && CharacterInTheVoid(GetLocalPlayer()));
+}
+
 // The animation a downed player plays (DownedAnimation): none. Getting up from the kneel plays its
 // stand-up (DownedStandAnimation), from another pose resets.
 const s32 downed_animation = DownedAnimation(std::getenv("SHADPS4_BLOODBORNE_DOWNED_ANIMATION"));
@@ -1232,6 +1241,7 @@ std::optional<std::vector<std::string>> SessionNames(std::span<const MemberVital
     if (!InPartySession()) {
         return names;
     }
+    const TickStepTimer step{"SessionNames"};
     std::vector<std::string> online_ids;
     for (const auto* lines : {&board, &hostile}) {
         for (const MemberVitals& member : *lines) {
@@ -1300,10 +1310,9 @@ void SetPlayerFlag(u64 offset, u8 value) {
     WriteValue(image_base + offset, 0, value);
 }
 
-// The yellow YOU ARE DOWN banner (the party HUD's, in place of the game's PvP Draw banner): queued
-// by the game's own SetTextEffect, as YOU DIED is. Without the party HUD it would show the Draw
-// banner's own words, so it is left out where the HUD is not the port's (the emulator) or is off
-// (BB_PARTY_HUD=0).
+// The yellow YOU ARE DOWN banner (the party HUD's, in place of the game's UNLOCKED banner): queued
+// by the game's own SetTextEffect, as YOU DIED is. Without the party HUD it would say UNLOCKED, so
+// it is left out where the HUD is not the port's (the emulator) or is off (BB_PARTY_HUD=0).
 void ShowDownedBanner() {
 #ifdef BLOODBORNE_PARTY_HUD
     static const bool party_hud = [] {
@@ -1496,6 +1505,19 @@ std::optional<DownedMember> SwingTargetByBody(PartyDeathRun& run, const DeathTic
     return std::nullopt;
 }
 
+// A fall into the void kills the player without the lethal check (rig 2026-10-22: the Forbidden
+// Woods' cliff west of the lamp; the void bit is clear by then) and fades it out for good unless
+// the map reloads: its respawn makes the trip (ChooseDeathRespawn). Asked at a real death, standing
+// or down (Provi's day 4, v1.3.0: a downed body pushed off a cliff got up invisible at its lamp).
+void NoteVoidFallDeath(u64 player) {
+    const float fade = ReadValue<float>(player, CharacterFadeOffset);
+    if (DeathWasAVoidFall(CharacterInTheVoid(player), fade)) {
+        party_death_void_fall.store(true, std::memory_order_relaxed);
+        LOG_INFO(Debug, "Bloodborne party death: the death was a fall into the void (fade {})",
+                 fade);
+    }
+}
+
 // Standing (or not in party death): a caught lethal hit puts the player down, a death is real, and
 // an attack near a downed member is a revive hit.
 void TickStanding(PartyDeathRun& run, const DeathTick& tick) {
@@ -1520,15 +1542,7 @@ void TickStanding(PartyDeathRun& run, const DeathTick& tick) {
         const bool reset = DiesWithReset(tick.in_session && DeathResetsMap(false, tick.armed));
         LOG_INFO(Debug, "Bloodborne party death: died for real on map {:#x} (reset={})", tick.map,
                  reset);
-        // A fall into the void kills the player without the lethal check (rig 2026-10-22: the
-        // Forbidden Woods' cliff west of the lamp; the void bit is clear by then) and fades it out
-        // for good unless the map reloads: its respawn makes the trip (ChooseDeathRespawn).
-        const float fade = ReadValue<float>(tick.player, CharacterFadeOffset);
-        if (DeathWasAVoidFall(CharacterInTheVoid(tick.player), fade)) {
-            party_death_void_fall.store(true, std::memory_order_relaxed);
-            LOG_INFO(Debug, "Bloodborne party death: the death was a fall into the void (fade {})",
-                     fade);
-        }
+        NoteVoidFallDeath(tick.player);
         return;
     }
     const u32 attacks = party_attack_presses.load();
@@ -1587,6 +1601,7 @@ void TickDown(PartyDeathRun& run, const DeathTick& tick) {
         const bool reset = DiesWithReset(tick.in_session && DeathResetsMap(false, tick.armed));
         LOG_INFO(Debug, "Bloodborne party death: killed while down {} (reset={})",
                  run.downed.DownId(), reset);
+        NoteVoidFallDeath(tick.player);
         return;
     }
     const auto wipe = tick.view.Fresh() ? WipeFor(tick.view.board, tick.view.member) : std::nullopt;
@@ -1769,6 +1784,7 @@ void WakeAtOwnLamp(PartyDeathRun& run, const DeathTick& tick, SpectateEnd why) {
     const s32 hp = std::max(ReadValue<s32>(tick.data, 0xFC), 1);
     WriteValue(tick.data, 0xF8, hp);
     run.downed.GetUp(tick.now);
+    RestockFromStorage("spectating"); // as the death it stands in for would
     const u64 global = GetGlobalState();
     const s32 point = global >= 0x10000 ? ReadValue<s32>(global, 0x1528) : -1;
     const u64 blocks = ReadValue<u64>(image_base + LoadedBlocksPointerOffset, 0);
@@ -2028,7 +2044,10 @@ void TickPartyDeath() {
     tick.now = SteadyMilliseconds();
     tick.in_session = InPartyHere();
     tick.map = PlayingMap();
-    tick.view = ReadVitalsBoard();
+    {
+        const TickStepTimer step{"TickPartyDeath: ReadVitalsBoard"};
+        tick.view = ReadVitalsBoard();
+    }
     party_death_others_stand.store(
         tick.view.Fresh() && SomeoneElseStandsAnywhere(tick.view.board.members, tick.view.member));
     tick.board = tick.view.Fresh() ? std::span<const MemberVitals>{tick.view.board.members}
@@ -2040,6 +2059,7 @@ void TickPartyDeath() {
                                                                                     : 0);
     // Kaniel 2026-10-25: a boss fight with a teammate in it (its deaths spectate).
     {
+        const TickStepTimer step{"TickPartyDeath: boss fight"};
         const u64 holder = ReadValue<u64>(image_base + BossGaugesPointerOffset, 0);
         constexpr std::size_t Size = BossGaugeSlots * BossGaugeSize;
         const bool bars_up =
@@ -2099,15 +2119,21 @@ void TickPartyDeath() {
     }
     switch (run.downed.Current()) {
     case Vital::Off:
-    case Vital::Up:
+    case Vital::Up: {
+        const TickStepTimer step{"TickPartyDeath: TickStanding"};
         TickStanding(run, tick);
         break;
-    case Vital::Down:
+    }
+    case Vital::Down: {
+        const TickStepTimer step{"TickPartyDeath: TickDown"};
         TickDown(run, tick);
         break;
-    case Vital::Spectate:
+    }
+    case Vital::Spectate: {
+        const TickStepTimer step{"TickPartyDeath: TickSpectating"};
         TickSpectating(run, tick, lamp_used);
         break;
+    }
     case Vital::Dead:
         if (!tick.alive && tick.in_session && tick.map != 0 && tick.view.Fresh() &&
             !tick.view.member.empty() &&
@@ -2134,8 +2160,15 @@ void TickPartyDeath() {
         own_point_before_death.Sample(ReadValue<s32>(global, 0x1528), tick.now);
     }
 
-    ForgetTargetsOnDowned(run, tick);
-    StrikeDownedBodies(run, tick.board, tick.view.member, tick.map, tick.in_session);
+    {
+        const TickStepTimer step{"TickPartyDeath: ForgetTargetsOnDowned"};
+        ForgetTargetsOnDowned(run, tick);
+    }
+    {
+        const TickStepTimer step{"TickPartyDeath: StrikeDownedBodies"};
+        StrikeDownedBodies(run, tick.board, tick.view.member, tick.map, tick.in_session);
+    }
+    const TickStepTimer step{"TickPartyDeath: PostVitalsAndPanel"};
     PostVitalsAndPanel(run, tick);
 }
 
@@ -2645,6 +2678,14 @@ void InstallPartyDeath(u64 base, u64 image_size) {
     } else {
         coop_features.Skipped("boss fight deaths",
                               SiteFailure(base, image_size, KillCharacterOffset));
+    }
+    if (EntityInAreaOffset + EntityInAreaStart.size() <= image_size &&
+        InstallCoopHook(reinterpret_cast<void*>(base + EntityInAreaOffset), EntityInAreaStart, 0,
+                        GuestFunctionOverride{SkipDownedPlayerInArea})) {
+        coop_features.On("no area events while down");
+    } else {
+        coop_features.Skipped("no area events while down",
+                              SiteFailure(base, image_size, EntityInAreaOffset));
     }
     if (EnemyBarDamageOffset + EnemyBarDamageStart.size() <= image_size &&
         InstallCoopHook(reinterpret_cast<void*>(base + EnemyBarDamageOffset), EnemyBarDamageStart,

@@ -1,9 +1,11 @@
 # Seamless co-op on macOS
 
 This branch integrates the online client from
-[lKaniel/bloodborne-server](https://github.com/lKaniel/bloodborne-server/tree/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1),
-pinned at `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`. The default server is
+[lKaniel/bloodborne-server](https://github.com/lKaniel/bloodborne-server/tree/5d2305ee611ef1e03be39ff925f0da75c9a70393),
+pinned at **v1.3.1**, `5d2305ee611ef1e03be39ff925f0da75c9a70393`. The default server is
 `bloodborne.phobos.services`. This repository builds the client and includes the separately hosted [server component](../server/LOCAL_FORK.md).
+
+See [the v1.3.1 integration record](SEAMLESS_V1_3_1.md) for the update scope and validation.
 
 ## Start playing
 
