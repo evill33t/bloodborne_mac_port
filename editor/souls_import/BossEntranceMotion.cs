@@ -84,9 +84,14 @@ internal static class BossEntranceMotion {
     // NativeRigAppend intentionally preserves existing opaque data. This
     // equally bounded editor adds one typed reference-frame object when the
     // retail7010 clip has none; original object/curve offsets remain unchanged.
-    static byte[] Rewrite(byte[] input,byte[] template,Motion motion,int frames,float oldDuration) {
+    internal static byte[] RetimeFlight(byte[] input,byte[] template,float duration,Vector4[] samples,int bones) {
+        var p=new NativeAnimation.Pack(input);int animation=p.Object("hkaSplineCompressedAnimation");
+        Require(bones is >0 and <=256&&float.IsFinite(duration)&&duration>0&&duration<=60&&samples.Length is >=2 and <=1024&&samples.All(v=>float.IsFinite(v.LengthSquared())&&v.Length()<1000),"invalid cinematic trajectory");
+        return Rewrite(input,template,new(duration,samples),p.Int(animation+56),p.Float(animation+16),bones);
+    }
+    static byte[] Rewrite(byte[] input,byte[] template,Motion motion,int frames,float oldDuration,int bones=211) {
         var p=new NativeAnimation.Pack(input);var donor=new NativeAnimation.Pack(template);int animation=p.Object("hkaSplineCompressedAnimation"),binding=p.Object("hkaAnimationBinding");
-        Require(p.Int(animation+20)==211&&p.Int(animation+56)==frames&&p.Int(animation+60)==1&&p.Int(animation+64)==256&&p.Float(animation+16)==oldDuration&&input[p.Data+binding+80]==0,"native intro dimensions/blend changed");
+        Require(p.Int(animation+20)==bones&&p.Int(animation+56)==frames&&p.Int(animation+60)==1&&p.Int(animation+64)==256&&p.Float(animation+16)==oldDuration&&input[p.Data+binding+80]==0,"native intro dimensions/blend changed");
         int sections=64+BitConverter.ToUInt16(input,62),header=sections+128;
         int I(int at)=>BitConverter.ToInt32(input,at);int local=I(header+24),global=I(header+28),virt=I(header+32),end=I(header+36);
         Require(I(header+40)==end&&I(header+44)==end&&p.Data+end==input.Length,"unsupported native imports/exports/tail");
@@ -126,7 +131,7 @@ internal static class BossEntranceMotion {
         BitConverter.GetBytes(p.Data+shift).CopyTo(prefix,sections+64+20);BitConverter.GetBytes(p.Data+shift).CopyTo(prefix,header+20);
         int[] offsets=[newLocal,newGlobal,newVirtual,newEnd,newEnd,newEnd];for(int i=0;i<6;i++)BitConverter.GetBytes(offsets[i]).CopyTo(prefix,header+24+i*4);
         var output=prefix.Concat(names.Bytes).Concat(body).ToArray();var check=new NativeAnimation.Pack(output);
-        Require(globals.Single(g=>g.Field==animation+32)==(animation+32,2,frame)&&check.Object(FrameClass)==frame&&check.Array(frame+56,16,256).Count==motion.Samples.Length&&check.Float(frame+48)==motion.Duration,"reference-frame readback failed");
+        Require(globals.Single(g=>g.Field==animation+32)==(animation+32,2,frame)&&check.Object(FrameClass)==frame&&check.Array(frame+56,16,1024).Count==motion.Samples.Length&&check.Float(frame+48)==motion.Duration,"reference-frame readback failed");
         return output;
     }
     sealed record ClassTable(List<byte> Bytes,int Used,Dictionary<string,(int Name,uint Signature)> Names);

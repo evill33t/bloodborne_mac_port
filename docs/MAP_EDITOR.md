@@ -1013,7 +1013,8 @@ their probability as no-drop outcomes. Supported source consumable rolls remain 
 from a repeatable 10% one-vial / 90% no-drop roll on every imported enemy,
 including skeletons, rats, Parish specials, bosses and Capra's dogs. The separate roll
 does not use Luck or cumulative probability. Installed-export checks cover all
-117 actors and their 32 distinct NPC rows, including mixed crossbow brains;
+119 actors and their 33 distinct NPC rows, including mixed crossbow brains
+and the two Hellkite instances (the flyby instance is invincible);
 only owned loot fields change. Enemy kill/pickup behavior still needs native
 validation; a few kills cannot establish the configured probability.
 
@@ -1166,6 +1167,42 @@ appearance/combat evidence, not complete route traversal or source moveset proof
 Installed-asset checks independently decode 98 rat playback clips, verify all
 four final collision/display/loot bindings and retain the prior 113 identities.
 
+The Hellkite (`c3430`) has a separate first-visit cinematic adapter. Entering
+source region `1012301` plays the 9.333-second Burg flyby (`7012`) once. After
+that visit, entering source region `1012305` plays the 13.167-second bridge
+approach (`7005`) and restores the actor to source perch `1012310`, waiting
+with `7006`. Seen flags survive reload; later visits restore the perched dragon
+without replaying either flight. The two `c8960` actors use reserved identities
+`4039970`/`4039971`; existing imported actors retain their identities.
+
+The source 132-bone hierarchy uses a 110-bone native wrapper, keeping the combined
+242-bone rig below the skin limit. Native spline output carries source duration,
+flight poses and extracted movement. Both native animation banks are adapted,
+including both TAE entries; leaving the alternate bank untouched selects native
+motion and native death events instead. Retail physical pose channels and
+container metadata remain intact, with authored movement curves and source
+durations applied to the sampled visible poses. Native gravity and map collision
+are disabled during the cinematic/perch state, as in the source events.
+Fallback actions retain the source perch pose; unrelated native action effects
+are removed, including visibility changes that otherwise hide the dragon after
+the initial idle. Perch actions carry loop metadata in both animation banks.
+`tests/test_hellkite.sh` checks independently decoded poses/trajectories, source
+event fingerprints, native parameter preservation and first-visit/reload/defeat
+state transitions. Existing native spline round-trip tests also pass.
+
+Bounded native tests with disposable saves observed the Burg flight trajectory,
+bridge approach and arrival at the authored perch. A saved-state reload restored
+the perched actor without replaying either flight, and the corrected idle stayed
+visible through repeated loops. These tests used player placement and No Dead
+for observation; enemy position/health observations were read only. They do not
+establish complete route traversal or dragon combat behavior.
+
+This stage covers the flyby, bridge arrival and perched appearance. Source fire
+breath, bridge sweeping damage, ground combat, tail severing, sound/SFX and
+scripted object destruction need further adapters. The unrelated native donor's
+melee AI stays disabled. Native damage, health scaling, capsule and death/loot
+behavior remain approximate; source base HP and reward values are retained.
+
 The native character ABI imposes two additional requirements on appended rigs:
 borrowed `hkStringPtr` bone names must have even addresses, and render FLVER nodes
 must keep active bones before disabled helper nodes. Offline string/pose decoding
@@ -1283,7 +1320,7 @@ and full quest behavior remain outside this bounded check.
 A private copied-save control raised only the enemy vial roll to 100% to
 verify the complete native path: normal combat kill, corpse glow, Search Corpse
 and Blood Vial x1 award, with inventory increasing from zero to one. The public
-export remains 10%; its exact weights and all 117 actor bindings are checked
+export remains 10%; its exact weights and all 119 actor bindings are checked
 separately. The control does not measure the random drop rate in gameplay.
 
 The ordinary Burg breakable adapter emits 351 native object actors across 29
