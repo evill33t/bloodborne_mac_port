@@ -128,6 +128,8 @@ const char *runtime_patch_conflict(uint64_t offset, const unsigned char *data, s
 int runtime_install_render_guard(unsigned char *image, uint64_t image_size);
 /* Return a context leaked by 1.09's failed Havok buffer upload. */
 int runtime_install_havok_guard(unsigned char *image, uint64_t image_size);
+/* Reject movie-audio start/stop with an absent output device (#123). */
+int runtime_install_movie_audio_guard(unsigned char *image, uint64_t image_size);
 void runtime_context_lock_stats(void);
 /* The hook name while another thread holds the context lock, else NULL (diagnostics). */
 const char *runtime_context_lock_other(void);

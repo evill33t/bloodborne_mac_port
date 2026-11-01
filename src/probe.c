@@ -971,6 +971,7 @@ int main(int argc, char **argv) {
         if (runtime_coop_install(image,module_count?modules[0].base:size))
             fail("seamless co-op hooks could not be installed for this game image; see co-op log");
     }
+    runtime_install_movie_audio_guard(image, size);
     protect(thunks, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size)+timing_tail, 0);
     int executable_entry = 0;

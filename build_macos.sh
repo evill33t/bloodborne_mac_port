@@ -153,6 +153,8 @@ if [[ ${1:-} == --test ]]; then
     out/render-guard-test
     "$CC" "${cflags[@]}" -I. -Isrc tests/test_havok_guard.c src/runtime_havok_guard.c -o out/havok-guard-test
     out/havok-guard-test
+    "$CC" "${cflags[@]}" -I. -Isrc tests/test_movie_audio_guard.c src/runtime_movie_audio_guard.c -o out/movie-audio-guard-test
+    out/movie-audio-guard-test
     "$CC" "${cflags[@]}" -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
     "$CC" "${cflags[@]}" -DBB_SAVE_TXN_TESTING -Isrc tests/test_save_txn.c src/runtime_save_txn.c -o out/save-txn-test
