@@ -74,14 +74,16 @@ internal static class MapEnemySpawns {
         var paramDonor=npcs.Rows.Single(r=>r.ID==templateParam);var used=npcs.Rows.Select(r=>r.ID).ToHashSet();
         int nextModel=9600,nextSkeletonModel=9700,nextSpecialModel=8800,nextEntity=ordinaryFirstEntity??(sourceMap=="m10_02_00_00"?2419800:2409000),nextSkeletonEntity=2419900;
         int firstEntity=nextEntity,nextSpecialEntity=checked(firstEntity+900);
+        int firstRatEntity=sourceMap=="m10_02_00_00"?4029950:checked(firstEntity+950),nextRatEntity=firstRatEntity;
         var entities=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).ToHashSet();
         foreach(var group in selected.GroupBy(p=>(p.ModelName,p.NPCParamID))) {
-            bool skeleton=CemeterySkeleton(group.First(),sourceMap);var special=Special(group.First());bool encounter=Encounter(group.First());
+            bool skeleton=CemeterySkeleton(group.First(),sourceMap);var special=Special(group.First());bool encounter=Encounter(group.First()),rat=special==NonHumanoidEnemies.Rat;
             int encounterModel=group.Key.NPCParamID switch {225000=>8950,224000=>8951,334003=>8952,535000=>8953,535001=>8954,_=>0};
-            int next=encounter?encounterModel:special!=null?nextSpecialModel:skeleton?nextSkeletonModel:nextModel,limit=encounter?encounterModel+1:special!=null?8900:skeleton?9800:9700;
+            int ratModel=sourceMap=="m10_02_00_00"?8820:8821;
+            int next=rat?ratModel:encounter?encounterModel:special!=null?nextSpecialModel:skeleton?nextSkeletonModel:nextModel,limit=rat?ratModel+1:encounter?encounterModel+1:special!=null?8900:skeleton?9800:9700;
             while(next<limit&&(used.Contains(next*100)||destination.Models.Enemies.Any(m=>m.Name=="c"+next)||File.Exists(Path.Combine(nativeRoot,"chr/c"+next+".chrbnd.dcx"))||special!=null&&(Directory.EnumerateFiles(Path.Combine(nativeRoot,"chr"),"c"+next+".*").Any()||File.Exists(Path.Combine(nativeRoot,"action/script/c"+next+".hks"))||Directory.EnumerateFiles(Path.Combine(nativeRoot,"sound"),"sprj_c"+next+".*").Any()||Directory.EnumerateFiles(Path.Combine(nativeRoot,"sound"),"sprj_c"+next+"_*.fsb").Any())))next++;
             if(next>=limit)throw new InvalidDataException("Imported enemy namespace exhausted");
-            int id=next,paramID=id*100;if(!encounter&&special!=null)nextSpecialModel=next+1;else if(special==null&&skeleton)nextSkeletonModel=next+1;else if(special==null)nextModel=next+1;
+            int id=next,paramID=id*100;if(!encounter&&!rat&&special!=null)nextSpecialModel=next+1;else if(special==null&&skeleton)nextSkeletonModel=next+1;else if(special==null)nextModel=next+1;
             string target="c"+id;used.Add(paramID);
             var row=sourceNpcs.Rows.Single(r=>r.ID==group.Key.NPCParamID);
             var masks=Enumerable.Range(0,16).Where(i=>Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="modelDispMask"+i).Value)!=0).ToHashSet();
@@ -124,23 +126,25 @@ internal static class MapEnemySpawns {
                 if(profile!.Ranged)projectileBindings.Add(new(roleParams.Values.ToArray(),id*10,paramID));
             } else {
                 var payload=MapCharacters.Payload(rowDonor);if(encounter)payload=BossEnemyCharacters.Parameters(payload,row,definitions);else if(special!=null)payload=NonHumanoidEnemies.Capsule(payload,row,definitions);foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
-                MapCharacters.CloneRow(npcs,rowDonor,paramID,(encounter?"Imported boss encounter actor ":special!=null?"Imported Parish enemy ":"Imported cemetery skeleton ")+group.Key,payload);
+                MapCharacters.CloneRow(npcs,rowDonor,paramID,(rat?"Imported rat ":encounter?"Imported boss encounter actor ":special!=null?"Imported Parish enemy ":"Imported cemetery skeleton ")+group.Key,payload);
             }
             var model=(MSBB.Model.Enemy)actorMap.Models.Enemies.Single(m=>m.Name==actorTemplate).DeepCopy();model.Name=target;model.SibPath=model.SibPath.Replace(actorTemplate,target,StringComparison.OrdinalIgnoreCase);destination.Models.Enemies.Add(model);
             foreach(var sourceActor in group) {
                 int bossOffset=sourceActor.EntityID switch {1010700=>800,1010750=>801,1010500=>802,1010501=>803,1010800=>804,1010801=>805,_=>-1};
-                int entity=encounter?checked(firstEntity+bossOffset):special!=null?nextSpecialEntity:skeleton?nextSkeletonEntity:nextEntity;if(encounter&&(bossOffset<0||entities.Contains(entity)))throw new InvalidDataException("Imported encounter actor reservation is occupied");
+                int entity=rat?nextRatEntity:encounter?checked(firstEntity+bossOffset):special!=null?nextSpecialEntity:skeleton?nextSkeletonEntity:nextEntity;if(encounter&&(bossOffset<0||entities.Contains(entity)))throw new InvalidDataException("Imported encounter actor reservation is occupied");
                 if(!encounter)while(entities.Contains(entity))entity++;
                 if(special==null&&!skeleton&&ordinaryFirstEntity is {} first&&entity>=first+800)throw new InvalidDataException("Imported ordinary enemy entity namespace exhausted");
-                if(!encounter&&special!=null){if(entity>=firstEntity+1000)throw new InvalidDataException("Imported Parish enemy entity namespace exhausted");nextSpecialEntity=entity+1;}else if(special==null&&skeleton){if(entity>=2420000)throw new InvalidDataException("Imported skeleton entity namespace exhausted");nextSkeletonEntity=entity+1;}else if(special==null)nextEntity=entity+1;
+                if(rat){if(entity>=firstRatEntity+10)throw new InvalidDataException("Imported rat entity namespace exhausted");nextRatEntity=entity+1;}
+                else if(!encounter&&special!=null){if(entity>=firstEntity+950)throw new InvalidDataException("Imported Parish enemy entity namespace exhausted");nextSpecialEntity=entity+1;}else if(special==null&&skeleton){if(entity>=2420000)throw new InvalidDataException("Imported skeleton entity namespace exhausted");nextSkeletonEntity=entity+1;}else if(special==null)nextEntity=entity+1;
                 entities.Add(entity);
-                int collision=encounter?MapCollisionBindings.ObjectSlot(chunks,sourceActor.CollisionName,sourceActor.Position+offset):Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
+                int collision=encounter||rat?MapCollisionBindings.ObjectSlot(chunks,sourceActor.CollisionName,sourceActor.Position+offset):Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
                 var actor=(MSBB.Part.Enemy)actorDonor.DeepCopy();actor.Name=target+"_"+reports.Count.ToString("D4");actor.ModelName=target;
                 var actorRole=ordinary?profiles[sourceActor.Name]:null;
                 actor.EntityID=entity;actor.NPCParamID=actorRole==null?paramID:roleParams[actorRole.NativeNpc];actor.ThinkParamID=actorRole?.NativeThink??actorThink;actor.TalkID=-1;actor.CharaInitID=-1;
                 actor.Position=sourceActor.Position+offset;actor.Rotation=sourceActor.Rotation;actor.Scale=sourceActor.Scale*bake.ProportionScale;actor.CollisionName=slots[collision].Name;
                 actor.InitAnimID=-1;actor.DamageAnimID=-1;actor.PatrolInfoName=null!;actor.PatrolType=0;actor.FallbackPlatoonID=0;Array.Clear(actor.MovePointNames);
                 Array.Fill(actor.DrawGroups,uint.MaxValue);Array.Fill(actor.DispGroups,uint.MaxValue);Array.Fill(actor.BackreadGroups,uint.MaxValue);
+                if(rat)Array.Copy(actorDonor.BackreadGroups,actor.BackreadGroups,actor.BackreadGroups.Length);
                 destination.Parts.Enemies.Add(actor);reports.Add(new(sourceActor.Name,sourceActor.ModelName,sourceActor.NPCParamID,sourceActor.ThinkParamID,sourceActor.EntityID,target,entity,actor.NPCParamID,actor.ThinkParamID,actor.Position,masks.Order().ToArray(),bake.DirectWeightShare,bake.ProportionScale,bake.Bones,hasTorch,sourceActor.InitAnimID,special?.Native,clothReport,null,hollow?.Report));
             }
         }
@@ -162,8 +166,9 @@ internal static class MapEnemySpawns {
             "Firelink's identified c2900/c2910 cemetery skeletons retain source appearance, equipment masks, placement and stature. Source 9001/9061 bone-pile awakening and living heavy-hit 2014/2020/2040 motion are retargeted onto native playback slots, with source wake groups and protection windows. Combat AI, attacks, hitboxes, health, death and effects remain native; necromancer resurrection, original movesets and giant attack reach are not converted. Other special-pose enemies remain disabled.",
             "The Parish armored boar and Titanite Demon retain their complete source skin, segment lengths and source animation on appended rig tracks; native body tracks, locomotion, attack timing, hitboxes, AI and HP remain in use. The cloned native character capsule uses the matching source hitHeight/hitRadius/hitYOffset fields. Extra native states reuse explicitly mapped source actions. Their source armor, lightning/projectiles, unique death persistence and original combat behavior are not converted. Native physical/attack anchors can differ from the visible source body and require gameplay validation.",
             "The Balder Knight cape uses an offline gravity pose calculated from its source capsule bodies, masses, inertia, constraints and contacts. This is a static appearance pose that follows the animated body; ongoing native cloth simulation, wind and cloth/body collisions are not reproduced.",
+            "The four c1201 rats retain source geometry, stature, capsule and authored motion on native c1100 rat playback. Native combat decisions, timing, damage, poison, HP and physical/ragdoll anchors remain approximations; uncommon native states reuse explicit source actions. Rat model/entity reservations do not shift existing actors. Ungrouped source rats keep unfiltered display groups and native rat backread settings.",
             "Supported hollow weapons, hands and shields retain their authored animated source hierarchy and visibility channels. Ranged projectiles originate at the source muzzle frame. Native combat decisions and physical hitboxes remain approximations.",
-            "Only explicit ordinary, cemetery skeleton, Parish and Burg boss encounter parameter rows are instantiated. Source quest actors, other bosses, multiplayer phantoms and unsupported actors remain disabled.",
+            "Only explicit ordinary, cemetery skeleton, rat, Parish and Burg boss encounter parameter rows are instantiated. Source quest actors, other bosses, multiplayer phantoms and unsupported actors remain disabled.",
             "This enemy adapter does not convert source patrols or event activation. Consult the navigation report for static source navigation coverage. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation."],projectileBindings);
     }
 }

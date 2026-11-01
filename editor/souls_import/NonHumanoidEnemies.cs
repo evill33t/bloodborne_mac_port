@@ -2,15 +2,22 @@
 using SoulsFormats;
 using System.Numerics;
 
-// Explicit Parish actors, not a generic cross-species retargeter. Visible bones
+// Explicit source actors, not a generic cross-species retargeter. Visible bones
 // retain source bind positions and source motion. Native bone indices, combat
 // controllers and physical/attack anchors remain a separate, approximate layer.
 internal static class NonHumanoidEnemies {
     internal sealed record Profile(string Source,string Native,int Npc,int Think,string Map,string Ai,int NativeBones,int Clips,string Variant="");
     internal static readonly Profile Boar=new("c3460","c1270",127500,127400,"m24_01_00_01","m24_01_00_00",163,76);
     internal static readonly Profile Demon=new("c2300","c3130",313000,313000,"m29_21_00_00/m29_21_00_46","m29_00_00_00",125,147);
-    internal static Profile? Select(MSB1.Part.Enemy p,string map)=>map=="m10_01_00_00"&&p.CharaInitID<0&&p.TalkID<=0&&p.InitAnimID==-1?
-        (p.ModelName,p.NPCParamID,p.ThinkParamID,p.EntityID) switch {("c3460",346000,346000,1010310)=>Boar,("c2300",230001,230003,1010340)=>Demon,_=>null}:null;
+    internal static readonly Profile Rat=new("c1201","c1100",110010,110000,"m24_01_00_01","m24_01_00_00",108,98);
+    internal static Profile? Select(MSB1.Part.Enemy p,string map) {
+        if(p.CharaInitID>=0||p.TalkID>0||p.InitAnimID!=-1)return null;
+        if(p.ModelName=="c1201"&&p.EntityID==-1&&
+            (map=="m10_02_00_00"&&p.Name=="c1201_0002"&&p.NPCParamID==120100&&p.ThinkParamID==120100||
+             map=="m10_01_00_00"&&(p.Name is "c1201_0000" or "c1201_0001" or "c1201_0002")&&p.NPCParamID==120101&&p.ThinkParamID==120101))return Rat;
+        return map=="m10_01_00_00"?(p.ModelName,p.NPCParamID,p.ThinkParamID,p.EntityID) switch {
+            ("c3460",346000,346000,1010310)=>Boar,("c2300",230001,230003,1010340)=>Demon,_=>null}:null;
+    }
     static string Leaf(string p)=>p.Replace('\\','/').Split('/').Last();
     // The native renderer requires active FLVER nodes in a contiguous prefix;
     // the Havok rig keeps its own original indices and binds these by name.
@@ -67,6 +74,25 @@ internal static class NonHumanoidEnemies {
     // Extra native attacks explicitly reuse a source attack, retaining native
     // action timing and hitboxes. This does not claim the original moveset.
     internal static int SourceSlot(Profile profile,int native) {
+        if(profile==Rat) {
+            if(native<0||native/1000000 is not(0 or 10))throw new InvalidDataException("Unsupported native rat playback bank: "+native);
+            int rat=native%1000000;
+            return rat switch {
+                0 or 200 or 201 or 202 or 203 or 500 or 502 or 503 or 602 or 603 or 604 or 605 or 701 or
+                1500 or 1750 or 2000 or 2001 or 2002 or 2004 or 2005 or 2006 or 2007 or 2010 or 2011 or 2012 or 2013 or 2014 or
+                2020 or 2030 or 2031 or 2032 or 2040 or 2050 or 2051 or 2052 or 2053 or 2200 or 2207 or 2209 or
+                2250 or 3000 or 3001 or 3002 or 3003 or 3500=>rat,
+                700 or 702 or 703=>701,1751=>1750,2003=>2002,2060=>2014,
+                2080=>2004,2081=>2005,2082=>2006,2083=>2007,
+                2202 or 2203 or 2204 or 2205 or 2211=>2200,2255=>2250,
+                // Source 23xx/24xx reactions are additive. Preserve native
+                // additive body tracks; appended tracks use identity deltas.
+                // Any full-pose native variant uses this absolute source hit.
+                >=2300 and <=2303 or >=2600 and <=2603 or >=2610 and <=2613 or >=2620 and <=2623 or >=2900 and <=2903=>2014,
+                3004=>3000,3005=>3001,3006=>3002,3501=>3500,3600 or 3620=>3000,
+                _=>throw new InvalidDataException("Unsupported native rat playback slot: "+native)
+            };
+        }
         int slot=native%1000000;
         if(profile==Boar) return slot switch {
             0 or 200 or 201 or 202 or 203 or 500 or 602 or 603 or 604 or 605 or 701 or 1500 or 1750 or

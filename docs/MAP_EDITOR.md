@@ -1011,9 +1011,9 @@ per flask. Source soul tiers and upgrade materials use approximate native equiva
 Armor, weapons and accessories are excluded, and excluded equipment outcomes retain
 their probability as no-drop outcomes. Supported source consumable rolls remain separate
 from a repeatable 10% one-vial / 90% no-drop roll on every imported enemy,
-including skeletons, Parish specials, bosses and Capra's dogs. The separate roll
+including skeletons, rats, Parish specials, bosses and Capra's dogs. The separate roll
 does not use Luck or cumulative probability. Installed-export checks cover all
-113 actors and their 30 distinct NPC rows, including mixed crossbow brains;
+117 actors and their 32 distinct NPC rows, including mixed crossbow brains;
 only owned loot fields change. Enemy kill/pickup behavior still needs native
 validation; a few kills cannot establish the configured probability.
 
@@ -1145,6 +1145,27 @@ quest actors and special poses remain reported omissions. In particular, nine
 Gravelord phantoms are disabled by source events, and the omitted hollow archer
 requires a ranged adapter rather than the native melee behavior.
 
+The four source `c1201` rats are also instantiated: one in Firelink's aqueduct
+and three under the Burg bridge. They retain source geometry, segment lengths,
+capsule dimensions and authored animation on an appended 50-bone hierarchy over
+the native `c1100` rat controller (158 bones total, 98 playback clips). Native
+combat decisions, timing, damage, poison, health and physical/ragdoll anchors
+remain approximations. Uncommon native states use explicit source action mappings;
+native additive channels retain identity deltas on the appended bones. The four
+source placements have empty draw/display masks; these keep unfiltered native
+display groups, the donor rat's backread groups, and the nearest matching source
+collision floor. Reserved `c8820`/`c8821` models and `4029950`/`4039950` entity
+ranges preserve every existing imported enemy identity. All four receive the
+same independent 10% one-vial roll as the other imported enemies.
+
+A copied-save native check loaded all four rat actors, displayed their source
+models in the aqueduct and Burg, and observed Burg pursuit and a normal combat
+kill. Encounter setup used player placement and a private NoDead setting;
+enemy position, health and AI observations were read only. This is bounded
+appearance/combat evidence, not complete route traversal or source moveset proof.
+Installed-asset checks independently decode 98 rat playback clips, verify all
+four final collision/display/loot bindings and retain the prior 113 identities.
+
 The native character ABI imposes two additional requirements on appended rigs:
 borrowed `hkStringPtr` bone names must have even addresses, and render FLVER nodes
 must keep active bones before disabled helper nodes. Offline string/pose decoding
@@ -1262,7 +1283,7 @@ and full quest behavior remain outside this bounded check.
 A private copied-save control raised only the enemy vial roll to 100% to
 verify the complete native path: normal combat kill, corpse glow, Search Corpse
 and Blood Vial x1 award, with inventory increasing from zero to one. The public
-export remains 10%; its exact weights and all 113 actor bindings are checked
+export remains 10%; its exact weights and all 117 actor bindings are checked
 separately. The control does not measure the random drop rate in gameplay.
 
 The ordinary Burg breakable adapter emits 351 native object actors across 29

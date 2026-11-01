@@ -21,7 +21,7 @@ static class MapEnemySpawnsTests {
             var merged=MapNativeAi.Merge(Read("script/"+map+".luabnd.dcx"),Read("script/m22_00_00_00.luabnd.dcx"));
             merged=MapNativeAi.Merge(merged,Read("script/aicommon.luabnd.dcx"),requiredGoals:[10000]);
             merged=MapNativeAi.Merge(merged,Read("script/"+HollowCombatProfiles.NativeAi+".luabnd.dcx"),2630);
-            foreach(var profile in new[]{NonHumanoidEnemies.Demon,NonHumanoidEnemies.Boar,BossEnemyCharacters.Taurus,BossEnemyCharacters.Capra,BossEnemyCharacters.Dog,BossEnemyCharacters.GargoylePrimary,BossEnemyCharacters.GargoyleSecondary})
+            foreach(var profile in new[]{NonHumanoidEnemies.Demon,NonHumanoidEnemies.Boar,NonHumanoidEnemies.Rat,BossEnemyCharacters.Taurus,BossEnemyCharacters.Capra,BossEnemyCharacters.Dog,BossEnemyCharacters.GargoylePrimary,BossEnemyCharacters.GargoyleSecondary})
                 merged=MapNativeAi.Merge(merged,Read("script/"+profile.Ai+".luabnd.dcx"),int.Parse(profile.Native[1..]));
             var hash=SHA256.HashData(merged);var bank=BND4.Read(merged);
             var fallbacks=MapNativeAi.Fallbacks(merged,path=>existing.GetValueOrDefault(path));
@@ -29,7 +29,7 @@ static class MapEnemySpawnsTests {
             Check(fallbacks.Count==bank.Files.Count(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal)),"Fallback export omitted native bytecode or exported metadata");
             foreach(var (sourceBank,name) in new[]{("m22_00_00_00","261000_logic.lua"),("m22_00_00_00","261010_battle.lua"),("aicommon","010000_logic.lua"),
                 (HollowCombatProfiles.NativeAi,"263000_logic.lua"),(HollowCombatProfiles.NativeAi,"263020_battle.lua"),(HollowCombatProfiles.NativeAi,"263030_battle.lua"),
-                (NonHumanoidEnemies.Boar.Ai,"127000_battle.lua"),(BossEnemyCharacters.Capra.Ai,"273000_battle.lua"),
+                (NonHumanoidEnemies.Boar.Ai,"127000_battle.lua"),(NonHumanoidEnemies.Rat.Ai,"110000_logic.lua"),(NonHumanoidEnemies.Rat.Ai,"110000_battle.lua"),(BossEnemyCharacters.Capra.Ai,"273000_battle.lua"),
                 (BossEnemyCharacters.Taurus.Ai,"313000_battle.lua"),(BossEnemyCharacters.Dog.Ai,"114000_logic.lua"),(BossEnemyCharacters.Dog.Ai,"114000_battle.lua")}) {
                 var original=BND4.Read(Read("script/"+sourceBank+".luabnd.dcx")).Files.Single(f=>Leaf(f.Name)==name);
                 Check(fallbacks.TryGetValue("script_interroot/ai/out/"+name,out var bytes)&&bytes.AsSpan().SequenceEqual(original.Bytes.Span),"Early native AI lookup lacks its exact shipped bytecode: "+name);
@@ -108,7 +108,7 @@ static class MapEnemySpawnsTests {
             var offset=new Vector3(-143.8f,20.07f,164.63f);
             // Tiny residency fixtures around the exact source placements; real
             // floor/stack/split association has its own collision tests.
-            var encounterFloors=source.Parts.Enemies.Where(p=>BossEnemyCharacters.Select(p,id)!=null).Select(p=>p.Position+offset-new Vector3(0,.1f,0))
+            var encounterFloors=source.Parts.Enemies.Where(p=>BossEnemyCharacters.Select(p,id)!=null||NonHumanoidEnemies.Select(p,id)==NonHumanoidEnemies.Rat).Select(p=>p.Position+offset-new Vector3(0,.1f,0))
                 .Select(p=>new MapCollision.Triangle(p+new Vector3(-2,0,-2),p+new Vector3(2,0,-2),p+new Vector3(0,0,2))).ToArray();
             var chunks=slots.Select(p=>new MapCollisionBindings.Chunk(source.Parts.Collisions.First().Name,encounterFloors,[])).ToArray();
             var result=MapEnemySpawns.Bake(Read,source,id,defs,native,map,offset,chunks,slots,composed,readNative:Native);
@@ -127,8 +127,13 @@ static class MapEnemySpawnsTests {
             Check(earlyScripts.Length==afterAi.Files.Count(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal))&&
                 afterAi.Files.Where(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal)).All(f=>result.Files["script_interroot/ai/out/"+Leaf(f.Name)].AsSpan().SequenceEqual(f.Bytes.Span)),"Enemy export omitted exact early-lookup Lua payloads");
             foreach(var (path,bytes) in earlyScripts)composedFiles[path]=bytes;
-            Check(result.Spawns.Count==(id=="m10_02_00_00"?19:94),"Enemy selection changed or conditional populations were included");
+            Check(result.Spawns.Count==(id=="m10_02_00_00"?20:97),"Enemy selection changed or conditional populations were included");
             Check(result.Skipped.Count+result.Spawns.Count==source.Parts.Enemies.Count,"Source actors were not completely accounted for");
+            var rats=result.Spawns.Where(p=>p.SourceModel=="c1201").ToArray();int ratStart=id=="m10_02_00_00"?4029950:2409950;
+            Check(rats.Length==(id=="m10_02_00_00"?1:3)&&rats.Select(p=>p.EntityID).Order().SequenceEqual(Enumerable.Range(ratStart,rats.Length)),"Rat population or reserved identity changed");
+            Check(rats.All(p=>p.TargetModel==(id=="m10_02_00_00"?"c8820":"c8821")&&p.NativeAdapter=="c1100"&&p.ThinkParamID==110000&&!p.HasSourceTorch&&p.ProportionScale==1),"Rat wrapper, source stature or stable model reservation changed");
+            Check(rats.All(p=>map.Parts.Enemies.Single(a=>a.EntityID==p.EntityID).BackreadGroups.All(g=>g==0)),"Rat native distance/residency groups changed");
+
             Check(result.Spawns.All(p=>p.SourceInitAnimID==source.Parts.Enemies.Single(s=>s.Name==p.SourceName).InitAnimID&&
                 (p.SourceInitAnimID==-1||id=="m10_02_00_00"&&p.SourceInitAnimID==9001&&p.SourceModel is "c2900" or "c2910")),"An unadapted hanging/special-pose actor was spawned standing");
             var skeletons=result.Spawns.Where(p=>p.SourceModel is "c2900" or "c2910").ToArray();
@@ -361,6 +366,6 @@ static class MapEnemySpawnsTests {
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
         Check(mobileCrossbows==5&&fixedCrossbows==4,"Source crossbow mobile/stationary role population changed");
         Console.WriteLine($"PASS: {torchActors} source torch carriers, {nonTorchActors} other enemies, five mobile/four stationary crossbows with scoped arrows; cemetery skeletons preserve their c2610 torch/superarmor filtering");
-        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants and two Capra dogs), source masks/shared textures, role-specific c2630/source-visible571-clip hollow rigs, preserved skeleton/boss paths, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants, two Capra dogs and four rats), source masks/shared textures, role-specific c2630/source-visible571-clip hollow rigs, preserved skeleton/boss paths, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

@@ -35,8 +35,9 @@ static class MapItemsTests {
             }
             reports.Add((map,actors));
         }
-        var all=reports.SelectMany(p=>p.Actors).ToArray();Check(all.Length==113&&all.Select(p=>p.EntityID).Distinct().Count()==113,"Actual connected export enemy population changed");
+        var all=reports.SelectMany(p=>p.Actors).ToArray();Check(all.Length==117&&all.Select(p=>p.EntityID).Distinct().Count()==117,"Actual connected export enemy population changed");
         Check(all.Count(p=>p.SourceModel is "c2900" or "c2910")==13&&all.Count(p=>p.SourceModel is "c2250" or "c2240" or "c5350")==4&&all.Count(p=>p.SourceModel=="c3340")==2&&all.Count(p=>p.SourceModel is "c3460" or "c2300")==2,"Actual special/boss/dog coverage changed");
+        Check(all.Count(p=>p.SourceModel=="c1201")==4,"Actual rat loot coverage changed");
         var original=BND4.Read(baseline);var originalNpcs=Table(original,"NpcParam","NPC_PARAM_ST",388,5);
         foreach(var actor in all)Check(Enumerable.Range(0,6).Count(i=>Int(Data(originalNpcs.Rows.Single(r=>r.ID==actor.NPCParamID)),44+i*4)==MapItems.VialLot)==1,"Later final-export composition lost the shared vial lot: "+actor.SourceName);
         var donorMap=MSBB.Read(Read(Path.Combine(nativeRoot,"map/MapStudio/m24_01_00_01.msb.dcx")));var slot=donorMap.Parts.Collisions.First();
@@ -101,6 +102,6 @@ static class MapItemsTests {
         foreach(var (file,hash) in hashes)Check(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))==hash,"Original source/native/export asset changed: "+file);
         MapPickupCarrierTests.Run(sourceRoot,nativeRoot,definitions,modRoot,output);
         Directory.CreateDirectory(output);File.WriteAllText(Path.Combine(output,"validation.json"),JsonSerializer.Serialize(new{status="PASS",actors=all.Length,npcRows=owned.Count,weights=new[]{100,900},count=1,luck=false,cumulative=false,repeatable=true,passes,coverage,originalHashes=hashes,nativePickup="Not exercised; deterministic schema and complete actual-export coverage only"},new JsonSerializerOptions{WriteIndented=true}));
-        Console.WriteLine($"PASS: all113 actual-export enemies/{owned.Count} NPC rows, one-vial10%:none90%, no luck/cumulation, friendly/native/source loot preserved, connected byte-idempotence, legacy migration/conflict guards; {hashes.Count} original assets unchanged");
+        Console.WriteLine($"PASS: all117 actual-export enemies/{owned.Count} NPC rows, one-vial10%:none90%, no luck/cumulation, friendly/native/source loot preserved, connected byte-idempotence, legacy migration/conflict guards; {hashes.Count} original assets unchanged");
     }
 }
