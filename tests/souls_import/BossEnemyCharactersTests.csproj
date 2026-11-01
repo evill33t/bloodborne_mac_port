@@ -19,6 +19,9 @@
     <Compile Include="../../editor/souls_import/HollowCombatProfiles.cs" Link="HollowCombatProfiles.cs"/>
     <Compile Include="../../editor/souls_import/HollowCombatMotion.cs" Link="HollowCombatMotion.cs"/>
     <Compile Include="../../editor/souls_import/HollowCombatCharacters.cs" Link="HollowCombatCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/HollowDeathSource.cs" Link="HollowDeathSource.cs"/>
+    <Compile Include="../../editor/souls_import/HollowDeathRig.cs" Link="HollowDeathRig.cs"/>
+    <Compile Include="../../editor/souls_import/HollowDeathMotion.cs" Link="HollowDeathMotion.cs"/>
     <Compile Include="../../editor/souls_import/HollowSourceSkin.cs" Link="HollowSourceSkin.cs"/>
     <Compile Include="../../editor/souls_import/HollowProjectiles.cs" Link="HollowProjectiles.cs"/>
     <Compile Include="../../editor/souls_import/MapEnemySpawns.cs" Link="MapEnemySpawns.cs"/>

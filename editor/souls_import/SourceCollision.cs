@@ -162,6 +162,7 @@ internal static class SourceCollision {
         TypeInfo Type(int type)=>type>=0&&type<types.Count?types[type]:throw new InvalidDataException("Invalid collision type index");
         int Size(int type,int depth=0){if(depth>64)throw new InvalidDataException("Cyclic collision type hierarchy");var info=Type(type);return info.Size>0?info.Size:info.Parent>0?Size(info.Parent,depth+1):0;}
         internal string Name(int type)=>Type(type).Name;
+        internal int ByteSize(int type)=>Size(type);
         Field Find(int type,string name,int depth=0) {
             if(depth>64)throw new InvalidDataException("Cyclic collision member hierarchy");var info=Type(type);
             return info.Fields.FirstOrDefault(f=>f.Name==name)??(info.Parent>0?Find(info.Parent,name,depth+1):throw new InvalidDataException("Missing collision member "+info.Name+"."+name));

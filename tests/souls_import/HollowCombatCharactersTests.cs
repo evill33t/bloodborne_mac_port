@@ -87,8 +87,17 @@ static class HollowCombatCharactersTests {
             File.WriteAllBytes(Path.Combine(output,tuple.Target+".chrbnd.dcx"),files["chr/"+tuple.Target+".chrbnd.dcx"]);File.WriteAllBytes(Path.Combine(output,tuple.Target+".anibnd.dcx"),files["chr/"+tuple.Target+".anibnd.dcx"]);
             Check(files.Count==3&&files["action/script/"+tuple.Target+".hks"].SequenceEqual(nativeHks),"Native HKS or package closure changed");
             var bank=BND4.Read(files["chr/"+tuple.Target+".anibnd.dcx"]);var character=BND4.Read(files["chr/"+tuple.Target+".chrbnd.dcx"]);var visual=FLVER2.Read(character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);var bind=SkinRetarget.World(visual.Nodes);
-            Check(bank.Files.Count==originalBank.Files.Count&&bank.Files.Select(f=>f.ID).Order().SequenceEqual(originalBank.Files.Select(f=>f.ID).Order()),"Native animation binder membership changed");
-            foreach(var member in originalCharacter.Files.Where(f=>!Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)&&!Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)&&!Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)&&!Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)&&!TPF.Is(f.Bytes.ToArray()))) {
+            var ownedDeaths=result.Report.OwnedDeathClips.ToDictionary(b=>b.Action);
+            Check(result.Report.MotionClips==567&&ownedDeaths.Keys.Order().SequenceEqual(new[]{2002211,2002261,3002252,3002253})&&bank.Files.Count==originalBank.Files.Count+4&&bank.Files.Select(f=>f.ID).Order().SequenceEqual(originalBank.Files.Select(f=>f.ID).Concat(ownedDeaths.Keys.Select(i=>1000000000+i)).Order()),"Owned death binder membership changed");
+            Check(result.Report.DeathPhysics is {Bodies:19,Constraints:18},"Source death physics report missing");
+            var physics=new HollowDeathRig.Pack(character.Files.Single(f=>f.ID==300).Bytes.ToArray());
+            var physicalRig=physics.Objects.Where(o=>o.Name=="hkaSkeleton").Select(o=>physics.Skeleton(o.At)).Single(s=>s.Names.Length>24);
+            var serializedRig=NativeAnimation.Skeleton(bank.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
+            Check(physicalRig.Names.SequenceEqual(serializedRig.Names)&&physicalRig.Parents.Select(p=>(int)p).SequenceEqual(serializedRig.Parents)&&physicalRig.Local.Zip(serializedRig.Local).All(p=>Error(p.First,p.Second)<.00001f),"Packaged ragdoll animation skeleton differs from live ANIBND");
+            var expectedProject=SkinRetarget.RenameBehavior(originalBank.Files.Single(f=>f.ID==7000300).Bytes,"c2630",tuple.Target).ToArray();
+            foreach(var death in ownedDeaths.Values)System.Text.Encoding.ASCII.GetBytes(tuple.Target).CopyTo(expectedProject,death.ProjectOffset+@"Model\chr\".Length);
+            Check(expectedProject.SequenceEqual(bank.Files.Single(f=>f.ID==7000300).Bytes.ToArray()),"Changes escaped the four owned death project paths");
+            foreach(var member in originalCharacter.Files.Where(f=>f.ID!=300&&!Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase)&&!Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)&&!Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)&&!Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)&&!TPF.Is(f.Bytes.ToArray()))) {
                 var copied=character.Files.Single(f=>f.ID==member.ID);Check(member.Bytes.Span.SequenceEqual(copied.Bytes.Span)&&copied.Name==member.Name.Replace("c2630",tuple.Target,StringComparison.OrdinalIgnoreCase),"Unrelated native character member changed");
             }
             var rig=NativeAnimation.Skeleton(bank.Files.Single(f=>f.ID==1000000).Bytes.ToArray());Check(rig.Names.Take(84).SequenceEqual(originalRig.Names)&&rig.Local.Take(84).SequenceEqual(originalRig.Local)&&rig.Parents.Take(84).SequenceEqual(originalRig.Parents),"Native84-bone controller prefix changed");
@@ -114,9 +123,9 @@ static class HollowCombatCharactersTests {
             if(socket!=null)Check(visual.Nodes[socket.AttachBoneIndex].Name=="DS1_"+sourceModel.Nodes[sourceSocket!.AttachBoneIndex].Name&&socket.FollowAttachBone==sourceSocket.FollowAttachBone&&socket.UseUpwardVector==sourceSocket.UseUpwardVector,"Muzzle lost animated source attachment after render sorting");
             int localPoses=0;
             foreach(var file in bank.Files.Where(f=>f.ID>=1000000000)) {
-                int id=file.ID-1000000000;byte[] before=originalBank.Files.Single(f=>f.ID==file.ID).Bytes.ToArray(),after=file.Bytes.ToArray();NativeUnchanged(before,after,84,rig.Names.Length);checkedClips++;
+                int id=file.ID-1000000000;int originalID=ownedDeaths.TryGetValue(id,out var death)?death.NativeCounterpart:id;int sourceID=death?.SourceAction??motion.MotionSourceIDs[id];byte[] before=originalBank.Files.Single(f=>f.ID==1000000000+originalID).Bytes.ToArray(),after=file.Bytes.ToArray();NativeUnchanged(before,after,84,rig.Names.Length);checkedClips++;
                 var p=new NativeAnimation.Pack(after);int a=p.Object("hkaSplineCompressedAnimation"),binding=p.Object("hkaAnimationBinding");var tracks=NativeTracks(after);bool additive=after[p.Data+binding+80]==1;
-                var source=motion.ReferenceFallbackIDs.Contains(id)?reference:From(motion.MotionSourceIDs[id]);
+                var source=motion.ReferenceFallbackIDs.Contains(id)?reference:From(sourceID);
                 int lastFrame=p.Int(a+56)-1;
                 foreach(float fraction in new[]{0f,(lastFrame/2)/(float)lastFrame,1f,.5f}.Distinct()) {
                     float frame=(p.Int(a+56)-1)*fraction;int block=Math.Min((int)(frame/255),tracks.Count-1);var local=tracks[block].Select(t=>At(t,frame-block*255)).ToArray();
@@ -129,7 +138,7 @@ static class HollowCombatCharactersTests {
                     if(Math.Abs(frame-MathF.Round(frame))>.0001f) {
                         for(int bone=84;bone<rig.Names.Length;bone++) {
                             var expected=sourceWorld[names[rig.Names[bone][4..]]];float error=Error(expected,world[bone]);
-                            if(error>worstInterpolationFrame){worstInterpolationFrame=error;interpolationContext=new{model=tuple.Model,physical=id,source=motion.MotionSourceIDs[id],bone=rig.Names[bone],fraction,nativeFrames=p.Int(a+56),sourceFrames=source.Info.FrameCount,translationError=Vector3.Distance(expected.Translation,world[bone].Translation)};}
+                            if(error>worstInterpolationFrame){worstInterpolationFrame=error;interpolationContext=new{model=tuple.Model,physical=id,source=sourceID,bone=rig.Names[bone],fraction,nativeFrames=p.Int(a+56),sourceFrames=source.Info.FrameCount,translationError=Vector3.Distance(expected.Translation,world[bone].Translation)};}
                         }
                         continue;
                     }
@@ -174,8 +183,8 @@ static class HollowCombatCharactersTests {
             }
             foreach(var original in originalBank.Files.Where(f=>f.ID<1000000000&&f.ID!=1000000&&!TAE.Is(f.Bytes.ToArray())&&f.ID is not(>=7000000 and <8000000)))Check(original.Bytes.Span.SequenceEqual(bank.Files.Single(f=>f.ID==original.ID).Bytes.Span),"Unrelated native animation member changed");
             Check(character.Files.Count(f=>TPF.Is(f.Bytes.ToArray()))==1&&character.Files.All(f=>!Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)),"Unsupported cloth or duplicate texture resource in final package");
-            reports.Add(new{tuple.Model,role=tuple.Role.ToString(),nativeBones=84,addedBones=rig.Names.Length-84,clips=567,actions=688,poses=localPoses,hits,shots,vertices=result.Skin.Vertices,fallbacks=motion.ReferenceFallbackIDs.Count});
-            Console.WriteLine($"PASS {tuple.Model} {tuple.Role}: 567 clips/688 actions/{localPoses} complete poses, {hits} hit/{shots} shot windows");
+            reports.Add(new{tuple.Model,role=tuple.Role.ToString(),nativeBones=84,addedBones=rig.Names.Length-84,clips=571,actions=688,poses=localPoses,hits,shots,vertices=result.Skin.Vertices,fallbacks=motion.ReferenceFallbackIDs.Count});
+            Console.WriteLine($"PASS {tuple.Model} {tuple.Role}: 571 clips/688 actions/{localPoses} complete poses, {hits} hit/{shots} shot windows");
         }
         foreach(var(path,hash)in hashes)Check(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))==hash,"Input changed: "+path);
         File.WriteAllText(Path.Combine(output,"regression.json"),JsonSerializer.Serialize(new{status="PASS",checkedClips,checkedPoses,vertices,sockets,worstFrame,worstVertex,worstSocket,worstInterpolationFrame,interpolationContext,reports,hashes},new JsonSerializerOptions{WriteIndented=true}));

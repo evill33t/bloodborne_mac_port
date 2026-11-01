@@ -8,7 +8,10 @@ using System.Numerics;
 internal static class HollowCombatCharacters {
     internal sealed record Report(string SourceModel,string Role,string NativeModel,int NativeBones,int VisibleBones,
         int MotionClips,int ReferenceFallbacks,int MeleeActions,int ProjectileActions,int? SourceProjectileDummy,
-        IReadOnlyList<HollowCombatMotion.EventBinding> CombatActions,IReadOnlyList<string> Limitations);
+        IReadOnlyList<HollowCombatMotion.EventBinding> CombatActions,IReadOnlyList<string> Limitations) {
+        public HollowDeathRig.Report? DeathPhysics {get;init;}
+        public IReadOnlyList<HollowDeathMotion.Binding> OwnedDeathClips {get;init;}=[];
+    }
     internal sealed record Result(SkinBake Skin,Report Report);
     static string Leaf(string path)=>path.Replace('\\','/').Split('/').Last();
     internal static Result Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,
@@ -55,6 +58,10 @@ internal static class HollowCombatCharacters {
                 time=>motion.ReferenceFallbackIDs.Contains(id)?still:HollowSourceSkin.Sample(plan,sourceClip,Math.Min(sourceClip.Duration,time*sourceClip.Duration)),
                 preserveAddedRootWorld:true,allowZeroAddedBones:hidden);
         }
+        var deathMotion=HollowDeathMotion.Apply(animation,plan,motion);
+        var physics=character.Files.Single(f=>f.ID==300&&Leaf(f.Name).Equals(template+".hkx",StringComparison.OrdinalIgnoreCase));
+        var death=HollowDeathRig.Convert(physics.Bytes.ToArray(),HollowDeathRig.ReadPhysics(readSource,profile.SourceModel),plan,profile.SourceModel);
+        physics.Bytes=death.Physics;
         HollowCombatMotion.Report? eventReport=null;
         foreach(var file in animation.Files) {
             file.Name=file.Name.Replace(template,target,StringComparison.OrdinalIgnoreCase);
@@ -79,7 +86,8 @@ internal static class HollowCombatCharacters {
         return new(bake with{ProportionScale=1},new(profile.SourceModel,profile.Role.ToString(),template,plan.Original.Names.Length,plan.Added.Count,
             clips.Length,motion.ReferenceFallbackIDs.Count,active.Count(a=>a.Hits>0),active.Count(a=>a.Shots>0),muzzleIDs.Length==0?null:muzzleIDs[0],active,
             [..HollowCombatProfiles.Limitations,..eventReport.Limits,
-                "The visible body and equipped meshes retain the complete selected source animation hierarchy. Source shield grips and equipment visibility are animated; source cape settling remains a static body-following approximation."]));
+                "The visible body and equipped meshes retain the complete selected source animation hierarchy. Source shield grips and equipment visibility are animated; source cape settling remains a static body-following approximation.",
+                "Four previously shared death actions now own source-visible death clips. Their physical tracks use the checked local native death counterpart; their original native event timelines remain unchanged."]){DeathPhysics=death.Report,OwnedDeathClips=deathMotion});
     }
     static void BindMuzzle(FLVER2 target,byte[] sourceBytes,NativeRigAppend.Plan plan,HollowCombatProfiles.Profile profile) {
         var source=FLVER2.Read(sourceBytes);

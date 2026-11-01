@@ -1010,8 +1010,12 @@ use explicit native equivalents, including Estus acquisition becoming five Blood
 per flask. Source soul tiers and upgrade materials use approximate native equivalents.
 Armor, weapons and accessories are excluded, and excluded equipment outcomes retain
 their probability as no-drop outcomes. Supported source consumable rolls remain separate
-from a repeatable 30% one-vial / 70% no-drop roll added to ordinary hollows. Enemy kill/drop
-behavior for these edited lots has not yet been verified in gameplay.
+from a repeatable 10% one-vial / 90% no-drop roll on every imported enemy,
+including skeletons, Parish specials, bosses and Capra's dogs. The separate roll
+does not use Luck or cumulative probability. Installed-export checks cover all
+113 actors and their 30 distinct NPC rows, including mixed crossbow brains;
+only owned loot fields change. Enemy kill/pickup behavior still needs native
+validation; a few kills cannot establish the configured probability.
 
 Quest goods receive separate inventory identities and source-localized names/descriptions;
 native key icons are placeholders. These are inventory records, not functioning NPC quests
@@ -1164,9 +1168,23 @@ instead of the exported source rig, leaving the visible body in its reference po
 Explicit per-role mappings resolve source a00/a01/a02 action imports. Source
 hit, projectile and continuation windows follow the visible source pose on the
 retained native clip time. Native combat decisions, damage, physical hitboxes,
-locomotion and timing remain approximations. Thirty-one nonlocal shared native
-actions, including four death aliases, remain unconverted. Some unsupported
+locomotion and timing remain approximations. Four shared death actions now own
+source-visible death clips while retaining their native event timelines and checked
+native physical counterparts. Twenty-seven other nonlocal shared native actions
+remain unconverted. Some unsupported
 special states use an explicit reference pose; source ambush poses stay omitted.
+
+Ordinary hollow death physics now includes the source-visible skeleton in both
+mapper directions. Source capsule/box shapes, masses, inertias and joint limits
+are translated from Havok 2015 into the native 2014 `hknp` scene format; hinge
+motor and angular-limit fields require explicit layout conversion. This covers
+92 ordinary hollow placements across 20 owned wrappers. The 13 skeletons and
+eight special/boss actors retain their earlier physics adapters. Source angular
+damping and continuous cape simulation remain unsupported. Native solver and
+death rendering require gameplay checks beyond binary and pose fixtures. A
+copied-save native check killed a shield hollow through ordinary combat and
+showed its source body settled on Burg paving. Other source families have
+serialized-asset coverage; this is not a complete ragdoll/playthrough claim.
 
 Crossbows fire owned native Bowblade arrows with native rifle NPC damage. Their
 source muzzle frame follows the authored equipment hierarchy. All native rifle
@@ -1181,8 +1199,8 @@ c2560 cape's legacy capsule physics is settled offline from its 57 bodies and
 ongoing cloth simulation and arm/body contact are unconverted.
 
 Installed-asset tests cover all twelve supported model/role combinations and
-both complete shield/crossbow packages. Independent decoding checks 1,134 native
-clips, 1,376 action timelines, 3,128 complete keyframe poses and 1,564 serialized
+both complete shield/crossbow packages. Independent decoding checks 1,142 native
+clips, 1,376 action timelines, 3,146 complete keyframe poses and 1,573 serialized
 muzzle frames. Native controller channels, timing, objects and source topology
 remain intact. Source motion between encoded native keyframes retains a sampling
 approximation; these checks do not establish native gameplay or projectile damage.
@@ -1216,6 +1234,36 @@ barrel-supported corpses resolve their initial pose 100 from the verified source
 constructor/event 11010400. Unknown corpse poses fail explicitly instead of using
 the standing bind pose. Their support-breaking animation 101, physics and treasure
 state changes remain unconverted. Source dummy objects stay excluded.
+Pickup actors use an owned meshless `o699990` carrier: the borrowed native loot
+body previously rendered an extra Bloodborne corpse over the source body. Its
+attachment nodes, Dummy90, treasure flags and action-button behavior remain intact;
+it adds no physics. All 32 placed pickups use the same owned carrier. A native view
+retains the source Firelink ledge body without the borrowed native corpse.
+
+Both Undead Merchants now retain their authored `c2510` models, masks and idle
+poses: the female in Firelink's aqueduct and the seated male in Burg. A separate
+56-bone source hierarchy follows native friendly playback. Their zero source
+draw masks are replaced by the bound floor's residency groups so they remain
+visible. Original Firelink NPC identities are unchanged.
+
+Each merchant has a bounded authentic greeting and the native purchase UI.
+Fifteen converted goods retain source prices and unlimited/one-item stock;
+limited stock uses separate persistent flags. Humanity follows the existing
+Insight-consumable policy; quest keys keep their own inventory identities.
+Weapons, armor, accessories, ammunition and unsupported goods are omitted and
+reported. Source voices, talk gestures, hostility and full merchant quests are
+unconverted. A copied-save native check opened both purchase UIs, bought one
+Molotov for 50 Echoes and bought the Residence Key for 1,000. The key then
+disappeared from stock and set its owned flag, which survived restart in a
+separate copied save. Both source models were visible in native gameplay,
+including the male merchant seated beside his wares. Source interaction voices
+and full quest behavior remain outside this bounded check.
+
+A private copied-save control raised only the enemy vial roll to 100% to
+verify the complete native path: normal combat kill, corpse glow, Search Corpse
+and Blood Vial x1 award, with inventory increasing from zero to one. The public
+export remains 10%; its exact weights and all 113 actor bindings are checked
+separately. The control does not measure the random drop rate in gameplay.
 
 The ordinary Burg breakable adapter emits 351 native object actors across 29
 source models, preserving the authored intact/broken visuals and 630 distinct
@@ -1349,7 +1397,10 @@ DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
 `tests/test_shield_grip.sh`, `tests/test_boar_materials.sh`,
 `tests/test_hollow_combat_profiles.sh`, `tests/test_hollow_combat_motion.sh`,
 `tests/test_hollow_source_skin.sh`, `tests/test_hollow_combat_characters.sh`,
-`tests/test_hollow_projectiles.sh`,
+`tests/test_hollow_projectiles.sh`, `tests/test_hollow_death_rig.sh`,
+`tests/test_hollow_death_motion.sh`,
+`tests/test_map_items.sh`, `tests/test_map_merchants.sh`,
+`tests/test_map_merchant_talk.sh`,
 `tests/test_boss_encounter_source.sh`, `tests/test_boss_enemy_characters.sh`,
 `tests/test_boss_entrance_motion.sh`,
 `tests/test_boss_fog_walls.sh`, `tests/test_boss_encounters.sh` and

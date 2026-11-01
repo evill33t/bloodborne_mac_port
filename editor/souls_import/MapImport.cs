@@ -214,11 +214,23 @@ internal static partial class Program {
                 foreach(var actorReport in characters.Reports.Where(r=>r.EntityID.HasValue)){var actor=characters.Actors.Single(p=>p.EntityID==actorReport.EntityID);actor.GparamConfigStruct=Lighting(actorReport.SourceName);SourceGroups(actor,actorReport.SourceName);}
                 foreach(var (path,bytes) in characters.Files)Write(path,bytes);
             }
+            MapMerchants.Export? merchantCharacters=null;
+            if(profile.Id=="DS1R"&&legacyMap!=null&&boundCollision!=null) {
+                merchantCharacters=MapMerchants.Bake(sourceMap.ReadAsset,ReadStaged,profile.Id,map,definitions!,nativeRoot,msb,offset,boundCollision,slots,
+                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadStaged("param/gameparam/gameparam.parambnd.dcx")!);
+                msb.Models.Enemies.AddRange(merchantCharacters.Models);msb.Parts.Enemies.AddRange(merchantCharacters.Actors);
+                // These source NPCs have zero group masks. Their explicit
+                // collision binding supplies residency; copying zero masks
+                // would hide the restored merchant again.
+                foreach(var actorReport in merchantCharacters.Reports)
+                    merchantCharacters.Actors.Single(p=>p.EntityID==actorReport.EntityID).GparamConfigStruct=Lighting(actorReport.SourceName);
+                foreach(var (path,bytes) in merchantCharacters.Files)Write(path,bytes);
+            }
             MapEnemySpawns.Result? enemySpawns=null;
             IReadOnlyList<MapSkeletonAnimations.Wake> skeletonAwakenings=[];
             if(profile.Id=="DS1R"&&legacyMap!=null&&boundCollision!=null) {
                 enemySpawns=MapEnemySpawns.Bake(sourceMap.ReadAsset,legacyMap,map,definitions!,nativeRoot,msb,offset,boundCollision,slots,
-                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,nativeMap:baseMap,readNative:destination.Additional?ReadStaged:ReadNative,
+                    merchantCharacters?.GameParamBytes??characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,nativeMap:baseMap,readNative:destination.Additional?ReadStaged:ReadNative,
                     ordinaryFirstEntity:destination.Additional&&map=="m10_01_00_00"?4039000:null);
                 foreach(var spawnReport in enemySpawns.Spawns){var actor=msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID);actor.GparamConfigStruct=Lighting(spawnReport.SourceName);SourceGroups(actor,spawnReport.SourceName);}
                 foreach(var (path,bytes) in enemySpawns.Files)Write(path,bytes);
@@ -260,6 +272,7 @@ internal static partial class Program {
             }
             MapWorldState.Result? worldState=null;
             MapTalk.Result? dialogue=null;
+            MapMerchantTalk.Result? merchantDialogue=null;
             IReadOnlyList<MapQuestState.Presence> npcAvailability=[];
             if(profile.Id=="DS1R"&&map=="m10_02_00_00"&&legacyMap!=null&&boundCollision!=null&&characters!=null) {
                 MapQuestState.VerifyReservations(nativeRoot);
@@ -271,6 +284,14 @@ internal static partial class Program {
                 var availability=MapQuestState.Availability(worldState.Script,actors,sourceScript);npcAvailability=availability.Bindings;
                 Write(eventPath,MapQuestState.Initialize(availability.Script,sourceMap.ReadAsset("event/common.emevd.dcx")??throw new FileNotFoundException("Source initial quest states unavailable")));
                 dialogue=MapTalk.Export(msb,profile.Id,map,nativeRoot,definitions!,sourceMap.ReadAsset,MapQuestState.Flag,actors,Write,readNative:ReadStaged,nativeMap:baseMap);
+            }
+            if(merchantCharacters!=null) {
+                var actors=merchantCharacters.Reports.ToDictionary(r=>r.SourceEntityID,r=>r.EntityID);
+                var staged=Directory.EnumerateFiles(Path.Combine(stage.FullName,"dvdroot_ps4"),"*.dcx",SearchOption.AllDirectories)
+                    .Select(path=>(Path:path,Relative:Path.GetRelativePath(Path.Combine(stage.FullName,"dvdroot_ps4"),path).Replace('\\','/')))
+                    .Where(p=>p.Relative.StartsWith("event/",StringComparison.Ordinal)||p.Relative.StartsWith("script/talk/",StringComparison.Ordinal))
+                    .Select(p=>new KeyValuePair<string,byte[]>(p.Relative,File.ReadAllBytes(p.Path))).ToArray();
+                merchantDialogue=MapMerchantTalk.Export(msb,map,baseMap,nativeRoot,definitions!,sourceMap.ReadAsset,ReadStaged,actors,Write,staged);
             }
             MapDeathBoundaries.Result? deathBoundaries=null;
             if(profile.Id=="DS1R"&&legacyMap!=null&&sourceCollision!=null)
@@ -353,13 +374,14 @@ internal static partial class Program {
             int accounted=placedStatic+placedBreakable+placedBossFog+sourceNoRenderGeometry+filteredAll+missingData;
             var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,placedBossFog,sourceNoRenderGeometry,filteredAll,missingData,accounted,
                 reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)&&placedBossFog==encounterFogNames.Count};
+            var characterReports=characters?.Reports.Where(r=>merchantCharacters?.Reports.Any(m=>m.SourceName==r.SourceName)!=true).ToArray();
             var report=new{source=profile.Id,map,target,destination=destination.Additional?"additional":"replacement",templateMap=destination.TemplateMap,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
-                placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot},
-                worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=worldState==null?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,npcAvailability},dialogue,
+                placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot,items.PickupCarrier,items.Limits},
+                worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=worldState==null?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,npcAvailability},dialogue,merchantDialogue,
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",navigation=navigation?.Report,deathBoundaries=deathBoundaries?.Report,
                 collisionResidency=destination.Additional?"Collision Draw groups retain both physical layers in loaded imported blocks. Original Display/Backread and actor/scenery groups, enable flags and geometry are preserved. Connected-scene residency is broader; multi-area memory/culling behavior remains approximate.":"Original source collision groups retained",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
-                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,bossSource=bossPlan,bossEncounters=bossEncounters==null?null:new{bossEncounters.Encounters,bossEncounters.Limits},ladders=ladders==null?null:new{ladders.Bindings,ladders.Skipped,ladders.Limits},characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
+                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,bossSource=bossPlan,bossEncounters=bossEncounters==null?null:new{bossEncounters.Encounters,bossEncounters.Limits},ladders=ladders==null?null:new{ladders.Bindings,ladders.Skipped,ladders.Limits},characters=characterReports,merchants=merchantCharacters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
                 environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations=destination.Additional?"Experimental additional map: a fresh Bloodborne MSB contains only emitted source geometry, converted collision, adapted actors/treasures and explicitly adapted world/quest records. Original native map layouts, collision archives and event scripts are preserved. Source AI, full quests, water physics and complete collision material behavior are not ported. Source stair materials retain their native no-slide classification; static source navigation coverage and unconverted gates/cross-mesh links are recorded in navigation.Limits. Native material shaders, GI and source animation/behavior adaptation retain the limits recorded by each stage. The destination finalizer adds entry/return travel and lamps; their interactions, save behavior and connected-map transitions require gameplay validation with a copied save.":"Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
             bool hollowCombat=enemySpawns?.Spawns.Any(p=>p.HollowCombat!=null)==true;
             if(bossEncounters!=null||hollowCombat) {

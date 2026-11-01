@@ -6,11 +6,45 @@ internal static class MapItems {
     internal record Lot(int SourceID,int TargetID,int SourceCollectionFlag,int CollectionFlag,IReadOnlyList<MapItemPolicy.Conversion> Goods,int IgnoredEquipment);
     internal record Pickup(string SourceName,string SourcePart,string TargetPart,int[] Lots,Vector3 Position);
     internal record Omitted(string SourceName,string Reason);
+    internal record Carrier(string DonorModel,string TargetModel,int RemovedMeshes,int RemovedVertices,int AttachmentDummy);
     internal record Result(byte[] GameParamBytes,IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<Lot> Lots,
-        IReadOnlyList<Pickup> Pickups,IReadOnlyList<Omitted> Skipped,IReadOnlyDictionary<int,int> QuestItems,int VialDropLot);
+        IReadOnlyList<Pickup> Pickups,IReadOnlyList<Omitted> Skipped,IReadOnlyDictionary<int,int> QuestItems,int VialDropLot) {
+        public Carrier? PickupCarrier {get;init;}
+        public IReadOnlyList<string> Limits {get;init;}=[];
+    }
     static string Leaf(string p)=>p.Replace('\\','/').Split('/').Last();
     static int Number(PARAM.Row row,string field)=>Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName==field).Value);
     static void Int(byte[] data,int at,int value)=>BitConverter.GetBytes(value).CopyTo(data,at);
+    internal const int VialLot=89000000;
+    internal const string PickupModel="o699990";
+    const string VialOwner="Imported enemy Blood Vial",LegacyVialOwner="Imported ordinary hollow Blood Vial";
+    static void NativeLootSchema(string definitions) {
+        string root=Path.GetFullPath(Path.Combine(definitions,"../../BB/Defs"));
+        var lot=PARAMDEF.XmlDeserialize(Path.Combine(root,"ItemLotParam.xml"));
+        var npc=PARAMDEF.XmlDeserialize(Path.Combine(root,"NpcParam.xml"));
+        void Field(PARAMDEF def,string name,int offset,PARAMDEF.DefType type) {
+            int index=def.Fields.FindIndex(f=>f.InternalName==name);if(index<0)throw new InvalidDataException("Native loot field is missing: "+name);
+            var prefix=new PARAMDEF();prefix.Fields.AddRange(def.Fields.Take(index));var field=def.Fields[index];
+            if(prefix.GetRowSize()!=offset||field.DisplayType!=type||field.ArrayLength!=1||field.BitSize!=-1)
+                throw new InvalidDataException("Native loot field layout changed: "+name);
+        }
+        if(lot.ParamType!="ITEMLOT_PARAM_ST"||lot.DataVersion!=2||lot.GetRowSize()!=148||npc.ParamType!="NPC_PARAM_ST"||npc.DataVersion!=5||npc.GetRowSize()!=388)
+            throw new InvalidDataException("Native loot parameter schema changed");
+        for(int i=0;i<8;i++) {
+            string suffix=(i+1).ToString("D2");Field(lot,"lotItemId"+suffix,i*4,PARAMDEF.DefType.s32);
+            Field(lot,"lotItemCategory"+suffix,32+i*4,PARAMDEF.DefType.s32);Field(lot,"lotItemBasePoint"+suffix,64+i*2,PARAMDEF.DefType.u16);
+            Field(lot,"cumulateLotPoint"+suffix,80+i*2,PARAMDEF.DefType.u16);Field(lot,"getItemFlagId"+suffix,96+i*4,PARAMDEF.DefType.s32);
+            Field(lot,"lotItemNum"+suffix,138+i,PARAMDEF.DefType.u8);
+        }
+        Field(lot,"getItemFlagId",128,PARAMDEF.DefType.s32);Field(lot,"cumulateNumFlagId",132,PARAMDEF.DefType.s32);
+        Field(lot,"cumulateNumMax",136,PARAMDEF.DefType.u8);Field(lot,"lotItem_Rarity",137,PARAMDEF.DefType.u8);
+        var flags=lot.Fields.TakeLast(16).ToArray();
+        var names=Enumerable.Range(1,8).Select(i=>"enableLuck"+i.ToString("D2")).Concat(Enumerable.Range(1,8).Select(i=>"cumulateReset"+i.ToString("D2")));
+        if(!flags.Select(f=>f.InternalName).SequenceEqual(names)||flags.Any(f=>f.DisplayType!=PARAMDEF.DefType.u16||f.BitSize!=1||f.ArrayLength!=1))
+            throw new InvalidDataException("Native loot luck/cumulation bit layout changed");
+        for(int i=0;i<6;i++)Field(npc,"itemLotId_"+(i+1),44+i*4,PARAMDEF.DefType.s32);
+        Field(npc,"humanityLotId",68,PARAMDEF.DefType.s32);
+    }
     internal static byte[] LotBytes(IReadOnlyList<(int Item,int Count,int Weight)> entries,int flag=-1) {
         if(entries.Count is <1 or >8||entries.Any(e=>e.Item<0||e.Count<0||e.Count>99||e.Weight<0||e.Weight>65535)||entries.Sum(e=>e.Weight)<=0)
             throw new InvalidDataException("Invalid native imported item lot");
@@ -40,6 +74,7 @@ internal static class MapItems {
         string sourceMap,string definitions,string nativeRoot,Vector3 offset,IReadOnlyList<MapCollisionBindings.Chunk> chunks,IReadOnlyList<MSBB.Part.Collision> slots,
         IReadOnlyList<MapEnemySpawns.Spawn> enemies,byte[] gameParamBytes,IReadOnlyList<int>? rewardLots=null) {
         if(chunks.Count!=slots.Count||slots.Count==0)throw new InvalidDataException("Item collision bindings differ");
+        NativeLootSchema(definitions);
         var sourceFiles=BND3.Read(sourceRead("param/GameParam/GameParam.parambnd.dcx")??throw new FileNotFoundException("Source item parameters unavailable")).Files;
         PARAM Source(string name){var p=PARAM.Read(sourceFiles.Single(f=>Leaf(f.Name)==name+".param").Bytes);p.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitions,name+".xml")));return p;}
         var sourceGoods=Source("EquipParamGoods");var sourceLots=Source("ItemLotParam");var sourceNpcs=Source("NpcParam");
@@ -119,27 +154,66 @@ internal static class MapItems {
             return group.Any(r=>r.Goods.Count>0)?group[0]:null;
         }
         // Keep standard consumable support independent of equipment conversion.
-        // Explicit 30% one-vial / 70% no-drop roll; source loot rolls remain separate.
-        const int vialLot=89000000;var vialBytes=LotBytes([(MapItemPolicy.BloodVial,1,300),(0,0,700)]);
+        // Explicit 10% one-vial / 90% no-drop roll on every adapted enemy.
+        // Source loot rolls stay separate; zero luck/cumulation bits preserve
+        // the same repeatable chance rather than scaling with item discovery.
+        if(goods.Rows.Count(r=>r.ID==MapItemPolicy.BloodVial)!=1)throw new InvalidDataException("Native Blood Vial goods row is unavailable");
+        const int vialLot=VialLot;var vialBytes=LotBytes([(MapItemPolicy.BloodVial,1,100),(0,0,900)]);
         var existingVial=lots.Rows.SingleOrDefault(r=>r.ID==vialLot);
-        if(existingVial==null)ImportParam.Append(lots,lots.Rows.First(),vialLot,"Imported ordinary hollow Blood Vial",vialBytes);
-        else if(existingVial.Name!="Imported ordinary hollow Blood Vial"||!ImportParam.Payload(existingVial).SequenceEqual(vialBytes))throw new InvalidDataException("Blood Vial drop namespace is occupied");
-        var npcTyped=PARAM.Read(Entry("NpcParam").Bytes);var nativeDefs=Path.GetFullPath(Path.Combine(definitions,"../../BB/Defs/NpcParam.xml"));npcTyped.ApplyParamdef(PARAMDEF.XmlDeserialize(nativeDefs));
-        foreach(var group in enemies.GroupBy(e=>e.NPCParamID)) {
-            var actor=group.First();var original=sourceNpcs.Rows.Single(r=>r.ID==actor.SourceNPCParamID);
-            var selected=Enumerable.Range(1,6).Select(i=>Number(original,"itemLotId_"+i)).Where(id=>id>0).Select(ConvertGroup).Where(r=>r!=null).Select(r=>r!.TargetID).Distinct().ToList();
-            if(selected.Count>=6)throw new InvalidDataException("Source hollow has no slot left for its native Blood Vial roll");selected.Add(vialLot);
-            var row=npcTyped.Rows.Single(r=>r.ID==actor.NPCParamID);
-            for(int i=1;i<=6;i++)row.Cells.Single(c=>c.Def.InternalName=="itemLotId_"+i).Value=i<=selected.Count?selected[i-1]:-1;
-            row.Cells.Single(c=>c.Def.InternalName=="humanityLotId").Value=-1;
+        if(existingVial==null)ImportParam.Append(lots,lots.Rows.First(),vialLot,VialOwner,vialBytes);
+        else {
+            var previous=ImportParam.Payload(existingVial);
+            bool current=(existingVial.Name==VialOwner||existingVial.Name==LegacyVialOwner)&&previous.SequenceEqual(vialBytes);
+            bool legacy=existingVial.Name==LegacyVialOwner&&previous.SequenceEqual(LotBytes([(MapItemPolicy.BloodVial,1,300),(0,0,700)]));
+            if(!current&&!legacy)throw new InvalidDataException("Blood Vial drop namespace is occupied");
+            existingVial.Name=VialOwner;existingVial.Cells.Single().Value=vialBytes;
         }
-        var changed=ImportParam.Read(npcTyped.Write(),"NPC_PARAM_ST",388,5);
-        foreach(int id in enemies.Select(e=>e.NPCParamID).Distinct())npcs.Rows.Single(r=>r.ID==id).Cells.Single().Value=ImportParam.Payload(changed.Rows.Single(r=>r.ID==id));
+        foreach(var group in enemies.GroupBy(e=>e.NPCParamID)) {
+            var actor=group.First();var row=npcs.Rows.Single(r=>r.ID==actor.NPCParamID);
+            if(group.Select(p=>p.SourceNPCParamID).Distinct().Count()!=1||group.Any(p=>p.TargetModel!=actor.TargetModel)||
+                !System.Text.RegularExpressions.Regex.IsMatch(actor.TargetModel,@"\Ac\d{4}\z")||actor.NPCParamID/100!=int.Parse(actor.TargetModel[1..])||
+                row.Name==null||!new[]{"Imported hollow ","Imported cemetery skeleton ","Imported Parish enemy ","Imported boss encounter actor "}.Any(prefix=>row.Name.StartsWith(prefix,StringComparison.Ordinal)))
+                throw new InvalidDataException("Blood Vial drop owner is not an adapted enemy: "+actor.NPCParamID);
+            var original=sourceNpcs.Rows.Single(r=>r.ID==actor.SourceNPCParamID);
+            var selected=Enumerable.Range(1,6).Select(i=>Number(original,"itemLotId_"+i)).Where(id=>id>0).Select(ConvertGroup).Where(r=>r!=null).Select(r=>r!.TargetID).Distinct().ToList();
+            if(selected.Count>=6)throw new InvalidDataException("Source enemy has no slot left for its native Blood Vial roll");selected.Add(vialLot);
+            var payload=ImportParam.Payload(row);
+            for(int i=0;i<6;i++)Int(payload,44+i*4,i<selected.Count?selected[i]:-1);
+            Int(payload,68,-1);row.Cells.Single().Value=payload;
+        }
         var dream=MSBB.Read(nativeRead("map/MapStudio/m21_00_00_00.msb.dcx")??throw new FileNotFoundException("Native pickup donor unavailable"));
         var treasureTemplate=dream.Events.Treasures.First(t=>!t.InChest&&t.ItemLot1>=0);
         var donorPart=dream.Parts.GetEntries().Single(p=>p.Name==treasureTemplate.TreasurePartName);var donorCopy=donorPart.DeepCopy();
         var objectTemplate=new MSBB.Part.Object();foreach(var property in typeof(MSBB.Part.ObjectBase).GetProperties().Where(p=>p.CanRead&&p.CanWrite))property.SetValue(objectTemplate,property.GetValue(donorCopy));
-        if(!destination.Models.Objects.Any(m=>m.Name==objectTemplate.ModelName))destination.Models.Objects.Add((MSBB.Model.Object)dream.Models.Objects.Single(m=>m.Name==objectTemplate.ModelName).DeepCopy());
+        Carrier? carrierReport=null;
+        void PrepareCarrier() {
+            if(carrierReport!=null)return;
+            // The Dream donor is a real Yharnam corpse. Its 3,691 vertices
+            // previously overlaid every already-baked DS1 loot body. Retain
+            // the pickup actor and dummy90 while giving it no render meshes.
+            // No HKX/rigid bodies exist in this donor, so this cannot leave an
+            // invisible native corpse collider behind the source geometry.
+            const string donorModel="o000611";string path="obj/"+PickupModel+".objbnd.dcx";
+            if(objectTemplate.ModelName!=donorModel||donorPart is not MSBB.Part.DummyObject)
+                throw new InvalidDataException("Native pickup actor donor changed");
+            var objectRows=ImportParam.Read(Entry("ObjectParam").Bytes,"OBJECT_PARAM_ST",32,1);
+            if(objectRows.Rows.Any(r=>r.ID is 611 or 699990))throw new InvalidDataException("Pickup default ObjectParam contract or owned namespace changed");
+            var bytes=nativeRead("obj/"+donorModel+".objbnd.dcx")??throw new FileNotFoundException("Native pickup visual donor unavailable");var bundle=BND4.Read(bytes);
+            if(bundle.Files.Count!=2||!bundle.Files.Select(f=>Leaf(f.Name)).Order(StringComparer.Ordinal).SequenceEqual(new[]{donorModel+".flver",donorModel+".tpf"}))
+                throw new InvalidDataException("Native pickup donor has unexpected physics/asset dependencies");
+            var visual=bundle.Files.Single(f=>Leaf(f.Name)==donorModel+".flver");var flver=FLVER2.Read(visual.Bytes);
+            if(flver.Meshes.Count!=2||flver.Meshes.Sum(m=>m.Vertices.Count)!=3691||flver.Dummies.Count!=1||flver.Dummies[0].ReferenceID!=90)
+                throw new InvalidDataException("Native pickup mesh/attachment contract changed");
+            carrierReport=new(donorModel,PickupModel,flver.Meshes.Count,flver.Meshes.Sum(m=>m.Vertices.Count),90);flver.Meshes.Clear();visual.Bytes=flver.Write();
+            if(FLVER2.Read(visual.Bytes).Meshes.Count!=0)throw new InvalidDataException("Owned pickup still has visible meshes");
+            foreach(var file in bundle.Files)file.Name=file.Name.Replace(donorModel,PickupModel,StringComparison.Ordinal);
+            var output=bundle.Write(DCX.Type.DCX_DFLT_10000_44_9);var existing=nativeRead(path);
+            if(existing!=null&&!existing.SequenceEqual(output))throw new InvalidDataException("Owned invisible pickup model is occupied");
+            var model=(MSBB.Model.Object)dream.Models.Objects.Single(m=>m.Name==donorModel).DeepCopy();model.Name=PickupModel;
+            model.SibPath=@"N:\SPRJ\data\Model\obj\"+PickupModel+@"\sib\"+PickupModel+".sib";
+            if(destination.Models.Objects.Any(m=>m.Name==PickupModel))throw new InvalidDataException("Owned pickup MSB model is occupied");
+            files.Add(path,output);destination.Models.Objects.Add(model);objectTemplate.ModelName=PickupModel;
+        }
         int firstEntity=sourceMap switch {"m10_02_00_00"=>2418500,"m10_01_00_00"=>2408500,_=>throw new NotSupportedException("No item entity reservation for "+sourceMap)};
         int entity=firstEntity;
         int eventID=destination.Events.GetEntries().Select(e=>e.EventID).DefaultIfEmpty(-1).Max()+1;
@@ -152,6 +226,7 @@ internal static class MapItems {
             var selected=treasure.ItemLots.Where(id=>id>=0).Select(ConvertGroup).Where(r=>r!=null).Select(r=>r!.TargetID).ToArray();
             if(selected.Length==0){skipped.Add(new(treasure.Name,"No supported consumable or quest item; equipment is deliberately excluded."));continue;}
             if(selected.Length>3)throw new InvalidDataException("Source treasure exceeds the native item-lot slot count");
+            PrepareCarrier();
             while(entities.Contains(entity))entity++;
             if(entity>=firstEntity+100)throw new InvalidDataException("Imported pickup entity reservation is exhausted");
             var obj=(MSBB.Part.Object)objectTemplate.DeepCopy();obj.InstanceID=9000+pickups.Count;obj.Name=obj.ModelName+"_"+obj.InstanceID.ToString("D4");obj.EntityID=entity++;entities.Add(obj.EntityID);obj.Position=carrier.Position+offset;obj.Rotation=carrier.Rotation;obj.Scale=Vector3.One;
@@ -194,6 +269,8 @@ internal static class MapItems {
                 files.Add(path,native.Write(native.Compression));
             }
         }
-        return new(resultBytes,files,reports,pickups,skipped,questItems,vialLot);
+        return new(resultBytes,files,reports,pickups,skipped,questItems,vialLot){PickupCarrier=carrierReport,Limits=[
+            "Pickup actors contain no native corpse render meshes or rigid bodies; source corpse geometry remains independent. Native attachment dummy90, actor scale and treasure interaction records are retained.",
+            "Source DummyObject treasure carriers remain visually absent; their unported source activation scripts are not inferred from the existence of a treasure event. Pickup collection and native glow after visual suppression require gameplay validation."]};
     }
 }

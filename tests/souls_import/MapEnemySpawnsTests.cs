@@ -192,8 +192,8 @@ static class MapEnemySpawnsTests {
                 var animation=BND4.Read(result.Files["chr/"+group.Key+".anibnd.dcx"]);
                 if(group.First().HollowCombat is {} combat) {
                     Check(group.All(p=>p.HollowCombat!=null&&p.SourceEquipmentMounts==null&&p.ProportionScale==1&&p.DirectWeightShare>.999999&&p.Bones.All(b=>b.Direct&&b.Target.StartsWith("DS1_",StringComparison.Ordinal))),"Ordinary source-visible hierarchy was replaced by an idle/native body fit");
-                    Check(combat.NativeModel=="c2630"&&combat.NativeBones==84&&combat.VisibleBones>0&&combat.MotionClips==567,"Ordinary hollow did not use the declared c2630/source-visible rig");
-                    Check(animation.Files.Count==hollowAnimation.Files.Count&&animation.Files.Select(f=>f.ID).SequenceEqual(hollowAnimation.Files.Select(f=>f.ID))&&animation.Files.Count(f=>f.ID>=1000000000)==567,"Ordinary hollow changed native motion membership");
+                    Check(combat.NativeModel=="c2630"&&combat.NativeBones==84&&combat.VisibleBones>0&&combat.MotionClips==567&&combat.OwnedDeathClips.Count==4&&combat.DeathPhysics!=null,"Ordinary hollow did not use the declared c2630/source-visible rig");
+                    Check(animation.Files.Count==hollowAnimation.Files.Count+4&&hollowAnimation.Files.All(f=>animation.Files.Any(a=>a.ID==f.ID))&&animation.Files.Count(f=>f.ID>=1000000000)==571,"Ordinary hollow lost native motions or its four owned death clips");
                     Check(result.Files["action/script/"+group.Key+".hks"].SequenceEqual(hollowScript),"Ordinary hollow lost the shipped c2630 action script");
                     var rig=NativeAnimation.Skeleton(animation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
                     Check(rig.Names.Length==84+combat.VisibleBones&&rig.Names.Length<=256&&rig.Names.Take(84).SequenceEqual(hollowRig.Names)&&rig.Parents.Take(84).SequenceEqual(hollowRig.Parents)&&rig.Local.Take(84).SequenceEqual(hollowRig.Local)&&rig.Names.Skip(84).All(n=>n.StartsWith("DS1_",StringComparison.Ordinal)),"Ordinary source rig changed native bones or exceeded skin indices");
@@ -338,7 +338,7 @@ static class MapEnemySpawnsTests {
             }
             var itemLots=ImportParam.Read(next.Files.Single(f=>Leaf(f.Name)=="ItemLotParam.param").Bytes,"ITEMLOT_PARAM_ST",148,2);
             var vial=ImportParam.Payload(itemLots.Rows.Single(r=>r.ID==loot.VialDropLot));
-            Check(BitConverter.ToInt32(vial,0)==1000&&BitConverter.ToUInt16(vial,64)==300&&BitConverter.ToUInt16(vial,66)==700&&vial[138]==1&&BitConverter.ToInt32(vial,128)==-1,"Vial probability or repeatability is incorrect");
+            Check(BitConverter.ToInt32(vial,0)==1000&&BitConverter.ToUInt16(vial,64)==100&&BitConverter.ToUInt16(vial,66)==900&&vial[138]==1&&BitConverter.ToInt32(vial,128)==-1&&BitConverter.ToInt32(vial,132)==-1&&vial[136]==0&&BitConverter.ToUInt16(vial,146)==0,"Vial probability, luck independence or repeatability is incorrect");
             var keys=ImportParam.Read(next.Files.Single(f=>Leaf(f.Name)=="EquipParamGoods.param").Bytes,"EQUIP_PARAM_GOODS_ST",108,1);
             foreach(var (sourceID,targetID) in loot.QuestItems)Check(keys.Rows.Single(r=>r.ID==targetID).Name=="Imported DS1R good "+sourceID,"Quest item identity was lost");
             if(id=="m10_02_00_00") {
@@ -361,6 +361,6 @@ static class MapEnemySpawnsTests {
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
         Check(mobileCrossbows==5&&fixedCrossbows==4,"Source crossbow mobile/stationary role population changed");
         Console.WriteLine($"PASS: {torchActors} source torch carriers, {nonTorchActors} other enemies, five mobile/four stationary crossbows with scoped arrows; cemetery skeletons preserve their c2610 torch/superarmor filtering");
-        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants and two Capra dogs), source masks/shared textures, role-specific c2630/source-visible567-clip hollow rigs, preserved skeleton/boss paths, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants and two Capra dogs), source masks/shared textures, role-specific c2630/source-visible571-clip hollow rigs, preserved skeleton/boss paths, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }
