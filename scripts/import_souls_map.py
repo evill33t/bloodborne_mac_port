@@ -189,6 +189,10 @@ def main(argv=None):
                 # those composed outputs replace files; independent exports cannot
                 # be combined with a blind copy of whole game-parameter binders.
                 shutil.copytree(next_output / "dvdroot_ps4", staging / "dvdroot_ps4", dirs_exist_ok=True)
+                from import_runtime import merge
+                runtime = merge([staging / 'runtime-requirements.json', next_output / 'runtime-requirements.json'])
+                if runtime['requirements']:
+                    (staging / 'runtime-requirements.json').write_text(json.dumps(runtime) + '\n')
                 metadata = staging / "maps" / attached["source_map"]
                 metadata.mkdir(parents=True)
                 shutil.copy2(next_output / "conversion.json", metadata / "conversion.json")

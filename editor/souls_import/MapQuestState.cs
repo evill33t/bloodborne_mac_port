@@ -205,6 +205,8 @@ internal static class MapQuestState {
         [1487]=52100296,
         [1488]=52100297,
         [1489]=52100298,
+        [11010902]=52100299, // Capra defeat; Taurus11010901 already owns52100173.
+        [3]=52100300, // Gargoyles defeated; upper bell11010700 stays separate.
     };
     internal static int Flag(int source)=>Flags.TryGetValue(source,out int target)?target:
         throw new NotSupportedException("Source quest flag has no stable reservation: "+source);

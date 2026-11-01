@@ -31,7 +31,10 @@ internal static class MapDestination {
         // The breakable converter borrows actor fields from this record. It is
         // removed after conversion and is never registered in the shipped scene.
         var urn=donor.Parts.Objects.FirstOrDefault(p=>p.ModelName=="o240028")??donor.Parts.Objects.FirstOrDefault(p=>p.ModelName=="o240035");
-        if(urn!=null){var seed=(MSBB.Part.Object)urn.DeepCopy();seed.Name=UrnSeed;seed.EntityID=-1;result.Parts.Objects.Add(seed);}
+        if(urn!=null){var seed=(MSBB.Part.Object)urn.DeepCopy();seed.Name=UrnSeed;seed.EntityID=-1;result.Parts.Objects.Add(seed);
+            // Intermediate encounter/ladder validation serializes this scene
+            // before Finish removes the temporary template actor.
+            if(seed.ModelName!=null)result.Models.Objects.Add((MSBB.Model.Object)donor.Models.Objects.Single(m=>m.Name==seed.ModelName).DeepCopy());}
         return result;
     }
     internal static byte[] EmptyEvents() {

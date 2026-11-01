@@ -2,8 +2,8 @@
 using SoulsFormats;
 using System.Numerics;
 
-// Explicit hollow, cemetery skeleton and Parish boar/Titanite adapters. Other
-// bosses, quest actors and event-controlled populations require separate adapters.
+// Explicit ordinary and encounter adapters. Quest actors and unsupported
+// event-controlled populations stay omitted until their behavior is adapted.
 internal static class MapEnemySpawns {
     internal record Spawn(string SourceName,string SourceModel,int SourceNPCParamID,int SourceThinkParamID,int SourceEntityID,
         string TargetModel,int EntityID,int NPCParamID,int ThinkParamID,Vector3 Position,int[] DisplayMasks,double DirectWeightShare,float ProportionScale,IReadOnlyList<BoneMatch> Bones,bool HasSourceTorch,int SourceInitAnimID,string? NativeAdapter=null,SourceClothPose.Report? SourceClothPose=null,SourceEquipmentMounts.Report? SourceEquipmentMounts=null);
@@ -46,8 +46,10 @@ internal static class MapEnemySpawns {
         MSBB destination,Vector3 offset,IReadOnlyList<MapCollisionBindings.Chunk> chunks,IReadOnlyList<MSBB.Part.Collision> slots,
         byte[] gameParamBytes,string? nativeMap=null,Func<string,byte[]?>? readNative=null,int? ordinaryFirstEntity=null) {
         if(ordinaryFirstEntity is <10000 or >int.MaxValue-1000)throw new ArgumentOutOfRangeException(nameof(ordinaryFirstEntity));
+        NonHumanoidEnemies.Profile? Special(MSB1.Part.Enemy p)=>NonHumanoidEnemies.Select(p,sourceMap)??BossEnemyCharacters.Select(p,sourceMap);
+        bool Encounter(MSB1.Part.Enemy p)=>BossEnemyCharacters.Select(p,sourceMap)!=null;
         var selected=source.Parts.Enemies.Where(p=>p.TalkID<=0&&p.CharaInitID<0&&
-            (SupportedParams.Contains(p.NPCParamID)&&p.ModelName=="c"+(p.NPCParamID/100)&&p.InitAnimID==-1||CemeterySkeleton(p,sourceMap)||NonHumanoidEnemies.Select(p,sourceMap)!=null)).ToArray();
+            (SupportedParams.Contains(p.NPCParamID)&&p.ModelName=="c"+(p.NPCParamID/100)&&p.InitAnimID==-1||CemeterySkeleton(p,sourceMap)||Special(p)!=null)).ToArray();
         var names=selected.Select(p=>p.Name).ToHashSet(StringComparer.Ordinal);
         var skipped=source.Parts.Enemies.Where(p=>!names.Contains(p.Name)).Select(p=>new Omitted(p.Name,p.ModelName,p.NPCParamID,p.InitAnimID,OmissionReason(p,sourceMap))).ToArray();
         static bool Finite(Vector3 p)=>float.IsFinite(p.X)&&float.IsFinite(p.Y)&&float.IsFinite(p.Z);
@@ -73,16 +75,17 @@ internal static class MapEnemySpawns {
         int firstEntity=nextEntity,nextSpecialEntity=checked(firstEntity+900);
         var entities=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).ToHashSet();
         foreach(var group in selected.GroupBy(p=>(p.ModelName,p.NPCParamID))) {
-            bool skeleton=CemeterySkeleton(group.First(),sourceMap);var special=NonHumanoidEnemies.Select(group.First(),sourceMap);
-            int next=special!=null?nextSpecialModel:skeleton?nextSkeletonModel:nextModel,limit=special!=null?8900:skeleton?9800:9700;
+            bool skeleton=CemeterySkeleton(group.First(),sourceMap);var special=Special(group.First());bool encounter=Encounter(group.First());
+            int encounterModel=group.Key.NPCParamID switch {225000=>8950,224000=>8951,334003=>8952,535000=>8953,535001=>8954,_=>0};
+            int next=encounter?encounterModel:special!=null?nextSpecialModel:skeleton?nextSkeletonModel:nextModel,limit=encounter?encounterModel+1:special!=null?8900:skeleton?9800:9700;
             while(next<limit&&(used.Contains(next*100)||destination.Models.Enemies.Any(m=>m.Name=="c"+next)||File.Exists(Path.Combine(nativeRoot,"chr/c"+next+".chrbnd.dcx"))||special!=null&&(Directory.EnumerateFiles(Path.Combine(nativeRoot,"chr"),"c"+next+".*").Any()||File.Exists(Path.Combine(nativeRoot,"action/script/c"+next+".hks"))||Directory.EnumerateFiles(Path.Combine(nativeRoot,"sound"),"sprj_c"+next+".*").Any()||Directory.EnumerateFiles(Path.Combine(nativeRoot,"sound"),"sprj_c"+next+"_*.fsb").Any())))next++;
             if(next>=limit)throw new InvalidDataException("Imported enemy namespace exhausted");
-            int id=next,paramID=id*100;if(special!=null)nextSpecialModel=next+1;else if(skeleton)nextSkeletonModel=next+1;else nextModel=next+1;
+            int id=next,paramID=id*100;if(!encounter&&special!=null)nextSpecialModel=next+1;else if(special==null&&skeleton)nextSkeletonModel=next+1;else if(special==null)nextModel=next+1;
             string target="c"+id;used.Add(paramID);
             var row=sourceNpcs.Rows.Single(r=>r.ID==group.Key.NPCParamID);
             var masks=Enumerable.Range(0,16).Where(i=>Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="modelDispMask"+i).Value)!=0).ToHashSet();
             var appearance=MapCharacters.Authored(sourceRead,group.Key.ModelName);SourceClothPose.Report? clothReport=null;SourceClothPose.Result? clothResult=null;
-            if(SourceClothPose.ReadPhysics(sourceRead,"DS1R",group.Key.ModelName) is {} clothPhysics) {
+            if(special==null&&SourceClothPose.ReadPhysics(sourceRead,"DS1R",group.Key.ModelName) is {} clothPhysics) {
                 if(!clothCache.TryGetValue(group.Key.ModelName,out var cloth))clothCache.Add(group.Key.ModelName,cloth=SourceClothPose.Bake(appearance.Model,clothPhysics));
                 appearance.Model=cloth.Model;clothReport=cloth.Report;clothResult=cloth;
             }
@@ -94,21 +97,23 @@ internal static class MapEnemySpawns {
             // c2500 mask 1 is the authored torch loadout (NpcParam 250001).
             // Armoured c2540/c2550/c2560 variants carry other equipment.
             bool hasTorch=group.Key.ModelName=="c2500"&&masks.Contains(1);
-            var bake=special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910",preserveEnemyProportions:!skeleton,staticClothAnchors:clothResult?.Anchors,equipmentMounts:equipment?.Frames,equipmentGrip:equipment?.Grip);
+            var bake=encounter?BossEnemyCharacters.Package(sourceRead,Native,special!,target,masks,files):special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910",preserveEnemyProportions:!skeleton,staticClothAnchors:clothResult?.Anchors,equipmentMounts:equipment?.Frames,equipmentGrip:equipment?.Grip);
             var actorMap=special!=null?MSBB.Read(Native("map/MapStudio/"+special.Map+".msb.dcx")):donorMap;
             var actorDonor=special!=null?actorMap.Parts.Enemies.First(p=>p.ModelName==special.Native):donor;
             var rowDonor=special!=null?npcs.Rows.Single(r=>r.ID==special.Npc):paramDonor;
             string actorTemplate=special?.Native??template;int actorThink=special?.Think??templateParam;
             if(skeleton)MapSkeletonAnimations.Apply(sourceRead,group.Key.ModelName,target,bake,files);
-            var payload=MapCharacters.Payload(rowDonor);if(special!=null)payload=NonHumanoidEnemies.Capsule(payload,row,definitions);foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
-            MapCharacters.CloneRow(npcs,rowDonor,paramID,(special!=null?"Imported Parish enemy ":skeleton?"Imported cemetery skeleton ":"Imported hollow ")+group.Key,payload);
+            var payload=MapCharacters.Payload(rowDonor);if(encounter)payload=BossEnemyCharacters.Parameters(payload,row,definitions);else if(special!=null)payload=NonHumanoidEnemies.Capsule(payload,row,definitions);foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
+            MapCharacters.CloneRow(npcs,rowDonor,paramID,(encounter?"Imported boss encounter actor ":special!=null?"Imported Parish enemy ":skeleton?"Imported cemetery skeleton ":"Imported hollow ")+group.Key,payload);
             var model=(MSBB.Model.Enemy)actorMap.Models.Enemies.Single(m=>m.Name==actorTemplate).DeepCopy();model.Name=target;model.SibPath=model.SibPath.Replace(actorTemplate,target,StringComparison.OrdinalIgnoreCase);destination.Models.Enemies.Add(model);
             foreach(var sourceActor in group) {
-                int entity=special!=null?nextSpecialEntity:skeleton?nextSkeletonEntity:nextEntity;while(entities.Contains(entity))entity++;
-                if(!skeleton&&ordinaryFirstEntity is {} first&&entity>=first+1000)throw new InvalidDataException("Imported ordinary enemy entity namespace exhausted");
-                if(special!=null){if(entity>=firstEntity+1000)throw new InvalidDataException("Imported Parish enemy entity namespace exhausted");nextSpecialEntity=entity+1;}else if(skeleton){if(entity>=2420000)throw new InvalidDataException("Imported skeleton entity namespace exhausted");nextSkeletonEntity=entity+1;}else nextEntity=entity+1;
+                int bossOffset=sourceActor.EntityID switch {1010700=>800,1010750=>801,1010500=>802,1010501=>803,1010800=>804,1010801=>805,_=>-1};
+                int entity=encounter?checked(firstEntity+bossOffset):special!=null?nextSpecialEntity:skeleton?nextSkeletonEntity:nextEntity;if(encounter&&(bossOffset<0||entities.Contains(entity)))throw new InvalidDataException("Imported encounter actor reservation is occupied");
+                if(!encounter)while(entities.Contains(entity))entity++;
+                if(special==null&&!skeleton&&ordinaryFirstEntity is {} first&&entity>=first+800)throw new InvalidDataException("Imported ordinary enemy entity namespace exhausted");
+                if(!encounter&&special!=null){if(entity>=firstEntity+1000)throw new InvalidDataException("Imported Parish enemy entity namespace exhausted");nextSpecialEntity=entity+1;}else if(special==null&&skeleton){if(entity>=2420000)throw new InvalidDataException("Imported skeleton entity namespace exhausted");nextSkeletonEntity=entity+1;}else if(special==null)nextEntity=entity+1;
                 entities.Add(entity);
-                int collision=Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
+                int collision=encounter?MapCollisionBindings.ObjectSlot(chunks,sourceActor.CollisionName,sourceActor.Position+offset):Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
                 var actor=(MSBB.Part.Enemy)actorDonor.DeepCopy();actor.Name=target+"_"+reports.Count.ToString("D4");actor.ModelName=target;
                 actor.EntityID=entity;actor.NPCParamID=paramID;actor.ThinkParamID=actorThink;actor.TalkID=-1;actor.CharaInitID=-1;
                 actor.Position=sourceActor.Position+offset;actor.Rotation=sourceActor.Rotation;actor.Scale=sourceActor.Scale*bake.ProportionScale;actor.CollisionName=slots[collision].Name;
@@ -120,16 +125,20 @@ internal static class MapEnemySpawns {
         npcFile.Bytes=MapCharacters.WriteRows(npcs);files.Add("param/gameparam/gameparam.parambnd.dcx",game.Write(DCX.Type.DCX_DFLT_10000_44_9));
         string aiPath="script/"+(nativeMap??(sourceMap=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00"))+".luabnd.dcx";
         var ai=MapNativeAi.Merge(Native(aiPath),Native("script/m22_00_00_00.luabnd.dcx"));
-        foreach(var profile in selected.Select(p=>NonHumanoidEnemies.Select(p,sourceMap)).Where(p=>p!=null).Distinct())
+        var specialProfiles=selected.Select(Special).Where(p=>p!=null).Distinct().ToArray();
+        if(specialProfiles.Length>0)ai=MapNativeAi.Merge(ai,Native("script/aicommon.luabnd.dcx"),requiredGoals:[10000]);
+        foreach(var profile in specialProfiles)
             ai=MapNativeAi.Merge(ai,Native("script/"+profile!.Ai+".luabnd.dcx"),int.Parse(profile.Native[1..]));
         files.Add(aiPath,ai);
-        return new(files,reports,skipped,["Ordinary hollows retain source segment lengths in both their bind rig and every native animation's positional channels, without relying on MSB enemy scale. Native animation rotations, timing, events, extracted motion, attack/hitbox, AI and health remain in use. Native combat reach and physics are approximations; source combat and weapon behavior are not reproduced. The item adapter replaces native donor loot where enabled.",
+        foreach(var (path,bytes) in MapNativeAi.Fallbacks(ai,path=>readNative?.Invoke(path)??
+            (File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null)))files.Add(path,bytes);
+        return new(files,reports,skipped,[..BossEnemyCharacters.Limitations,"Ordinary hollows retain source segment lengths in both their bind rig and every native animation's positional channels, without relying on MSB enemy scale. Native animation rotations, timing, events, extracted motion, attack/hitbox, AI and health remain in use. Native combat reach and physics are approximations; source combat and weapon behavior are not reproduced. The item adapter replaces native donor loot where enabled.",
             "Native donor torch-flame events are retained only for the source c2500 torch loadout. Hollow donor animation events and native combat/status parameters remain unchanged. Skeleton attack superarmor is aligned with the source basic attacks. Source torch placement, weapon movesets and fire damage are not converted.",
             "Firelink's identified c2900/c2910 cemetery skeletons retain source appearance, equipment masks, placement and stature. Source 9001/9061 bone-pile awakening and living heavy-hit 2014/2020/2040 motion are retargeted onto native playback slots, with source wake groups and protection windows. Combat AI, attacks, hitboxes, health, death and effects remain native; necromancer resurrection, original movesets and giant attack reach are not converted. Other special-pose enemies remain disabled.",
             "The Parish armored boar and Titanite Demon retain their complete source skin, segment lengths and source animation on appended rig tracks; native body tracks, locomotion, attack timing, hitboxes, AI and HP remain in use. The cloned native character capsule uses the matching source hitHeight/hitRadius/hitYOffset fields. Extra native states reuse explicitly mapped source actions. Their source armor, lightning/projectiles, unique death persistence and original combat behavior are not converted. Native physical/attack anchors can differ from the visible source body and require gameplay validation.",
             "The Balder Knight cape uses an offline gravity pose calculated from its source capsule bodies, masses, inertia, constraints and contacts. This is a static appearance pose that follows the animated body; ongoing native cloth simulation, wind and cloth/body collisions are not reproduced.",
             "Supported hollow weapons and shields use their authored source idle attachment frames on the native anatomical hands and forearms. Other source animation-local equipment movement and visibility channels are not retargeted; combat poses and weapon behavior remain native approximations.",
-            "Only explicitly supported ordinary hollow, cemetery skeleton and Parish boar/Titanite parameter rows are instantiated. Source quest actors, bosses, multiplayer phantoms and other unsupported actors remain disabled.",
+            "Only explicit ordinary, cemetery skeleton, Parish and Burg boss encounter parameter rows are instantiated. Source quest actors, other bosses, multiplayer phantoms and unsupported actors remain disabled.",
             "This enemy adapter does not convert source patrols or event activation. Consult the navigation report for static source navigation coverage. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation."]);
     }
 }

@@ -8,6 +8,7 @@ byte[]? Read(string p){if(files.TryGetValue(p,out var b))return b;if(!File.Exist
 void Write(string p,byte[] b){Check(!p.StartsWith("map/MapStudio/"),"Seed overwrote native MSB");files[p]=b;}
 foreach(var (source,target) in new[]{("m10_02_00_00","m40_02_00_00"),("m10_01_00_00","m40_03_00_00")}){
  var choice=MapDestination.Select("additional","DS1R",source,target);var donor=MSBB.Read(Read("map/MapStudio/"+choice.TemplateMap+".msb.dcx")!);var before=donor.Write();var map=MapDestination.Create(donor,choice);
+ Check(MSBB.Read(map.Write()).Parts.Objects.Count==map.Parts.Objects.Count,"Temporary actor lacks a serializable model reference");
  Check(map.Parts.Players.Count==1&&map.Parts.Collisions.Count==1&&map.Parts.MapPieces.Count==0&&map.Parts.Enemies.Count==0&&map.Events.GetEntries().Count==0&&map.Regions.GetEntries().Count==0,"Additional scene imported native residents/events");
  MapDestination.Seed(choice,Read,Write);var script=EMEVD.Read(files["event/"+target+".emevd.dcx"]);Check(script.Events.Select(e=>e.ID).Order().SequenceEqual(new long[]{0,50})&&script.Events.All(e=>e.Instructions.Count==0),"Fresh event roots changed");
  var oldEnv=TPF.Read(Read("map/m24/m24_envmap.tpf.dcx")!);var env=TPF.Read(files["map/m40/m40_envmap.tpf.dcx"]);

@@ -63,7 +63,7 @@ internal sealed partial class SourceAnimation {
             var bone=skeleton.Element(names,i);var text=skeleton.Reference(skeleton.Nested(bone.Type,bone.At,"name").At);
             if(text.Count is <2 or >256||skeleton.Name(text.Type)!="char"||skeleton.Byte(text.At+text.Count-1)!=0)
                 throw new InvalidDataException("Invalid source animation bone name");
-            var name=new UTF8Encoding(false,true).GetString(Enumerable.Range(text.At,text.Count-1).Select(skeleton.Byte).ToArray());
+            var name=DecodeBoneName(Enumerable.Range(text.At,text.Count-1).Select(skeleton.Byte).ToArray());
             int parent=unchecked((short)skeleton.UShort(skeleton.Element(parents,i).At));
             if(name.Contains('\0')||!uniqueNames.Add(name)||parent< -1||parent>=bones.Length||parent==i)
                 throw new InvalidDataException("Invalid source animation skeleton hierarchy");
@@ -109,6 +109,21 @@ internal sealed partial class SourceAnimation {
             reader.Align(16);if(reader.At!=end-start)throw new InvalidDataException("Unexpected trailing source animation block data");
         }
         return new(bones,duration,delta,frames,blockFrames,trackBones,decoded);
+    }
+
+    // DS1R retains Shift-JIS skeleton names such as Taurus's authored
+    // "master エクストラ01Nub". Preserve the same Unicode name as FLVER;
+    // reject malformed sequences and non-round-tripping legacy mappings.
+    internal static string DecodeBoneName(byte[] bytes) {
+        if(bytes.Length is <1 or >255||bytes.Contains((byte)0))throw new InvalidDataException("Invalid source animation bone name bytes");
+        try{return new UTF8Encoding(false,true).GetString(bytes);}
+        catch(DecoderFallbackException) {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var encoding=Encoding.GetEncoding(932,EncoderFallback.ExceptionFallback,DecoderFallback.ExceptionFallback);
+            string name=encoding.GetString(bytes);
+            if(!encoding.GetBytes(name).AsSpan().SequenceEqual(bytes))throw new InvalidDataException("Source bone name does not round-trip in Shift-JIS");
+            return name;
+        }
     }
 
     internal Matrix4x4[] Sample(float time) {

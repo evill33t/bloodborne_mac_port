@@ -1212,6 +1212,73 @@ The barrel check does not isolate the player as the source of the hit. Native
 views also showed the corrected shield grip, armored corpse pose and metallic
 boar material; these bounded checks do not establish every combat pose or prop.
 
+Burg also has explicit Taurus, Capra and Bell Gargoyle encounter adapters. Their
+four boss combatants and two primary Capra dogs bring the two-map population to
+113. Friendly NPCs keep their existing `c8900` identities; new encounter models
+use `c8950`–`c8954`, with separate append-only entity roles. The source Gargoyle
+variants retain their distinct masks and the second becomes active at the source
+60% threshold. Both must die before the encounter clears. Source base HP, localized
+boss names, health bars, mapped persistent defeat flags and boss-clear Blood Echo
+amounts are independent of donor parameters. The upper bell is not rung by defeat.
+Taurus and both Gargoyles use the shipped sword-boss Think preset with 100-metre
+engagement, sharing the same native combat scripts as the ordinary ten-metre preset.
+
+The composed AI banks also export their unchanged native bytecode at
+`script_interroot/ai/out`. New map IDs request some loose goals before their map
+bank is available. The native cache retains an empty result after a missing loose
+file, and later bank registration does not fill it. This left imported enemies
+idle even though their controllers, Think rows and goal registries were present.
+Fallback exports supply the same bytes at the first lookup, reject conflicting
+existing files and retain both maps' normal bank metadata. A fresh copied-save
+control changed nine failed script loads to zero and restored movement, attacks
+and damage for ordinary hollows and the boss wrappers.
+
+Connected boss maps declare a fixed 768 MiB MAIN heap requirement. Their additional
+animation banks exhausted the native 524 MiB heap during animation materialization.
+The offline mod loader collects this requirement from enabled mod layers, and the
+patch audit applies it only to the exact verified Bloodborne 1.09 executable hash
+and original table value. Original executable files stay intact. Disabled mods and
+online mode do not request the larger heap; unknown profiles are rejected.
+
+Five source fog apertures use source-sized physical boxes with native Bloodborne
+particles and traversal animation. Source outside regions gate the action prompt;
+source battle-entry volumes confirm admission, independently of the small rotation
+target. Restarting a map clears admission/phase state and retains defeat. Separate
+persistent reward controllers recover interrupted reward waits. The existing goods
+policy converts Humanity/Twin Humanities to Insight consumables; Capra's Key to
+Depths retains a separate inventory identity. Its keyed door still needs an adapter.
+Original game files and existing composed parameter/message/event entries stay intact.
+
+These are native combat wrappers: source visible poses and proportions do not
+reproduce source attack hitboxes, damage, projectiles, AI or flight. Source intro
+cutscenes are unconverted. Taurus retains the source waiting location and bridge
+trigger after fog admission; its explicit entrance clips adapt source motion and
+movement flags before combat starts. The second Gargoyle uses its checked source
+landing position for its physical body. Gargoyle
+fire breath, tail cutting and boss music remain unconverted. Native fog particles
+retain their authored size/style even though physical apertures match the source.
+
+Twelve fixed Burg/Parish ladders retain their source static visuals and use owned
+invisible native ladder objects. Fifty-nine source endpoint/facing markers stay
+unchanged. Taurus ladder's upper interaction marker moves down ten centimetres:
+its imported platform is six centimetres below the native descent contact window.
+The motion target and native rung count stay unchanged. Native
+climbing registration uses separate start/stop flags. The `o1208` kick-down shortcut
+is explicitly skipped and remains locked; its object animation and persistent gate
+need a separate adapter. Source ladder rail collision, AI ladder navigation and
+multiplayer behavior are not converted. Format and state-machine fixtures are
+separate from native fog, combat and climbing gameplay validation.
+
+Copied-save native checks confirmed all three entrance fog traversals, Taurus
+waiting on the tower after admission, one bridge-triggered jump, and subsequent
+approach/attacks. Capra and both dogs moved and attacked; ordinary hollows again
+dealt damage. Separate ladder checks covered ascent, upper dismount and descent.
+Taurus's clear/reward path was exercised with player attacks. Both Gargoyles died
+by falling during the phase/clear check, which produced the mapped reward; this
+does not establish a complete melee fight. QA player placement and a copied-save
+No Dead flag helped exercise these paths. These checks do not establish full
+campaign progression, source combat accuracy or live defeat persistence on reload.
+
 Source collision filters 13/14 (fall camera) and 15 (instant death) are now exported
 as separate paired H/L sensor bodies with matching native filter metadata, rather
 than omitted or added to the walkable layer. Eight source sensor placements retain
@@ -1251,7 +1318,11 @@ DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
 `tests/test_npc_face.sh`, `tests/test_map_characters.sh`, `tests/test_map_enemy_spawns.sh`,
 `tests/test_enemy_proportions.sh`, `tests/test_static_map_uv.sh`,
 `tests/test_map_navigation.sh`, `tests/test_skin_hair_alpha.sh`,
-`tests/test_shield_grip.sh` and `tests/test_boar_materials.sh`.
+`tests/test_shield_grip.sh`, `tests/test_boar_materials.sh`,
+`tests/test_boss_encounter_source.sh`, `tests/test_boss_enemy_characters.sh`,
+`tests/test_boss_entrance_motion.sh`,
+`tests/test_boss_fog_walls.sh`, `tests/test_boss_encounters.sh` and
+`tests/test_map_ladders.sh`.
 The proportion tests independently decode 3,996 posed frames across four source
 models and check all 328 native clips per model. NPC and cemetery-skeleton adapters
 remain separate. `tests/test_source_animation.sh` accepts the DS1R

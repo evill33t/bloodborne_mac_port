@@ -44,6 +44,7 @@ def content_root(folder):
     if folders and all(e.name.casefold() in GAME_FOLDERS for e in folders):
         return folder, 'dvdroot_ps4'
     if len(folders) == 1 and not [e for e in entries if e.is_file() and
+                                  e.name != 'runtime-requirements.json' and
                                   e.suffix.casefold() not in ('.txt', '.md', '.jpg', '.png', '.ini')]:
         return content_root(folders[0])
     return None
@@ -200,6 +201,7 @@ def main():
     parser.add_argument('--mods-dir', required=True, type=Path)
     parser.add_argument('--config', type=Path)
     parser.add_argument('--enabled', choices=('0', '1'), default='1')
+    parser.add_argument('--runtime-out', type=Path, help='runtime requirements of the layers mounted for this launch')
     parser.add_argument('--report', action='store_true', help='print the mods and conflicts as JSON')
     args = parser.parse_args()
     if args.report:
@@ -224,7 +226,21 @@ def main():
         else:
             for name in selected(args.mods_dir, args.config):
                 layers.append((name, args.mods_dir / name))
-    print(build_overlay(args.game, args.out, layers))
+    runtime = None
+    if args.runtime_out:
+        from import_runtime import merge
+        paths = []
+        for _, folder in layers:
+            base, _ = content_root(folder)
+            paths.extend(dict.fromkeys((Path(folder) / 'runtime-requirements.json', base / 'runtime-requirements.json')))
+        runtime = merge(paths)
+    view = build_overlay(args.game, args.out, layers)
+    if args.runtime_out:
+        args.runtime_out.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.runtime_out.with_suffix('.tmp')
+        temporary.write_text(json.dumps(runtime) + '\n')
+        temporary.replace(args.runtime_out)
+    print(view)
 
 
 if __name__ == '__main__':

@@ -92,6 +92,8 @@ internal static partial class Program {
                 ToneEV:Setting("--exposure-ev",-.4f),FogStrength:Setting("--fog-strength",.30f),FogDistance:Setting("--fog-distance",80f),FogStart:Setting("--fog-start",25f),FogColorScale:Setting("--fog-color-scale",.35f));
             var allPlacements=sourceMap.Placements;
             MSB1? legacyMap=profile.Id is "DS1" or "DS1R"?MSB1.Read(sourceMap.ReadAsset($"map/MapStudio/{map}.msb")??sourceMap.ReadAsset($"map/MapStudio/{map}.msb.dcx")??throw new FileNotFoundException("Source MSB unavailable")):null;
+            var bossPlan=profile.Id=="DS1R"&&map=="m10_01_00_00"?BossEncounterSource.Load(sourceMap.ReadAsset,profile.Id,map,definitions!):null;
+            var encounterFogNames=bossPlan?.Encounters.SelectMany(e=>new[]{e.EntryFog}.Concat(e.ExitFogs)).Select(f=>f.Name).ToHashSet(StringComparer.Ordinal)??[];
             var environment=legacyMap==null?null:MapEnvironment.Load(sourceMap.ReadAsset,path=>File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null,profile.Id,map,target,definitions!,
                 legacyMap.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Object or MSB1.Part.Collision or MSB1.Part.Enemy)
                     .Select(p=>new EnvironmentBinding(p.Name,p.LightID,p.FogID,p.ScatterID,p.ShadowID,p is MSB1.Part.Collision,p.ToneMapID,p.ToneCorrectID)).ToArray(),calibration,destination.Additional||target=="m24_00_00_00"?"m24_01_00_00":null);
@@ -118,7 +120,7 @@ internal static partial class Program {
                 foreach(var (path,bytes) in breakables.Files)Write(path,bytes);
                 foreach(var (sourceName,actorName) in breakables.SourceActors){var actor=breakables.Objects.Single(p=>p.Name==actorName);actor.GparamConfigStruct=Lighting(sourceName);SourceGroups(actor,sourceName);}
             }
-            var placements=allPlacements.Where(p=>breakables?.ConsumedNames.Contains(p.Name)!=true).ToArray();
+            var placements=allPlacements.Where(p=>breakables?.ConsumedNames.Contains(p.Name)!=true&&!encounterFogNames.Contains(p.Name)).ToArray();
             var corpsePlan=SourceCorpsePose.Resolve(profile.Id,map,legacyMap,sourceMap.ReadAsset);
             var corpseByName=corpsePlan.Placements.ToDictionary(p=>p.Name,StringComparer.Ordinal);
             string ModelKey(StaticPlacement p)=>corpseByName.TryGetValue(p.Name,out var corpse)?p.Model+"_pose"+corpse.Animation:p.Model;
@@ -230,9 +232,24 @@ internal static partial class Program {
             if(importItems&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
                 items=MapItems.Bake(sourceMap.ReadAsset,ReadNative,legacyMap,msb,map,definitions!,nativeRoot,offset,boundCollision,slots,
                     enemySpawns.Spawns,enemySpawns.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??
-                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!);
+                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,
+                    rewardLots:bossPlan?.Encounters.SelectMany(e=>(e.Rewards.Immediate is {} immediate?new[]{immediate.ID}:Array.Empty<int>()).Concat(e.Rewards.Delayed.Select(l=>l.ID))).Distinct().ToArray());
                 foreach(var pickup in items.Pickups)msb.Parts.Objects.Single(p=>p.Name==pickup.TargetPart).GparamConfigStruct=Lighting(pickup.SourcePart);
                 foreach(var (path,bytes) in items.Files)Write(path,bytes);
+            }
+            MapBossEncounters.Result? bossEncounters=null;
+            MapLadders.Result? ladders=null;
+            if(bossPlan!=null&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
+                MapQuestState.VerifyReservations(nativeRoot);
+                string path="event/"+baseMap+".emevd.dcx";
+                bossEncounters=MapBossEncounters.Apply(bossPlan,msb,enemySpawns.Spawns,offset,boundCollision,slots,
+                    sourceMap.ReadAsset,ReadNative,ReadStaged,ReadStaged(path)??throw new FileNotFoundException("Boss script unavailable"),baseMap,nativeRoot,definitions!,importItems);
+                foreach(var pair in bossEncounters.Files)Write(pair.Key,pair.Value);Write(path,bossEncounters.Script);
+                enemySpawns=enemySpawns with{Spawns=enemySpawns.Spawns.Select(s=>s with{Position=msb.Parts.Enemies.Single(p=>p.EntityID==s.EntityID).Position}).ToArray()};
+                MapLadders.VerifyReservations(nativeRoot);
+                ladders=MapLadders.Apply(sourceMap.ReadAsset,ReadNative,ReadStaged,legacyMap,msb,offset,boundCollision,slots,
+                    ReadStaged(path)!,map,baseMap);
+                foreach(var pair in ladders.Files)Write(pair.Key,pair.Value);Write(path,ladders.Script);
             }
             MapWorldState.Result? worldState=null;
             MapTalk.Result? dialogue=null;
@@ -311,10 +328,12 @@ internal static partial class Program {
                 Write("map/MapStudio/"+Path.GetFileName(variantPath),variant.Write(DCX.Type.DCX_DFLT_10000_44_9));
             }
             var breakableTargets=breakables?.Objects.ToDictionary(p=>p.Name,StringComparer.Ordinal);
+            var fogTargets=bossEncounters?.Encounters.SelectMany(e=>e.Walls).ToDictionary(w=>w.SourceName,w=>w.ObjectName,StringComparer.Ordinal);
             var placementResults=allPlacements.Select(part=>{
                 MSBB.Part? targetPart=null;string status;string? reason=null;
                 if(staticTargets.TryGetValue(part.Name,out var staticPart)){targetPart=staticPart;status="placed-static";}
                 else if(breakables?.SourceActors.TryGetValue(part.Name,out var actorName)==true){targetPart=breakableTargets![actorName];status="placed-breakable";reason="Source visuals use native approximate fracture physics; source object events and interactions are not ported.";}
+                else if(fogTargets?.TryGetValue(part.Name,out var fogActor)==true){targetPart=msb.Parts.Objects.Single(p=>p.Name==fogActor);status="placed-boss-fog";reason="Source-sized native physical fog wall with native particles and encounter-controlled admission.";}
                 else if(modelSkips.TryGetValue(ModelKey(part),out var skipped)){status=skipped.Status;reason=skipped.Reason;}
                 else throw new InvalidDataException("Unaccounted source placement: "+part.Name);
                 return new{sourceName=part.Name,sourceModel=part.Model,sourceTransform=new{position=part.Position,rotation=part.Rotation,scale=part.Scale},initAnimID=part.InitAnimID,
@@ -322,19 +341,20 @@ internal static partial class Program {
                     targetTransform=targetPart==null?null:new{position=targetPart.Position,rotation=targetPart.Rotation,scale=targetPart.Scale}};
             }).ToArray();
             int PlacementCount(string status)=>placementResults.Count(p=>p.status==status);
-            int placedStatic=PlacementCount("placed-static"),placedBreakable=PlacementCount("placed-breakable"),sourceNoRenderGeometry=PlacementCount("source-no-render-geometry"),
+            int placedStatic=PlacementCount("placed-static"),placedBreakable=PlacementCount("placed-breakable"),placedBossFog=PlacementCount("placed-boss-fog"),sourceNoRenderGeometry=PlacementCount("source-no-render-geometry"),
                 filteredAll=PlacementCount("filtered-all"),missingData=PlacementCount("missing-data");
-            int accounted=placedStatic+placedBreakable+sourceNoRenderGeometry+filteredAll+missingData;
-            var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,sourceNoRenderGeometry,filteredAll,missingData,accounted,
-                reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)};
+            int accounted=placedStatic+placedBreakable+placedBossFog+sourceNoRenderGeometry+filteredAll+missingData;
+            var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,placedBossFog,sourceNoRenderGeometry,filteredAll,missingData,accounted,
+                reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)&&placedBossFog==encounterFogNames.Count};
             var report=new{source=profile.Id,map,target,destination=destination.Additional?"additional":"replacement",templateMap=destination.TemplateMap,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
                 placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot},
                 worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=worldState==null?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,npcAvailability},dialogue,
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",navigation=navigation?.Report,deathBoundaries=deathBoundaries?.Report,
                 collisionResidency=destination.Additional?"Collision Draw groups retain both physical layers in loaded imported blocks. Original Display/Backread and actor/scenery groups, enable flags and geometry are preserved. Connected-scene residency is broader; multi-area memory/culling behavior remains approximate.":"Original source collision groups retained",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
-                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
+                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,bossSource=bossPlan,bossEncounters=bossEncounters==null?null:new{bossEncounters.Encounters,bossEncounters.Limits},ladders=ladders==null?null:new{ladders.Bindings,ladders.Skipped,ladders.Limits},characters=characters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
                 environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations=destination.Additional?"Experimental additional map: a fresh Bloodborne MSB contains only emitted source geometry, converted collision, adapted actors/treasures and explicitly adapted world/quest records. Original native map layouts, collision archives and event scripts are preserved. Source AI, full quests, water physics and complete collision material behavior are not ported. Source stair materials retain their native no-slide classification; static source navigation coverage and unconverted gates/cross-mesh links are recorded in navigation.Limits. Native material shaders, GI and source animation/behavior adaptation retain the limits recorded by each stage. The destination finalizer adds entry/return travel and lamps; their interactions, save behavior and connected-map transitions require gameplay validation with a copied save.":"Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
+            if(bossEncounters!=null)File.WriteAllText(Path.Combine(stage.FullName,"runtime-requirements.json"),"{\"schema\":\"bbmap-runtime-1\",\"requirements\":[\"bloodborne-1.09-connected-map-main-768\"]}\n");
             File.WriteAllText(Path.Combine(stage.FullName,"conversion.json"),JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true,IncludeFields=true}));File.WriteAllText(Path.Combine(stage.FullName,"README.txt"),$"Experimental {map} {(destination.Additional?"additional map":"map replacement")} for Bloodborne {target}. Enable only with a copied test save. Place player near {to.X} {to.Y} {to.Z}. See conversion.json for coverage and limitations.\n");Directory.CreateDirectory(Path.GetDirectoryName(output)!);Directory.Move(stage.FullName,output);Console.WriteLine(JsonSerializer.Serialize(report,new JsonSerializerOptions{IncludeFields=true}));return 0;
         }catch{if(stage.Exists)stage.Delete(true);throw;}
     }

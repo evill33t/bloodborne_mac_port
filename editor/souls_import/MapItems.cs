@@ -38,7 +38,7 @@ internal static class MapItems {
     }
     internal static Result Bake(Func<string,byte[]?> sourceRead,Func<string,byte[]?> nativeRead,MSB1 source,MSBB destination,
         string sourceMap,string definitions,string nativeRoot,Vector3 offset,IReadOnlyList<MapCollisionBindings.Chunk> chunks,IReadOnlyList<MSBB.Part.Collision> slots,
-        IReadOnlyList<MapEnemySpawns.Spawn> enemies,byte[] gameParamBytes) {
+        IReadOnlyList<MapEnemySpawns.Spawn> enemies,byte[] gameParamBytes,IReadOnlyList<int>? rewardLots=null) {
         if(chunks.Count!=slots.Count||slots.Count==0)throw new InvalidDataException("Item collision bindings differ");
         var sourceFiles=BND3.Read(sourceRead("param/GameParam/GameParam.parambnd.dcx")??throw new FileNotFoundException("Source item parameters unavailable")).Files;
         PARAM Source(string name){var p=PARAM.Read(sourceFiles.Single(f=>Leaf(f.Name)==name+".param").Bytes);p.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitions,name+".xml")));return p;}
@@ -166,6 +166,7 @@ internal static class MapItems {
             evt.ItemLot1=selected[0];evt.ItemLot2=selected.Length>1?selected[1]:-1;evt.ItemLot3=selected.Length>2?selected[2]:-1;destination.Events.Treasures.Add(evt);
             pickups.Add(new(treasure.Name,carrier.Name,obj.Name,selected,obj.Position));
         }
+        foreach(int reward in rewardLots??[])if(ConvertGroup(reward)==null)throw new NotSupportedException("Boss reward has no supported goods: "+reward);
         Entry("ItemLotParam").Bytes=ImportParam.Write(lots);Entry("EquipParamGoods").Bytes=ImportParam.Write(goods);Entry("NpcParam").Bytes=ImportParam.Write(npcs);
         var resultBytes=game.Write(DCX.Type.DCX_DFLT_10000_44_9);files.Add("param/gameparam/gameparam.parambnd.dcx",resultBytes);
         if(questItems.Count>0) {

@@ -6,7 +6,7 @@ using System.Numerics;
 // retain source bind positions and source motion. Native bone indices, combat
 // controllers and physical/attack anchors remain a separate, approximate layer.
 internal static class NonHumanoidEnemies {
-    internal sealed record Profile(string Source,string Native,int Npc,int Think,string Map,string Ai,int NativeBones,int Clips);
+    internal sealed record Profile(string Source,string Native,int Npc,int Think,string Map,string Ai,int NativeBones,int Clips,string Variant="");
     internal static readonly Profile Boar=new("c3460","c1270",127500,127400,"m24_01_00_01","m24_01_00_00",163,76);
     internal static readonly Profile Demon=new("c2300","c3130",313000,313000,"m29_21_00_00/m29_21_00_46","m29_00_00_00",125,147);
     internal static Profile? Select(MSB1.Part.Enemy p,string map)=>map=="m10_01_00_00"&&p.CharaInitID<0&&p.TalkID<=0&&p.InitAnimID==-1?
@@ -46,7 +46,7 @@ internal static class NonHumanoidEnemies {
     }
     internal static NativeRigAppend.Plan Rig(byte[] sourceModel,byte[] nativeModel,byte[] skeleton,SourceAnimation reference) {
         var rig=NativeAnimation.Skeleton(skeleton);var source=FLVER2.Read(sourceModel);var names=reference.Bones.Select((b,i)=>(b.Name,i)).ToDictionary(p=>p.Name,p=>p.i,StringComparer.Ordinal);
-        if(reference.Bones.Count(b=>b.Parent<0)!=1||reference.Bones[0].Name!="Master"||reference.Bones[0].Parent!=-1||!Matrix4x4.Invert(rig.Local[0],out var inverse))throw new InvalidDataException("Unsupported authored enemy source root");
+        if(reference.Bones.Count(b=>b.Parent<0)!=1||!reference.Bones[0].Name.Equals("Master",StringComparison.OrdinalIgnoreCase)||reference.Bones[0].Parent!=-1||!Matrix4x4.Invert(rig.Local[0],out var inverse))throw new InvalidDataException("Unsupported authored enemy source root");
         var added=reference.Bones.Select(b=> {
             var matches=source.Nodes.Where(n=>n.Name==b.Name).ToArray();if(matches.Length!=1)throw new InvalidDataException("Source mesh/animation bone mismatch: "+b.Name);
             var bind=new FLVER.Node(matches[0]){Flags=matches[0].Flags,Name="DS1_"+b.Name};
@@ -108,7 +108,7 @@ internal static class NonHumanoidEnemies {
         }
         return bytes;
     }
-    internal static SkinBake Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,Profile profile,string target,IReadOnlySet<int> masks,Dictionary<string,byte[]> files) {
+    internal static SkinBake Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,Profile profile,string target,IReadOnlySet<int> masks,Dictionary<string,byte[]> files,Func<int,int>? sourceSlot=null,Action<SkinBake>? adaptMaterials=null) {
         var source=MapCharacters.Authored(readSource,profile.Source);var character=BND4.Read(readNative("chr/"+profile.Native+".chrbnd.dcx"));var animation=BND4.Read(readNative("chr/"+profile.Native+".anibnd.dcx"));
         var visual=character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase));var skeleton=animation.Files.Single(f=>f.ID==1000000);
         NativeRigAppend.ValidateCharacter(animation.Files.Single(f=>f.ID==7000400).Bytes.ToArray());
@@ -124,12 +124,13 @@ internal static class NonHumanoidEnemies {
         var bake=SkinRetarget.Bake(source.Model,render.Write(),source.Textures,masks,overrides,target,"DS1R",preserveBoneLengths:true);
         if(bake.DirectWeightShare<.999999)throw new InvalidDataException("Authored enemy skin lost direct source bone weights");
         if(profile==Boar)BoarMaterials.Apply(readSource,source.Model,source.Textures,bake,target);
+        adaptMaterials?.Invoke(bake);
         OrderRenderNodes(bake.Model);
         visual.Bytes=bake.Model.Write();skeleton.Bytes=plan.Skeleton;
         var clips=animation.Files.Where(f=>f.ID>=1000000000).ToArray();if(clips.Length!=profile.Clips)throw new InvalidDataException("Native enemy donor clip population changed");
         if(!Matrix4x4.Invert(plan.Original.Local[0],out var inverse))throw new InvalidDataException("Singular native locomotion root");
         foreach(var f in clips) {
-            var sourceClip=Clip(SourceSlot(profile,f.ID-1000000000));
+            var sourceClip=Clip(sourceSlot?.Invoke(f.ID-1000000000)??SourceSlot(profile,f.ID-1000000000));
             f.Bytes=NativeRigAppend.Clip(f.Bytes.ToArray(),plan,time=>{var pose=sourceClip.Sample(Math.Min(sourceClip.Duration,time*sourceClip.Duration));pose[0]*=inverse;return pose;},preserveAddedRootWorld:true);
         }
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));

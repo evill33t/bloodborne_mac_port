@@ -458,6 +458,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--patches-dir',type=Path,help='third-party patch XML files (shadPS4 format)')
     p.add_argument('--patches-config',type=Path,help='patches.json: enabled/disabled external patches')
+    p.add_argument('--import-runtime',type=Path,help='requirements from this launch\'s mounted mod layers')
     p.add_argument('--xml',type=Path,default=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml')
     p.add_argument('--fps',choices=sorted(FPS_PRESETS),default='uncap')
     p.add_argument('--extra',default='',help='additional patch names, separated by ";"')
@@ -509,13 +510,20 @@ def main():
         if dropped:
             print(f'Patches: online play: off for this launch: {dropped}')
     validate_patch_requirements(names,a.game_dir)
-    segments=eboot_segments((a.out/'eboot.elf').read_bytes())
+    elf=(a.out/'eboot.elf').read_bytes()
+    segments=eboot_segments(elf)
     wide = ultrawide_patch(read_settings(a.settings))
     if wide and (a.render_res or any(n.startswith('Resolution Patch ') or
                                     n == 'Increased Graphics Heap Sizes' for n in names)):
         raise ValueError('Ultrawide already selects the native resolution; remove conflicting resolution/heap overrides')
     audit=PatchAudit()
     writes=compile_patches(a.xml,names,a.app_version,segments,audit)
+    if a.import_runtime:
+        from import_runtime import heap_writes
+        imported=heap_writes(a.import_runtime,elf)
+        if imported:
+            writes += audit.add('Imported map MAIN heap', imported)
+            names.append('Imported map MAIN heap: 768 MiB')
     if wide:
         writes += audit.add(wide, ultrawide_writes(a.xml, wide, a.app_version, segments))
         names.append(f'Native scene/UI with bounded texture pool: {wide}')

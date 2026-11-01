@@ -7,8 +7,59 @@ using System.Text;
 static class MapEnemySpawnsTests {
     static void Check(bool ok,string message){if(!ok)throw new Exception(message);}
     static string Leaf(string p)=>p.Replace('\\','/').Split('/').Last();
+    static void AiFallbackContract(string native) {
+        var hashes=new Dictionary<string,byte[]>();
+        byte[] Read(string path) {
+            string file=Path.Combine(native,path);var bytes=File.ReadAllBytes(file);
+            hashes.TryAdd(file,SHA256.HashData(bytes));return bytes;
+        }
+        void Reject(Action action,string message) {
+            try{action();}catch(InvalidDataException){return;}throw new Exception(message);
+        }
+        var existing=new Dictionary<string,byte[]>(StringComparer.Ordinal);var reports=new List<object>();
+        foreach(string map in new[]{"m24_01_00_00","m24_00_00_00"}) {
+            var merged=MapNativeAi.Merge(Read("script/"+map+".luabnd.dcx"),Read("script/m22_00_00_00.luabnd.dcx"));
+            merged=MapNativeAi.Merge(merged,Read("script/aicommon.luabnd.dcx"),requiredGoals:[10000]);
+            foreach(var profile in new[]{NonHumanoidEnemies.Demon,NonHumanoidEnemies.Boar,BossEnemyCharacters.Taurus,BossEnemyCharacters.Capra,BossEnemyCharacters.Dog,BossEnemyCharacters.GargoylePrimary,BossEnemyCharacters.GargoyleSecondary})
+                merged=MapNativeAi.Merge(merged,Read("script/"+profile.Ai+".luabnd.dcx"),int.Parse(profile.Native[1..]));
+            var hash=SHA256.HashData(merged);var bank=BND4.Read(merged);
+            var fallbacks=MapNativeAi.Fallbacks(merged,path=>existing.GetValueOrDefault(path));
+            Check(SHA256.HashData(merged).SequenceEqual(hash),"Fallback export mutated its native map bank");
+            Check(fallbacks.Count==bank.Files.Count(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal)),"Fallback export omitted native bytecode or exported metadata");
+            foreach(var (sourceBank,name) in new[]{("m22_00_00_00","261000_logic.lua"),("m22_00_00_00","261010_battle.lua"),("aicommon","010000_logic.lua"),
+                (NonHumanoidEnemies.Boar.Ai,"127000_battle.lua"),(BossEnemyCharacters.Capra.Ai,"273000_battle.lua"),
+                (BossEnemyCharacters.Taurus.Ai,"313000_battle.lua"),(BossEnemyCharacters.Dog.Ai,"114000_logic.lua"),(BossEnemyCharacters.Dog.Ai,"114000_battle.lua")}) {
+                var original=BND4.Read(Read("script/"+sourceBank+".luabnd.dcx")).Files.Single(f=>Leaf(f.Name)==name);
+                Check(fallbacks.TryGetValue("script_interroot/ai/out/"+name,out var bytes)&&bytes.AsSpan().SequenceEqual(original.Bytes.Span),"Early native AI lookup lacks its exact shipped bytecode: "+name);
+            }
+            if(map=="m24_01_00_00") {
+                var wait=BND4.Read(Read("script/"+map+".luabnd.dcx")).Files.Single(f=>Leaf(f.Name)=="011000_battle.lua");
+                Check(fallbacks["script_interroot/ai/out/011000_battle.lua"].AsSpan().SequenceEqual(wait.Bytes.Span),"Early wait-goal lookup lacks its original native bytecode");
+            }
+            foreach(var (path,bytes) in fallbacks)existing[path]=bytes;
+            Check(MapNativeAi.Fallbacks(merged,path=>existing.GetValueOrDefault(path)).All(f=>f.Value.AsSpan().SequenceEqual(existing[f.Key])),"Identical composed fallbacks were rejected or changed");
+            byte[] Alter(Action<BND4> change){var copy=BND4.Read(merged);change(copy);return copy.Write(DCX.Type.DCX_DFLT_10000_44_9);}
+            BinderFile Script(BND4 b)=>b.Files.First(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal));
+            Reject(()=>MapNativeAi.Fallbacks(Alter(b=>Script(b).Name="../escape.lua")),"Unsafe native fallback path was accepted");
+            Reject(()=>MapNativeAi.Fallbacks(Alter(b=>Script(b).Bytes=Array.Empty<byte>())),"Empty native AI script was accepted");
+            Reject(()=>MapNativeAi.Fallbacks(Alter(b=>{var f=Script(b);var bytes=f.Bytes.ToArray();bytes[0]=0;f.Bytes=bytes;})),"Non-native Lua payload was accepted");
+            Reject(()=>MapNativeAi.Fallbacks(Alter(b=>{var f=Script(b);b.Files.Add(new BinderFile(f.Flags,900000,"duplicate/"+Leaf(f.Name),f.Bytes.ToArray()));})),"Repeated native fallback leaf was accepted");
+            Reject(()=>MapNativeAi.Fallbacks(Alter(b=>Script(b).ID=999)),"Unsupported native script ID was accepted");
+            Reject(()=>MapNativeAi.Fallbacks(Alter(b=>b.Files.RemoveAll(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal)))),"Empty fallback bank was accepted");
+            Reject(()=>MapNativeAi.Fallbacks(merged,_=>[0]),"Conflicting staged/native fallback was overwritten");
+            var extra=MapNativeAi.Fallbacks(Alter(b=>{var f=Script(b);b.Files.Add(new BinderFile(f.Flags,900000,"not_a_script.txt",f.Bytes.ToArray()));}));
+            Check(extra.Count==fallbacks.Count&&!extra.Keys.Any(p=>p.EndsWith(".txt",StringComparison.Ordinal)),"Fallback exporter copied an arbitrary binder entry");
+            reports.Add(new{map,files=fallbacks.Count,bytes=fallbacks.Values.Sum(b=>b.Length),bankSha=Convert.ToHexString(hash),guards=7});
+        }
+        foreach(var (file,hash) in hashes)Check(SHA256.HashData(File.ReadAllBytes(file)).SequenceEqual(hash),"Native AI source asset changed");
+        string output="out/map-editor/boss-encounters/characters/ai/fallback-validation.json";Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        File.WriteAllText(output,System.Text.Json.JsonSerializer.Serialize(new{maps=reports,nativeAssetsUnchanged=hashes.Count,sharedFiles=existing.Count},new System.Text.Json.JsonSerializerOptions{WriteIndented=true}));
+        Console.WriteLine($"PASS: native AI fallback bytecode for ordinary/special profiles in both maps, seven guards, {hashes.Count} unchanged native banks");
+    }
     public static void Main(string[] args) {
         string root=args[0],native=args[1],defs=args[2];var originals=new Dictionary<string,byte[]>();
+        AiFallbackContract(native);
+        if(Environment.GetEnvironmentVariable("ENEMY_AI_ONLY")=="1")return;
         byte[]? Read(string path){string p=Path.Combine(root,path);if(!File.Exists(p))return null;var b=File.ReadAllBytes(p);originals.TryAdd(p,SHA256.HashData(b));return b;}
         byte[] baseline=File.ReadAllBytes(Path.Combine(native,"param/gameparam/gameparam.parambnd.dcx")),composed=baseline;
         Check(MapItemPolicy.Map(MapItemPolicy.SourceGoodsCategory,500,3,false)?.TargetID==1500,"Humanity does not become Madman's Knowledge");
@@ -46,8 +97,13 @@ static class MapEnemySpawnsTests {
         foreach(var id in new[]{"m10_02_00_00","m10_01_00_00"}) {
             var source=MSB1.Read(Read("map/MapStudio/"+id+".msb")!);
             var map=MSBB.Read(File.ReadAllBytes(Path.Combine(native,"map/MapStudio/m24_01_00_01.msb.dcx")));MapReplacement.ParkActors(map);
-            var slots=map.Parts.Collisions.DistinctBy(p=>p.ModelName).ToArray();var chunks=slots.Select(p=>new MapCollisionBindings.Chunk(source.Parts.Collisions.First().Name,[],[])).ToArray();
+            var slots=map.Parts.Collisions.DistinctBy(p=>p.ModelName).ToArray();
             var offset=new Vector3(-143.8f,20.07f,164.63f);
+            // Tiny residency fixtures around the exact source placements; real
+            // floor/stack/split association has its own collision tests.
+            var encounterFloors=source.Parts.Enemies.Where(p=>BossEnemyCharacters.Select(p,id)!=null).Select(p=>p.Position+offset-new Vector3(0,.1f,0))
+                .Select(p=>new MapCollision.Triangle(p+new Vector3(-2,0,-2),p+new Vector3(2,0,-2),p+new Vector3(0,0,2))).ToArray();
+            var chunks=slots.Select(p=>new MapCollisionBindings.Chunk(source.Parts.Collisions.First().Name,encounterFloors,[])).ToArray();
             var result=MapEnemySpawns.Bake(Read,source,id,defs,native,map,offset,chunks,slots,composed,readNative:Native);
             string aiPath="script/"+(id=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00")+".luabnd.dcx";
             var beforeAi=BND4.Read(Native(aiPath)!);var afterAi=BND4.Read(result.Files[aiPath]);var donorAi=File.ReadAllBytes(Path.Combine(native,"script/m22_00_00_00.luabnd.dcx"));
@@ -60,7 +116,11 @@ static class MapEnemySpawnsTests {
             Check(goals.Goals.Any(g=>g.ID==261010)&&goals.Goals.Any(g=>g.ID==261000),"Imported rig lacks native logic/battle goal registration");
             Check(MapNativeAi.Merge(result.Files[aiPath],donorAi).SequenceEqual(result.Files[aiPath]),"Native AI composition is not idempotent");
             Check(afterAi.Files.Count(f=>Leaf(f.Name).StartsWith("2610")&&Leaf(f.Name).EndsWith(".lua"))==6,"Native rig AI companion scripts were omitted");
-            Check(result.Spawns.Count==(id=="m10_02_00_00"?19:88),"Enemy selection changed or conditional populations were included");
+            var earlyScripts=result.Files.Where(f=>f.Key.StartsWith("script_interroot/ai/out/",StringComparison.Ordinal)).ToArray();
+            Check(earlyScripts.Length==afterAi.Files.Count(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal))&&
+                afterAi.Files.Where(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal)).All(f=>result.Files["script_interroot/ai/out/"+Leaf(f.Name)].AsSpan().SequenceEqual(f.Bytes.Span)),"Enemy export omitted exact early-lookup Lua payloads");
+            foreach(var (path,bytes) in earlyScripts)composedFiles[path]=bytes;
+            Check(result.Spawns.Count==(id=="m10_02_00_00"?19:94),"Enemy selection changed or conditional populations were included");
             Check(result.Skipped.Count+result.Spawns.Count==source.Parts.Enemies.Count,"Source actors were not completely accounted for");
             Check(result.Spawns.All(p=>p.SourceInitAnimID==source.Parts.Enemies.Single(s=>s.Name==p.SourceName).InitAnimID&&
                 (p.SourceInitAnimID==-1||id=="m10_02_00_00"&&p.SourceInitAnimID==9001&&p.SourceModel is "c2900" or "c2910")),"An unadapted hanging/special-pose actor was spawned standing");
@@ -235,6 +295,6 @@ static class MapEnemySpawnsTests {
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
         Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data; skeleton basic attacks also omit eight donor superarmor windows");
-        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon), source masks/shared textures, source-length hollow rigs/animations, preserved skeleton path, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants and two Capra dogs), source masks/shared textures, source-length hollow rigs/animations, preserved skeleton path, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

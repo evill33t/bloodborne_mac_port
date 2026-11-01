@@ -63,8 +63,9 @@ internal static class MapQuestStateTests {
         var pre=original.Events.SingleOrDefault(e=>e.ID==50);if(pre==null){pre=new(50);pre.Instructions.Add(new(2003,2,999,(byte)1));original.Events.Add(pre);}pre.Parameters.Add(new(0,0,0,4));
         var sentinel=new EMEVD.Event(12415900,EMEVD.Event.RestBehaviorType.Restart);sentinel.Instructions.Add(new(1001,0,2f));original.Events.Add(sentinel);
         var native=original.Write();
-        Check(MapQuestState.Flags.Count==198&&MapQuestState.Flags.Values.Distinct().Count()==198&&!MapQuestState.Flags.Values.Contains(MapQuestState.InitialFlag),"Quest ownership aliases or population changed");
-        Check(MapQuestState.InitialFlag==52100499&&MapQuestState.Flags.Values.All(v=>v is >=52100100 and <=52100298)&&!MapQuestState.Flags.Values.Contains(52100258),"Stable reservation range/retired gap changed");
+        Check(MapQuestState.Flags.Count==200&&MapQuestState.Flags.Values.Distinct().Count()==200&&!MapQuestState.Flags.Values.Contains(MapQuestState.InitialFlag),"Quest ownership aliases or population changed");
+        Check(MapQuestState.InitialFlag==52100499&&MapQuestState.Flags.Values.All(v=>v is >=52100100 and <=52100300)&&!MapQuestState.Flags.Values.Contains(52100258),"Stable reservation range/retired gap changed");
+        Check(F(11010901)==52100173&&F(11010902)==52100299&&F(3)==52100300,"Boss append-only defeat reservations changed");
         foreach(var (source,target) in new[]{(280,52100100),(1140,52100107),(1202,52100149),(1460,52100159),(11010700,52100171),(11020350,52100174),(11400200,52100182),(71300093,52100257),(1150,52100259),(1489,52100298)})Check(F(source)==target,"Stable mapping anchor renumbered: "+source);
         foreach(var (first,last,_) in Ranges)foreach(int flag in Enumerable.Range(first,last-first+1))_=F(flag);
         Reject<NotSupportedException>(()=>F(int.MaxValue),"Unknown source flag silently allocated");
@@ -136,6 +137,6 @@ internal static class MapQuestStateTests {
         Corpus("compressed-talk",F(71100026));
         } finally {fixture.Delete(true);}
         foreach(var (path,hash) in hashes)Check(hash.SequenceEqual(SHA256.HashData(File.ReadAllBytes(path))),"Original event asset changed: "+path);
-        Console.WriteLine("MapQuestState passed: 198 stable reservations/native scan, fresh defaults, all80 nonfresh range states, marker persistence, composed event/parameter preservation, Petrus/Crestfallen absence/restore loops, source contract rejection and "+hashes.Count+" unchanged original input hashes.");
+        Console.WriteLine("MapQuestState passed: 200 stable reservations/native scan, fresh defaults, all80 nonfresh range states, marker persistence, composed event/parameter preservation, Petrus/Crestfallen absence/restore loops, source contract rejection and "+hashes.Count+" unchanged original input hashes.");
     }
 }
