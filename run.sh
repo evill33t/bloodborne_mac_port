@@ -149,6 +149,14 @@ elif [[ -n ${scaled_output:-} ]]; then
 fi
 "$PYTHON" scripts/patches.py --out "$out" --fps "$fps" --extra "$launch_patches" --settings "$BB_CONFIG" --game-dir "$game" --render-res "${BB_RENDER_RES:-}" --output-res "${BB_OUTPUT_RES:-}" \
     --patches-dir "${BB_PATCHES_DIR:-$data/patches}" --patches-config "${BB_PATCHES_CONFIG:-$data/patches.json}" --import-runtime "$out/import-runtime.json"
+# Imported combat banks need space for both MAIN and the unchanged native
+# Havok/graphics heaps. Apply this minimum after resolution settings so a larger
+# existing direct-memory budget is retained.
+import_dmem=$("$PYTHON" scripts/import_runtime.py --direct-memory "$out/import-runtime.json" --current-dmem "${BB_DMEM_MB:-}")
+if [[ -n $import_dmem ]]; then
+    export BB_IMPORT_PREVIOUS_DMEM=${BB_DMEM_MB:-} BB_DMEM_MB=$import_dmem BB_IMPORT_AUTO_DMEM=$import_dmem
+    echo "Imported map: direct memory $BB_DMEM_MB MiB"
+fi
 if [[ -z ${BB_VBLANK_HZ:-} ]]; then
     case $fps in uncap|adaptive) export BB_VBLANK_HZ=0 ;; 90) export BB_VBLANK_HZ=90 ;; *) export BB_VBLANK_HZ=60 ;; esac
     export BB_LAUNCH_AUTO_VBLANK=$BB_VBLANK_HZ

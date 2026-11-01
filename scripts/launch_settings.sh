@@ -42,6 +42,14 @@ bb_launch_settings() { # ini file
     local line cap='' full='' hud='' compress='' online='' server='' webapi='' npid='' password='' community='' upnp='' p2p=''
     local pool='' thd_id='' thd_token='' timing='' seamless_server='' display=''
     # Clear values exported from the previous config, keeping explicit caller overrides.
+    if [[ -n ${BB_IMPORT_AUTO_DMEM:-} && ${BB_IMPORT_AUTO_DMEM:-} == "${BB_DMEM_MB:-}" ]]; then
+        if [[ -n ${BB_IMPORT_PREVIOUS_DMEM:-} ]]; then
+            export BB_DMEM_MB=$BB_IMPORT_PREVIOUS_DMEM
+        else
+            unset BB_DMEM_MB
+        fi
+    fi
+    unset BB_IMPORT_AUTO_DMEM BB_IMPORT_PREVIOUS_DMEM
     if [[ ${BB_LAUNCH_AUTO_LIMIT:-} == "${BB_FPS_LIMIT:-unset}" ]]; then unset BB_FPS_LIMIT; fi
     if [[ ${BB_LAUNCH_AUTO_FULLSCREEN:-} == "${BB_FULLSCREEN:-unset}" ]]; then unset BB_FULLSCREEN; fi
     if [[ ${BB_LAUNCH_AUTO_HUD:-} == "${MTL_HUD_ENABLED:-unset}" ]]; then unset MTL_HUD_ENABLED; fi

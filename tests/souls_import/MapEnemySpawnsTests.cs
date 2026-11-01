@@ -20,6 +20,7 @@ static class MapEnemySpawnsTests {
         foreach(string map in new[]{"m24_01_00_00","m24_00_00_00"}) {
             var merged=MapNativeAi.Merge(Read("script/"+map+".luabnd.dcx"),Read("script/m22_00_00_00.luabnd.dcx"));
             merged=MapNativeAi.Merge(merged,Read("script/aicommon.luabnd.dcx"),requiredGoals:[10000]);
+            merged=MapNativeAi.Merge(merged,Read("script/"+HollowCombatProfiles.NativeAi+".luabnd.dcx"),2630);
             foreach(var profile in new[]{NonHumanoidEnemies.Demon,NonHumanoidEnemies.Boar,BossEnemyCharacters.Taurus,BossEnemyCharacters.Capra,BossEnemyCharacters.Dog,BossEnemyCharacters.GargoylePrimary,BossEnemyCharacters.GargoyleSecondary})
                 merged=MapNativeAi.Merge(merged,Read("script/"+profile.Ai+".luabnd.dcx"),int.Parse(profile.Native[1..]));
             var hash=SHA256.HashData(merged);var bank=BND4.Read(merged);
@@ -27,6 +28,7 @@ static class MapEnemySpawnsTests {
             Check(SHA256.HashData(merged).SequenceEqual(hash),"Fallback export mutated its native map bank");
             Check(fallbacks.Count==bank.Files.Count(f=>Leaf(f.Name).EndsWith(".lua",StringComparison.Ordinal)),"Fallback export omitted native bytecode or exported metadata");
             foreach(var (sourceBank,name) in new[]{("m22_00_00_00","261000_logic.lua"),("m22_00_00_00","261010_battle.lua"),("aicommon","010000_logic.lua"),
+                (HollowCombatProfiles.NativeAi,"263000_logic.lua"),(HollowCombatProfiles.NativeAi,"263020_battle.lua"),(HollowCombatProfiles.NativeAi,"263030_battle.lua"),
                 (NonHumanoidEnemies.Boar.Ai,"127000_battle.lua"),(BossEnemyCharacters.Capra.Ai,"273000_battle.lua"),
                 (BossEnemyCharacters.Taurus.Ai,"313000_battle.lua"),(BossEnemyCharacters.Dog.Ai,"114000_logic.lua"),(BossEnemyCharacters.Dog.Ai,"114000_battle.lua")}) {
                 var original=BND4.Read(Read("script/"+sourceBank+".luabnd.dcx")).Files.Single(f=>Leaf(f.Name)==name);
@@ -82,7 +84,12 @@ static class MapEnemySpawnsTests {
                 a.Skip(common).All(v=>v==0)&&b.Skip(common).All(v=>v==0);
         }
         static bool SameEvent(TAE.Event a,TAE.Event b)=>a.Type==b.Type&&a.StartTime==b.StartTime&&a.EndTime==b.EndTime&&a.Unk04==b.Unk04&&a.Group?.GroupType==b.Group?.GroupType&&SamePayload(a.GetParameterBytes(false),b.GetParameterBytes(false));
-        int torchActors=0,nonTorchActors=0;
+        int torchActors=0,nonTorchActors=0,mobileCrossbows=0,fixedCrossbows=0;
+        var hollowAnimation=BND4.Read(File.ReadAllBytes(Path.Combine(native,"chr/c2630.anibnd.dcx")));
+        var hollowRig=NativeAnimation.Skeleton(hollowAnimation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
+        var hollowScript=File.ReadAllBytes(Path.Combine(native,"action/script/c2630.hks"));
+        var sourceNpcRows=PARAM.Read(BND3.Read(Read("param/GameParam/GameParam.parambnd.dcx")!).Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes);
+        sourceNpcRows.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(defs,"NpcParam.xml")));
         // Additional maps can choose a free entity range without changing any
         // native behavior/skin/parameter files or the default replacement IDs.
         var identitySource=MSB1.Read(Read("map/MapStudio/m10_01_00_00.msb")!);
@@ -149,10 +156,29 @@ static class MapEnemySpawnsTests {
                 }
             }
             var old=BND4.Read(composed);composed=result.Files["param/gameparam/gameparam.parambnd.dcx"];var game=BND4.Read(composed);
-            foreach(var f in old.Files.Where(f=>Leaf(f.Name)!="NpcParam.param"))Check(game.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Enemy export overwrote an unrelated parameter entry");
+            foreach(var f in old.Files.Where(f=>Leaf(f.Name) is not("NpcParam.param" or "BehaviorParam.param" or "Bullet.param")))Check(game.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Enemy export overwrote an unrelated parameter entry");
             var oldNpcs=MapCharacters.NativeRows(old.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes,false);
             var npcs=MapCharacters.NativeRows(game.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes,false);
-            for(int i=0;i<oldNpcs.Rows.Count;i++)Check(npcs.Rows[i].ID==oldNpcs.Rows[i].ID&&MapCharacters.Payload(npcs.Rows[i]).SequenceEqual(MapCharacters.Payload(oldNpcs.Rows[i])),"Existing composed NPC row changed");
+            for(int i=0;i<oldNpcs.Rows.Count;i++)Check(npcs.Rows[i].ID==oldNpcs.Rows[i].ID&&npcs.Rows[i].Name==oldNpcs.Rows[i].Name&&MapCharacters.Payload(npcs.Rows[i]).SequenceEqual(MapCharacters.Payload(oldNpcs.Rows[i])),"Existing composed NPC row/order/null-name changed");
+            Check(npcs.Rows.Count==oldNpcs.Rows.Count+result.Spawns.Select(p=>p.NPCParamID).Distinct().Count(),"Owned NPC role row population changed");
+            foreach(var (table,type,size,version) in new[]{("BehaviorParam","BEHAVIOR_PARAM_ST",32,(short)2),("Bullet","BULLET_PARAM_ST",160,(short)2)}) {
+                var before=ImportParam.Read(old.Files.Single(f=>Leaf(f.Name)==table+".param").Bytes,type,size,version);
+                var after=ImportParam.Read(game.Files.Single(f=>Leaf(f.Name)==table+".param").Bytes,type,size,version);
+                var oldIDs=before.Rows.Select(r=>r.ID).ToHashSet();var retained=after.Rows.Where(r=>oldIDs.Contains(r.ID)).ToArray();
+                Check(retained.Length==before.Rows.Count&&before.Rows.Zip(retained).All(p=>p.First.ID==p.Second.ID&&p.First.Name==p.Second.Name&&ImportParam.Payload(p.First).SequenceEqual(ImportParam.Payload(p.Second))),"Arrow conversion modified an existing native/composed row or its order");
+                Check(after.Rows.Count==before.Rows.Count+(result.Projectiles?.Count??0)*(table=="BehaviorParam"?72:1),"Scoped arrow behavior/Bullet population changed");
+            }
+            var projectileOwners=result.Spawns.Where(p=>p.HollowCombat?.ProjectileActions>0&&p.SourceModel=="c2550").Select(p=>p.TargetModel).Distinct().ToArray();
+            Check(result.Projectiles!=null&&result.Projectiles.Count==projectileOwners.Length,"Crossbow models lack scoped projectile bindings");
+            foreach(var binding in result.Projectiles!) {
+                int model=binding.BulletID/100;Check(binding.VariationID==model*10&&binding.TargetNpcIDs.Order().SequenceEqual(result.Spawns.Where(p=>p.TargetModel=="c"+model).Select(p=>p.NPCParamID).Distinct().Order()),"Scoped arrow owner/prefix binding changed");
+                var behaviors=ImportParam.Read(game.Files.Single(f=>Leaf(f.Name)=="BehaviorParam.param").Bytes,"BEHAVIOR_PARAM_ST",32,2);
+                var ammo=ImportParam.Read(game.Files.Single(f=>Leaf(f.Name)=="Bullet.param").Bytes,"BULLET_PARAM_ST",160,2);
+                var shot=ImportParam.Payload(behaviors.Rows.Single(r=>r.ID==200000000+binding.VariationID*1000+450));
+                var arrow=ImportParam.Payload(ammo.Rows.Single(r=>r.ID==binding.BulletID));
+                var expectedArrow=ImportParam.Payload(ammo.Rows.Single(r=>r.ID==940));BitConverter.GetBytes(263080).CopyTo(expectedArrow,0);
+                Check(shot[9]==1&&BitConverter.ToInt32(shot,12)==binding.BulletID&&arrow.SequenceEqual(expectedArrow),"Crossbow shot lost its scoped native-arrow/NPC-damage contract");
+            }
             foreach(var group in result.Spawns.GroupBy(p=>p.TargetModel)) {
                 Check(allModels.Add(group.Key),"Two maps reuse an imported character namespace");
                 if(group.First().NativeAdapter!=null) {
@@ -164,7 +190,46 @@ static class MapEnemySpawnsTests {
                 Check(group.All(p=>p.HasSourceTorch==hasTorch),"Source torch loadout was misclassified");
                 if(hasTorch)torchActors+=group.Count();else nonTorchActors+=group.Count();
                 var animation=BND4.Read(result.Files["chr/"+group.Key+".anibnd.dcx"]);
+                if(group.First().HollowCombat is {} combat) {
+                    Check(group.All(p=>p.HollowCombat!=null&&p.SourceEquipmentMounts==null&&p.ProportionScale==1&&p.DirectWeightShare>.999999&&p.Bones.All(b=>b.Direct&&b.Target.StartsWith("DS1_",StringComparison.Ordinal))),"Ordinary source-visible hierarchy was replaced by an idle/native body fit");
+                    Check(combat.NativeModel=="c2630"&&combat.NativeBones==84&&combat.VisibleBones>0&&combat.MotionClips==567,"Ordinary hollow did not use the declared c2630/source-visible rig");
+                    Check(animation.Files.Count==hollowAnimation.Files.Count&&animation.Files.Select(f=>f.ID).SequenceEqual(hollowAnimation.Files.Select(f=>f.ID))&&animation.Files.Count(f=>f.ID>=1000000000)==567,"Ordinary hollow changed native motion membership");
+                    Check(result.Files["action/script/"+group.Key+".hks"].SequenceEqual(hollowScript),"Ordinary hollow lost the shipped c2630 action script");
+                    var rig=NativeAnimation.Skeleton(animation.Files.Single(f=>f.ID==1000000).Bytes.ToArray());
+                    Check(rig.Names.Length==84+combat.VisibleBones&&rig.Names.Length<=256&&rig.Names.Take(84).SequenceEqual(hollowRig.Names)&&rig.Parents.Take(84).SequenceEqual(hollowRig.Parents)&&rig.Local.Take(84).SequenceEqual(hollowRig.Local)&&rig.Names.Skip(84).All(n=>n.StartsWith("DS1_",StringComparison.Ordinal)),"Ordinary source rig changed native bones or exceeded skin indices");
+                    var visualBank=BND4.Read(result.Files["chr/"+group.Key+".chrbnd.dcx"]);var skin=FLVER2.Read(visualBank.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);
+                    var textureBank=TPF.Read(visualBank.Files.Single(f=>TPF.Is(f.Bytes.ToArray())).Bytes);
+                    int active=skin.Nodes.TakeWhile(n=>(n.Flags&FLVER.Node.NodeFlags.Disabled)==0).Count();
+                    Check(active>0&&skin.Nodes.Skip(active).All(n=>(n.Flags&FLVER.Node.NodeFlags.Disabled)!=0)&&textureBank.Textures.All(t=>t.Header.Unk2==0xD),"Ordinary render palette/PS4 texture contract changed");
+                    foreach(var mesh in skin.Meshes)foreach(var vertex in mesh.Vertices)for(int i=0;i<4;i++)if(vertex.BoneWeights[i]>0) {
+                        int bone=SkinRetarget.Bone(mesh,vertex.BoneIndices[i]);Check(bone>=0&&bone<active&&skin.Nodes[bone].Name.StartsWith("DS1_",StringComparison.Ordinal),"A visible hollow vertex uses the native donor or disabled palette tail");
+                    }
+                    var tae=TAE.Read(animation.Files.Single(f=>TAE.Is(f.Bytes.ToArray())).Bytes);var nativeTae=TAE.Read(hollowAnimation.Files.Single(f=>TAE.Is(f.Bytes.ToArray())).Bytes);
+                    Check(tae.ID==200000+int.Parse(group.Key[1..])&&tae.Animations.Select(a=>a.ID).SequenceEqual(nativeTae.Animations.Select(a=>a.ID)),"Ordinary role TAE identities changed");
+                    var cohortRoles=group.Select(p=>HollowCombatProfiles.Select(source.Parts.Enemies.Single(a=>a.Name==p.SourceName),p.DisplayMasks.ToHashSet())!.NativeNpc).Distinct().Count();
+                    Check(group.Select(p=>p.NPCParamID).Distinct().Count()==cohortRoles&&group.All(p=>p.NPCParamID/100==int.Parse(group.Key[1..])),"Mobile/fixed source brains did not receive separate NPC rows within their stable model block");
+                    foreach(var spawn in group) {
+                        var actor=map.Parts.Enemies.Single(a=>a.EntityID==spawn.EntityID);var original=source.Parts.Enemies.Single(a=>a.Name==spawn.SourceName);
+                        var role=HollowCombatProfiles.Select(original,spawn.DisplayMasks.ToHashSet())??throw new Exception("Imported hollow lacks a validated source role");
+                        var sourceRow=sourceNpcRows.Rows.Single(r=>r.ID==spawn.SourceNPCParamID);
+                        var rolePayload=HollowCombatProfiles.Parameters(role,MapCharacters.Payload(oldNpcs.Rows.Single(r=>r.ID==role.NativeNpc)),sourceRow,defs);
+                        foreach(int i in new[]{0x146,0x147,0x14A,0x14B})rolePayload[i]=255;
+                        if(role.Ranged)BitConverter.GetBytes(int.Parse(spawn.TargetModel[1..])*10).CopyTo(rolePayload,0);
+                        Check(MapCharacters.Payload(npcs.Rows.Single(r=>r.ID==spawn.NPCParamID)).SequenceEqual(rolePayload),"Ordinary role changed donor combat bytes beyond source capsule/display/prefix fields");
+                        Check(actor.NPCParamID==spawn.NPCParamID&&actor.ThinkParamID==role.NativeThink&&spawn.ThinkParamID==role.NativeThink&&actor.TalkID==-1&&actor.InitAnimID==-1&&actor.CharaInitID==-1,"Ordinary source AI role was collapsed or incompatible IDs survived");
+                        Check(actor.Position==original.Position+offset&&actor.Rotation==original.Rotation&&actor.Scale==original.Scale,"Ordinary source transform/proportions changed");
+                        Check(goals.Goals.Any(g=>g.ID==role.NativeBattleGoal)&&goals.Goals.Any(g=>g.ID==10000),"Ordinary native role AI closure is missing");
+                        if(role.Role==HollowCombatProfiles.Kind.Crossbow)mobileCrossbows++;
+                        if(role.Role==HollowCombatProfiles.Kind.CrossbowStationary)fixedCrossbows++;
+                        if(role.Ranged)Check(combat.ProjectileActions>0&&combat.CombatActions.Any(a=>a.Shots>0)&&combat.SourceProjectileDummy==20,"Source crossbow has no authored firing action");
+                        else Check(combat.MeleeActions>0,"Source melee role lacks attack actions");
+                    }
+                    if(group.First().SourceModel=="c2560")Check(group.All(p=>p.SourceClothPose is{Bodies:57,Constraints:119} c&&c.ChangedVertices>0&&c.MaximumPivotError<.005f&&c.MaximumPenetration<.001f),"Animated Balder cape lost its settled source pose");
+                    else Check(group.All(p=>p.SourceClothPose==null),"Cloth pose leaked into another ordinary source model");
+                    continue; // Dedicated hollow fixtures cover every appended clip/channel and event window.
+                }
                 bool skeletonModel=group.First().SourceModel is "c2900" or "c2910";
+                Check(skeletonModel,"An ordinary hollow retained the shared c2610 wrapper instead of its source-visible role adapter");
                 Check(skeletonModel?group.All(p=>p.SourceEquipmentMounts==null):group.All(p=>p.SourceEquipmentMounts is {} e&&e.SourceModel==p.SourceModel&&e.Mounts.Count>0),"Source idle equipment report is missing or affected the skeleton path");
                 if(group.First().SourceModel=="c2560")Check(group.All(p=>p.SourceClothPose is {Bodies:57,Constraints:119} c&&c.ChangedVertices>0&&c.MaximumPivotError<.005f&&c.MaximumPenetration<.001f),"Balder Knight source capsule-cloth pose was not integrated");
                 else Check(group.All(p=>p.SourceClothPose==null),"Source cloth adapter affected another enemy model");
@@ -294,7 +359,8 @@ static class MapEnemySpawnsTests {
         }
         foreach(var (p,hash) in originals)Check(SHA256.HashData(File.ReadAllBytes(p)).SequenceEqual(hash),"Source character asset was modified");
         Check(torchActors>0&&nonTorchActors>0,"Both torch and non-torch loadouts must be covered");
-        Console.WriteLine($"PASS: {torchActors} source torch carriers retain donor flames; {nonTorchActors} other enemies omit only four native torch events, retaining combat/status data; skeleton basic attacks also omit eight donor superarmor windows");
-        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants and two Capra dogs), source masks/shared textures, source-length hollow rigs/animations, preserved skeleton path, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
+        Check(mobileCrossbows==5&&fixedCrossbows==4,"Source crossbow mobile/stationary role population changed");
+        Console.WriteLine($"PASS: {torchActors} source torch carriers, {nonTorchActors} other enemies, five mobile/four stationary crossbows with scoped arrows; cemetery skeletons preserve their c2610 torch/superarmor filtering");
+        Console.WriteLine($"PASS: {total} enemy placements (92 hollows, 13 cemetery skeletons, Parish boar/Titanite Demon, four boss combatants and two Capra dogs), source masks/shared textures, role-specific c2630/source-visible567-clip hollow rigs, preserved skeleton/boss paths, composed opaque parameters, MSB references, PS4 tiling and {originals.Count} unchanged source assets");
     }
 }

@@ -955,14 +955,12 @@ Separate collision controls exercised short approach segments and loaded Burg. A
 steering also left the narrow path or hit adjacent rocks, so these runs do not establish
 a complete clear stair route or that every reported snag is resolved.
 
-The hollow adapter also filters the native donor's torch particles by source
-loadout: `c2500` display mask 1 retains them; the sword, axe, shield, spear and
-other non-torch variants omit only the four `610250` spawn events in the donor's
-torch animation set. Installed-asset checks cover seven torch carriers and 85
-other hollows, preserve every other animation event (apart from zero alignment
-padding), and retain the native combat/status parameters. Torch placement and
-source fire damage remain approximate. Subsequent skeleton gameplay captures show
-non-torch actors without the donor's idle flames.
+Ordinary hollows now use explicit native sword, torch, axe, shield/poker,
+firebomb and rifle roles instead of sharing one torch-melee controller. Source
+NPC/Think/mask identities select the role; five mobile crossbow users and four
+stationary crossbow users retain distinct native brains and resident effects.
+Mixed source cohorts share a visible model while owning separate NPC rows.
+Source combat decision trees and patrols remain unconverted.
 
 Skeleton validation is under ignored `out/map-editor/skeleton-review/` and
 `out/map-editor/skeleton-animation/`. Tests cover 105 placements, all three skeleton
@@ -1153,23 +1151,49 @@ long stretched geometry from both new enemies without changing Havok tracks or
 source geometry. Serialized regression checks retain named bone/vertex/dummy
 relationships through the render-node permutation.
 
-Ordinary hollow equipment uses the source hand/forearm attachment frame instead
-of the donor torch sockets. Where the source animation differs from its bind
-mount, the authored constant idle equipment frame supplies the resting grip; source
-attack-local equipment motion is not reproduced. DS1R cutout armor and cape edge materials use the
-supported native cutout shader. The c2560 cape's legacy capsule physics is not a
-native Bloodborne cloth resource: its 57 bodies and 119 authored constraints are
-settled offline under gravity. A single torso anchor preserves that static drape
-through native arm animation; this is rigid attached scenery, not dynamic cloth.
-Source vertices and faces remain present. Combat poses and weapon movesets still
-follow the native donor.
+Ordinary hollow bodies, hands, weapons and shields retain an appended source
+animation hierarchy, separate from the native controller's body tracks. This
+preserves the animated equipment frame and authored zero-scale hiding instead
+of applying one idle grip to every attack. Source masks select the visible
+geometry. Native render nodes stay in the required active prefix, and original
+native bone indices and compressed physical-body tracks stay intact.
+Owned NPC clones clear the donor's `normalChangeAnimChrId` override after
+validating its native schema. Retaining `2630` silently loads the retail bank
+instead of the exported source rig, leaving the visible body in its reference pose.
 
-Shield loadouts also retain the source idle left wrist and six shared finger
-tracks while the native forearm moves. The native torch grip otherwise separates
-the glove from the shield handle even with the correct forearm mount. Only those
-seven tracks change; additive grip tracks are neutral. Source combat hand gestures
-remain unconverted. Independent decoding covers all 328 native clips for each of
-seven shield variants, including additive clips and actual shield/gauntlet contact.
+Explicit per-role mappings resolve source a00/a01/a02 action imports. Source
+hit, projectile and continuation windows follow the visible source pose on the
+retained native clip time. Native combat decisions, damage, physical hitboxes,
+locomotion and timing remain approximations. Thirty-one nonlocal shared native
+actions, including four death aliases, remain unconverted. Some unsupported
+special states use an explicit reference pose; source ambush poses stay omitted.
+
+Crossbows fire owned native Bowblade arrows with native rifle NPC damage. Their
+source muzzle frame follows the authored equipment hierarchy. All native rifle
+behavior rows are cloned under each ranged model's owned prefix; only its shot
+reference changes. The complete unchanged DLC effect bank is composed into the
+imported area's effects so arrows do not depend on the hunter equipping Bowblade.
+Native arrow speed, range, effects and ballistics approximate source bolts.
+
+DS1R cutout armor and cape edges use the supported native cutout shader. The
+c2560 cape's legacy capsule physics is settled offline from its 57 bodies and
+119 authored constraints. Its 337 settled vertices follow the source torso;
+ongoing cloth simulation and arm/body contact are unconverted.
+
+Installed-asset tests cover all twelve supported model/role combinations and
+both complete shield/crossbow packages. Independent decoding checks 1,134 native
+clips, 1,376 action timelines, 3,128 complete keyframe poses and 1,564 serialized
+muzzle frames. Native controller channels, timing, objects and source topology
+remain intact. Source motion between encoded native keyframes retains a sampling
+approximation; these checks do not establish native gameplay or projectile damage.
+
+Bounded native copied-save checks now load the owned hollow HKS/ANIBND banks,
+show source sword/shield attack and recovery poses with attached equipment,
+and show platform crossbows aiming, firing and staggering the hunter. An earlier
+projectile control recorded hunter HP 594 to 164 to 1. QA used No Dead only in
+its separate save/config and player placement for encounter setup; this does not
+establish ordinary route traversal or a complete playthrough. The 1024 MiB control
+retained over 100 MiB free at its lowest sampled MAIN-heap observation.
 
 The armored boar has a separate DS1R workflow-1 material adapter. The shipped
 shader's `IF_Z` selects its legacy RGB-specular branch for this authored workflow.
@@ -1233,12 +1257,16 @@ existing files and retain both maps' normal bank metadata. A fresh copied-save
 control changed nine failed script loads to zero and restored movement, attacks
 and damage for ordinary hollows and the boss wrappers.
 
-Connected boss maps declare a fixed 768 MiB MAIN heap requirement. Their additional
-animation banks exhausted the native 524 MiB heap during animation materialization.
-The offline mod loader collects this requirement from enabled mod layers, and the
+Connected boss maps declare a fixed 768 MiB MAIN heap requirement; source hollow
+combat rigs require 1024 MiB. Loading all eighteen owned hollow banks exhausted
+768 MiB: a traced 93,264-byte animation allocation failed with 53,872 bytes free.
+The offline mod loader selects the largest fixed requirement from enabled layers, and the
 patch audit applies it only to the exact verified Bloodborne 1.09 executable hash
 and original table value. Original executable files stay intact. Disabled mods and
 online mode do not request the larger heap; unknown profiles are rejected.
+The 1024 MiB profile also raises launch direct memory to at least 6144 MiB so the
+unchanged native Havok/graphics heaps fit. Larger resolution budgets are retained;
+other imports and launches without this profile request no direct-memory increase.
 
 Five source fog apertures use source-sized physical boxes with native Bloodborne
 particles and traversal animation. Source outside regions gate the action prompt;
@@ -1319,6 +1347,9 @@ DSR root), `tests/test_map_breakables.sh`, `tests/test_source_corpse_pose.sh`,
 `tests/test_enemy_proportions.sh`, `tests/test_static_map_uv.sh`,
 `tests/test_map_navigation.sh`, `tests/test_skin_hair_alpha.sh`,
 `tests/test_shield_grip.sh`, `tests/test_boar_materials.sh`,
+`tests/test_hollow_combat_profiles.sh`, `tests/test_hollow_combat_motion.sh`,
+`tests/test_hollow_source_skin.sh`, `tests/test_hollow_combat_characters.sh`,
+`tests/test_hollow_projectiles.sh`,
 `tests/test_boss_encounter_source.sh`, `tests/test_boss_enemy_characters.sh`,
 `tests/test_boss_entrance_motion.sh`,
 `tests/test_boss_fog_walls.sh`, `tests/test_boss_encounters.sh` and

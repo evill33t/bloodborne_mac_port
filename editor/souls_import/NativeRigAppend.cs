@@ -90,7 +90,17 @@ internal static class NativeRigAppend {
         if(p.Array(obj+128,4,16).Count!=0||p.Array(p.Object("hkbMirroredSkeletonInfo")+32,2,256).Count!=0)
             throw new InvalidDataException("Native character has a fixed-size bone LOD/mirror contract");
     }
-    internal static byte[] Clip(byte[] input,Plan plan,Func<float,IReadOnlyList<Matrix4x4>> sample,bool preserveAddedRootWorld=false) {
+    internal static byte[] Clip(byte[] input,Plan plan,Func<float,IReadOnlyList<Matrix4x4>> sample,bool preserveAddedRootWorld=false,IReadOnlySet<int>? allowZeroAddedBones=null) {
+        if(allowZeroAddedBones!=null)foreach(int bone in allowZeroAddedBones) {
+            int at=bone,steps=0;bool equipment=false;
+            while(at>=0&&at<plan.Added.Count&&++steps<=plan.Added.Count) {
+                var name=plan.Added[at].Name;if(!name.StartsWith("DS1_",StringComparison.Ordinal))break;
+                var key=new string(name[4..].Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+                if(System.Text.RegularExpressions.Regex.IsMatch(key,@"\A(?:rweapon\d*|lweapon\d*|lshield|sword|bpw00)\z")){equipment=true;break;}
+                at=plan.Added[at].Parent-plan.Original.Names.Length;
+            }
+            if(!equipment)throw new InvalidDataException("Zero-scale visibility may only target an appended source equipment branch");
+        }
         var edit=new Edit(input);var p=edit.Pack;int a=p.Object("hkaSplineCompressedAnimation"),b=p.Object("hkaAnimationBinding"),n=plan.Original.Names.Length;
         int frames=p.Int(a+56),blocks=p.Int(a+60),blockFrames=p.Int(a+64),tracks=p.Int(a+20);float dt=p.Float(a+80);
         int blend=input[p.Data+b+80];
@@ -115,7 +125,7 @@ internal static class NativeRigAppend {
                 }
                 poses.AddRange(values);
             }
-            var encoded=NativeSpline.Encode(poses,plan.Added.Count,count,dt,plan.Original.Name,plan.Added.Select(bone=>bone.Name).ToArray(),allowMirroredScale:true);
+            var encoded=NativeSpline.Encode(poses,plan.Added.Count,count,dt,plan.Original.Name,plan.Added.Select(bone=>bone.Name).ToArray(),allowMirroredScale:true,allowZeroScaleTracks:allowZeroAddedBones);
             var extra=new NativeAnimation.Pack(encoded);int ea=extra.Object("hkaSplineCompressedAnimation");var ed=extra.Array(ea+152,1,64*1024*1024);int eEnd=extra.Int(extra.Array(ea+104,4,256).At),mask=plan.Added.Count*4;
             newStarts.Add(checked((int)stream.Length));stream.Write(input.AsSpan(p.Data+data.At+start,n*4));stream.Write(encoded.AsSpan(extra.Data+ed.At,mask));
             stream.Write(input.AsSpan(p.Data+data.At+start+n*4,used-n*4));stream.Write(encoded.AsSpan(extra.Data+ed.At+mask,eEnd-mask));

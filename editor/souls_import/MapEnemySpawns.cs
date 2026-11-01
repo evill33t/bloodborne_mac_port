@@ -6,9 +6,9 @@ using System.Numerics;
 // event-controlled populations stay omitted until their behavior is adapted.
 internal static class MapEnemySpawns {
     internal record Spawn(string SourceName,string SourceModel,int SourceNPCParamID,int SourceThinkParamID,int SourceEntityID,
-        string TargetModel,int EntityID,int NPCParamID,int ThinkParamID,Vector3 Position,int[] DisplayMasks,double DirectWeightShare,float ProportionScale,IReadOnlyList<BoneMatch> Bones,bool HasSourceTorch,int SourceInitAnimID,string? NativeAdapter=null,SourceClothPose.Report? SourceClothPose=null,SourceEquipmentMounts.Report? SourceEquipmentMounts=null);
+        string TargetModel,int EntityID,int NPCParamID,int ThinkParamID,Vector3 Position,int[] DisplayMasks,double DirectWeightShare,float ProportionScale,IReadOnlyList<BoneMatch> Bones,bool HasSourceTorch,int SourceInitAnimID,string? NativeAdapter=null,SourceClothPose.Report? SourceClothPose=null,SourceEquipmentMounts.Report? SourceEquipmentMounts=null,HollowCombatCharacters.Report? HollowCombat=null);
     internal record Omitted(string SourceName,string SourceModel,int SourceNPCParamID,int SourceInitAnimID,string Reason);
-    internal record Result(IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<Spawn> Spawns,IReadOnlyList<Omitted> Skipped,IReadOnlyList<string> Limitations);
+    internal record Result(IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<Spawn> Spawns,IReadOnlyList<Omitted> Skipped,IReadOnlyList<string> Limitations,IReadOnlyList<HollowProjectiles.Binding>? Projectiles=null);
     static readonly HashSet<int> SupportedParams=[250000,250001,250050,254000,254001,254002,254010,254011,254012,
         255000,255001,255002,255010,255040,255041,255042,256000,256002];
     static bool CemeterySkeleton(MSB1.Part.Enemy p,string map)=>map=="m10_02_00_00"&&p.InitAnimID==9001&&
@@ -56,19 +56,20 @@ internal static class MapEnemySpawns {
         if(!Finite(offset)||chunks.Count!=slots.Count||slots.Count==0)throw new InvalidDataException("Invalid enemy collision/coordinate bindings");
         foreach(var p in selected)if(!Finite(p.Position)||!Finite(p.Rotation)||!Finite(p.Scale)||Math.Min(p.Scale.X,Math.Min(p.Scale.Y,p.Scale.Z))<=0||Math.Max(p.Scale.X,Math.Max(p.Scale.Y,p.Scale.Z))>10)throw new InvalidDataException("Invalid source enemy transform");
         var files=new Dictionary<string,byte[]>();var reports=new List<Spawn>();var clothCache=new Dictionary<string,SourceClothPose.Result>(StringComparer.Ordinal);
-        var equipmentCache=new Dictionary<(string Model,string Masks),SourceEquipmentMounts.Result?>();
+        var projectileBindings=new List<HollowProjectiles.Binding>();
         if(selected.Length==0)return new(files,reports,skipped,[]);
         var sourceParams=BND3.Read(sourceRead("param/GameParam/GameParam.parambnd.dcx")??throw new FileNotFoundException("Source NPC parameters unavailable"));
         var sourceNpcs=PARAM.Read(sourceParams.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes);
         sourceNpcs.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitions,"NpcParam.xml")));
         var donorMap=MSBB.Read(File.ReadAllBytes(Path.Combine(nativeRoot,"map/MapStudio/m22_00_00_00.msb.dcx")));
-        // c2630's reference arms have substantially different lengths. Use the
-        // symmetric Hemwick humanoid rig for ordinary human-sized hollows.
+        // Cemetery skeletons keep their existing wrapper. Ordinary hollows
+        // use separate role controllers and an independent authored visible rig.
         const string template="c2610";const int templateParam=261010;
         var donor=donorMap.Parts.Enemies.First(p=>p.ModelName==template&&p.NPCParamID==templateParam&&p.ThinkParamID==templateParam);
         byte[] Native(string path)=>readNative?.Invoke(path)??File.ReadAllBytes(Path.Combine(nativeRoot,path));
         var nativeCharacter=Native("chr/"+template+".chrbnd.dcx");var nativeAnimation=Native("chr/"+template+".anibnd.dcx");var nativeScript=Native("action/script/"+template+".hks");
         var noTorchAnimation=WithoutDonorTorch(nativeAnimation);
+        var hollowMap=MSBB.Read(Native("map/MapStudio/"+HollowCombatProfiles.NativeMap+".msb.dcx"));
         var game=BND4.Read(gameParamBytes);var npcFile=game.Files.Single(f=>Leaf(f.Name)=="NpcParam.param");var npcs=MapCharacters.NativeRows(npcFile.Bytes,false);
         var paramDonor=npcs.Rows.Single(r=>r.ID==templateParam);var used=npcs.Rows.Select(r=>r.ID).ToHashSet();
         int nextModel=9600,nextSkeletonModel=9700,nextSpecialModel=8800,nextEntity=ordinaryFirstEntity??(sourceMap=="m10_02_00_00"?2419800:2409000),nextSkeletonEntity=2419900;
@@ -84,27 +85,47 @@ internal static class MapEnemySpawns {
             string target="c"+id;used.Add(paramID);
             var row=sourceNpcs.Rows.Single(r=>r.ID==group.Key.NPCParamID);
             var masks=Enumerable.Range(0,16).Where(i=>Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="modelDispMask"+i).Value)!=0).ToHashSet();
+            var ordinary=!skeleton&&special==null;
+            var profiles=new Dictionary<string,HollowCombatProfiles.Profile>(StringComparer.Ordinal);
+            if(ordinary)foreach(var actor in group)profiles.Add(actor.Name,HollowCombatProfiles.Select(actor,masks)??
+                throw new InvalidDataException("Source hollow has no explicit combat role: "+actor.Name));
+            // A source crossbow cohort can mix mobile and fixed brains while
+            // retaining one visible model and stable model/entity allocation.
+            var profile=ordinary?profiles.Values.FirstOrDefault(p=>p.Role==HollowCombatProfiles.Kind.Crossbow)??profiles.Values.First():null;
+            if(ordinary&&profiles.Values.Any(p=>p.SourceModel!=profile!.SourceModel||p.MotionBank!=profile.MotionBank||
+                p.Role!=profile.Role&&!(p.Ranged&&profile.Ranged)))throw new InvalidDataException("Incompatible source hollow roles share a model cohort");
             var appearance=MapCharacters.Authored(sourceRead,group.Key.ModelName);SourceClothPose.Report? clothReport=null;SourceClothPose.Result? clothResult=null;
             if(special==null&&SourceClothPose.ReadPhysics(sourceRead,"DS1R",group.Key.ModelName) is {} clothPhysics) {
                 if(!clothCache.TryGetValue(group.Key.ModelName,out var cloth))clothCache.Add(group.Key.ModelName,cloth=SourceClothPose.Bake(appearance.Model,clothPhysics));
-                appearance.Model=cloth.Model;clothReport=cloth.Report;clothResult=cloth;
-            }
-            SourceEquipmentMounts.Result? equipment=null;
-            if(!skeleton&&special==null&&group.Key.ModelName is "c2500" or "c2540" or "c2550" or "c2560") {
-                var key=(group.Key.ModelName,string.Join(',',masks.Order()));
-                if(!equipmentCache.TryGetValue(key,out equipment))equipmentCache.Add(key,equipment=SourceEquipmentMounts.Load(sourceRead,"DS1R",group.Key.ModelName,appearance.Model,masks));
+                clothReport=cloth.Report;clothResult=cloth;
             }
             // c2500 mask 1 is the authored torch loadout (NpcParam 250001).
             // Armoured c2540/c2550/c2560 variants carry other equipment.
             bool hasTorch=group.Key.ModelName=="c2500"&&masks.Contains(1);
-            var bake=encounter?BossEnemyCharacters.Package(sourceRead,Native,special!,target,masks,files):special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,hasTorch?nativeAnimation:noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910",preserveEnemyProportions:!skeleton,staticClothAnchors:clothResult?.Anchors,equipmentMounts:equipment?.Frames,equipmentGrip:equipment?.Grip);
-            var actorMap=special!=null?MSBB.Read(Native("map/MapStudio/"+special.Map+".msb.dcx")):donorMap;
-            var actorDonor=special!=null?actorMap.Parts.Enemies.First(p=>p.ModelName==special.Native):donor;
+            var hollow=ordinary?HollowCombatCharacters.Package(sourceRead,Native,profile!,target,appearance.Model,appearance.Textures,masks,clothResult,files):null;
+            var bake=hollow?.Skin??(encounter?BossEnemyCharacters.Package(sourceRead,Native,special!,target,masks,files):special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):
+                MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910"));
+            var actorMap=ordinary?hollowMap:special!=null?MSBB.Read(Native("map/MapStudio/"+special.Map+".msb.dcx")):donorMap;
+            var actorDonor=ordinary?actorMap.Parts.Enemies.First(p=>p.ModelName==HollowCombatProfiles.NativeModel):special!=null?actorMap.Parts.Enemies.First(p=>p.ModelName==special.Native):donor;
             var rowDonor=special!=null?npcs.Rows.Single(r=>r.ID==special.Npc):paramDonor;
-            string actorTemplate=special?.Native??template;int actorThink=special?.Think??templateParam;
+            string actorTemplate=ordinary?HollowCombatProfiles.NativeModel:special?.Native??template;int actorThink=special?.Think??templateParam;
             if(skeleton)MapSkeletonAnimations.Apply(sourceRead,group.Key.ModelName,target,bake,files);
-            var payload=MapCharacters.Payload(rowDonor);if(encounter)payload=BossEnemyCharacters.Parameters(payload,row,definitions);else if(special!=null)payload=NonHumanoidEnemies.Capsule(payload,row,definitions);foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
-            MapCharacters.CloneRow(npcs,rowDonor,paramID,(encounter?"Imported boss encounter actor ":special!=null?"Imported Parish enemy ":skeleton?"Imported cemetery skeleton ":"Imported hollow ")+group.Key,payload);
+            var roleParams=new Dictionary<int,int>();
+            if(ordinary) {
+                foreach(var role in profiles.Values.DistinctBy(p=>p.NativeNpc)) {
+                    int owned=checked(paramID+roleParams.Count);
+                    if(owned!=paramID&&!used.Add(owned))throw new InvalidDataException("Imported hollow role parameter reservation is occupied");
+                    var nativeRow=npcs.Rows.Single(r=>r.ID==role.NativeNpc);
+                    var payload=HollowCombatProfiles.Parameters(role,MapCharacters.Payload(nativeRow),row,definitions);
+                    foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
+                    MapCharacters.CloneRow(npcs,nativeRow,owned,"Imported hollow "+group.Key+" / "+role.Role,payload);
+                    roleParams.Add(role.NativeNpc,owned);
+                }
+                if(profile!.Ranged)projectileBindings.Add(new(roleParams.Values.ToArray(),id*10,paramID));
+            } else {
+                var payload=MapCharacters.Payload(rowDonor);if(encounter)payload=BossEnemyCharacters.Parameters(payload,row,definitions);else if(special!=null)payload=NonHumanoidEnemies.Capsule(payload,row,definitions);foreach(int i in new[]{0x146,0x147,0x14A,0x14B})payload[i]=255;
+                MapCharacters.CloneRow(npcs,rowDonor,paramID,(encounter?"Imported boss encounter actor ":special!=null?"Imported Parish enemy ":"Imported cemetery skeleton ")+group.Key,payload);
+            }
             var model=(MSBB.Model.Enemy)actorMap.Models.Enemies.Single(m=>m.Name==actorTemplate).DeepCopy();model.Name=target;model.SibPath=model.SibPath.Replace(actorTemplate,target,StringComparison.OrdinalIgnoreCase);destination.Models.Enemies.Add(model);
             foreach(var sourceActor in group) {
                 int bossOffset=sourceActor.EntityID switch {1010700=>800,1010750=>801,1010500=>802,1010501=>803,1010800=>804,1010801=>805,_=>-1};
@@ -115,30 +136,34 @@ internal static class MapEnemySpawns {
                 entities.Add(entity);
                 int collision=encounter?MapCollisionBindings.ObjectSlot(chunks,sourceActor.CollisionName,sourceActor.Position+offset):Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
                 var actor=(MSBB.Part.Enemy)actorDonor.DeepCopy();actor.Name=target+"_"+reports.Count.ToString("D4");actor.ModelName=target;
-                actor.EntityID=entity;actor.NPCParamID=paramID;actor.ThinkParamID=actorThink;actor.TalkID=-1;actor.CharaInitID=-1;
+                var actorRole=ordinary?profiles[sourceActor.Name]:null;
+                actor.EntityID=entity;actor.NPCParamID=actorRole==null?paramID:roleParams[actorRole.NativeNpc];actor.ThinkParamID=actorRole?.NativeThink??actorThink;actor.TalkID=-1;actor.CharaInitID=-1;
                 actor.Position=sourceActor.Position+offset;actor.Rotation=sourceActor.Rotation;actor.Scale=sourceActor.Scale*bake.ProportionScale;actor.CollisionName=slots[collision].Name;
                 actor.InitAnimID=-1;actor.DamageAnimID=-1;actor.PatrolInfoName=null!;actor.PatrolType=0;actor.FallbackPlatoonID=0;Array.Clear(actor.MovePointNames);
                 Array.Fill(actor.DrawGroups,uint.MaxValue);Array.Fill(actor.DispGroups,uint.MaxValue);Array.Fill(actor.BackreadGroups,uint.MaxValue);
-                destination.Parts.Enemies.Add(actor);reports.Add(new(sourceActor.Name,sourceActor.ModelName,sourceActor.NPCParamID,sourceActor.ThinkParamID,sourceActor.EntityID,target,entity,paramID,actorThink,actor.Position,masks.Order().ToArray(),bake.DirectWeightShare,bake.ProportionScale,bake.Bones,hasTorch,sourceActor.InitAnimID,special?.Native,clothReport,equipment?.Report));
+                destination.Parts.Enemies.Add(actor);reports.Add(new(sourceActor.Name,sourceActor.ModelName,sourceActor.NPCParamID,sourceActor.ThinkParamID,sourceActor.EntityID,target,entity,actor.NPCParamID,actor.ThinkParamID,actor.Position,masks.Order().ToArray(),bake.DirectWeightShare,bake.ProportionScale,bake.Bones,hasTorch,sourceActor.InitAnimID,special?.Native,clothReport,null,hollow?.Report));
             }
         }
-        npcFile.Bytes=MapCharacters.WriteRows(npcs);files.Add("param/gameparam/gameparam.parambnd.dcx",game.Write(DCX.Type.DCX_DFLT_10000_44_9));
+        npcFile.Bytes=MapCharacters.WriteRows(npcs);
+        files.Add("param/gameparam/gameparam.parambnd.dcx",HollowProjectiles.Apply(game.Write(DCX.Type.DCX_DFLT_10000_44_9),projectileBindings));
         string aiPath="script/"+(nativeMap??(sourceMap=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00"))+".luabnd.dcx";
         var ai=MapNativeAi.Merge(Native(aiPath),Native("script/m22_00_00_00.luabnd.dcx"));
         var specialProfiles=selected.Select(Special).Where(p=>p!=null).Distinct().ToArray();
-        if(specialProfiles.Length>0)ai=MapNativeAi.Merge(ai,Native("script/aicommon.luabnd.dcx"),requiredGoals:[10000]);
+        bool hasHollows=reports.Any(p=>p.HollowCombat!=null);
+        if(specialProfiles.Length>0||hasHollows)ai=MapNativeAi.Merge(ai,Native("script/aicommon.luabnd.dcx"),requiredGoals:[10000]);
+        if(hasHollows)ai=MapNativeAi.Merge(ai,Native("script/"+HollowCombatProfiles.NativeAi+".luabnd.dcx"),2630);
         foreach(var profile in specialProfiles)
             ai=MapNativeAi.Merge(ai,Native("script/"+profile!.Ai+".luabnd.dcx"),int.Parse(profile.Native[1..]));
         files.Add(aiPath,ai);
         foreach(var (path,bytes) in MapNativeAi.Fallbacks(ai,path=>readNative?.Invoke(path)??
             (File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null)))files.Add(path,bytes);
-        return new(files,reports,skipped,[..BossEnemyCharacters.Limitations,"Ordinary hollows retain source segment lengths in both their bind rig and every native animation's positional channels, without relying on MSB enemy scale. Native animation rotations, timing, events, extracted motion, attack/hitbox, AI and health remain in use. Native combat reach and physics are approximations; source combat and weapon behavior are not reproduced. The item adapter replaces native donor loot where enabled.",
-            "Native donor torch-flame events are retained only for the source c2500 torch loadout. Hollow donor animation events and native combat/status parameters remain unchanged. Skeleton attack superarmor is aligned with the source basic attacks. Source torch placement, weapon movesets and fire damage are not converted.",
+        return new(files,reports,skipped,[..BossEnemyCharacters.Limitations,..HollowCombatProfiles.Limitations,..(projectileBindings.Count>0?HollowProjectiles.Limitations:Array.Empty<string>()),"Ordinary hollow source bodies and equipment keep an independent animated rig. Explicit native weapon-role controllers and source hit/shot windows replace the shared torch-melee wrapper. Native physical attack anchors, locomotion, clip timing, defense and health remain approximations. The item adapter replaces native donor loot where enabled.",
+            "Cemetery skeletons retain their prior native wrapper and filtered torch effects. Skeleton attack superarmor is aligned with source basic attacks. Other hollow roles no longer inherit the c2610 torch attack bank.",
             "Firelink's identified c2900/c2910 cemetery skeletons retain source appearance, equipment masks, placement and stature. Source 9001/9061 bone-pile awakening and living heavy-hit 2014/2020/2040 motion are retargeted onto native playback slots, with source wake groups and protection windows. Combat AI, attacks, hitboxes, health, death and effects remain native; necromancer resurrection, original movesets and giant attack reach are not converted. Other special-pose enemies remain disabled.",
             "The Parish armored boar and Titanite Demon retain their complete source skin, segment lengths and source animation on appended rig tracks; native body tracks, locomotion, attack timing, hitboxes, AI and HP remain in use. The cloned native character capsule uses the matching source hitHeight/hitRadius/hitYOffset fields. Extra native states reuse explicitly mapped source actions. Their source armor, lightning/projectiles, unique death persistence and original combat behavior are not converted. Native physical/attack anchors can differ from the visible source body and require gameplay validation.",
             "The Balder Knight cape uses an offline gravity pose calculated from its source capsule bodies, masses, inertia, constraints and contacts. This is a static appearance pose that follows the animated body; ongoing native cloth simulation, wind and cloth/body collisions are not reproduced.",
-            "Supported hollow weapons and shields use their authored source idle attachment frames on the native anatomical hands and forearms. Other source animation-local equipment movement and visibility channels are not retargeted; combat poses and weapon behavior remain native approximations.",
+            "Supported hollow weapons, hands and shields retain their authored animated source hierarchy and visibility channels. Ranged projectiles originate at the source muzzle frame. Native combat decisions and physical hitboxes remain approximations.",
             "Only explicit ordinary, cemetery skeleton, Parish and Burg boss encounter parameter rows are instantiated. Source quest actors, other bosses, multiplayer phantoms and unsupported actors remain disabled.",
-            "This enemy adapter does not convert source patrols or event activation. Consult the navigation report for static source navigation coverage. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation."]);
+            "This enemy adapter does not convert source patrols or event activation. Consult the navigation report for static source navigation coverage. Hanging/special initial-pose actors are skipped until their animation/activation adapter exists. Chasing across the imported map requires gameplay validation."],projectileBindings);
     }
 }

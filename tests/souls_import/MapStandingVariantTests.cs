@@ -45,18 +45,26 @@ static class MapStandingVariantTests {
         var identities=new List<object>();var newSkips=new List<MapEnemySpawns.Omitted>();byte[] composed=Native("param/gameparam/gameparam.parambnd.dcx")!;int ordinary=0;
         foreach(string id in new[]{"m10_02_00_00","m10_01_00_00"}) {
             var sourceMap=MSB1.Read(Source("map/MapStudio/"+id+".msb")!);var destination=MSBB.Read(Native("map/MapStudio/m24_01_00_01.msb.dcx")!);MapReplacement.ParkActors(destination);
-            var slots=destination.Parts.Collisions.DistinctBy(c=>c.ModelName).ToArray();var chunks=slots.Select(_=>new MapCollisionBindings.Chunk(sourceMap.Parts.Collisions.First().Name,[],[])).ToArray();
-            var imported=MapEnemySpawns.Bake(Source,sourceMap,id,defs,native,destination,new(-143.8f,20.07f,164.63f),chunks,slots,composed,readNative:Native);composed=imported.Files["param/gameparam/gameparam.parambnd.dcx"];
+            var offset=new Vector3(-143.8f,20.07f,164.63f);
+            // This identity fixture needs solid residency for the independently
+            // adapted boss actors; actual collision coverage has separate tests.
+            var floors=sourceMap.Parts.Enemies.Where(p=>BossEnemyCharacters.Select(p,id)!=null).Select(p=>p.Position+offset-new Vector3(0,.1f,0))
+                .Select(p=>new MapCollision.Triangle(p+new Vector3(-2,0,-2),p+new Vector3(2,0,-2),p+new Vector3(0,0,2))).ToArray();
+            var slots=destination.Parts.Collisions.DistinctBy(c=>c.ModelName).ToArray();var chunks=slots.Select(_=>new MapCollisionBindings.Chunk(sourceMap.Parts.Collisions.First().Name,floors,[])).ToArray();
+            var imported=MapEnemySpawns.Bake(Source,sourceMap,id,defs,native,destination,offset,chunks,slots,composed,readNative:Native);composed=imported.Files["param/gameparam/gameparam.parambnd.dcx"];
             Check(imported.Spawns.Where(p=>p.SourceModel=="c2560").All(p=>p.SourceClothPose is{Bodies:57,Constraints:119} report&&report.ChangedVertices>0),"Source cape appearance report is missing");
             if(id=="m10_01_00_00") {newSkips.AddRange(imported.Skipped.Where(s=>candidates.Contains(s.SourceNPCParamID)));Check(imported.Spawns.All(s=>!candidates.Contains(s.SourceNPCParamID)),"Conditional phantoms or unsupported bow archer were spawned as melee enemies");}
-            foreach(var a in imported.Spawns.Where(s=>s.NativeAdapter==null&&s.SourceModel is not("c2900" or "c2910"))) {ordinary++;identities.Add(new{map=id,a.SourceName,a.SourceModel,a.SourceNPCParamID,a.TargetModel,a.EntityID,a.NPCParamID,a.ThinkParamID});}
+            foreach(var a in imported.Spawns.Where(s=>s.NativeAdapter==null&&s.SourceModel is not("c2900" or "c2910"))) {ordinary++;identities.Add(new{map=id,a.SourceName,a.SourceModel,a.SourceNPCParamID,a.TargetModel,a.EntityID,NPCParamID=a.NPCParamID/100*100});}
         }
         Check(ordinary==92&&newSkips.Count==10,"Existing cohorts or unsupported standing population changed");
         Check(newSkips.Where(s=>s.SourceNPCParamID!=250052).All(s=>s.Reason.Contains("Gravelord",StringComparison.Ordinal))&&newSkips.Single(s=>s.SourceNPCParamID==250052).Reason.Contains("bow",StringComparison.OrdinalIgnoreCase),"Standing omissions hide their actual source contracts");
         string json=JsonSerializer.Serialize(identities),identityHash=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
-        const string expected="55E8379B945B6CED8B19A6F84987DF7A6E9E2A463786D369A720E51E61330B6A";
+        // Derived from the preserved old92-identities.json baseline. Native
+        // Think/controller roles now vary; the source/model/entity and owned
+        // hundred-row NPC allocation stay stable across those role variants.
+        const string expected="DED63A91EEE0F163382FF1F2A9215317DAD9C597E5BB20174B5B1540ADC75454";
         Console.WriteLine("Existing92IdentitySHA256="+identityHash);
-        Check(identityHash==expected,"Existing 92 hollow model/entity/parameter identities changed");
+        Check(identityHash==expected,"Existing 92 hollow source/model/entity/NPC-block identities changed");
         foreach(var (path,hash) in hashes)Check(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))==hash,"Original asset changed: "+path);
         Directory.CreateDirectory(args[3]);File.WriteAllText(Path.Combine(args[3],"standing-variant-validation.json"),JsonSerializer.Serialize(new{status="PASS",ordinary,identityHash,identities,conditional=phantom.Select(a=>new{a.Name,a.NPCParamID,a.EntityID}),archer=new{archer.Name,archer.NPCParamID,archer.ThinkParamID},newSkips,hashes},new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine($"PASS: 9 conditional phantoms and 1 ranged bow variant remain excluded; existing {ordinary} hollow identities, {hashes.Count} original hashes preserved");

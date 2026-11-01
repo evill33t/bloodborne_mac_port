@@ -245,3 +245,28 @@ echo 'PASS: native ultrawide restart and disable'
     [[ $BB_FPS_LIMIT == 120 && $BB_FULLSCREEN == 0 && $MTL_HUD_ENABLED == 0 && $BB_LAZY_TEXTURE_USAGE == 1 ]]
 ) || { echo 'FAIL: native menu launch settings restart'; exit 1; }
 echo 'PASS: native menu launch settings restart'
+
+# The imported-map minimum belongs to one launch. Restore the setting it
+# temporarily replaced, including unset, while preserving a later caller edit.
+env -u BB_DMEM_MB -u BB_IMPORT_AUTO_DMEM -u BB_IMPORT_PREVIOUS_DMEM /bin/bash -eu -c '
+    source scripts/launch_settings.sh
+    export BB_IMPORT_PREVIOUS_DMEM= BB_DMEM_MB=6144 BB_IMPORT_AUTO_DMEM=6144
+    bb_launch_settings /nonexistent/bbport.ini
+    [[ -z ${BB_DMEM_MB+x} && -z ${BB_IMPORT_AUTO_DMEM+x} && -z ${BB_IMPORT_PREVIOUS_DMEM+x} ]]
+
+    export BB_IMPORT_PREVIOUS_DMEM=5056 BB_DMEM_MB=6144 BB_IMPORT_AUTO_DMEM=6144
+    bb_launch_settings /nonexistent/bbport.ini
+    [[ $BB_DMEM_MB == 5056 && -z ${BB_IMPORT_AUTO_DMEM+x} && -z ${BB_IMPORT_PREVIOUS_DMEM+x} ]]
+    bb_launch_settings /nonexistent/bbport.ini
+    [[ $BB_DMEM_MB == 5056 ]]
+
+    export BB_IMPORT_PREVIOUS_DMEM=5056 BB_DMEM_MB=9152 BB_IMPORT_AUTO_DMEM=6144
+    bb_launch_settings /nonexistent/bbport.ini
+    [[ $BB_DMEM_MB == 9152 && -z ${BB_IMPORT_AUTO_DMEM+x} && -z ${BB_IMPORT_PREVIOUS_DMEM+x} ]]
+
+    # An orphan previous-value marker cannot claim an untagged explicit value.
+    export BB_IMPORT_PREVIOUS_DMEM=5056 BB_DMEM_MB=6144
+    bb_launch_settings /nonexistent/bbport.ini
+    [[ $BB_DMEM_MB == 6144 && -z ${BB_IMPORT_AUTO_DMEM+x} && -z ${BB_IMPORT_PREVIOUS_DMEM+x} ]]
+' || { echo 'FAIL: imported-map direct-memory restart cleanup'; exit 1; }
+echo 'PASS: imported-map direct-memory restart cleanup and explicit override'

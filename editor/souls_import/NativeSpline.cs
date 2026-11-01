@@ -7,7 +7,7 @@ using System.Text;
 // Encode sampled source motion as clamped degree-one splines using the retail
 // THREECOMP40 quaternion and sixteen-bit translation/scale quantization profile.
 internal static class NativeSpline {
-    internal static byte[] Encode(IReadOnlyList<Matrix4x4> samples,int trackCount,int frameCount,float frameDuration,string skeletonName,IReadOnlyList<string> trackNames,bool allowMirroredScale=false) {
+    internal static byte[] Encode(IReadOnlyList<Matrix4x4> samples,int trackCount,int frameCount,float frameDuration,string skeletonName,IReadOnlyList<string> trackNames,bool allowMirroredScale=false,IReadOnlySet<int>? allowZeroScaleTracks=null) {
         if(trackCount is <1 or >256||frameCount is <2 or >256||samples.Count!=trackCount*frameCount||
             !float.IsFinite(frameDuration)||frameDuration is <.00001f or >1||string.IsNullOrEmpty(skeletonName)||skeletonName.Length>128||skeletonName.Any(char.IsControl)||
             trackNames.Count!=trackCount||trackNames.Any(n=>string.IsNullOrEmpty(n)||n.Length>256||n.Any(char.IsControl))||trackNames.Distinct(StringComparer.Ordinal).Count()!=trackCount)
@@ -15,13 +15,18 @@ internal static class NativeSpline {
         var positions=new Vector3[trackCount][];var rotations=new Quaternion[trackCount][];var scales=new Vector3[trackCount][];
         var positionSpline=new bool[trackCount];var rotationSpline=new bool[trackCount];var scaleSpline=new bool[trackCount];
         bool animated=false;
+        bool EquipmentName(string name)=>name.StartsWith("DS1_",StringComparison.Ordinal)&&System.Text.RegularExpressions.Regex.IsMatch(
+            new string(name[4..].Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray()),@"\A(?:rweapon\d*|lweapon\d*|lshield|sword|bpw00|bow|bowstring|arrow\d*|wcloth\d*)\z");
+        if(allowZeroScaleTracks!=null&&allowZeroScaleTracks.Any(i=>i<0||i>=trackCount||!EquipmentName(trackNames[i])))
+            throw new InvalidDataException("Invalid source equipment visibility track allowlist");
         bool Finite(Vector3 v)=>float.IsFinite(v.X)&&float.IsFinite(v.Y)&&float.IsFinite(v.Z)&&Math.Abs(v.X)<=100000&&Math.Abs(v.Y)<=100000&&Math.Abs(v.Z)<=100000;
         for(int track=0;track<trackCount;++track) {
             positions[track]=new Vector3[frameCount];rotations[track]=new Quaternion[frameCount];scales[track]=new Vector3[frameCount];
             for(int frame=0;frame<frameCount;++frame) {
                 var m=samples[frame*trackCount+track];
+                bool hidden=allowZeroScaleTracks?.Contains(track)==true;
                 if(!float.IsFinite(m.M14)||!float.IsFinite(m.M24)||!float.IsFinite(m.M34)||!float.IsFinite(m.M44)||Math.Abs(m.M14)>.000001f||Math.Abs(m.M24)>.000001f||Math.Abs(m.M34)>.000001f||Math.Abs(m.M44-1)>.000001f||
-                    !Matrix4x4.Decompose(m,out var s,out var q,out var p)||!Finite(p)||!Finite(s)||Math.Abs(s.X)<.000001f||Math.Abs(s.Y)<.000001f||Math.Abs(s.Z)<.000001f||!allowMirroredScale&&(s.X<0||s.Y<0||s.Z<0)||!float.IsFinite(q.LengthSquared())||Math.Abs(q.LengthSquared()-1)>.01f)
+                    !Matrix4x4.Decompose(m,out var s,out var q,out var p)||!Finite(p)||!Finite(s)||!hidden&&(Math.Abs(s.X)<.000001f||Math.Abs(s.Y)<.000001f||Math.Abs(s.Z)<.000001f)||!allowMirroredScale&&(s.X<0||s.Y<0||s.Z<0)||!float.IsFinite(q.LengthSquared())||Math.Abs(q.LengthSquared()-1)>.01f)
                     throw new InvalidDataException("Native spline contains an unrepresentable sampled transform");
                 q=Quaternion.Normalize(q);if(frame>0&&Quaternion.Dot(rotations[track][frame-1],q)<0)q=-q;
                 positions[track][frame]=p;rotations[track][frame]=q;scales[track][frame]=s;

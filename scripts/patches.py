@@ -523,7 +523,8 @@ def main():
         imported=heap_writes(a.import_runtime,elf)
         if imported:
             writes += audit.add('Imported map MAIN heap', imported)
-            names.append('Imported map MAIN heap: 768 MiB')
+            capacity = struct.unpack('<Q', imported[0][1])[0] // (1024 * 1024)
+            names.append(f'Imported map MAIN heap: {capacity} MiB')
     if wide:
         writes += audit.add(wide, ultrawide_writes(a.xml, wide, a.app_version, segments))
         names.append(f'Native scene/UI with bounded texture pool: {wide}')

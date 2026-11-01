@@ -15,6 +15,11 @@
     <Compile Include="../../editor/souls_import/NpcAppearance.cs" Link="NpcAppearance.cs"/>
     <Compile Include="../../editor/souls_import/NpcBodyShape.cs" Link="NpcBodyShape.cs"/>
     <Compile Include="../../editor/souls_import/SkinRetarget.cs" Link="SkinRetarget.cs"/>
+    <Compile Include="../../editor/souls_import/HollowCombatProfiles.cs" Link="HollowCombatProfiles.cs"/>
+    <Compile Include="../../editor/souls_import/HollowCombatMotion.cs" Link="HollowCombatMotion.cs"/>
+    <Compile Include="../../editor/souls_import/HollowCombatCharacters.cs" Link="HollowCombatCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/HollowSourceSkin.cs" Link="HollowSourceSkin.cs"/>
+    <Compile Include="../../editor/souls_import/HollowProjectiles.cs" Link="HollowProjectiles.cs"/>
     <Compile Include="../../editor/souls_import/MapEnemySpawns.cs" Link="MapEnemySpawns.cs"/>
     <Compile Include="../../editor/souls_import/SourceClothPose.cs" Link="SourceClothPose.cs"/>
     <Compile Include="../../editor/souls_import/SourceEquipmentMounts.cs" Link="SourceEquipmentMounts.cs"/>
