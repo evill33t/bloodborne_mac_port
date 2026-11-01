@@ -755,37 +755,38 @@ void DisplayTab(BbSettings::Values& s) {
     EndCard();
 
     BeginCard("Frame generation", int(BbSettings::FrameGenerationNeedsRestart()));
-    const bool temporal = upscaler_on && upscaler != BbSettings::UpscalerSpatial;
-    const bool framegen_available = !s.startup_hdr && s.framegen_supported && temporal && BbFrameGen::DisplaySupported();
+    const bool framegen_available = !s.startup_hdr && upscaler != BbSettings::UpscalerSpatial && s.framegen_supported && BbFrameGen::DisplaySupported();
     ImGui::BeginDisabled(!framegen_available || s.framegen_forced);
     Toggle("MetalFX 2x (experimental)", s.framegen);
     ImGui::EndDisabled();
-    HintBelow("Adds an intermediate image between real frames. Requires an active temporal "
-              "upscaler; the FPS cap still controls real frames. Adds GPU work and latency.");
-    if (!temporal) {
-        Note("Choose MetalFX, FSR 3.1, or TAA above. Native 16:10 and ultrawide output "
-             "and MetalFX Spatial cannot provide frame generation inputs.");
-    } else if (s.startup_hdr) {
+    HintBelow("Adds an intermediate image between real frames, including at native resolution. "
+              "The FPS cap still controls real frames. Adds GPU work; takes effect after restart.");
+    if (s.startup_hdr) {
         Note("Frame generation is unavailable with HDR presentation.");
+    } else if (upscaler == BbSettings::UpscalerSpatial) {
+        Note("Select MetalFX, FSR 3.1, TAA, or native output to use frame generation.");
     } else if (!s.framegen_supported) {
         Note("Unavailable in this session. Requires macOS 26 or newer, a supported GPU, "
              "and the temporal renderer.");
     } else if (!BbFrameGen::DisplaySupported()) {
         if (!s.framegen_real_cap) {
-            Note("Set a real FPS cap to use frame generation. Use a fixed refresh rate that is "
-                 "a whole multiple of twice the cap, or an active variable-refresh mode.");
+            Note("Set a real FPS cap to use frame generation. The display must support at "
+                 "least twice that rate.");
         } else {
             char text[256];
             const auto timing = s.display_timing.load();
             std::snprintf(text, sizeof(text),
-                          "Set the display to %.0f Hz (or a whole multiple) for the %u FPS cap, "
-                          "or use active variable refresh. External Adaptive-Sync needs full screen. "
+                          "Requires at least %.0f Hz for the %u FPS cap. "
+                          "External Adaptive-Sync needs full screen. "
                           "This window reports %.2f Hz (0 means unknown).",
                           2.0 * s.framegen_real_cap, s.framegen_real_cap, double(timing.refresh_hz));
             Note(text);
         }
     } else if (s.framegen_forced) {
         Note("Set by BB_METAL_FRAMEGEN at launch. Remove that override to change it here.");
+    } else if (BbFrameGen::Requested() && BbFrameGen::GpuBudgetLimited()) {
+        Note("Waiting for spare GPU time to preserve real FPS. Frame generation resumes "
+             "automatically when there is enough headroom.");
     }
     EndCard();
 

@@ -501,6 +501,7 @@ void TestFramePair(Device& device, PresentPasses& passes, PresentQueue& queue, b
     auto packet = std::make_shared<int>(1);
     std::weak_ptr<int> lifetime = packet;
     const u64 tick = device.CurrentTick();
+    const double deadline = PresentationTime();
     std::atomic<int> done{0};
     WithAutoreleasePool([&] {
         auto generated = NextDrawable((__bridge void*)layer);
@@ -509,7 +510,7 @@ void TestFramePair(Device& device, PresentPasses& passes, PresentQueue& queue, b
         void* first = queue.Begin();
         queue.WaitForDeviceTick(first, tick);
         passes.Present(first, source.Get(), 64, 36, generated.texture, 64, 36);
-        queue.Commit(first, generated.drawable.Get(), [packet, &done] { ++done; }, .97 / 120);
+        queue.Commit(first, generated.drawable.Get(), [packet, &done] { ++done; }, 0, {}, deadline);
     });
     Expect(queue.InFlight() == 1 && done == 0,
            "generated image submitted before acquiring the real drawable");
@@ -521,7 +522,8 @@ void TestFramePair(Device& device, PresentPasses& passes, PresentQueue& queue, b
             void* second = queue.Begin();
             queue.WaitForDeviceTick(second, tick);
             passes.Present(second, source.Get(), 64, 36, real.texture, 64, 36);
-            queue.Commit(second, real.drawable.Get(), [packet, &done] { ++done; }, .97 / 120);
+            queue.Commit(second, real.drawable.Get(), [packet, &done] { ++done; }, 0, {},
+                         deadline + 1. / 120);
         });
     }
     packet.reset();

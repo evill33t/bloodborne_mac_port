@@ -4,6 +4,7 @@
 // sRGB, warmup/cuts/gaps, and bounded pool fallback. No game files or window
 // required.
 #include "bbport_framegen.h"
+#include "bbport_framegen_budget.h"
 #include "bbport_settings.h"
 #include "video_core/renderer_metal/mtl_device.h"
 #include "video_core/renderer_metal/mtl_encoder.h"
@@ -53,27 +54,20 @@ void Policy() {
     settings.startup_framegen = false;
     for (const auto [hz, cap, supported] : {
              std::tuple{60.0, 30u, true}, {60.0, 60u, false}, {120.0, 60u, true},
-             {120.0, 120u, false}, {144.0, 60u, false}, {160.0, 60u, false},
+             {120.0, 120u, false}, {144.0, 60u, true}, {160.0, 60u, true},
              {240.0, 60u, true}, {360.0, 60u, true}, {240.0, 120u, true},
-             {80.0, 40u, true}, {120.0, 40u, false}, {180.0, 90u, true},
+             {80.0, 40u, true}, {120.0, 40u, true}, {180.0, 90u, true},
              {59.94, 30u, true}, {119.88, 60u, true}, {239.76, 60u, true},
-             {119.0, 60u, false}, {121.0, 60u, false}, {0.0, 30u, false}, {120.0, 0u, false},
+             {119.0, 60u, false}, {121.0, 60u, true}, {0.0, 30u, false}, {120.0, 0u, false},
              {-1.0, 30u, false}, {std::numeric_limits<double>::quiet_NaN(), 30u, false}}) {
         Expect(BbFrameGen::DisplaySupported(hz, cap) == supported,
-               "fixed refresh must be a whole multiple of twice the cap within 0.2 percent");
-        if (supported) {
-            const double hold = BbFrameGen::PresentDuration(1.f / cap, cap);
-            const double refreshes = std::ceil(hold * hz);
-            const double paced_real_rate = hz / (2.0 * refreshes);
-            Expect(std::abs(paced_real_rate / cap - 1) <= .002,
-                   "accepted fixed modes do not add refreshes that reduce the real rate beyond tolerance");
-        }
+               "absolute pair deadlines require at least twice the cap within tolerance");
     }
     for (const auto [maximum, minimum, cap, supported] : {
              std::tuple{144.0, 48.0, 60u, true}, {160.0, 48.0, 60u, true},
              {119.88, 23.976, 60u, true},
              {160.0, 48.0, 40u, true}, {160.0, 100.0, 40u, false},
-             {160.0, 48.0, 90u, false}, {160.0, 0.0, 60u, false},
+             {160.0, 48.0, 90u, false}, {160.0, 0.0, 60u, true},
              {160.0, 160.0, 60u, false}, {160.0, 200.0, 60u, false},
              {160.0, std::numeric_limits<double>::quiet_NaN(), 60u, false}}) {
         Expect(BbFrameGen::DisplaySupported(maximum, cap, minimum) == supported,
@@ -91,19 +85,19 @@ void Policy() {
     settings.display_timing = {60, 0};
     Expect(!BbFrameGen::Active(), "moving the window to 60 Hz suspends generation");
     settings.display_timing = {144, 0};
-    Expect(!BbFrameGen::Active(), "moving to fixed 144 Hz suspends capture and paired presentation");
+    Expect(BbFrameGen::Active(), "absolute deadlines support fixed 144 Hz without a mode change");
     settings.display_timing = {160, 0};
-    Expect(!BbFrameGen::Active(), "fixed 160 Hz cannot activate paired presentation");
+    Expect(BbFrameGen::Active(), "absolute deadlines support fixed 160 Hz");
     settings.display_timing = {160, 48};
     Expect(BbFrameGen::Active(), "active 48-160 Hz variable refresh resumes generation");
     settings.display_timing = {160, 0};
-    Expect(!BbFrameGen::Active(), "leaving Adaptive-Sync suspends generation on an incompatible fixed mode");
+    Expect(BbFrameGen::Active(), "leaving Adaptive-Sync keeps absolute pacing on fixed 160 Hz");
     settings.display_timing = {120, 0};
     Expect(BbFrameGen::Active(), "moving back to a suitable display resumes generation");
     settings.upscaler = BbSettings::UpscalerOff;
-    Expect(!BbFrameGen::Active(), "native output without a temporal upscaler cannot activate generation");
+    Expect(BbFrameGen::Active(), "native output captures frame generation inputs without a temporal upscaler");
     settings.upscaler = BbSettings::UpscalerSpatial;
-    Expect(!BbFrameGen::Active(), "spatial scaling has no temporal motion input for generation");
+    Expect(!BbFrameGen::Active(), "spatial scaling retains its existing generation exclusion");
     settings.upscaler = BbSettings::UpscalerMetalFx;
     settings.startup_framegen = false;
     const auto previous = Description();
@@ -129,16 +123,76 @@ void Policy() {
         next.sequence++;
         next.interval = interval;
         Expect(!BbFrameGen::Continuous(previous, next), "invalid timing discards history");
-        Expect(BbFrameGen::PresentDuration(interval, 60) == 0, "invalid timing cannot pace a pair");
+        Expect(BbFrameGen::PresentInterval(interval, 60) == 0, "invalid timing cannot pace a pair");
     }
     for (float interval : {1.f / 120.f, 1.f / 60.f, 1.f / 30.f, 1.f / 20.f, 1.f / 12.f}) {
-        Expect(std::abs(BbFrameGen::PresentDuration(interval, 120) - .97 / 240) < 1e-8,
+        Expect(std::abs(BbFrameGen::PresentInterval(interval, 120) - 1. / 240) < 1e-8,
                "drawable backpressure cannot lengthen the next pair's display hold");
     }
-    Expect(std::abs(BbFrameGen::PresentDuration(1.f / 60.f, 30) - .97 / 60) < 1e-8,
+    // Model refresh quantisation over all phases. Absolute deadlines are based on each
+    // source, so a hold rounded to two refreshes cannot feed back into the next pair.
+    // The old relative 8 ms holds needed four refreshes per pair at 144/160 Hz.
+    for (double hz : {120., 144., 160., 240.}) {
+        for (int phase = 0; phase < 100; ++phase) {
+            const double offset = phase / (100. * hz);
+            double previous_real = -1;
+            double first_real = 0, last_real = 0;
+            for (int frame = 0; frame < 600; ++frame) {
+                // A single late source must not shift every following deadline.
+                const double ready = offset + frame / 60. + (frame == 300 ? .025 : 0);
+                const double real_deadline = ready + BbFrameGen::PresentInterval(1.f / 60.f, 60);
+                const double shown = std::ceil(real_deadline * hz - 1e-9) / hz;
+                if (frame == 0) first_real = shown;
+                if (frame == 599) last_real = shown;
+                if (frame > 301) {
+                    Expect(shown - previous_real <= 1. / 60. + 1. / hz + 1e-9,
+                           "late source does not accumulate a recurring pacing stall");
+                }
+                previous_real = shown;
+            }
+            Expect(std::abs(599. / (last_real - first_real) - 60.) < .1,
+                   "non-integer refresh ratio preserves the real source rate");
+        }
+    }
+    Expect(std::abs(BbFrameGen::PresentInterval(1.f / 60.f, 30) - 1. / 60) < 1e-8,
            "a queued real frame cannot outrun the game frame cap");
-    Expect(BbFrameGen::PresentDuration(1.f / 30.f, 0) == 0,
+    Expect(BbFrameGen::PresentInterval(1.f / 30.f, 0) == 0,
            "uncapped output adds no measured-cadence display hold");
+}
+
+void BudgetPolicy() {
+    BbFrameGen::GpuBudget budget;
+    double now = 1;
+    uint64_t busy = 0;
+    const auto sample = [&](double gpu_ms, double frame_ms = 1000. / 60,
+                            uint64_t draw_count = 1100, uint64_t config = 1) {
+        now += frame_ms / 1000;
+        busy += uint64_t(gpu_ms * 1e6);
+        return budget.Observe(now, busy, draw_count > 100, 60, config, .004);
+    };
+    for (int i = 0; i < 120; ++i)
+        Expect(!sample(1, 1000. / 60, 10), "loading frames cannot admit interpolation");
+    for (int i = 0; i < 120; ++i) sample(7);
+    Expect(sample(7), "spare GPU time admits generation after measuring real-only gameplay");
+    sample(8, 100); // CPU/snapshot hitch, with little GPU work
+    for (int i = 0; i < 60; ++i)
+        Expect(sample(7), "an isolated CPU hitch does not disable generation");
+    for (int i = 0; i < 90; ++i) sample(20, 1000. / 45);
+    Expect(!sample(16), "sustained GPU overload returns to real-only presentation");
+    for (int i = 0; i < 600; ++i)
+        Expect(!sample(16), "saturated real-only output never periodically probes interpolation");
+    for (int i = 0; i < 120; ++i) sample(6);
+    Expect(sample(6), "lighter gameplay resumes generation with headroom for its measured cost");
+    Expect(!sample(6, 1000. / 60, 1100, 2), "resolution/preset changes remeasure real-only cost");
+    for (int i = 0; i < 120; ++i)
+        Expect(!sample(16, 1000. / 60, 1100, 2), "GPU-bound baseline never enables generation");
+    for (int i = 0; i < 120; ++i) sample(6, 1000. / 60, 1100, 2);
+    Expect(sample(6, 1000. / 60, 1100, 2), "headroom recovers without changing the saved switch");
+    Expect(!sample(6, 500, 1100, 2), "occlusion/pause discards stale cost estimates");
+    BbFrameGen::GpuBudget unknown;
+    for (int i = 0; i < 120; ++i)
+        Expect(!unknown.Observe(1. + i / 60., 0, true, 60, 1),
+               "missing GPU timestamps cannot claim spare time");
 }
 
 id<MTLDevice> Dev(Metal::Device& device) { return (__bridge id<MTLDevice>)device.NativeDevice(); }
@@ -160,20 +214,23 @@ void Upload(Metal::Device& device, Metal::Encoder& e, void* texture, const void*
 void SceneDisplay(Metal::Device& device, Metal::Encoder& encoder, BbFrameGen::Generator& generator,
                   const BbFrameGen::FramePtr& frame, void* ui, void* displayed,
                   std::span<const float> curves = {}) {
-    const uint32_t height = curves.empty() ? 1 : uint32_t(curves.size() / 256);
+    // The retail LUT: one 1-row curve per array slice (red, green, blue inputs: slices 2, 1, 0).
+    const uint32_t slices = curves.empty() ? 3 : uint32_t(curves.size() / 256);
     auto d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR32Float
-        width:256 height:height mipmapped:NO];
-    d.textureType = MTLTextureType2DArray; d.arrayLength = 1;
+        width:256 height:1 mipmapped:NO];
+    d.textureType = MTLTextureType2DArray; d.arrayLength = slices;
     d.storageMode = MTLStorageModeShared; d.usage = MTLTextureUsageShaderRead;
     auto lut = [Dev(device) newTextureWithDescriptor:d];
-    std::vector<float> values(256);
+    std::vector<float> values(256 * slices);
     for (unsigned i=0; i<256; ++i) {
         const float x = float(i)/255;
-        values[i] = x <= .04045f ? x/12.92f : std::pow((x+.055f)/1.055f,2.4f);
+        for (uint32_t slice = 0; slice < slices; ++slice)
+            values[slice * 256 + i] = x <= .04045f ? x/12.92f : std::pow((x+.055f)/1.055f,2.4f);
     }
     if (!curves.empty()) values.assign(curves.begin(), curves.end());
-    [lut replaceRegion:MTLRegionMake2D(0,0,256,height) mipmapLevel:0 slice:0
-        withBytes:values.data() bytesPerRow:256*4 bytesPerImage:height*256*4];
+    for (uint32_t slice = 0; slice < slices; ++slice)
+        [lut replaceRegion:MTLRegionMake2D(0,0,256,1) mipmapLevel:0 slice:slice
+            withBytes:values.data() + slice * 256 bytesPerRow:256*4 bytesPerImage:256*4];
     auto sd = [MTLSamplerDescriptor new];
     sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear;
     sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
@@ -374,14 +431,14 @@ void Gpu(Metal::Device& device) {
     }
 }
 
-void GammaRows(Metal::Device& device) {
-    // The retail LUT stores channel curves in rows, in one array slice. Distinct
-    // curves and a fourth sentinel row expose bottom-edge clamping or row blending.
-    for (const uint32_t rows : {3u, 4u}) {
+void GammaSlices(Metal::Device& device) {
+    // The retail LUT stores one channel curve per array slice, in reverse channel order.
+    // Distinct curves and a fourth sentinel slice expose a slice or channel mix-up.
+    for (const uint32_t slices : {3u, 4u}) {
         BbFrameGen::Generator generator{device};
         const auto d = Description();
         auto frame = generator.Prepare(d);
-        Expect(bool(frame), "gamma row snapshot allocated");
+        Expect(bool(frame), "gamma slice snapshot allocated");
         if (!frame) return;
         auto depth = Texture(device, MTLPixelFormatDepth32Float, d.width, d.height);
         auto motion = Texture(device, MTLPixelFormatRG16Float, d.width, d.height);
@@ -393,7 +450,7 @@ void GammaRows(Metal::Device& device) {
         for (size_t p = 0; p < image.size(); p += 4) {
             image[p] = 51; image[p + 1] = 102; image[p + 2] = 153; image[p + 3] = 255;
         }
-        std::vector<float> curves(256 * rows, .95f);
+        std::vector<float> curves(256 * slices, .95f);
         for (uint32_t x = 0; x < 256; ++x) {
             const float coordinate = (x + .5f) / 256.f;
             curves[x] = .1f + .6f * coordinate;
@@ -413,13 +470,14 @@ void GammaRows(Metal::Device& device) {
             d.out_width * 8, d.out_width * d.out_height * 8);
         device.Wait(encoder.Submit());
         const auto* rgb = static_cast<const _Float16*>(pixels.contents);
-        Expect(std::abs(float(rgb[0]) - .22f) < .002f,
-               "red uses the center of gamma LUT row zero");
+        // Input (.2, .4, .6): red = slice 2 (blue), green = slice 1, blue = slice 0 (red).
+        Expect(std::abs(float(rgb[0]) - .35f) < .002f,
+               "red output maps blue input through gamma LUT slice two");
         Expect(std::abs(float(rgb[1]) - .32f) < .002f,
-               "green uses the center of gamma LUT row one");
-        Expect(std::abs(float(rgb[2]) - .35f) < .002f,
-               "blue uses the center of gamma LUT row two");
-        Expect(float(rgb[3]) == 1.f, "gamma row sampling preserves alpha");
+               "green output maps green input through gamma LUT slice one");
+        Expect(std::abs(float(rgb[2]) - .22f) < .002f,
+               "blue output maps red input through gamma LUT slice zero");
+        Expect(float(rgb[3]) == 1.f, "gamma slice sampling preserves alpha");
     }
 }
 
@@ -464,11 +522,12 @@ void CroppedDisplay(Metal::Device& device) {
 } // namespace
 int main() {
     Policy();
+    BudgetPolicy();
     @autoreleasepool {
         Metal::Device device;
         if (BbFrameGen::Supported(device)) {
             Gpu(device);
-            GammaRows(device);
+            GammaSlices(device);
             CroppedDisplay(device);
         } else
             std::printf("SKIP: MetalFX frame interpolation unsupported\n");

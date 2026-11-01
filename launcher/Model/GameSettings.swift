@@ -318,9 +318,8 @@ struct GameSettings: Equatable {
     func frameGenerationUnavailableReason(deviceSupported: Bool, display: FrameGenerationDisplay?) -> String? {
         guard !hdr else { return "Frame generation is unavailable with HDR presentation." }
         guard deviceSupported else { return "Requires macOS 26 or later and a Mac supporting MetalFX frame generation." }
-        guard !ultrawide else { return "Unavailable with native ultrawide or 16:10 output: upscaling is off." }
-        guard upscaler != .off && upscaler != .metalfx_spatial else {
-            return "Select MetalFX, FSR 3.1 or TAA to use frame generation."
+        guard upscaler != .metalfx_spatial else {
+            return "Select MetalFX, FSR 3.1, TAA, or native output to use frame generation."
         }
         guard let display, display.refreshRate.isFinite, display.refreshRate > 0 else {
             return "The display refresh rate could not be determined."
@@ -329,14 +328,10 @@ struct GameSettings: Equatable {
         let rate = display.refreshRate.formatted(.number.precision(.fractionLength(0...2)))
         let minimum = display.minimumRefreshRate.formatted(.number.precision(.fractionLength(0...2)))
         guard display.supports(realCap: frameCap.rawValue, fullscreen: fullscreen) else {
-            if !fullscreen, display.requiresFullscreen,
-               display.supports(realCap: frameCap.rawValue, fullscreen: true) {
-                return "Use full screen for Adaptive-Sync, or set the display to \(required) Hz (or a whole multiple)."
-            }
             if display.minimumRefreshRate > 0, !display.requiresFullscreen || fullscreen {
                 return "The paired \(required) FPS is outside the display's variable refresh range (\(minimum)–\(rate) Hz). Change the cap or display mode."
             }
-            return "Set the display to \(required) Hz (or a whole multiple) for the \(frameCap.label) FPS cap, or lower the cap. Fixed \(rate) Hz cannot pace the pair evenly."
+            return "Requires at least \(required) Hz for the \(frameCap.label) FPS cap. This display reports \(rate) Hz."
         }
         return nil
     }
