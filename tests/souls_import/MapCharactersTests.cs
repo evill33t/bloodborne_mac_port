@@ -165,6 +165,12 @@ static class MapCharactersTests {
         Reject(()=>MapCharacters.BakeFirelink(Read,"DS1R",mapName,defs,nativeRoot,MSBB.Read(mapBytes),new(float.NaN),collision),"Non-finite character offset accepted");
         Reject(()=>MapCharacters.BakeFirelink(path=>path=="facegen/FaceGen.fgbnd"?null:Read(path),"DS1R",mapName,defs,nativeRoot,MSBB.Read(mapBytes),offset,collision),"Missing source head was silently substituted");
         Reject(()=>MapCharacters.BakeFirelink(Read,"DS1R",mapName,defs,nativeRoot,MSBB.Read(mapBytes),offset,"missing"),"Dangling collision reference accepted");
+        foreach(string knight in new[]{"c2792","c2793","c2794","c2795"}) {
+            var authored=MapCharacters.Authored(Read,knight);var arm=authored.Textures.Single(t=>t.Name.Equals("c2799_AM_A_9490",StringComparison.OrdinalIgnoreCase));
+            Check(Convert.ToHexStringLower(SHA256.HashData(arm.Bytes))=="fdba9808121a66f02b08d586905c15f6936e7823e77a49b6963cbc297303650d"&&authored.Paths.Contains("chr/c2799.chrtpfbdt"),"Shared Black Knight part texture owner was not resolved");
+        }
+        var vamos=MapCharacters.Authored(Read,"c2920");var hammer=vamos.Textures.Single(t=>t.Name.Equals("c2929_hammer",StringComparison.OrdinalIgnoreCase));
+        Check(hammer.Format==38&&hammer.Bytes.Length==87556,"Vamos source-owned remastered hammer was replaced with the older shared fallback");
         foreach(var (path,hash) in hashes)Equal(SHA256.HashData(File.ReadAllBytes(path)),hash,"Original source/native game asset changed");
         string output=Path.Combine(Directory.GetCurrentDirectory(),"out/map-editor/firelink-validation/map-characters-tests.json");Directory.CreateDirectory(Path.GetDirectoryName(output)!);File.WriteAllText(output,JsonSerializer.Serialize(new{actors=active,reports=result.Reports.Count,disabled=result.Reports.Count-3,originalFiles=hashes.Count,gameplayValidated=false},new JsonSerializerOptions{WriteIndented=true,IncludeFields=true}));
         Console.WriteLine($"Map characters passed: 3 source NPC appearances, {result.Reports.Count-3} explicit unconverted actors; MSB, native animation/skeleton, PS4 textures, opaque composed params and {hashes.Count} original files verified. Gameplay remains unverified.");

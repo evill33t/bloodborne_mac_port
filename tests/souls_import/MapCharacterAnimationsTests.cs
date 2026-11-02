@@ -36,7 +36,8 @@ static class MapCharacterAnimationsTests {
         string sourceRoot=args[0],nativeRoot=args[1],defs=args[2];var hashes=new Dictionary<string,string>();
         byte[]? Read(string p){var path=Path.Combine(sourceRoot,p);if(!File.Exists(path))return null;var b=File.ReadAllBytes(path);hashes.TryAdd(path,Hash(b));return b;}
         byte[] Native(string p){var path=Path.Combine(nativeRoot,p);var b=File.ReadAllBytes(path);hashes.TryAdd(path,Hash(b));return b;}
-        var msb=MSB1.Read(Read("map/MapStudio/m10_02_00_00.msb")!);var selections=new[]{msb.Parts.Enemies.Single(p=>p.EntityID==6270),msb.Parts.Enemies.Single(p=>p.EntityID==6080),msb.Parts.Enemies.Single(p=>p.EntityID==6060)};
+        var msb=MSB1.Read(Read("map/MapStudio/m10_02_00_00.msb")!);var burg=MSB1.Read(Read("map/MapStudio/m10_01_00_00.msb")!);
+        var selections=new[]{msb.Parts.Enemies.Single(p=>p.EntityID==6270),msb.Parts.Enemies.Single(p=>p.EntityID==6080),msb.Parts.Enemies.Single(p=>p.EntityID==6060),burg.Parts.Enemies.Single(p=>p.EntityID==6001)};
         byte[] nativeBank=Native("chr/c8030.anibnd.dcx"),nativeScript=Native("action/script/c8030.hks");
         var chr=BND4.Read(Native("chr/c8030.chrbnd.dcx"));byte[] nativeModel=chr.Files.Single(f=>Leaf(f.Name)=="c8030.flver").Bytes.ToArray();
         var skeleton=BND4.Read(nativeBank).Files.Single(f=>f.ID==1000000).Bytes.ToArray();var rig=NpcAnimationInspector.Skeleton(skeleton);
@@ -56,9 +57,9 @@ static class MapCharacterAnimationsTests {
             var mask=idle.Events.First(e=>e.Type==315).GetClone(false);var maskBytes=mask.GetParameterBytes(false).ToArray();BitConverter.GetBytes(7).CopyTo(maskBytes,16);mask.SetParameterBytes(false,maskBytes);idle.Events.Add(mask);taeFile.Bytes=fixtureTae.Write();
             var before=input.Write(input.Compression);string path=$"chr/{target}.anibnd.dcx";var files=new Dictionary<string,byte[]>{{path,before},{"action/script/"+target+".hks",nativeScript},{"unrelated.bin",[1,2,3]}};
             var report=MapCharacterAnimations.Apply(Read,source,target,skin,files);var after=BND4.Read(files[path]);var beforeRead=BND4.Read(before);
-            int expectedID=source.EntityID==6270?7810:0,frames=source.EntityID==6270?91:source.EntityID==6080?61:121;
+            int expectedID=source.EntityID==6270?7810:source.EntityID==6001?7845:0,frames=source.EntityID==6270?91:source.EntityID==6080?61:121;
             Check(report.SourceClipID==expectedID&&report.FrameCount==frames&&report.Approximation==(source.EntityID==6080),"NPC source pose or approximation report is wrong");
-            Check(report.SourceArchive==(source.EntityID==6270?"chr/c0000_a00_md.anibnd.dcx":source.EntityID==6080?"chr/c0000_a00_lo.anibnd.dcx":"chr/c2750.anibnd.dcx"),"Split source provenance is wrong");
+            Check(report.SourceArchive==(source.EntityID is 6270 or 6001?"chr/c0000_a00_md.anibnd.dcx":source.EntityID==6080?"chr/c0000_a00_lo.anibnd.dcx":"chr/c2750.anibnd.dcx"),"Split source provenance is wrong");
             Check(files.Count==3&&files["action/script/"+target+".hks"].SequenceEqual(nativeScript)&&files["unrelated.bin"].SequenceEqual(new byte[]{1,2,3}),"Pose staging changed HKS or unrelated output");
             var checkedTae=TAE.Read(after.Files.Single(f=>TAE.Is(f.Bytes.ToArray())).Bytes);var beforeTae=TAE.Read(beforeRead.Files.Single(f=>TAE.Is(f.Bytes.ToArray())).Bytes);
             foreach(int slot in report.NativeIdleSlots) {
@@ -107,7 +108,8 @@ static class MapCharacterAnimationsTests {
                         }
                     }
                 }
-                if(source.ModelName=="c0000")Check(rigidHeadEdges>1000&&hairEdges>100&&rigidHeadMaxError<.001f,"Actual source head/hair pose or dimensions were not preserved");
+                if(source.ModelName=="c0000"&&source.EntityID!=6001)Check(rigidHeadEdges>1000&&hairEdges>100&&rigidHeadMaxError<.001f,"Actual source head/hair pose or dimensions were not preserved");
+                if(source.EntityID==6001)Check(rigidHeadEdges>100&&rigidHeadMaxError<.001f,"Actual source covered helmet pose or dimensions were not preserved");
                 float mean=errors.Average(),max=errors.Max(),p95=errors.Order().ElementAt((int)(errors.Count*.95));
                 // Multi-bone armor retains blended bind-remap residuals even
                 // when rigid dimensions are preserved. The separate head/hair

@@ -33,15 +33,20 @@ internal static partial class Program {
         var parts=msb.Parts.GetEntries();
         var connections=parts.Where(p=>p.GetType().Name.Contains("ConnectCollision")).Select(p=>new {p.Name,p.Position,p.Rotation,values=Fields(p,"MapID","CollisionName","ModelName")}).ToArray();
         var actors=parts.Where(p=>Kind(p.GetType().Name)==2).Select(p=>new {p.Name,p.ModelName,p.Position,p.Rotation,p.Scale,kind=p.GetType().Name,values=Fields(p,"EntityID","NPCParamID","ThinkParamID","CharaInitID","InitAnimID","TalkID","CollisionName")}).ToArray();
-        var objects=parts.Where(p=>Kind(p.GetType().Name)==1).Select(p=>new {p.Name,p.ModelName,p.Position,p.Rotation,p.Scale,values=Fields(p,"EntityID","InitAnimID","CollisionName")}).ToArray();
+        var objects=parts.Where(p=>Kind(p.GetType().Name)==1).Select(p=>new {p.Name,p.ModelName,p.Position,p.Rotation,p.Scale,kind=p.GetType().Name,values=Fields(p,"EntityID","InitAnimID","CollisionName")}).ToArray();
         var events=msb.Events.GetEntries();
+        var treasures=events.Where(e=>e.GetType().Name=="Treasure").Select(e=>new{e.Name,values=Fields(e,"EntityID","TreasurePartName","ItemLots","InChest","StartDisabled")}).ToArray();
+        var sourceEvents=assets.Read("event/"+map+".emevd.dcx")??assets.Read("event/"+map+".emevd");
+        var script=sourceEvents==null?null:EMEVD.Read(sourceEvents);
+        var eventPrograms=script?.Events.Select(e=>new{e.ID,Instructions=e.Instructions.Count,Parameters=e.Parameters.Count,
+            SHA256=Convert.ToHexStringLower(SHA256.HashData(e.Instructions.SelectMany(i=>BitConverter.GetBytes(i.Bank).Concat(BitConverter.GetBytes(i.ID)).Concat(i.ArgData)).ToArray()))}).ToArray();
         var sounds=events.Where(e=>e.GetType().Name.Contains("Sound")).Select(e=>new {e.Name,values=Fields(e,"SoundID","SoundType","RegionName","PartName","EntityID")}).ToArray();
         var collisions=parts.Where(p=>p.GetType().Name=="Collision").Select(p=>new {p.Name,p.ModelName,p.Position,p.Rotation,p.Scale,values=Fields(p,"HitFilterID","MapNameID","PlayRegionID","DisableStart")}).ToArray();
         var lighting=parts.Where(p=>p.GetType().Name=="MapPiece").Select(p=>Fields(p,"LightID","FogID","ScatterID","LensFlareID","ShadowID","DofID","ToneMapID","ToneCorrectID","PointLightID","LanternID")).DistinctBy(d=>JsonSerializer.Serialize(d)).ToArray();
         var data=new {schema="bbmap-import-plan-1",profile=profile.Id,map,sourceRoot=root,sourceMapPath=path,sourceMapSha256=Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
             partCounts=parts.GroupBy(p=>p.GetType().Name).ToDictionary(g=>g.Key,g=>g.Count()),
             models=parts.Where(p=>!string.IsNullOrEmpty(p.ModelName)).GroupBy(p=>p.ModelName).Select(g=>new {model=g.Key,placements=g.Count(),kinds=g.Select(p=>p.GetType().Name).Distinct().ToArray()}).ToArray(),
-            actors,objects,collisions,connections,topology,sounds,lighting,eventCounts=events.GroupBy(e=>e.GetType().Name).ToDictionary(g=>g.Key,g=>g.Count()),
+            actors,objects,treasures,eventPrograms,sourceScriptSHA256=sourceEvents==null?null:Convert.ToHexStringLower(SHA256.HashData(sourceEvents)),collisions,connections,topology,sounds,lighting,eventCounts=events.GroupBy(e=>e.GetType().Name).ToDictionary(g=>g.Key,g=>g.Count()),
             requiredStages=new[]{"geometry/textures","high/low collision and filters","destructible objects","NPC/enemy appearance and behavior","corpse poses","localized area name","connected map loading","music and ambience","sky and lighting","items/events/quests"},
             notice="Source inventory only. Read conversion.json for implemented stages and gameplay limits. Source AI, quests, audio and map transitions require explicit conversion; their presence here does not imply runtime support."};
         var json=JsonSerializer.Serialize(data,new JsonSerializerOptions{WriteIndented=true,IncludeFields=true});

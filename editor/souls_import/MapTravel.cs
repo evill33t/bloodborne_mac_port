@@ -9,16 +9,41 @@ using System.Text.RegularExpressions;
 // group. They do not borrow Central Yharnam's unlocks, checkpoint, or requests.
 internal static class MapTravel {
     internal const int HeadstoneEntity=2100980,HeadstoneStone=2101980,HeadstoneTalk=210980,HeadstoneAvailable=52100599;
-    // 500 is a retail ItemLot flag;600..899 belong to imported pickups. This
-    // manifest owns exactly two20-bit native lamp records and nine requests/
-    // access bits. Never renumber these once a copied mod save has used them.
+    internal const int EntryRequest=52100033,EntryRespawn=4022960;
+    // Stable source-part identities, independent of import order. The first
+    // two registrations/chairs remain compatible with existing copied saves.
+    internal sealed record LampSlot(int Index,string SourceMap,string SourcePart,string Name,int Local,int SourceAreaName) {
+        internal int Registration=>Index<2?52100520+Index*20:52100320+(Index-2)*20;
+        internal int RegistrationRequest=>Index<2?52100580+Index:52100001+(Index-2)*4;
+        internal int ReturnRequest=>Index<2?52100582+Index:RegistrationRequest+1;
+        internal int ArrivalRequest=>Index<2?52100584+Index:RegistrationRequest+2;
+        internal int DisabledFlag=>Index<2?52100590+Index:RegistrationRequest+3;
+    }
+    internal static readonly IReadOnlyList<LampSlot> Lamps=[
+        new(0,"m10_02_00_00","o0200_0000","Firelink Shrine",0,1020),
+        new(1,"m10_01_00_00","o0200_0000","Undead Burg",0,1010),
+        new(2,"m10_01_00_00","o0200_0001","Sunlight Altar",1,1011),
+        new(3,"m10_01_00_00","o0200_0002","Undead Burg Bonfire",2,1010),
+        new(4,"m10_01_00_00","o0200_0005","Undead Parish",3,1011),
+        new(5,"m12_00_00_00","o0200_0000","Darkroot Garden",0,1200),
+        new(6,"m16_00_00_00","o0200_0002","Darkroot Basin",0,1201),
+        new(7,"m13_00_00_00","o0200_0000","The Catacombs",0,1300),
+        new(8,"m13_00_00_00","o0200_0001","Catacombs – Hidden Wall",1,1300),
+        new(9,"m13_00_00_00","o0200_0003","Catacombs – Vamos",2,1300)
+    ];
+    static LampSlot Slot(Destination d)=>Lamps.SingleOrDefault(s=>s.SourceMap==d.SourceMap&&s.SourcePart==d.SourceBonfirePart)
+        ??throw new ArgumentException("Unallocated source bonfire: "+d.SourceMap+"/"+d.SourceBonfirePart);
+    // 499 initializes NPC quests;500 is retail;600..899 own pickup flags.
+    // Additional lamp records320..479 and requests1..33 avoid those ranges;
+    // the source-data scan also excludes native bits0 and96.
     internal static readonly IReadOnlyList<int> ReservedFlags=Enumerable.Range(52100520,40)
-        .Concat(Enumerable.Range(52100580,6)).Concat(new[]{52100590,52100591,HeadstoneAvailable}).ToArray();
+        .Concat(Enumerable.Range(52100580,6)).Concat(new[]{52100590,52100591,HeadstoneAvailable})
+        .Concat(Enumerable.Range(52100320,160)).Concat(Enumerable.Range(52100001,33)).ToArray();
     internal sealed record Destination(string SourceMap,string TargetMap,string Name,Vector3 Spawn,Vector3 LampPosition,
-        Vector3 LampRotation,string? CollisionName=null,string? SourceBonfirePart=null,string? ReplacedMapPiece=null,string? SourceBonfireKind=null);
+        Vector3 LampRotation,string? CollisionName=null,string? SourceBonfirePart=null,string? ReplacedMapPiece=null,string? SourceBonfireKind=null,Vector3? SpawnRotation=null);
     internal sealed record Binding(string SourceMap,string TargetMap,string Name,int Controller,int Lamp,int Respawn,
         int Chair,int RegistrationBase,int ActiveFlag,int RegistrationRequest,int ReturnRequest,int ArrivalRequest,
-        int DisabledFlag,int MenuText,Vector3 Spawn,Vector3 LampPosition,string Collision,string? SourceBonfirePart,string? ReplacedMapPiece,string? SourceBonfireKind);
+        int DisabledFlag,int MenuText,Vector3 Spawn,Vector3 LampPosition,string Collision,string? SourceBonfirePart,string? ReplacedMapPiece,string? SourceBonfireKind,Vector3? SpawnRotation=null);
     internal sealed record Result(IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<Binding> Destinations,
         IReadOnlyDictionary<string,string> NativeSources,IReadOnlyList<string> Limitations);
     static string Leaf(string path)=>Path.GetFileName(path.Replace('\\','/'));
@@ -44,7 +69,8 @@ internal static class MapTravel {
             if(BND4.Is(bytes))foreach(var file in BND4.Read(bytes).Files)ReservationScan(file.Bytes.Span,owner+":"+file.Name);
             else ReservationScan(DCX.Is(bytes)?DCX.Decompress(bytes).Span:bytes,owner);
         }
-        var owned=new HashSet<int>{HeadstoneEntity,HeadstoneStone,4020950,4021950,4022950,4030950,4031950,4032950};
+        var owned=new HashSet<int>{HeadstoneEntity,HeadstoneStone,EntryRespawn};
+        foreach(var slot in Lamps){int code=int.Parse(MapDestination.AdditionalMaps[slot.SourceMap].AsSpan(1,2))*10+int.Parse(MapDestination.AdditionalMaps[slot.SourceMap].AsSpan(4,2));foreach(int suffix in new[]{950,1950,2950})owned.Add(code*10000+suffix+slot.Local);}
         foreach(string path in Directory.EnumerateFiles(Path.Combine(nativeRoot,"map/MapStudio"),"*.msb*",SearchOption.AllDirectories)) {
             var raw=File.ReadAllBytes(path);var bytes=DCX.Is(raw)?DCX.Decompress(raw).ToArray():raw;bool possible=false;
             for(int at=0;at+4<=bytes.Length;at+=4)if(owned.Contains(System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(at,4)))){possible=true;break;}
@@ -61,10 +87,8 @@ internal static class MapTravel {
 
     internal static Result Compose(Func<string,byte[]?> readNative,Func<string,byte[]?> readComposed,string definitions,
         IReadOnlyList<Destination> destinations,IReadOnlyList<string>? languages=null) {
-        if(destinations.Count is <1 or >2||destinations[0].SourceMap!="m10_02_00_00"||
-            destinations.Count==2&&destinations[1].SourceMap!="m10_01_00_00")
-            throw new NotSupportedException("Additional travel currently supports Firelink followed optionally by Undead Burg");
-        if(destinations.Select(d=>d.TargetMap).Distinct().Count()!=destinations.Count)throw new InvalidDataException("Duplicate destination map");
+        if(destinations.Count is <1 or >10)throw new NotSupportedException("Unsupported number of imported lamps");
+        if(destinations.Select(Slot).Select(s=>s.Index).Distinct().Count()!=destinations.Count)throw new InvalidDataException("Duplicate source bonfire destination");
         var files=new Dictionary<string,byte[]>(StringComparer.Ordinal);var sources=new Dictionary<string,string>(StringComparer.Ordinal);
         byte[] Native(string path){var bytes=readNative(path)??throw new FileNotFoundException("Native travel dependency unavailable",path);sources[path]=Convert.ToHexStringLower(SHA256.HashData(bytes));return bytes;}
         byte[] Merged(string path)=>readComposed(path)??Native(path);
@@ -90,46 +114,72 @@ internal static class MapTravel {
         if(returns.BigEndian||returns.DetectedSize!=32||returns.Format2D!=PARAM.FormatFlags1.LongDataOffset)throw new InvalidDataException("Unexpected native ReturnPointParam format");
         var donorReturn=returns.Rows.Single(r=>r.ID==2412950);
         if(Convert.ToInt32(donorReturn["warpChairNo"].Value)!=18||Convert.ToInt32(donorReturn["isRegistDeadReturn"].Value)!=1)throw new InvalidDataException("Native ReturnPoint checkpoint contract changed");
+        var entryReturn=returns.Rows.Single(r=>r.ID==2102962);
+        if(Convert.ToInt32(entryReturn["warpChairNo"].Value)!=-1||Convert.ToInt32(entryReturn["isRegistDeadReturn"].Value)!=0||Convert.ToInt32(entryReturn["returnAnimId"].Value)!=0)throw new InvalidDataException("Native non-checkpoint entry contract changed");
         var bindings=new List<Binding>();
         for(int index=0;index<destinations.Count;++index) {
             var d=destinations[index];
-            if(d.TargetMap!=(index==0?"m40_02_00_00":"m40_03_00_00")||new[]{d.Spawn,d.LampPosition,d.LampRotation}.Any(v=>!float.IsFinite(v.X)||!float.IsFinite(v.Y)||!float.IsFinite(v.Z)))throw new ArgumentException("Invalid additional destination map or coordinates");
+            var allocation=Slot(d);
+            if(!MapDestination.AdditionalMaps.TryGetValue(d.SourceMap,out var expectedMap)||d.TargetMap!=expectedMap||new[]{d.Spawn,d.LampPosition,d.LampRotation}.Any(v=>!float.IsFinite(v.X)||!float.IsFinite(v.Y)||!float.IsFinite(v.Z)))throw new ArgumentException("Invalid additional destination map or coordinates");
             int area=int.Parse(d.TargetMap.AsSpan(1,2)),block=int.Parse(d.TargetMap.AsSpan(4,2)),code=area*10+block;
-            int entity=code*10000,registration=52100520+index*20,chair=55+index,respawn=entity+2950;
+            int entity=code*10000,registration=allocation.Registration,chair=55+allocation.Index,respawn=entity+2950+allocation.Local,instance=90+allocation.Local;
             if(returns.Rows.Any(r=>r.ID==respawn||Convert.ToInt32(r["warpChairNo"].Value)==chair))throw new InvalidDataException("Destination ReturnPoint or chair reservation is occupied");
-            var mapPath=$"map/MapStudio/{d.TargetMap}.msb.dcx";var map=MSBB.Read(readComposed(mapPath)??throw new FileNotFoundException("Staged destination MSB unavailable",mapPath));
-            Free(map,entity+950,entity+1950,respawn);
+            var mapPath=$"map/MapStudio/{d.TargetMap}.msb.dcx";var map=MSBB.Read(files.GetValueOrDefault(mapPath)??readComposed(mapPath)??throw new FileNotFoundException("Staged destination MSB unavailable",mapPath));
+            Free(map,entity+950+allocation.Local,entity+1950+allocation.Local,respawn);
             var collision=d.CollisionName==null?map.Parts.Collisions.FirstOrDefault(c=>!c.DisableStart):map.Parts.Collisions.SingleOrDefault(c=>c.Name==d.CollisionName);
             if(collision==null)throw new InvalidDataException("Destination lamp has no active collision binding");
-            var binding=new Binding(d.SourceMap,d.TargetMap,d.Name,entity+950,entity+1950,respawn,chair,registration,registration+10,
-                52100580+index,52100582+index,52100584+index,52100590+index,70900000+index,d.Spawn,d.LampPosition,collision.Name,d.SourceBonfirePart,d.ReplacedMapPiece,d.SourceBonfireKind);bindings.Add(binding);
+            var binding=new Binding(d.SourceMap,d.TargetMap,d.Name,entity+950+allocation.Local,entity+1950+allocation.Local,respawn,chair,registration,registration+10,
+                allocation.RegistrationRequest,allocation.ReturnRequest,allocation.ArrivalRequest,allocation.DisabledFlag,70900000+allocation.Index,d.Spawn,d.LampPosition,collision.Name,d.SourceBonfirePart,d.ReplacedMapPiece,d.SourceBonfireKind,d.SpawnRotation);bindings.Add(binding);
             if(d.ReplacedMapPiece!=null&&map.Parts.MapPieces.RemoveAll(p=>p.Name==d.ReplacedMapPiece)!=1)throw new InvalidDataException("Selected source bonfire visual mapping is invalid");
-            if(map.Parts.GetEntries().Any(p=>p.Name=="c9010_0090"||p.Name=="o009900_0090")||map.Regions.GetEntries().Any(r=>r.Name=="souls_lamp_arrival"))throw new InvalidDataException("Destination travel names are occupied");
+            string actorName=$"c9010_{instance:D4}",lampName=$"o009900_{instance:D4}",arrivalName=allocation.Local==0?"souls_lamp_arrival":$"souls_lamp_arrival_{allocation.Local}";
+            if(map.Parts.GetEntries().Any(p=>p.Name==actorName||p.Name==lampName)||map.Regions.GetEntries().Any(r=>r.Name==arrivalName))throw new InvalidDataException("Destination travel names are occupied");
             if(!map.Models.Objects.Any(m=>m.Name=="o009900"))map.Models.Objects.Add((MSBB.Model.Object)nativeMap.Models.Objects.Single(m=>m.Name=="o009900").DeepCopy());
             if(!map.Models.Enemies.Any(m=>m.Name=="c9010"))map.Models.Enemies.Add((MSBB.Model.Enemy)nativeMap.Models.Enemies.Single(m=>m.Name=="c9010").DeepCopy());
-            var lamp=(MSBB.Part.Object)lampTemplate.DeepCopy();lamp.Name="o009900_0090";lamp.InstanceID=90;lamp.EntityID=binding.Lamp;lamp.Position=d.LampPosition;lamp.Rotation=d.LampRotation;lamp.CollisionName=collision.Name;Groups(lamp);
-            var actor=(MSBB.Part.Enemy)actorTemplate.DeepCopy();actor.Name="c9010_0090";actor.InstanceID=90;actor.EntityID=binding.Controller;actor.Position=d.LampPosition;actor.Rotation=d.LampRotation;actor.CollisionName=collision.Name;actor.TalkID=code*1000+950;Groups(actor);
+            var lamp=(MSBB.Part.Object)lampTemplate.DeepCopy();lamp.Name=lampName;lamp.InstanceID=instance;lamp.EntityID=binding.Lamp;lamp.Position=d.LampPosition;lamp.Rotation=d.LampRotation;lamp.CollisionName=collision.Name;Groups(lamp);
+            var actor=(MSBB.Part.Enemy)actorTemplate.DeepCopy();actor.Name=actorName;actor.InstanceID=instance;actor.EntityID=binding.Controller;actor.Position=d.LampPosition;actor.Rotation=d.LampRotation;actor.CollisionName=collision.Name;actor.TalkID=code*1000+950+allocation.Local;Groups(actor);
             map.Parts.Objects.Add(lamp);map.Parts.Enemies.Add(actor);
-            var arrival=spawnRegionTemplate.DeepCopy();arrival.Name="souls_lamp_arrival";arrival.Position=d.Spawn;arrival.Rotation=d.LampRotation;map.Regions.Regions.Add(arrival);
+            var arrival=spawnRegionTemplate.DeepCopy();arrival.Name=arrivalName;arrival.Position=d.Spawn;arrival.Rotation=d.SpawnRotation??d.LampRotation;map.Regions.Regions.Add(arrival);
             // Preserve the native field-lamp event's opaque activation bytes
             // and base fields; a default event's four zero bytes differ.
-            var spawn=(MSBB.Event.SpawnPoint)spawnTemplate.DeepCopy();spawn.Name="souls_lamp_spawn";spawn.EventID=map.Events.GetEntries().Select(e=>e.EventID).DefaultIfEmpty(-1).Max()+1;spawn.EntityID=respawn;spawn.SpawnPointName=arrival.Name;map.Events.SpawnPoints.Add(spawn);
+            var spawn=(MSBB.Event.SpawnPoint)spawnTemplate.DeepCopy();spawn.Name=allocation.Local==0?"souls_lamp_spawn":$"souls_lamp_spawn_{allocation.Local}";spawn.EventID=map.Events.GetEntries().Select(e=>e.EventID).DefaultIfEmpty(-1).Max()+1;spawn.EntityID=respawn;spawn.SpawnPointName=arrival.Name;map.Events.SpawnPoints.Add(spawn);
+            if(allocation.Index==0) {
+                Free(map,EntryRespawn);
+                if(returns.Rows.Any(r=>r.ID==EntryRespawn))throw new InvalidDataException("Lordran entry ReturnPoint reservation is occupied");
+                var entrySpawn=(MSBB.Event.SpawnPoint)spawn.DeepCopy();entrySpawn.Name="souls_lordran_entry";entrySpawn.EventID=spawn.EventID+1;entrySpawn.EntityID=EntryRespawn;map.Events.SpawnPoints.Add(entrySpawn);
+                var entryRow=new PARAM.Row(entryReturn){ID=EntryRespawn,Name="Lordran first entry"};entryRow["areaNo"].Value=(short)area;entryRow["blockNo"].Value=(short)block;entryRow["returnPointEntityId"].Value=EntryRespawn;returns.Rows.Add(entryRow);
+            }
             files[mapPath]=map.Write(DCX.Type.DCX_DFLT_10000_44_9);
             var row=new PARAM.Row(donorReturn){ID=respawn,Name=d.Name+" lamp"};row["areaNo"].Value=(short)area;row["blockNo"].Value=(short)block;row["returnPointEntityId"].Value=respawn;row["warpChairNo"].Value=(sbyte)chair;returns.Rows.Add(row);
             var talkPath=$"script/talk/{d.TargetMap}.talkesdbnd.dcx";
-            var talk=readComposed(talkPath) is {} talkBytes?BND4.Read(talkBytes):BND4.Read(talkTemplate.Write());
+            var talk=(files.GetValueOrDefault(talkPath)??readComposed(talkPath)) is {} talkBytes?BND4.Read(talkBytes):BND4.Read(talkTemplate.Write());
             // No donor map conversations are installed when the destination did
             // not already own a talk binder.
-            if(readComposed(talkPath)==null)talk.Files.Clear();
+            if(!files.ContainsKey(talkPath)&&readComposed(talkPath)==null)talk.Files.Clear();
             if(talk.Files.Any(f=>Leaf(f.Name)==$"t{actor.TalkID}.esd"))throw new InvalidDataException("Destination lamp talk ID is occupied");
             var esd=BuildLamp(lampTalkFile.Bytes.ToArray(),binding);esd.Name=$"t{actor.TalkID}";
             talk.Files.Add(new BinderFile(lampTalkFile.Flags,talk.Files.Select(f=>f.ID).DefaultIfEmpty(-1).Max()+1,$@"N:\SPRJ\data\INTERROOT_ps4\script\talk\{d.TargetMap}\t{actor.TalkID}.esd",esd.Write()));files[talkPath]=talk.Write(DCX.Type.DCX_DFLT_10000_44_9);
-            var scriptPath=$"event/{d.TargetMap}.emevd.dcx";var script=EMEVD.Read(readComposed(scriptPath)??throw new FileNotFoundException("Staged destination EMEVD unavailable",scriptPath));ReservationScan(script.Write(),"composed:"+scriptPath);
+            var scriptPath=$"event/{d.TargetMap}.emevd.dcx";var script=EMEVD.Read(files.GetValueOrDefault(scriptPath)??readComposed(scriptPath)??throw new FileNotFoundException("Staged destination EMEVD unavailable",scriptPath));if(!files.ContainsKey(scriptPath))ReservationScan(script.Write(),"composed:"+scriptPath);
             CommonLink(script,nativeScript);var ctor=EnsureRoot(script,0);EnsureRoot(script,50);Flag(ctor,HeadstoneAvailable,true);
-            foreach(int eventID in new[]{7000,7100,7200,7300})if(ctor.Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length>=8&&BitConverter.ToInt32(i.ArgData,4)==eventID&&BitConverter.ToInt32(i.ArgData,0)==90))throw new InvalidDataException("Destination travel event slot is occupied");
-            Start(ctor,90,7000,binding.Controller,binding.Lamp,HeadstoneAvailable,registration);Start(ctor,90,7100,binding.RegistrationRequest,binding.Lamp);Start(ctor,90,7200,binding.ReturnRequest,binding.Lamp,2102950);Start(ctor,90,7300,binding.ArrivalRequest,binding.Lamp);
+            if(allocation.Index==0)Flag(ctor,EntryRequest,false);
             files[scriptPath]=script.Write(DCX.Type.DCX_DFLT_10000_44_9);
         }
+        // Retail m29 hosts its field-lamp routines in the area script. A
+        // connected block's actors can be interactive before that block's
+        // local event script starts, so host these listeners once for m40.
+        const string areaScriptPath="event/m40.emevd.dcx";
+        var areaScript=EMEVD.Read(readComposed(areaScriptPath)??(readNative(areaScriptPath)!=null?Native(areaScriptPath):MapDestination.EmptyEvents()));
+        ReservationScan(areaScript.Write(),"composed:"+areaScriptPath);CommonLink(areaScript,nativeScript);
+        var areaCtor=EnsureRoot(areaScript,0);EnsureRoot(areaScript,50);
+        foreach(var b in bindings) {
+            int instance=90+Lamps.Single(s=>s.SourceMap==b.SourceMap&&s.SourcePart==b.SourceBonfirePart).Index;
+            foreach(int eventID in new[]{7000,7100,7200,7300})if(areaCtor.Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length>=8&&BitConverter.ToInt32(i.ArgData,4)==eventID&&BitConverter.ToInt32(i.ArgData,0)==instance))throw new InvalidDataException("Area travel event slot is occupied");
+            // These are requests, not unlocks. A saved request must not send a
+            // later arrival straight back to the Dream. Arrival remains live
+            // until7300 consumes the headstone request on this area load.
+            Flag(areaCtor,b.RegistrationRequest,false);Flag(areaCtor,b.ReturnRequest,false);
+            Start(areaCtor,instance,7000,b.Controller,b.Lamp,HeadstoneAvailable,b.RegistrationBase);Start(areaCtor,instance,7100,b.RegistrationRequest,b.Lamp);Start(areaCtor,instance,7200,b.ReturnRequest,b.Lamp,2102950);Start(areaCtor,instance,7300,b.ArrivalRequest,b.Lamp);
+        }
+        files[areaScriptPath]=areaScript.Write(DCX.Type.DCX_DFLT_10000_44_9);
         // A new map's load list must also declare its connected scenes. The
         // area-wide list alone is not consulted when this block is entered.
         foreach(var destination in destinations) {
@@ -147,7 +197,7 @@ internal static class MapTravel {
         if(sharedTalk==null&&readNative(sharedTalkPath) is {} nativeShared){sharedTalk=nativeShared;sources[sharedTalkPath]=Convert.ToHexStringLower(SHA256.HashData(nativeShared));}
         var shared=sharedTalk==null?BND4.Read(talkTemplate.Write()):BND4.Read(sharedTalk);
         if(sharedTalk==null)shared.Files.Clear();
-        MergeAreaTalk(shared,destinations.Select(d=>BND4.Read(files[$"script/talk/{d.TargetMap}.talkesdbnd.dcx"])),sharedTalkMap);
+        MergeAreaTalk(shared,destinations.Select(d=>d.TargetMap).Distinct().Select(m=>BND4.Read(files[$"script/talk/{m}.talkesdbnd.dcx"])),sharedTalkMap);
         files[sharedTalkPath]=shared.Write(DCX.Type.DCX_DFLT_10000_44_9);
         returns.Rows.Sort((a,b)=>a.ID.CompareTo(b.ID));returnFile.Bytes=WriteRows(returns);files["param/gameparam/gameparam.parambnd.dcx"]=game.Write(DCX.Type.DCX_DFLT_10000_44_9);
         var dreamPath="map/MapStudio/m21_00_00_00.msb.dcx";var dream=MSBB.Read(Merged(dreamPath));Free(dream,HeadstoneEntity,HeadstoneStone);
@@ -175,7 +225,11 @@ internal static class MapTravel {
         var warp=dreamScript.Events.Single(e=>e.ID==12107000);if(warp.Instructions.Count!=5||warp.Instructions[4].Bank!=2003||warp.Instructions[4].ID!=49||warp.Parameters.Count!=3)throw new InvalidDataException("Native headstone warp contract changed");
         Flag(dreamCtor,HeadstoneAvailable,true);dreamCtor.Instructions.Add(new(2003,18,Pack(HeadstoneEntity,7001,1)));
         foreach(var setup in pre.Instructions.Where(i=>i.ArgData.Length>=4&&BitConverter.ToInt32(i.ArgData,0)==2100950).ToArray()){var data=setup.ArgData.ToArray();BitConverter.GetBytes(HeadstoneEntity).CopyTo(data,0);pre.Instructions.Add(new(setup.Bank,setup.ID,data));}
-        foreach(var b in bindings){int slot=80+bindings.IndexOf(b);if(dreamCtor.Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length>=8&&BitConverter.ToInt32(i.ArgData,0)==slot&&BitConverter.ToInt32(i.ArgData,4)==12107000))throw new InvalidDataException("Additional headstone warp slot is occupied");Flag(dreamCtor,b.ArrivalRequest,false);Start(dreamCtor,slot,12107000,b.ArrivalRequest,HeadstoneEntity,b.Respawn);}
+        foreach(var b in bindings){int slot=80+Lamps.Single(s=>s.SourceMap==b.SourceMap&&s.SourcePart==b.SourceBonfirePart).Index;if(dreamCtor.Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length>=8&&BitConverter.ToInt32(i.ArgData,0)==slot&&BitConverter.ToInt32(i.ArgData,4)==12107000))throw new InvalidDataException("Additional headstone warp slot is occupied");Flag(dreamCtor,b.ArrivalRequest,false);Start(dreamCtor,slot,12107000,b.ArrivalRequest,HeadstoneEntity,b.Respawn);}
+        if(bindings.Any(b=>b.SourceMap=="m10_02_00_00"&&b.SourceBonfirePart=="o0200_0000")) {
+            if(dreamCtor.Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length>=8&&BitConverter.ToInt32(i.ArgData,0)==90&&BitConverter.ToInt32(i.ArgData,4)==12107000))throw new InvalidDataException("Lordran entry warp slot is occupied");
+            Flag(dreamCtor,EntryRequest,false);Start(dreamCtor,90,12107000,EntryRequest,HeadstoneEntity,EntryRespawn);
+        }
         files[dreamScriptPath]=dreamScript.Write(DCX.Type.DCX_DFLT_10000_44_9);
         var dreamTalkPath="script/talk/m21_00_00_00.talkesdbnd.dcx";var dreamTalk=BND4.Read(Merged(dreamTalkPath));var donorTalk=dreamTalk.Files.Single(f=>Leaf(f.Name)=="t210000.esd");
         if(dreamTalk.Files.Any(f=>Leaf(f.Name)==$"t{HeadstoneTalk}.esd"))throw new InvalidDataException("Imported Dream headstone talk ID is occupied");
@@ -184,10 +238,12 @@ internal static class MapTravel {
         int locales=0;foreach(string language in languages??["as","dandk","deude","enggb","engus","eu","finfi","frafr","itait","japanese","jp","jpnjp","korkr","na","nldnl","norno","polpl","porbr","porpt","rusru","spaar","spaes","swese","turtr","uk","zhocn","zhotw"]) {
             if(!Regex.IsMatch(language,@"\A[A-Za-z0-9_]+\z"))throw new ArgumentException("Invalid native menu language");string path=$"msg/{language}/menu.msgbnd.dcx";var original=readNative(path);if(original==null)continue;var binder=BND4.Read(readComposed(path)??Native(path));
             var candidates=binder.Files.Where(f=>Leaf(f.Name).EndsWith(".fmg",StringComparison.OrdinalIgnoreCase)).Select(f=>(File:f,Text:FMG.Read(f.Bytes))).Where(f=>f.Text.Entries.Any(e=>e.ID==70002410)).ToArray();if(candidates.Length!=1)throw new InvalidDataException("Native warp menu text contract changed: "+language);var text=candidates[0].Text;
-            foreach(var b in bindings){if(text.Entries.Any(e=>e.ID==b.MenuText))throw new InvalidDataException("Destination menu text reservation is occupied");text.Entries.Add(new(text,b.MenuText,b.Name));}candidates[0].File.Bytes=text.Write();files[path]=binder.Write(binder.Compression);++locales;
+            foreach(var b in bindings){if(text.Entries.Any(e=>e.ID==b.MenuText))throw new InvalidDataException("Destination menu text reservation is occupied");text.Entries.Add(new(text,b.MenuText,b.Name));}
+            if(text.Entries.Any(e=>e.ID==70900010))throw new InvalidDataException("Lordran entry menu text reservation is occupied");
+            text.Entries.Add(new(text,70900010,"Enter Lordran"));candidates[0].File.Bytes=text.Write();files[path]=binder.Write(binder.Compression);++locales;
         }
         if(locales==0)throw new InvalidDataException("Native warp menu text is unavailable");
-        return new(files,bindings,sources,["Additional destination interactions, death checkpoint persistence and save/reload require native gameplay validation.","Native lamp actor/object and common events are reused; source bonfire rest/kindling/Estus behavior is not transplanted. Only the two explicitly selected source bonfires become lamps; other source bonfires remain scenery.","The additional Dream headstone clones native physical scenery m000010 and its c9020 messenger controller. Its visual has no separately cloned solid collision body; existing native Dream collision and all original headstones are preserved."]);
+        return new(files,bindings,sources,["Additional destination interactions, death checkpoint persistence and save/reload require native gameplay validation.","Native lamp actor/object and common events are reused; source bonfire rest/kindling/Estus behavior is not transplanted. All registered source bonfires in the imported maps and the retained Burg approach anchor become independent lamps. Unused source warp/altar dummy objects do not become additional bonfires.","The additional Dream headstone clones native physical scenery m000010 and its c9020 messenger controller. Its visual has no separately cloned solid collision body; existing native Dream collision and all original headstones are preserved."]);
     }
 
     internal static ESD BuildLamp(byte[] original,Binding b) {
@@ -206,8 +262,20 @@ internal static class MapTravel {
         var changed=Rewrite(esd,required);if(required.Keys.Any(k=>!changed.Contains(k)))throw new InvalidDataException("Native headstone access contract changed");
         var states=new Dictionary<long,ESD.State>();ESD.State State(long id){var s=new ESD.State();states.Add(id,s);return s;}
         void Go(ESD.State s,long target,byte[] expr)=>s.Conditions.Add(new(target,End(expr)));
-        Go(State(0),1,Value(1));var menu=State(1);menu.EntryCommands.Add(Command(20));
-        for(int i=0;i<bindings.Count;++i)menu.EntryCommands.Add(Command(19,i+1,bindings[i].MenuText,i==0?-1:bindings[i].ActiveFlag));Go(menu,2,Value(1));
+        var initial=State(0);var entry=bindings.SingleOrDefault(b=>b.SourceMap=="m10_02_00_00"&&b.SourceBonfirePart=="o0200_0000");
+        if(entry!=null) {
+            var activated=bindings.Select(b=>Binary(0x95,Call(15,Value(b.ActiveFlag)),Value(1))).Aggregate((a,b)=>Binary(0x99,a,b));
+            Go(initial,1,activated);Go(initial,100,Value(1));
+            // A fresh save needs an entrance to Lordran before any lamp can
+            // be lit. This separate entry does not register a checkpoint or
+            // expose inactive bonfires in the fast-travel list.
+            var first=State(100);first.EntryCommands.Add(Command(20));first.EntryCommands.Add(Command(19,1,70900010,-1));Go(first,101,Value(1));
+            var open=State(101);open.EntryCommands.Add(Command(41));open.WhileCommands.Add(MenuLifetime());Go(open,102,Binary(0x95,Call(59,Value(100),Value(0)),Value(1)));
+            var pick=State(102);pick.WhileCommands.Add(MenuLifetime());Go(pick,103,Binary(0x95,Call(23),Value(1)));Go(pick,4,Binary(0x99,Binary(0x95,Call(23),Value(0)),Binary(0x95,Call(59,Value(100),Value(0)),Value(0))));
+            var begin=State(103);begin.EntryCommands.Add(Command(11,EntryRequest,1));Go(begin,4,Value(1));
+        } else Go(initial,1,Value(1));
+        var menu=State(1);menu.EntryCommands.Add(Command(20));
+        for(int i=0;i<bindings.Count;++i)menu.EntryCommands.Add(Command(19,i+1,bindings[i].MenuText,bindings[i].ActiveFlag));Go(menu,2,Value(1));
         // Warp-menu initialization is asynchronous. Keep native talk ownership
         // alive, and observe the menu open before accepting its closed state.
         var opening=State(2);opening.EntryCommands.Add(Command(41));opening.WhileCommands.Add(MenuLifetime());Go(opening,3,Binary(0x95,Call(59,Value(100),Value(0)),Value(1)));
@@ -263,12 +331,19 @@ internal static partial class Program {
             using var source=new StaticMapSource(root,profile.Id,"m10_02_00_00");var destinations=new List<MapTravel.Destination>();
             Vector3 Vector(JsonElement element)=>new(element.GetProperty("X").GetSingle(),element.GetProperty("Y").GetSingle(),element.GetProperty("Z").GetSingle());
             foreach(var entry in reports.OrderBy(e=>e.GetProperty("map").GetString()=="m10_02_00_00"?0:1)) {
-                var sourceMap=entry.GetProperty("map").GetString()!;var target=entry.GetProperty("target").GetString()!;var bytes=source.ReadAsset($"map/MapStudio/{sourceMap}.msb")??source.ReadAsset($"map/MapStudio/{sourceMap}.msb.dcx")??throw new FileNotFoundException("Source bonfire MSB unavailable");var msb=MSB1.Read(bytes);int bonfireID=sourceMap=="m10_02_00_00"?1021960:sourceMap=="m10_01_00_00"?1011960:throw new NotSupportedException("Unsupported additional destination source map");
-                // The initial Burg bonfire is authored as a DummyObject in
-                // this source MSB. It is an explicit checkpoint selection,
-                // not a promise to translate that object's source event state.
-                var bonfire=msb.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Single(p=>p.EntityID==bonfireID);var offset=Vector(entry.GetProperty("offset"));string? collision=null;
-                if(entry.TryGetProperty("collisionEnvironment",out var bindings)&&bindings.ValueKind==JsonValueKind.Array){var match=bindings.EnumerateArray().FirstOrDefault(b=>b.GetProperty("source").GetString()==bonfire.CollisionName);if(match.ValueKind==JsonValueKind.Object&&match.TryGetProperty("target",out var found))collision=found.GetString();}
+                var sourceMap=entry.GetProperty("map").GetString()!;var target=entry.GetProperty("target").GetString()!;var bytes=source.ReadAsset($"map/MapStudio/{sourceMap}.msb")??source.ReadAsset($"map/MapStudio/{sourceMap}.msb.dcx")??throw new FileNotFoundException("Source bonfire MSB unavailable");var msb=MapDestination.Slice(sourceMap,MSB1.Read(bytes));
+                var allocated=MapTravel.Lamps.Where(l=>l.SourceMap==sourceMap).ToArray();
+                if(allocated.Length==0||msb.Parts.Objects.Any(p=>p.ModelName=="o0200"&&!allocated.Any(l=>l.SourcePart==p.Name)))throw new InvalidDataException("Source bonfire has no stable lamp reservation");
+                foreach(var lampSlot in allocated) {
+                // Name, not EntityID: the source contains duplicate IDs on
+                // dormant checkpoints, including the authored Basin anchor.
+                var bonfire=msb.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Single(p=>p.Name==lampSlot.SourcePart);
+                if(bonfire.ModelName!="o0200")throw new InvalidDataException("Source bonfire model changed");
+                var offset=Vector(entry.GetProperty("offset"));string? collision=null;
+                if(entry.TryGetProperty("bonfireCollisionBindings",out var lampBindings)&&lampBindings.ValueKind==JsonValueKind.Array) {
+                    var exact=lampBindings.EnumerateArray().Single(b=>b.GetProperty("sourcePart").GetString()==bonfire.Name);collision=exact.GetProperty("targetCollision").GetString();
+                }
+                if(collision==null&&entry.TryGetProperty("collisionEnvironment",out var bindings)&&bindings.ValueKind==JsonValueKind.Array){var match=bindings.EnumerateArray().FirstOrDefault(b=>b.GetProperty("source").GetString()==bonfire.CollisionName);if(match.ValueKind==JsonValueKind.Object&&match.TryGetProperty("target",out var found))collision=found.GetString();}
                 string? visual=null;if(entry.TryGetProperty("placementResults",out var placements)) {
                     var matches=placements.EnumerateArray().Where(p=>p.GetProperty("sourceName").GetString()==bonfire.Name).ToArray();
                     if(matches.Length>1)throw new InvalidDataException("Duplicate source bonfire render placement: "+bonfire.Name);
@@ -278,8 +353,18 @@ internal static partial class Program {
                     if(matches.Length==1&&matches[0].TryGetProperty("targetKind",out var kind)&&kind.GetString()=="MapPiece")visual=matches[0].GetProperty("targetName").GetString();
                 }
                 if(entry.GetProperty("source").GetString()!=profile.Id||destinations.Count>0&&offset!=Vector(reports[0].GetProperty("offset")))throw new InvalidDataException("Additional destination source profiles/transforms must agree");
-                var lamp=bonfire.Position+offset;var arrival=lamp+Vector3.UnitY+Vector3.Transform(new Vector3(0,0,2),Matrix4x4.CreateRotationY(bonfire.Rotation.Y*MathF.PI/180));
-                destinations.Add(new(sourceMap,target,sourceMap=="m10_02_00_00"?"Firelink Shrine":"Undead Burg",arrival,lamp,bonfire.Rotation,collision,bonfire.Name,visual,bonfire.GetType().Name));
+                var lamp=bonfire.Position+offset;var arrival=lamp+Vector3.UnitY+Vector3.Transform(new Vector3(0,0,2),Matrix4x4.CreateRotationY(bonfire.Rotation.Y*MathF.PI/180));Vector3? arrivalRotation=null;
+                // Real bonfires have authored arrival points, often sideways
+                // from the flame to avoid walls. Dummy warp anchors can reuse
+                // their EntityID, so never resolve those by this numeric link.
+                if(bonfire is MSB1.Part.Object) {
+                    var checkpoint=msb.Events.SpawnPoints.SingleOrDefault(e=>e.EntityID==bonfire.EntityID+1000)
+                        ??throw new InvalidDataException("Source bonfire has no unique authored arrival point: "+bonfire.Name);
+                    var region=msb.Regions.GetEntries().Single(r=>r.Name==checkpoint.SpawnPointName);
+                    arrival=region.Position+offset+Vector3.UnitY*.15f;arrivalRotation=region.Rotation;
+                }
+                destinations.Add(new(sourceMap,target,lampSlot.Name,arrival,lamp,bonfire.Rotation,collision,bonfire.Name,visual,bonfire.GetType().Name,arrivalRotation));
+                }
             }
             MapTravel.VerifyReservations(native);
             var result=MapTravel.Compose(ReadNative,ReadStaged,Path.Combine(smithbox,"src/Smithbox.Data/Assets/PARAM/BB/Defs"),destinations,Directory.EnumerateDirectories(Path.Combine(native,"msg")).Select(Path.GetFileName).Select(n=>n!).ToArray());
@@ -287,7 +372,7 @@ internal static partial class Program {
             // is changed; failures leave all original staged files untouched.
             var writes=result.Files.Select(p=>(Path:Safe(p.Key),p.Value)).ToArray();var travelReport=SafeOutput("destination-travel.json");
             foreach(var write in writes){Directory.CreateDirectory(Path.GetDirectoryName(write.Path)!);File.WriteAllBytes(write.Path,write.Value);}
-            var text=JsonSerializer.Serialize(new{schema="bbmap-destination-travel-1",result.Destinations,result.NativeSources,result.Limitations},new JsonSerializerOptions{WriteIndented=true,IncludeFields=true});File.WriteAllText(travelReport,text);Console.WriteLine(text);return 0;
+            var text=JsonSerializer.Serialize(new{schema="bbmap-destination-travel-1",result.Destinations,Entry=result.Destinations.Any(b=>b.SourceMap=="m10_02_00_00")?new{Request=MapTravel.EntryRequest,Respawn=MapTravel.EntryRespawn,RegistersCheckpoint=false,ActivatesLamp=false}:null,result.NativeSources,result.Limitations},new JsonSerializerOptions{WriteIndented=true,IncludeFields=true});File.WriteAllText(travelReport,text);Console.WriteLine(text);return 0;
         }finally{foreach(var child in children)child.Dispose();}
     }
 }

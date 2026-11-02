@@ -24,6 +24,8 @@ static class SourceCollisionTests {
         var native=result.PlayerTriangles("h").Single();
         Check(native.A==new Vector3(113,2,3)&&native.B==new Vector3(113,2,5)&&native.C==new Vector3(115,2,3),"MSB instance/anchor transform or Bloodborne winding is wrong");
         Check(result.Parts.Single(p=>p.Layer=="h"&&p.HitFilter==9).Surfaces[0].Triangles[0].A==new Vector3(131,2,3),"Repeated source collision instance lost its own placement");
+        var slice=SourceCollision.Read("DS1R","m10_02_00_00",files.GetValueOrDefault,new Vector3(100,0,0),new HashSet<string>{"floor"});
+        Check(slice.Parts.Count==2&&slice.Parts.All(p=>p.Name=="floor")&&slice.PlayerTriangles("h").Single()==native&&slice.PlayerTriangles("l").Single()==native,"Selected boundary room lost one collision layer or imported a neighbouring placement");
         Check(native.NativeMaterial==null,"Unmapped source material must retain the native donor");
         foreach(uint material in new uint[]{99,100,103,199,200,400}) {
             foreach(var layer in new[]{"h","l"}) {

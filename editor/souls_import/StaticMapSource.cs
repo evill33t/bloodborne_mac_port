@@ -16,6 +16,7 @@ internal static partial class Program {
         readonly Dictionary<string,(BinderReader Reader,BinderFileHeader File)> textureFiles=new(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string,TPF.Texture> textureCache=new(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string,BinderFileHeader> mapFiles=new(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<string> indexedAreas=new(StringComparer.Ordinal);
         readonly BinderReader? mapModels;
         string? lastModel;
         Memory<byte>? lastData;
@@ -25,7 +26,7 @@ internal static partial class Program {
         public IReadOnlyList<StaticPlacement> Placements { get; }
         public Vector3? PlayerStart { get; }
 
-        public StaticMapSource(string root,string profile,string map) {
+        public StaticMapSource(string root,string profile,string map,IReadOnlySet<string>? includeParts=null) {
             if(profile is not("DS1" or "DS1R" or "DS2" or "DS2S"))throw new NotSupportedException("No static map source adapter for "+profile);
             if(!Regex.IsMatch(map,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid source map identifier");
             this.profile=profile;this.map=map;assets=new Assets(Canonical(root),profile);
@@ -42,15 +43,11 @@ internal static partial class Program {
                     var path=$"map/MapStudio/{map}.msb";
                     var msb=MSB1.Read(assets.Read(path)??assets.Read(path+".dcx")??throw new FileNotFoundException("Source MSB unavailable"));
                     PlayerStart=msb.Parts.Players.FirstOrDefault()?.Position;
-                    Placements=msb.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Object)
+                    Placements=msb.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Object).Where(p=>includeParts==null||includeParts.Contains(p.Name))
                         .Select(p=>new StaticPlacement(p.Name,p.ModelName??"",p.Position,p.Rotation,p.Scale,p is MSB1.Part.Object obj?obj.InitAnimID:-1,p.LightID,p.FogID,p.ScatterID,p.IsShadowSrc!=0,p.IsShadowDest!=0,p.IsShadowOnly!=0)).ToArray();
-                    var area=map[..3];
                     // DS1/Remastered map textures live in area-wide BXF3s, rather
                     // than in the individual block's model folder.
-                    for(int i=0;i<4;++i)if(OpenSplit($"map/{area}/{area}_{i:D4}.tpfbhd") is {} textures)IndexTextures(textures);
-                    if((assets.Read($"map/{area}/{area}_9999.tpf.dcx")??assets.Read($"map/{area}/{area}_9999.tpf")) is {} common) {
-                        foreach(var texture in TPF.Read(common).Textures)textureCache.TryAdd(ModelName(texture.Name),texture);
-                    }
+                    IndexArea(map[..3]);
                 }
             } catch { Dispose();throw; }
         }
@@ -76,6 +73,14 @@ internal static partial class Program {
 
         void IndexTextures(BinderReader reader) {
             foreach(var file in reader.Files)textureFiles.TryAdd(ModelName(file.Name),(reader,file));
+        }
+        void IndexArea(string area) {
+            if(!Regex.IsMatch(area,@"\Am\d\d\z"))throw new InvalidDataException("Invalid referenced texture area");
+            if(!indexedAreas.Add(area))return;
+            if(indexedAreas.Count>16)throw new InvalidDataException("Too many referenced texture areas");
+            for(int i=0;i<4;++i)if(OpenSplit($"map/{area}/{area}_{i:D4}.tpfbhd") is {} textures)IndexTextures(textures);
+            if((assets.Read($"map/{area}/{area}_9999.tpf.dcx")??assets.Read($"map/{area}/{area}_9999.tpf")) is {} common)
+                foreach(var texture in TPF.Read(common).Textures)textureCache.TryAdd(ModelName(texture.Name),texture);
         }
 
         public byte[]? ReadAsset(string path)=>assets.Read(path);
@@ -114,7 +119,14 @@ internal static partial class Program {
             if(FLVER2.Is(raw.ToArray()))references=FLVER2.Read(raw).Materials.SelectMany(m=>m.Textures).Select(t=>t.Path);
             else if(FLVER0.Is(raw.ToArray()))references=FLVER0.Read(raw).Materials.SelectMany(m=>m.Textures).Select(t=>t.Path);
             else throw new InvalidDataException("No FLVER geometry in source model: "+model);
-            foreach(var key in references.Where(p=>!string.IsNullOrEmpty(p)).Select(ModelName).Distinct(StringComparer.OrdinalIgnoreCase)) {
+            var paths=references.Where(p=>!string.IsNullOrEmpty(p)).ToArray();
+            // Shared boundary rooms can use their neighbour's terrain maps.
+            // Resolve only the owner named by an actual missing texture path.
+            if(profile is "DS1" or "DS1R")foreach(var path in paths.Where(p=>!result.ContainsKey(ModelName(p))&&!textureCache.ContainsKey(ModelName(p)))) {
+                var owner=Regex.Match(path.Replace('\\','/'),@"/map/(m\d\d)/tex/",RegexOptions.IgnoreCase);
+                if(owner.Success)IndexArea(owner.Groups[1].Value.ToLowerInvariant());
+            }
+            foreach(var key in paths.Select(ModelName).Distinct(StringComparer.OrdinalIgnoreCase)) {
                 if(result.ContainsKey(key))continue;
                 if(!textureCache.ContainsKey(key)&&textureFiles.TryGetValue(key,out var entry))
                     foreach(var loaded in TPF.Read(ReadEntry(entry.Reader,entry.File)).Textures)textureCache.TryAdd(ModelName(loaded.Name),loaded);

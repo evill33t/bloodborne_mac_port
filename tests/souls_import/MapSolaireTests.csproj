@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup>
+<Compile Include="MapSolaireTests.cs"/>
+<Compile Include="../../editor/souls_import/MapQuestState.cs" Link="MapQuestState.cs"/>
+<Compile Include="../../editor/souls_import/MapNpcQuestState.cs" Link="MapNpcQuestState.cs"/>
+<Compile Include="../../editor/souls_import/MapSolaire.cs" Link="MapSolaire.cs"/>
+<Compile Include="../../editor/souls_import/MapTalk.cs" Link="MapTalk.cs"/>
+<Compile Include="../../editor/souls_import/MapTalkVoices.cs" Link="MapTalkVoices.cs"/>
+<Compile Include="../../editor/souls_import/NativeTalkBank.cs" Link="NativeTalkBank.cs"/>
+<Compile Include="../../editor/souls_import/MapItemPolicy.cs" Link="MapItemPolicy.cs"/>
+<Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference></ItemGroup></Project>

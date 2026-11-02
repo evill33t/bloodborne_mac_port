@@ -29,13 +29,47 @@ internal static partial class Program {
         foreach(var (target,id) in new[]{("m40_02_00_00",402970),("m40_03_00_00",403970)}) {
             var talk=BND4.Read(Native("script/talk/m24_01_00_00.talkesdbnd.dcx")!);talk.Files.Clear();var graph=new ESD(true,2){Name="t"+id};graph.StateGroups.Add(0,new(){[0]=new()});talk.Files.Add(new BinderFile(Binder.FileFlags.Flag1,7,$@"N:\SPRJ\data\INTERROOT_ps4\script\talk\{target}\t{id}.esd",graph.Write()));staged[$"script/talk/{target}.talkesdbnd.dcx"]=talk.Write(DCX.Type.DCX_DFLT_10000_44_9);
         }
+        staged["event/m40.emevd.dcx"]=staged["event/m40_02_00_00.emevd.dcx"];
         var before=staged.ToDictionary(p=>p.Key,p=>Hash(p.Value));
         byte[]? Read(string path)=>staged.GetValueOrDefault(path);
         string replaced=MSBB.Read(staged["map/MapStudio/m40_02_00_00.msb.dcx"]).Parts.MapPieces.First().Name;
         MapTravel.Destination[] destinations=[new("m10_02_00_00","m40_02_00_00","Firelink Shrine",new(-51,-59,55),new(-51.8f,-60.6f,55.7f),new(0,10,0),"h000017","o0200_0000",replaced),new("m10_01_00_00","m40_03_00_00","Undead Burg",new(-43,-20,-34),new(-42.9f,-21.79f,-33.6f),Vector3.Zero,"h000017","o0200_0000")];
-        MapTravel.VerifyReservations(native);Check(!MapTravel.ReservedFlags.Contains(52100500)&&MapTravel.ReservedFlags.Count==49&&MapTravel.ReservedFlags.Distinct().Count()==49,"Travel reservations exclude retail500 and do not alias");
+        MapTravel.VerifyReservations(native);Check(!MapTravel.ReservedFlags.Contains(52100500)&&MapTravel.ReservedFlags.Count==242&&MapTravel.ReservedFlags.Distinct().Count()==242,"Travel reservations exclude retail500 and do not alias");
         var result=MapTravel.Compose(Native,Read,defs,destinations);
         Check(result.Destinations.Count==2,"Destination accounting");
+        // Multiple bonfires in one map must compose against earlier lamps,
+        // without replacing their MSBs, ESDs, events or respawn records.
+        var allStage=new Dictionary<string,byte[]>(staged);
+        foreach(string target in new[]{"m40_04_00_00","m40_05_00_00","m40_06_00_00"}) {
+            allStage[$"map/MapStudio/{target}.msb.dcx"]=staged["map/MapStudio/m40_03_00_00.msb.dcx"];
+            allStage[$"event/{target}.emevd.dcx"]=MapDestination.EmptyEvents();
+        }
+        var allDestinations=MapTravel.Lamps.Select(l=>new MapTravel.Destination(l.SourceMap,MapDestination.AdditionalMaps[l.SourceMap],l.Name,
+            new(l.Index,2,3),new(l.Index,1,3),Vector3.Zero,"h000017",l.SourcePart)).ToArray();
+        var complete=MapTravel.Compose(Native,p=>allStage.GetValueOrDefault(p),defs,allDestinations);
+        var areaHost=EMEVD.Read(complete.Files["event/m40.emevd.dcx"]);var areaCalls=areaHost.Events.Single(e=>e.ID==0).Instructions.Where(i=>i.Bank==2000&&i.ID==0).ToArray();Check(areaCalls.Length==40&&areaCalls.Select(i=>(BitConverter.ToInt32(i.ArgData,0),BitConverter.ToInt32(i.ArgData,4))).Distinct().Count()==40&&areaHost.Events.Any(e=>e.ID==12415900)&&areaHost.Events.Single(e=>e.ID==0).Instructions[0].ArgData.SequenceEqual(Pack(52100100,1)),"All ten lamp listeners have unique area slots and preserve earlier event roots");
+        Check(complete.Destinations.Count==10&&complete.Destinations.Select(b=>b.Respawn).Distinct().Count()==10&&complete.Destinations.Select(b=>b.Chair).Distinct().Count()==10,"Every lamp has an independent native checkpoint and chair");
+        foreach(var group in complete.Destinations.GroupBy(b=>b.TargetMap)) {
+            var msb=MSBB.Read(complete.Files[$"map/MapStudio/{group.Key}.msb.dcx"]);
+            var talk=BND4.Read(complete.Files[$"script/talk/{group.Key}.talkesdbnd.dcx"]);
+            foreach(var b in group) {
+                var actor=msb.Parts.Enemies.Single(a=>a.EntityID==b.Controller);Check(msb.Parts.Objects.Single(o=>o.EntityID==b.Lamp).Position==b.LampPosition,"A later lamp overwrote a preceding placement");
+                Check(msb.Events.SpawnPoints.Count(s=>s.EntityID==b.Respawn)==1&&talk.Files.Count(f=>Leaf(f.Name)==$"t{actor.TalkID}.esd")==1,"A later lamp lost an earlier spawn or interaction");
+            }
+        }
+        foreach(var old in result.Destinations) {
+            var updated=complete.Destinations.Single(b=>b.SourceMap==old.SourceMap&&b.SourceBonfirePart==old.SourceBonfirePart);
+            Check((old.Controller,old.Lamp,old.Respawn,old.Chair,old.RegistrationBase,old.ActiveFlag,old.RegistrationRequest,old.ReturnRequest,old.ArrivalRequest)==
+                (updated.Controller,updated.Lamp,updated.Respawn,updated.Chair,updated.RegistrationBase,updated.ActiveFlag,updated.RegistrationRequest,updated.ReturnRequest,updated.ArrivalRequest),"Expanded lamp registry broke an existing save identity");
+        }
+        var completeTalk=BND4.Read(complete.Files["script/talk/m21_00_00_00.talkesdbnd.dcx"]);
+        var completeMenu=ESD.Read(completeTalk.Files.Single(f=>Leaf(f.Name)=="t210980.esd").Bytes).StateGroups[2147483641];
+        var entries=completeMenu[1].EntryCommands.Where(c=>c.CommandID==19).ToArray();Check(entries.Length==10,"Not every lamp is offered by the headstone");
+        for(int n=0;n<entries.Length;n++)Check(entries[n].Arguments[2].SequenceEqual((byte[])[0x82,..Pack(complete.Destinations[n].ActiveFlag),0xa1]),"An inactive bonfire is exposed unconditionally");
+        Check(completeMenu[0].Conditions.Count==2&&completeMenu[100].EntryCommands.Single(c=>c.CommandID==19).Arguments[1].SequenceEqual((byte[])[0x82,..Pack(70900010),0xa1])&&completeMenu[103].EntryCommands.Single().Arguments[0].SequenceEqual((byte[])[0x82,..Pack(MapTravel.EntryRequest),0xa1]),"Fresh saves have no separate Lordran entrance");
+        var entryMap=MSBB.Read(complete.Files["map/MapStudio/m40_02_00_00.msb.dcx"]);Check(entryMap.Events.SpawnPoints.Single(s=>s.EntityID==MapTravel.EntryRespawn).SpawnPointName==entryMap.Events.SpawnPoints.Single(s=>s.EntityID==complete.Destinations[0].Respawn).SpawnPointName,"First entry does not use the authored Firelink arrival region");
+        var entryEvents=EMEVD.Read(complete.Files["event/m40_02_00_00.emevd.dcx"]);Check(entryEvents.Events.Single(e=>e.ID==0).Instructions.Any(i=>i.Bank==2003&&i.ID==2&&i.ArgData.SequenceEqual(Pack(MapTravel.EntryRequest,0)))&&!entryEvents.Events.SelectMany(e=>e.Instructions).Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.Length>=12&&BitConverter.ToInt32(i.ArgData,4)==7300&&BitConverter.ToInt32(i.ArgData,8)==MapTravel.EntryRequest),"First entry must not initialize a lamp through retail event7300");
+        var entryDream=EMEVD.Read(complete.Files["event/m21_00_00_00.emevd.dcx"]);Check(entryDream.Events.Single(e=>e.ID==0).Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.SequenceEqual(Pack(90,12107000,MapTravel.EntryRequest,MapTravel.HeadstoneEntity,MapTravel.EntryRespawn))),"First entry must use the guarded native headstone warp");
         foreach(var destination in destinations) {
             var list=System.Text.Encoding.ASCII.GetString(result.Files[$"map/{destination.TargetMap}/{destination.TargetMap}.arealoadlist"]);
             Check(list.StartsWith("# retained list metadata\r\n",StringComparison.Ordinal)&&destinations.All(d=>list.Split('\n').Count(line=>line.Trim()=="map:/MapStudio/"+d.TargetMap+".msb")==1),"Per-map load list lost metadata or a connected scene");
@@ -45,7 +79,8 @@ internal static partial class Program {
         var originalBank=BND4.Read(Native("param/gameparam/gameparam.parambnd.dcx")!);foreach(var f in originalBank.Files.Where(f=>Leaf(f.Name)!="ReturnPointParam.param"))Check(bank.Files.Single(x=>x.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Original parameter member changed "+f.Name);
         var item=PARAM.Read(bank.Files.Single(f=>Leaf(f.Name)=="ItemLotParam.param").Bytes);item.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(defs,"ItemLotParam.xml")));Check(Convert.ToInt32(item.Rows.Single(r=>r.ID==2100500)["getItemFlagId"].Value)==52100500,"Retail ItemLot500 flag preserved");
         foreach(var old in originalRows.Rows){var actual=rows.Rows.Single(r=>r.ID==old.ID);Check(actual.Name==old.Name&&actual.Cells.Select(c=>c.Value is byte[] b?Convert.ToHexString(b):c.Value.ToString()).SequenceEqual(old.Cells.Select(c=>c.Value is byte[] b?Convert.ToHexString(b):c.Value.ToString())),"Original ReturnPoint row changed "+old.ID);}
-        Check(rows.Rows.Count==originalRows.Rows.Count+2,"Only two ReturnPoint rows appended");
+        Check(rows.Rows.Count==originalRows.Rows.Count+3,"Only two lamps and the separate entry ReturnPoint are appended");
+        var entryRow=rows.Rows.Single(r=>r.ID==MapTravel.EntryRespawn);Check(Convert.ToInt32(entryRow["isRegistDeadReturn"].Value)==0&&Convert.ToInt32(entryRow["warpChairNo"].Value)==-1&&Convert.ToInt32(entryRow["returnPointEntityId"].Value)==MapTravel.EntryRespawn,"First entry must not register a death checkpoint or use a lamp chair");
         foreach(var b in result.Destinations) {
             var map=MSBB.Read(result.Files[$"map/MapStudio/{b.TargetMap}.msb.dcx"]);var actor=map.Parts.Enemies.Single(p=>p.EntityID==b.Controller);var lamp=map.Parts.Objects.Single(p=>p.EntityID==b.Lamp);
             if(b.ReplacedMapPiece!=null)Check(map.Parts.MapPieces.All(p=>p.Name!=b.ReplacedMapPiece)&&map.Parts.MapPieces.Count==MSBB.Read(staged[$"map/MapStudio/{b.TargetMap}.msb.dcx"]).Parts.MapPieces.Count-1,"Selected static source bonfire visual replaced exactly once");
@@ -57,7 +92,9 @@ internal static partial class Program {
             var row=rows.Rows.Single(r=>r.ID==b.Respawn);Check(Convert.ToInt32(row["warpChairNo"].Value)==b.Chair&&Convert.ToInt32(row["isRegistDeadReturn"].Value)==1&&Convert.ToInt32(row["returnPointEntityId"].Value)==b.Respawn,"Checkpoint registration row");
             var ev=EMEVD.Read(result.Files[$"event/{b.TargetMap}.emevd.dcx"]);Check(ev.Events.Any(e=>e.ID==12415900),"Composed skeleton event preserved");Check(ev.Events.Single(e=>e.ID==0).Instructions[0].ArgData.SequenceEqual(Pack(52100100,1)),"Composed constructor preserved");
             Check(ev.LinkedFileOffsets.Count==1&&System.Text.Encoding.Unicode.GetString(ev.StringData[(int)ev.LinkedFileOffsets[0]..]).Contains("common.emevd",StringComparison.Ordinal)&&ev.StringData.AsSpan(0,System.Text.Encoding.Unicode.GetByteCount("retained metadata\0")).SequenceEqual(System.Text.Encoding.Unicode.GetBytes("retained metadata\0")),"Fresh destination links native common events and preserves string metadata");
-            var calls=ev.Events.Single(e=>e.ID==0).Instructions.Where(i=>i.Bank==2000&&i.ID==0).ToArray();Check(calls.Length==4&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(90,7000,b.Controller,b.Lamp,MapTravel.HeadstoneAvailable,b.RegistrationBase)))&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(90,7100,b.RegistrationRequest,b.Lamp)))&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(90,7200,b.ReturnRequest,b.Lamp,2102950)))&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(90,7300,b.ArrivalRequest,b.Lamp))),"Exact native common event calls");
+            var calls=ev.Events.Single(e=>e.ID==0).Instructions.Where(i=>i.Bank==2000&&i.ID==0).ToArray();Check(calls.Length==0,"Local scripts must not duplicate area lamp listeners");
+            var host=EMEVD.Read(result.Files["event/m40.emevd.dcx"]);var hostCtor=host.Events.Single(e=>e.ID==0).Instructions;calls=hostCtor.Where(i=>i.Bank==2000&&i.ID==0).ToArray();int instance=90+MapTravel.Lamps.Single(l=>l.SourceMap==b.SourceMap&&l.SourcePart==b.SourceBonfirePart).Index;Check(calls.Length==8&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(instance,7000,b.Controller,b.Lamp,MapTravel.HeadstoneAvailable,b.RegistrationBase)))&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(instance,7100,b.RegistrationRequest,b.Lamp)))&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(instance,7200,b.ReturnRequest,b.Lamp,2102950)))&&calls.Any(i=>i.ArgData.SequenceEqual(Pack(instance,7300,b.ArrivalRequest,b.Lamp))),"Exact native common event calls hosted once per area");
+            Check(host.LinkedFileOffsets.Count==1&&new[]{b.RegistrationRequest,b.ReturnRequest}.All(flag=>hostCtor.Any(i=>i.Bank==2003&&i.ID==2&&i.ArgData.SequenceEqual(Pack(flag,0))))&&!hostCtor.Any(i=>i.Bank==2003&&i.ID==2&&i.ArgData.SequenceEqual(Pack(b.ArrivalRequest,0))),"Area load clears stale activation/return requests but preserves live headstone arrivals");
             var talk=BND4.Read(result.Files[$"script/talk/{b.TargetMap}.talkesdbnd.dcx"]);Check(talk.Files.Count==2,"Composed source conversation and lamp retained without donor dialogue");var sourceTalk=BND4.Read(staged[$"script/talk/{b.TargetMap}.talkesdbnd.dcx"]).Files.Single();Check(talk.Files.Single(f=>f.ID==sourceTalk.ID).Bytes.Span.SequenceEqual(sourceTalk.Bytes.Span),"Composed source talk preserved");var esd=ESD.Read(talk.Files.Single(f=>Leaf(f.Name)==$"t{actor.TalkID}.esd").Bytes);Check(esd.Name=="t"+actor.TalkID&&esd.LongFormat&&esd.DarkSoulsCount==2,"Lamp ESD native format identity");
             var original=ESD.Read(BND4.Read(Native("script/talk/m24_01_00_00.talkesdbnd.dcx")!).Files.Single(f=>Leaf(f.Name)=="t241000.esd").Bytes);Check(esd.StateGroups.Keys.Order().SequenceEqual(original.StateGroups.Keys.Order()),"Native lamp state groups preserved");
         }
@@ -89,25 +126,34 @@ internal static partial class Program {
         rejected=false;try{FinalizeDestination(new(){["--native-root"]=native,["--output"]=native},new("DS1R"),"/unused/source");}catch(IOException){rejected=true;}Check(rejected,"Finalizer cannot write native root");
         bool connectedFinalizer=false;
         if(args.Length>3&&!string.IsNullOrWhiteSpace(args[3])) {
-            string sourceRoot=Path.GetFullPath(args[3]);var sourceFiles=new[]{"m10_02_00_00","m10_01_00_00"}.ToDictionary(map=>map,map=>Path.Combine(sourceRoot,"map/MapStudio",map+".msb"));var sourceHashes=sourceFiles.ToDictionary(p=>p.Key,p=>Hash(File.ReadAllBytes(p.Value)));
-            var sourceBonfires=sourceFiles.ToDictionary(p=>p.Key,p=>MSB1.Read(File.ReadAllBytes(p.Value)).Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Single(o=>o.EntityID==(p.Key=="m10_02_00_00"?1021960:1011960)));
+            string sourceRoot=Path.GetFullPath(args[3]);var sourceFiles=MapDestination.AdditionalMaps.Keys.ToDictionary(map=>map,map=>Path.Combine(sourceRoot,"map/MapStudio",map+".msb"));var sourceHashes=sourceFiles.ToDictionary(p=>p.Key,p=>Hash(File.ReadAllBytes(p.Value)));
+            var sourceBonfires=sourceFiles.ToDictionary(p=>p.Key,p=>MSB1.Read(File.ReadAllBytes(p.Value)).Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Single(o=>o.Name==MapTravel.Lamps.First(l=>l.SourceMap==p.Key&&l.Local==0).SourcePart));
+            var cave=MapDestination.Slice("m16_00_00_00",MSB1.Read(File.ReadAllBytes(sourceFiles["m16_00_00_00"])));
+            Check(cave.Parts.MapPieces.Single().Name=="m0200B0_0000"&&cave.Parts.Objects.Single().EntityID==1601961&&cave.Parts.Collisions.Single().Name=="h0062B0_0000"&&cave.Parts.Enemies.Count==0&&cave.Parts.DummyObjects.Count==0,"Basin slice included unrelated New Londo/Abyss content or omitted its real cave");
             Check(sourceBonfires["m10_01_00_00"] is MSB1.Part.DummyObject&&sourceBonfires["m10_02_00_00"] is MSB1.Part.Object,"Actual source checkpoint part classes");
             var fixture=Directory.CreateTempSubdirectory("bbmap-travel-finalizer-");
             try {
-                foreach(var (relative,bytes) in staged){var file=Path.Combine(fixture.FullName,"dvdroot_ps4",relative);Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllBytes(file,bytes);}
+                foreach(var (relative,bytes) in allStage){var file=Path.Combine(fixture.FullName,"dvdroot_ps4",relative);Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllBytes(file,bytes);}
                 var jsonOptions=new JsonSerializerOptions{WriteIndented=true,IncludeFields=true};
                 var fire=sourceBonfires["m10_02_00_00"];var burg=sourceBonfires["m10_01_00_00"];
                 object Entry(string sourceMap,string target,object[] placements)=>new{source="DS1R",map=sourceMap,target,from=Vector3.Zero,to=Vector3.Zero,offset=Vector3.Zero,spawn=Vector3.Zero,placementResults=placements,collisionEnvironment=new[]{new{source=sourceBonfires[sourceMap].CollisionName,target="h000017"}}};
                 object[] firePlacement=[new{sourceName=fire.Name,targetKind="MapPiece",targetName=replaced}];
                 // Match Python's realconnected report schema. The first Burg
                 // bonfire has a source object but no emitted render placement.
-                var rootReport=new{source="DS1R",map="m10_02_00_00",target="m40_02_00_00",from=Vector3.Zero,to=Vector3.Zero,offset=Vector3.Zero,spawn=Vector3.Zero,placementResults=firePlacement,collisionEnvironment=new[]{new{source=fire.CollisionName,target="h000017"}},connectedMaps=new[]{new{source_map="m10_01_00_00",target_map="m40_03_00_00",conversion="maps/m10_01_00_00/conversion.json"}}};
-                var rootReportFile=Path.Combine(fixture.FullName,"conversion.json");File.WriteAllText(rootReportFile,JsonSerializer.Serialize(rootReport,jsonOptions));var child=Path.Combine(fixture.FullName,"maps/m10_01_00_00/conversion.json");Directory.CreateDirectory(Path.GetDirectoryName(child)!);File.WriteAllText(child,JsonSerializer.Serialize(Entry("m10_01_00_00","m40_03_00_00",[new{sourceName="o0200_0001",targetKind="MapPiece",targetName="unselected-later-bonfire"}]),jsonOptions));
+                var rootReport=new{source="DS1R",map="m10_02_00_00",target="m40_02_00_00",from=Vector3.Zero,to=Vector3.Zero,offset=Vector3.Zero,spawn=Vector3.Zero,placementResults=firePlacement,collisionEnvironment=new[]{new{source=fire.CollisionName,target="h000017"}},connectedMaps=MapDestination.AdditionalMaps.Where(p=>p.Key!="m10_02_00_00").Select(p=>new{source_map=p.Key,target_map=p.Value,conversion=$"maps/{p.Key}/conversion.json"}).ToArray()};
+                var rootReportFile=Path.Combine(fixture.FullName,"conversion.json");File.WriteAllText(rootReportFile,JsonSerializer.Serialize(rootReport,jsonOptions));foreach(var attached in MapDestination.AdditionalMaps.Where(p=>p.Key!="m10_02_00_00")){var child=Path.Combine(fixture.FullName,$"maps/{attached.Key}/conversion.json");Directory.CreateDirectory(Path.GetDirectoryName(child)!);File.WriteAllText(child,JsonSerializer.Serialize(Entry(attached.Key,attached.Value,[]),jsonOptions));}
                 var options=new Dictionary<string,string>{["--native-root"]=native,["--output"]=fixture.FullName,["--smithbox"]=Path.GetFullPath(Path.Combine(args[2],"../.."))};var oldOutput=Console.Out;
                 try{Console.SetOut(new StringWriter());Check(FinalizeDestination(options,new("DS1R"),sourceRoot)==0,"Actual connected finalizer return code");}finally{Console.SetOut(oldOutput);}
                 using(var actual=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(fixture.FullName,"destination-travel.json")))) {
-                    Check(actual.RootElement.GetProperty("schema").GetString()=="bbmap-destination-travel-1","Versioned travel manifest");var bound=actual.RootElement.GetProperty("Destinations").EnumerateArray().ToArray();Check(bound.Length==2&&bound[0].GetProperty("ReplacedMapPiece").GetString()==replaced&&bound[1].GetProperty("ReplacedMapPiece").ValueKind==JsonValueKind.Null&&bound[1].GetProperty("SourceBonfireKind").GetString()=="DummyObject","Absent Burg render placement accepted while Firelink visual replaced");
-                    foreach(var b in bound){string map=b.GetProperty("SourceMap").GetString()!;var expected=sourceBonfires[map].Position;var xyz=b.GetProperty("LampPosition");Check(new Vector3(xyz.GetProperty("X").GetSingle(),xyz.GetProperty("Y").GetSingle(),xyz.GetProperty("Z").GetSingle())==expected,"Actual source bonfire transform retained");}
+                    Check(actual.RootElement.GetProperty("schema").GetString()=="bbmap-destination-travel-1","Versioned travel manifest");var bound=actual.RootElement.GetProperty("Destinations").EnumerateArray().ToArray();Check(bound.Length==10&&bound[0].GetProperty("ReplacedMapPiece").GetString()==replaced&&bound[1].GetProperty("ReplacedMapPiece").ValueKind==JsonValueKind.Null&&bound[1].GetProperty("SourceBonfireKind").GetString()=="DummyObject","Absent Burg render placement accepted while Firelink visual replaced");
+                    foreach(var b in bound){
+                        static Vector3 XYZ(JsonElement p)=>new(p.GetProperty("X").GetSingle(),p.GetProperty("Y").GetSingle(),p.GetProperty("Z").GetSingle());
+                        string map=b.GetProperty("SourceMap").GetString()!;var actualSource=MSB1.Read(File.ReadAllBytes(sourceFiles[map]));
+                        var bonfire=actualSource.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Single(p=>p.Name==b.GetProperty("SourceBonfirePart").GetString());
+                        Check(XYZ(b.GetProperty("LampPosition"))==bonfire.Position,"Actual source bonfire transform retained");
+                        if(bonfire is MSB1.Part.Object){var spawn=actualSource.Events.SpawnPoints.Single(p=>p.EntityID==bonfire.EntityID+1000);var point=actualSource.Regions.GetEntries().Single(p=>p.Name==spawn.SpawnPointName);
+                            Check(Vector3.Distance(XYZ(b.GetProperty("Spawn")),point.Position+Vector3.UnitY*.15f)<.00001f&&XYZ(b.GetProperty("SpawnRotation"))==point.Rotation,"Source-authored arrival transform lost in native lamp conversion");}
+                    }
                 }
                 // Duplicates are ambiguous and must still reject before any
                 // already composed staging artifact is changed.

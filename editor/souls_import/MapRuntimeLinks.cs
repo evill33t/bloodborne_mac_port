@@ -20,8 +20,9 @@ internal static class MapRuntimeLinks {
         return slots.Select(slot=>variant.Parts.Collisions.FirstOrDefault(p=>p.ModelName==slot.ModelName)??throw new InvalidDataException("Native variant lacks shared collision body: "+slot.ModelName)).ToArray();
     }
     internal static Result Apply(MSBB map,MSB1 source,IReadOnlyList<MapCollisionBindings.Chunk> chunks,
-        IReadOnlyList<MSBB.Part.Collision> slots,IReadOnlyDictionary<string,string> destinations,string? approachSourceMap=null) {
+        IReadOnlyList<MSBB.Part.Collision> slots,IReadOnlyDictionary<string,string> destinations,string? approachSourceMap=null,IReadOnlyDictionary<string,int>? destinationSlices=null) {
         if(chunks.Count!=slots.Count)throw new InvalidDataException("Connection collision binding count differs");
+        if(destinationSlices?.Values.Any(group=>group is <0 or >=128)==true)throw new ArgumentException("Invalid destination slice visibility group");
         var template=map.Parts.ConnectCollisions.FirstOrDefault();
         int removed=map.Parts.ConnectCollisions.Count;map.Parts.ConnectCollisions.Clear();
         var links=new List<Link>();var unavailable=new List<string>();
@@ -30,6 +31,9 @@ internal static class MapRuntimeLinks {
             var matches=destinations.Where(d=>new MapConnections.MapPattern(connection.MapID.Select(b=>(int)b)).Matches(d.Key)).ToArray();
             if(matches.Length==0)continue;
             if(matches.Length!=1)throw new InvalidDataException("Ambiguous runtime map connection: "+connection.Name);
+            if(destinationSlices?.TryGetValue(matches[0].Key,out int group)==true&&(connection.DispGroups[group/32]&(1u<<(group%32)))==0) {
+                unavailable.Add(connection.Name+": requested region is outside the imported destination slice");continue;
+            }
             var target=MapConnections.NativeBase(matches[0].Value);
             _=new MapConnections.SourceIdentity("BB",target);
             var indices=Enumerable.Range(0,chunks.Count).Where(i=>chunks[i].SourceName==connection.CollisionName).ToArray();

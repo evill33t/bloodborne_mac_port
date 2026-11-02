@@ -60,6 +60,7 @@ internal static class MapCharacterAnimations {
         int clipID=(source.ModelName,source.CharaInitID,source.NPCParamID,source.InitAnimID) switch {
             ("c0000",6270,6270,7810)=>7810,
             ("c0000",6080,6080,-1)=>0,
+            ("c0000",6000,6000,7845)=>7845,
             ("c2750",-1,275000,-1)=>0,
             _=>throw new NotSupportedException("Source NPC initial pose is not supported: "+source.Name)
         };

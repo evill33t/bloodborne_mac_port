@@ -17,7 +17,7 @@ internal static class SourceCollision {
         internal List<MapCollision.Triangle> PlayerTriangles(string layer)=>Parts.Where(p=>p.Layer==layer&&p.PlayerSolid).SelectMany(p=>p.Surfaces).SelectMany(s=>s.Triangles).ToList();
     }
 
-    internal static Result Read(string profile,string map,Func<string,byte[]?> read,Vector3 offset) {
+    internal static Result Read(string profile,string map,Func<string,byte[]?> read,Vector3 offset,IReadOnlySet<string>? includeParts=null) {
         if(profile!="DS1R")throw new NotSupportedException("Original collision extraction currently supports DS1 Remastered TAG0 assets");
         if(map.Length!=12||map[0]!='m'||!map.Skip(1).All(c=>char.IsAsciiDigit(c)||c=='_'))throw new ArgumentException("Invalid source map identifier");
         var msbData=read($"map/MapStudio/{map}.msb")??read($"map/MapStudio/{map}.msb.dcx")??throw new FileNotFoundException("Source collision MSB unavailable");
@@ -27,7 +27,7 @@ internal static class SourceCollision {
             using var archive=new BXF3Reader(read(stem+"bhd")??throw new FileNotFoundException(stem+"bhd"),read(stem+"bdt")??throw new FileNotFoundException(stem+"bdt"));
             var files=archive.Files.ToDictionary(f=>Path.GetFileName(f.Name.Replace('\\','/')),StringComparer.OrdinalIgnoreCase);
             var decoded=new Dictionary<string,IReadOnlyList<Surface>>(StringComparer.Ordinal);
-            foreach(var placement in msb.Parts.Collisions) {
+            foreach(var placement in msb.Parts.Collisions.Where(p=>includeParts==null||includeParts.Contains(p.Name))) {
                 if(string.IsNullOrEmpty(placement.ModelName))throw new InvalidDataException("Source collision has no model");
                 var model=layer+placement.ModelName[1..];
                 if(!decoded.TryGetValue(model,out var surfaces)) {

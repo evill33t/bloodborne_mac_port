@@ -5,6 +5,30 @@ using System.Text;
 
 // Additional maps borrow format/behavior templates, never a live retail scene.
 internal static class MapDestination {
+    internal static readonly IReadOnlyDictionary<string,string> AdditionalMaps=new Dictionary<string,string> {
+        ["m10_02_00_00"]="m40_02_00_00",["m10_01_00_00"]="m40_03_00_00",
+        ["m12_00_00_00"]="m40_04_00_00",["m13_00_00_00"]="m40_05_00_00",
+        ["m16_00_00_00"]="m40_06_00_00"
+    };
+    // The Basin cave is authored in the adjoining Valley map. Import that
+    // exact room and its floor, rather than using Darkroot's duplicate marker
+    // or exposing the unrelated Abyss checkpoint before its boss quest.
+    internal static IReadOnlySet<string>? SliceParts(string map)=>map=="m16_00_00_00"?new HashSet<string>{"m0200B0_0000","o0200_0002"}:null;
+    internal static IReadOnlySet<string>? SliceCollisions(string map)=>map=="m16_00_00_00"?new HashSet<string>{"h0062B0_0000"}:null;
+    internal static readonly IReadOnlyDictionary<string,int> SliceVisibility=new Dictionary<string,int>{{"m16_00_00_00",62}};
+    internal static MSB1 Slice(string map,MSB1 source) {
+        if(SliceParts(map) is not {} parts)return source;
+        var floor=source.Parts.Collisions.Single(p=>p.Name=="h0062B0_0000");
+        var fire=source.Parts.Objects.Single(p=>p.Name=="o0200_0002");
+        if(fire.EntityID!=1601961||fire.ModelName!="o0200"||fire.CollisionName!=floor.Name||floor.HitFilterID!=8||
+            source.Events.SpawnPoints.Count(p=>p.EntityID==1602961)!=1||source.Parts.MapPieces.Count(p=>p.Name=="m0200B0_0000"&&p.ModelName=="m0200B0")!=1)
+            throw new InvalidDataException("Authored Basin cave slice changed");
+        source.Parts.MapPieces.RemoveAll(p=>!parts.Contains(p.Name));source.Parts.Objects.RemoveAll(p=>!parts.Contains(p.Name));
+        source.Parts.Enemies.Clear();source.Parts.DummyEnemies.Clear();source.Parts.DummyObjects.Clear();
+        source.Parts.Collisions.RemoveAll(p=>p.Name!=floor.Name);source.Parts.ConnectCollisions.RemoveAll(p=>p.CollisionName!=floor.Name);
+        source.Events.Treasures.RemoveAll(p=>!parts.Contains(p.TreasurePartName));
+        return source;
+    }
     internal const string UrnSeed="__import_urn_template";
     internal sealed record Selection(bool Additional,string TargetMap,string TemplateMap) {
         internal string BaseMap=>TargetMap[..6]+"_00_00";
@@ -14,8 +38,8 @@ internal static class MapDestination {
     static string Leaf(string path)=>path.Replace('\\','/').Split('/').Last();
     internal static Selection Select(string mode,string profile,string source,string target) {
         if(mode=="additional") {
-            if(profile!="DS1R"||!new[]{("m10_02_00_00","m40_02_00_00"),("m10_01_00_00","m40_03_00_00")}.Contains((source,target)))
-                throw new NotSupportedException("Additional destinations currently support DS1R Firelink m40_02 and Undead Burg m40_03");
+            if(profile!="DS1R"||!AdditionalMaps.TryGetValue(source,out var allocated)||allocated!=target)
+                throw new NotSupportedException("Unallocated additional DS1R map destination");
             return new(true,target,source=="m10_02_00_00"?"m24_01_00_01":"m24_00_00_00");
         }
         if(mode!="replacement"||target is not("m24_01_00_01" or "m24_00_00_00"))throw new NotSupportedException("Unsupported map destination");

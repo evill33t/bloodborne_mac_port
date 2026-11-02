@@ -211,9 +211,9 @@ internal static class MapQuestState {
     internal static int Flag(int source)=>Flags.TryGetValue(source,out int target)?target:
         throw new NotSupportedException("Source quest flag has no stable reservation: "+source);
 
-    internal static void VerifyReservations(string nativeRoot) {
-        var reserved=Flags.Values.Append(InitialFlag).ToHashSet();
-        if(reserved.Count!=Flags.Count+1)throw new InvalidDataException("Imported quest flag ownership aliases");
+    internal static void VerifyReservations(string nativeRoot,IEnumerable<int>? additional=null) {
+        var all=Flags.Values.Append(InitialFlag).Concat(additional??[]).ToArray();var reserved=all.ToHashSet();
+        if(reserved.Count!=all.Length)throw new InvalidDataException("Imported quest flag ownership aliases");
         void Scan(ReadOnlySpan<byte> bytes,string owner) {
             for(int at=0;at+4<=bytes.Length;at++) {
                 int value=System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes[at..]);
@@ -221,7 +221,7 @@ internal static class MapQuestState {
             }
         }
         foreach(var file in BND4.Read(Path.Combine(nativeRoot,"param/gameparam/gameparam.parambnd.dcx")).Files)Scan(file.Bytes.Span,file.Name);
-        foreach(string folder in new[]{"event","script/talk"})foreach(string path in Directory.EnumerateFiles(Path.Combine(nativeRoot,folder),"*.dcx")) {
+        foreach(string folder in new[]{"event","script/talk"})foreach(string path in Directory.EnumerateFiles(Path.Combine(nativeRoot,folder),"*.dcx",SearchOption.AllDirectories)) {
             var bytes=File.ReadAllBytes(path);var owner=Path.GetRelativePath(nativeRoot,path);
             // Talk binders may compress each member independently of the outer
             // DCX. Scan decoded members so those flags cannot escape the guard.

@@ -222,6 +222,8 @@ internal static class MapEnvironment {
         if(nativeTemplateMap!=null)result.Limitations.Add("Complete native environment template "+nativeTemplateMap+" cloned for "+targetMap+"; target sparse override profiles are bypassed. Source lighting, fog and tone rows are converted independently; native environment maps and shader response remain approximations.");
         return result;
     }
+    internal static bool HasSkyMaterials(FLVER2 source)=>source.Meshes.Any(m=>SkyMaterial(source.Materials[m.MaterialIndex].MTD));
+    static bool SkyMaterial(string path)=>path.Contains("cloud",StringComparison.OrdinalIgnoreCase)||path.Contains("_Sky[",StringComparison.OrdinalIgnoreCase)||path.Contains("_m9000_M[D]",StringComparison.OrdinalIgnoreCase);
     internal static EnvironmentSky BakeSky(FLVER2 source,FLVER2 native,Func<string,MTD> sourceDefinition,Func<string,MTD> nativeDefinition,Func<string,string> texturePath,string materialPrefix) {
         if(!Regex.IsMatch(materialPrefix,@"\A[A-Za-z0-9_]{1,48}\z"))throw new ArgumentException("Invalid imported sky material prefix");
         if(native.Header.Version is not(0x20013 or 0x20014)||native.Header.BigEndian)throw new InvalidDataException("Choose a Bloodborne native sky template");

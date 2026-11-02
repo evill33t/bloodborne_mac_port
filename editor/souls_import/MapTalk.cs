@@ -11,7 +11,7 @@ internal static class MapTalk {
     sealed record Plan(string Name,int Entity,int Talk,Selection[] Selections);
 
     // These are bounded source conversations, not a transplanted native NPC quest.
-    static readonly Plan[] Plans=[
+    static readonly Plan[] FirelinkPlans=[
         new("Crestfallen Warrior",6270,102627,[
             new("introduction",27,37000000,28,[71100026,11026105]),
             new("bell directions",31,37000100,32,[71100027,11026105]),
@@ -27,18 +27,31 @@ internal static class MapTalk {
         new("Anastacia of Astora",6060,102606,[
             new("silent greeting",31,16000000,-1,[],1,"Binds source talk proxy c1000_0001 to visible actor6060. The source silent baseline is retained; Estus upgrades and resurrection dialogue are not exposed.")])
     ];
+    static readonly Plan[] BurgPlans=[new("Solaire of Astora",6001,101600,[
+        new("introduction",14,10010100,15,[71010050]),
+        new("first offer",17,10010200,18,[71010051]),
+        new("first acceptance",31,10010250,43,[71010058]),
+        new("first refusal",32,10010350,-1,[]),
+        new("second acceptance",37,10010300,34,[11010591]),
+        new("second refusal",40,10010360,-1,[]),
+        new("cooperation advice",19,10010310,20,[71010056,11010590]),
+        new("sun",21,10010400,22,[71010057,11010590]),
+        new("repeat first offer",23,10010500,-1,[]),
+        new("repeat second offer",38,10010500,-1,[])])];
+    internal const int SolairePrompt=900079900;
 
     internal static Result Export(MSBB map,string profile,string sourceMap,string nativeRoot,string definitionsDirectory,
         Func<string,byte[]?> readSource,Func<int,int> mapFlag,IReadOnlyDictionary<int,int> actorEntities,
         Action<string,byte[]> write,Func<string,byte[]?>? readNative=null,string nativeMap="m24_01_00_00") {
-        if(profile is not ("DS1" or "DS1R")||sourceMap!="m10_02_00_00")
-            throw new NotSupportedException("Bounded source dialogue is implemented only for DS1 Firelink Shrine");
+        if(profile is not ("DS1" or "DS1R")||sourceMap is not("m10_02_00_00" or "m10_01_00_00"))
+            throw new NotSupportedException("No verified source dialogue plan for this map");
+        bool solaire=sourceMap=="m10_01_00_00";var plans=solaire?BurgPlans:FirelinkPlans;
         byte[] Source(string path)=>readSource(path)??throw new FileNotFoundException("Source dialogue asset unavailable: "+path);
         byte[]? NativeOptional(string path)=>readNative?.Invoke(path)??
             (File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null);
         byte[] Native(string path)=>NativeOptional(path)??throw new FileNotFoundException("Native dialogue asset unavailable",path);
         static string Leaf(string path)=>Path.GetFileName(path.Replace('\\','/'));
-        var sourceTalk=BND3.Read(Source("script/talk/m10_02_00_00.talkesdbnd.dcx"));
+        var sourceTalk=BND3.Read(Source($"script/talk/{sourceMap}.talkesdbnd.dcx"));
         var sourceGame=BND3.Read(Source("param/GameParam/GameParam.parambnd.dcx"));
         var sourceRows=PARAM.Read(sourceGame.Files.Single(f=>Leaf(f.Name)=="TalkParam.param").Bytes);
         sourceRows.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitionsDirectory,"TalkParam.xml")));
@@ -56,32 +69,47 @@ internal static class MapTalk {
         var talk=BND4.Read(Native(talkPath));
         var nativeTemplate=ESD.Read(talk.Files[0].Bytes);
         if(!nativeTemplate.LongFormat||nativeTemplate.DarkSoulsCount!=2)throw new InvalidDataException("Expected native Bloodborne talk format");
-        var locales=new List<(string Language,BND4 Binder,BinderFile File,FMG Text)>();
+        var locales=new List<(string Language,BND4 Binder,BinderFile File,FMG Text,BinderFile? DialogFile,FMG? DialogText)>();
         foreach(var directory in Directory.EnumerateDirectories(Path.Combine(nativeRoot,"msg")).Order(StringComparer.Ordinal)) {
             var language=Path.GetFileName(directory);var relative=$"msg/{language}/menu.msgbnd.dcx";
             if(!File.Exists(Path.Combine(nativeRoot,relative)))continue;
             var binder=BND4.Read(Native(relative));var file=binder.Files.Single(f=>f.ID==1);
-            locales.Add((language,binder,file,FMG.Read(file.Bytes)));
+            var dialog=solaire?binder.Files.Single(f=>f.ID==30):null;
+            locales.Add((language,binder,file,FMG.Read(file.Bytes),dialog,dialog==null?null:FMG.Read(dialog.Bytes)));
         }
         if(locales.Count==0)throw new InvalidDataException("Native conversation text is unavailable");
-        var sourceLanguages=new Dictionary<string,Dictionary<int,string?>>(StringComparer.Ordinal);
-        Dictionary<int,string?>? Text(string language) {
-            if(sourceLanguages.TryGetValue(language,out var found))return found;
+        var sourceLanguages=new Dictionary<(string Language,int Table),Dictionary<int,string?>>();
+        Dictionary<int,string?>? Text(string language,int table=1) {
+            if(sourceLanguages.TryGetValue((language,table),out var found))return found;
             var bytes=readSource($"msg/{language}/menu.msgbnd.dcx")??readSource($"msg/{language}/menu.msgbnd");
             if(bytes==null)return null;
-            var fmg=FMG.Read(BND3.Read(bytes).Files.Single(f=>f.ID==1).Bytes);
-            var result=fmg.Entries.ToDictionary(e=>e.ID,e=>(string?)e.Text);sourceLanguages.Add(language,result);return result;
+            var fmg=FMG.Read(BND3.Read(bytes).Files.Single(f=>f.ID==table).Bytes);
+            var result=fmg.Entries.ToDictionary(e=>e.ID,e=>(string?)e.Text);sourceLanguages.Add((language,table),result);return result;
         }
         var english=Text("ENGLISH")??throw new InvalidDataException("Source English dialogue is unavailable");
         var used=rows.Rows.Select(r=>r.ID).Concat(locales.SelectMany(l=>l.Text.Entries.Select(e=>e.ID))).ToHashSet();
         int nextRow=900070000,nextTalk=area*10000+block*1000+970,lastTalk=area*10000+block*1000+999,
             nextFile=talk.Files.Max(f=>f.ID)+1,totalRows=0;
         var actors=new List<Actor>();var voiceRows=new List<(PARAM.Row Row,int SourceVoice,string Model)>();
-        foreach(var plan in Plans) {
+        if(solaire) {
+            var donor=ESD.Read(BND4.Read(Native("script/talk/m24_00_00_00.talkesdbnd.dcx")).Files.Single(f=>Leaf(f.Name)=="t240000.esd").Bytes);
+            if(!donor.StateGroups[2147483643][1].EntryCommands.Any(c=>c.CommandBank==1&&c.CommandID==17&&c.Arguments.Select(Constant).SequenceEqual(new[]{2,10010713,3,4,2})))throw new InvalidDataException("Native active confirmation dialog changed");
+            var englishDialog=Text("ENGLISH",30)??throw new InvalidDataException("Source generic dialog messages unavailable");
+            if(used.Contains(SolairePrompt)||locales.Any(l=>l.DialogText!.Entries.Any(e=>e.ID==SolairePrompt))||!englishDialog.TryGetValue(10020040,out var prompt)||string.IsNullOrWhiteSpace(prompt))throw new InvalidDataException("Source Solaire confirmation text unavailable or target occupied");
+            used.Add(SolairePrompt);
+            foreach(var locale in locales){var language=SourceLanguage(locale.Language);var text=language==null?null:Text(language,30)?.GetValueOrDefault(10020040);locale.DialogText!.Entries.Add(new(locale.DialogText,SolairePrompt,string.IsNullOrWhiteSpace(text)?prompt:text));}
+        }
+        foreach(var plan in plans) {
             if(!actorEntities.TryGetValue(plan.Entity,out var entity))throw new InvalidDataException("Imported dialogue actor has no target mapping: "+plan.Entity);
             var actor=map.Parts.Enemies.Single(p=>p.EntityID==entity);
             var source=ESD.Read(sourceTalk.Files.Single(f=>Leaf(f.Name)==$"t{plan.Talk}.esd").Bytes);
             if(source.DarkSoulsCount!=1||!source.StateGroups.TryGetValue(1,out var sourceStates))throw new InvalidDataException("Unexpected source dialogue graph");
+            if(solaire) {
+                foreach(var (state,yes,no,yesFlag,noFlag) in new[]{(30,28,29,71010052,71010054),(36,35,39,71010053,71010055)}) {
+                    if(!sourceStates[state].EntryCommands.Any(c=>c.CommandBank==1&&c.CommandID==17&&c.Arguments.Select(Constant).SequenceEqual(new[]{8,10020040,3,4,2}))||
+                       !new[]{(yes,yesFlag),(no,noFlag)}.All(p=>sourceStates[p.Item1].EntryCommands.Any(c=>c.CommandBank==1&&c.CommandID==11&&c.Arguments.Select(Constant).SequenceEqual(new[]{p.Item2,1}))))throw new InvalidDataException("Source Solaire dialog choice changed");
+                }
+            }
             var branches=new List<Branch>();
             foreach(var selection in plan.Selections) {
                 if(!sourceStates.TryGetValue(selection.State,out var state)||!state.EntryCommands.Any(c=>c.CommandBank==1&&c.CommandID==1&&c.Arguments.Count==3&&Constant(c.Arguments[0])==selection.Row))
@@ -131,13 +159,13 @@ internal static class MapTalk {
         if(area is not(24 or 40))throw new NotSupportedException("Imported Firelink dialogue targets the verified replacement or additional-area allocation");
         var voiceOwners=actors.Select(a=>map.Parts.Enemies.Single(p=>p.EntityID==a.NativeEntity).ModelName)
             .Select(model=>new MapTalkVoices.Owner(model,voiceRows.Where(r=>r.Model==model).Select(r=>r.SourceVoice).ToArray())).ToArray();
-        var voices=MapTalkVoices.Export(voiceOwners,readSource,NativeOptional,write);
+        var voices=MapTalkVoices.Export(voiceOwners,readSource,NativeOptional,write,firstVoice:solaire?249971000:MapTalkVoices.FirstVoice);
         var voiceIds=voices.Clips.ToDictionary(c=>c.SourceVoice,c=>c.NativeVoice);
         foreach(var binding in voiceRows)binding.Row["voiceId"].Value=voiceIds[binding.SourceVoice];
         talkFile.Bytes=WriteRows(rows);
         write("param/gameparam/gameparam.parambnd.dcx",game.Write(game.Compression));
         write(talkPath,talk.Write(talk.Compression));
-        foreach(var locale in locales) {locale.File.Bytes=locale.Text.Write();write($"msg/{locale.Language}/menu.msgbnd.dcx",locale.Binder.Write(locale.Binder.Compression));}
+        foreach(var locale in locales) {locale.File.Bytes=locale.Text.Write();if(locale.DialogFile!=null)locale.DialogFile.Bytes=locale.DialogText!.Write();write($"msg/{locale.Language}/menu.msgbnd.dcx",locale.Binder.Write(locale.Binder.Compression));}
         return new Result(actors,totalRows,locales.Count,voices,[
             "Bounded source dialogue only; complete source NPC quests, hostility, shops, covenants, Estus upgrades, rewards and departures are not translated.",
             "Selected original source speech is converted into per-actor owned native sound projects. Source talk animations are not converted.",
@@ -178,6 +206,29 @@ internal static class MapTalk {
             Go(dispatch,targets["introduction"],Flag(71300065,0));
             Go(dispatch,targets["warm greeting"],Flag(71300066,0));Go(dispatch,targets["repeat"],Value(1));
         } else if(sourceEntity==6060)Go(dispatch,targets["silent greeting"],Value(1));
+        else if(sourceEntity==6001) {
+            var gift=Any(Flag(11010591,1),Flag(1001,1));
+            Go(dispatch,targets["cooperation advice"],All(gift,Flag(71010056,0)));
+            Go(dispatch,targets["sun"],gift);
+            Go(dispatch,targets["introduction"],Flag(71010050,0));
+            Go(dispatch,targets["first offer"],Flag(71010051,0));
+            Go(dispatch,targets["repeat first offer"],Flag(71010052,0));
+            Go(dispatch,targets["first acceptance"],Flag(71010058,0));
+            Go(dispatch,targets["repeat second offer"],Value(1));
+            void Continue(string branch,long next){var done=states[targets[branch]+1];done.Conditions.Clear();Go(done,next,Value(1));}
+            Continue("first offer",200);Continue("repeat first offer",200);
+            Continue("first acceptance",210);Continue("repeat second offer",210);
+            void Choice(long id,int yesFlag,int noFlag,string yesBranch,string noBranch) {
+                var choice=State(id);choice.EntryCommands.Add(Command(17,2,SolairePrompt,3,4,2));
+                Go(choice,3,Any(Binary(0x95,Call(3),Value(1)),Binary(0x95,Call(19),Value(1)),Binary(0x94,Call(1),Value(5))));
+                // Match the active native dialog: accept first, then closed.
+                Go(choice,id+1,Binary(0x95,Call(22),Value(1)));Go(choice,id+2,Binary(0x95,Call(21),Value(0)));
+                var yes=State(id+1);yes.EntryCommands.Add(Command(11,mapFlag(yesFlag),1));Go(yes,targets[yesBranch],Value(1));
+                var no=State(id+2);no.EntryCommands.Add(Command(11,mapFlag(noFlag),1));Go(no,targets[noBranch],Value(1));
+            }
+            Choice(200,71010052,71010054,"first acceptance","first refusal");
+            Choice(210,71010053,71010055,"second acceptance","second refusal");
+        }
         else throw new NotSupportedException("No bounded source dialogue dispatcher for "+sourceEntity);
         return esd;
     }

@@ -28,7 +28,7 @@ static class SourceCorpseVariantsTests {
     internal static void Run(string root) {
         var hashes=new Dictionary<string,byte[]>();byte[] Read(string p){var path=Path.Combine(root,p);var b=File.ReadAllBytes(path);hashes.TryAdd(path,SHA256.HashData(b));return b;}
         var placements=new List<SourceCorpsePose.Placement>();var plans=new List<SourceCorpsePose.Plan>();
-        foreach(var (map,count) in new[]{("m10_02_00_00",16),("m10_01_00_00",28)}) {
+        foreach(var (map,count) in new[]{("m10_02_00_00",16),("m10_01_00_00",28),("m12_00_00_00",15),("m13_00_00_00",15)}) {
             var scene=MSB1.Read(Read("map/MapStudio/"+map+".msb"));var before=scene.Write();var plan=SourceCorpsePose.Resolve("DS1R",map,scene,Read);plans.Add(plan);placements.AddRange(plan.Placements);
             Check(plan.Placements.Count==count&&plan.Placements.Select(p=>p.Name).Distinct().Count()==count,"Placed corpse inventory changed");
             Check(plan.Placements.All(p=>scene.Parts.Objects.Any(o=>o.Name==p.Name&&o.ModelName==p.Model))&&plan.Placements.All(p=>!scene.Parts.DummyObjects.Any(o=>o.Name==p.Name)),"Dummy corpse or substituted model was emitted");
@@ -55,10 +55,10 @@ static class SourceCorpseVariantsTests {
             }
             reports.Add(new{model=group.Key.Model,animation=group.Key.Animation,placements=group.Count(),vertices=expectedVertices,boundsMin=output.Header.BoundingBoxMin,boundsMax=output.Header.BoundingBoxMax});
         }
-        Check(reports.Count==16&&placements.Count==44,"Installed corpse coverage incomplete");
+        Check(reports.Count==20&&placements.Count==74,"Installed corpse coverage incomplete");
         Check(SourceCorpsePose.Resolve("DS1","m10_01_00_00",null,_=>throw new Exception("Unexpected source read")).Placements.Count==0,"Unsupported profile was changed");
         foreach(var (path,sha) in hashes)Check(SHA256.HashData(File.ReadAllBytes(path)).SequenceEqual(sha),"Original source asset changed: "+path);
         string destination=Path.Combine(Environment.CurrentDirectory,"out/map-editor/fidelity-followup/corpses");Directory.CreateDirectory(destination);File.WriteAllText(Path.Combine(destination,"regression.json"),JsonSerializer.Serialize(new{status="PASS",placements=placements.Count,models=3,variants=reports.Count,vertices,triangles,maximumPoseError=maximum,originalAssets=hashes.Count,plans,reports},new JsonSerializerOptions{WriteIndented=true,IncludeFields=true}));
-        Console.WriteLine($"PASS corpses:44 placements/3 actual source models/16 static model-pose variants; {vertices} independently sampled vertices, max error{maximum*1000:F4}mm; original source assets unchanged");
+        Console.WriteLine($"PASS corpses:74 placements/3 actual source models/20 static model-pose variants; {vertices} independently sampled vertices, max error{maximum*1000:F4}mm; original source assets unchanged");
     }
 }

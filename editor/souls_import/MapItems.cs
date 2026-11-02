@@ -214,7 +214,7 @@ internal static class MapItems {
             if(destination.Models.Objects.Any(m=>m.Name==PickupModel))throw new InvalidDataException("Owned pickup MSB model is occupied");
             files.Add(path,output);destination.Models.Objects.Add(model);objectTemplate.ModelName=PickupModel;
         }
-        int firstEntity=sourceMap switch {"m10_02_00_00"=>2418500,"m10_01_00_00"=>2408500,_=>throw new NotSupportedException("No item entity reservation for "+sourceMap)};
+        int firstEntity=sourceMap switch {"m10_02_00_00"=>2418500,"m10_01_00_00"=>2408500,"m12_00_00_00"=>4048500,"m13_00_00_00"=>4058500,"m16_00_00_00"=>4068500,_=>throw new NotSupportedException("No item entity reservation for "+sourceMap)};
         int entity=firstEntity;
         int eventID=destination.Events.GetEntries().Select(e=>e.EventID).DefaultIfEmpty(-1).Max()+1;
         var entities=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).ToHashSet();

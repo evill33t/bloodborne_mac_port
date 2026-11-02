@@ -56,9 +56,15 @@ internal static class MapCharacters {
         var visual=files.SingleOrDefault(f=>IsModel(f.Name))??throw new InvalidDataException("Authored source character has no unique FLVER");
         if(!FLVER2.Is(visual.Bytes.ToArray()))throw new InvalidDataException("Authored source character requires FLVER2");
         var textures=new Dictionary<string,TPF.Texture>(StringComparer.OrdinalIgnoreCase);var paths=new List<string>{sourcePath};
-        void Add(TPF tpf){foreach(var texture in tpf.Textures) {
+        var primaryTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(TPF tpf,bool shared=false){foreach(var texture in tpf.Textures) {
             string name=TextureName(texture.Name);if(textures.TryGetValue(name,out var previous)) {
-                if(previous.Format!=texture.Format||!previous.Bytes.AsSpan().SequenceEqual(texture.Bytes))throw new InvalidDataException("Conflicting authored character texture: "+name);
+                // A model's own texture takes precedence over a shared fallback
+                // (Vamos embeds a remastered hammer also present in c2929).
+                if(previous.Format!=texture.Format||!previous.Bytes.AsSpan().SequenceEqual(texture.Bytes)) {
+                    if(shared&&primaryTextures.Contains(name))continue;
+                    throw new InvalidDataException("Conflicting authored character texture: "+name);
+                }
             } else textures.Add(name,texture);
         }}
         foreach(var file in files)if(TPF.Is(file.Bytes.ToArray()))Add(TPF.Read(file.Bytes));
@@ -79,21 +85,24 @@ internal static class MapCharacters {
         // Some hollow equipment references a shared character texture owner
         // (for example c2509). Read its texture resources without instantiating
         // its model or behavior, and retain provenance for each dependency.
-        var referenced=FLVER2.Read(visual.Bytes).Materials.SelectMany(m=>m.Textures).Select(t=>t.Path.Replace('\\','/'))
+        primaryTextures.UnionWith(textures.Keys);
+        var references=FLVER2.Read(visual.Bytes).Materials.SelectMany(m=>m.Textures).Select(t=>t.Path.Replace('\\','/')).ToArray();
+        var referenced=references
             .Select(path=>System.Text.RegularExpressions.Regex.Match(path,@"(?:^|/)chr/(c\d{4})/",System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            .Concat(references.Where(path=>!textures.ContainsKey(TextureName(path))).Select(path=>System.Text.RegularExpressions.Regex.Match(TextureName(path),@"\A(c\d{4})_",System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
             .Where(m=>m.Success).Select(m=>m.Groups[1].Value).Where(id=>!id.Equals(model,StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if(referenced.Length>16)throw new InvalidDataException("Too many shared character texture owners");
         foreach(var owner in referenced) {
             string path=$"chr/{owner}.chrbnd.dcx";
             var shared=read(path)??read(path[..^4]);if(shared==null)continue;paths.Add(path);
             var dependencies=Binder(shared);
-            foreach(var entry in dependencies)if(TPF.Is(entry.Bytes.ToArray()))Add(TPF.Read(entry.Bytes));
+            foreach(var entry in dependencies)if(TPF.Is(entry.Bytes.ToArray()))Add(TPF.Read(entry.Bytes),shared:true);
             foreach(var header in dependencies.Where(f=>Leaf(f.Name).EndsWith(".chrtpfbhd",StringComparison.OrdinalIgnoreCase))) {
                 string dataPath=$"chr/{owner}.chrtpfbdt";var data=Required(read,dataPath);paths.Add(dataPath);
                 using var split=new BXF3Reader(header.Bytes,data);
                 foreach(var entry in split.Files) {
                     if(entry.CompressedSize>128L*1024*1024||entry.UncompressedSize>128L*1024*1024)throw new InvalidDataException("Shared character texture exceeds the import budget");
-                    Add(TPF.Read(split.ReadFile(entry)));
+                    Add(TPF.Read(split.ReadFile(entry)),shared:true);
                 }
             }
         }
@@ -148,11 +157,15 @@ internal static class MapCharacters {
     // Pure in-memory staging: callers compose the returned map entries and files
     // with their other import stages before writing a mod outside either game.
     internal static Export BakeFirelink(Func<string,byte[]?> readSource,string profile,string sourceMap,string definitionsDirectory,
+        string nativeDvdRoot,MSBB destination,Vector3 offset,string collisionName,byte[]? gameParamOverride=null)=>
+        sourceMap=="m10_02_00_00"?BakeFriendly(readSource,profile,sourceMap,definitionsDirectory,nativeDvdRoot,destination,offset,collisionName,gameParamOverride):
+        throw new NotSupportedException("Expected Firelink source map");
+    internal static Export BakeFriendly(Func<string,byte[]?> readSource,string profile,string sourceMap,string definitionsDirectory,
         string nativeDvdRoot,MSBB destination,Vector3 offset,string collisionName,byte[]? gameParamOverride=null) {
-        if(profile is not("DS1" or "DS1R")||sourceMap!="m10_02_00_00")throw new NotSupportedException("Character actor import currently supports DS1 Firelink only");
+        if(profile is not("DS1" or "DS1R")||sourceMap is not("m10_02_00_00" or "m10_01_00_00"))throw new NotSupportedException("No verified friendly source actor selection for this map");
         if(!Finite(offset)||destination.Parts.Collisions.Count(c=>c.Name==collisionName)!=1)throw new InvalidDataException("Character import requires a valid offset and destination collision");
         string msbPath=$"map/MapStudio/{sourceMap}.msb";var source=MSB1.Read(readSource(msbPath)??Required(readSource,msbPath+".dcx"));
-        var selected=new[]{
+        var selected=sourceMap=="m10_01_00_00"?new[]{source.Parts.Enemies.Single(p=>p.EntityID==6001&&p.ModelName=="c0000"&&p.CharaInitID==6000&&p.NPCParamID==6000&&p.InitAnimID==7845)}:new[]{
             source.Parts.Enemies.Single(p=>p.ModelName=="c0000"&&p.CharaInitID==6270),
             source.Parts.Enemies.Single(p=>p.ModelName=="c0000"&&p.CharaInitID==6080),
             source.Parts.Enemies.Single(p=>p.ModelName=="c2750"&&p.NPCParamID==275000)};
@@ -174,7 +187,8 @@ internal static class MapCharacters {
         var usedNames=destination.Parts.GetEntries().Select(p=>p.Name).ToHashSet(StringComparer.Ordinal);
         var usedEntityIDs=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).ToHashSet();
         var usedParams=npcs.Rows.Select(r=>r.ID).ToHashSet();
-        var files=new Dictionary<string,byte[]>();var models=new List<MSBB.Model.Enemy>();var actors=new List<MSBB.Part.Enemy>();var reports=new Dictionary<string,CharacterReport>();int nextModel=FirstModel,nextEntity=2419700;
+        bool burg=sourceMap=="m10_01_00_00";
+        var files=new Dictionary<string,byte[]>();var models=new List<MSBB.Model.Enemy>();var actors=new List<MSBB.Part.Enemy>();var reports=new Dictionary<string,CharacterReport>();int nextModel=burg?8905:FirstModel,nextEntity=burg?4039710:2419700,lastEntity=burg?4039799:2419799;
         foreach(var p in selected) {
             bool Occupied(int id) {
                 string name="c"+id;return usedModels.Contains(name)||usedNames.Contains(name+"_0000")||usedParams.Contains(id*100)||
@@ -185,12 +199,14 @@ internal static class MapCharacters {
             }
             while(nextModel<=LastModel&&Occupied(nextModel))++nextModel;if(nextModel>LastModel)throw new InvalidDataException("No unused character model ID within the native sound-bank range");
             int id=nextModel++,paramID=id*100;string target="c"+id;usedModels.Add(target);usedParams.Add(paramID);
-            while(nextEntity<=2419799&&usedEntityIDs.Contains(nextEntity))++nextEntity;if(nextEntity>2419799)throw new InvalidDataException("No unused imported character entity ID");
+            while(nextEntity<=lastEntity&&usedEntityIDs.Contains(nextEntity))++nextEntity;if(nextEntity>lastEntity)throw new InvalidDataException("No unused imported character entity ID");
             int entityID=nextEntity++;usedEntityIDs.Add(entityID);
             byte[] sourceModel;List<TPF.Texture> textures;List<string> parts;List<string> limitations;NpcBodyShape.Report? bodyShape=null;
             if(p.ModelName=="c0000") {
                 var appearance=NpcAppearance.Load(readSource,definitionsDirectory,p.CharaInitID,applyBodyShape:profile=="DS1R");
-                if(!appearance.Parts.Any(part=>part.Slot=="Face")||!appearance.Parts.Any(part=>part.Slot=="Hair"))throw new InvalidDataException("Initial Firelink human NPC requires its real source FaceGen head and hair");
+                if(p.CharaInitID==6000) {
+                    if(!appearance.Parts.Select(part=>part.Slot).SequenceEqual(new[]{"Head","Body","Arms","Legs"})||appearance.Parts.Any(part=>part.ModelID!=9280))throw new InvalidDataException("Source Solaire fully covered armor set changed");
+                } else if(!appearance.Parts.Any(part=>part.Slot=="Face")||!appearance.Parts.Any(part=>part.Slot=="Hair"))throw new InvalidDataException("Initial Firelink human NPC requires its real source FaceGen head and hair");
                 sourceModel=appearance.Model.Write();textures=appearance.Textures;parts=appearance.Parts.Select(part=>part.Path).Distinct().ToList();limitations=appearance.Limitations.ToList();bodyShape=appearance.BodyShape;
             } else {
                 var appearance=Authored(readSource,p.ModelName);sourceModel=appearance.Model;textures=appearance.Textures;parts=appearance.Paths;
@@ -209,7 +225,7 @@ internal static class MapCharacters {
             // Native NpcParam display-mask fields 0..31 occupy these four bytes.
             // All source material groups, including source #33, remain baked.
             foreach(int index in new[]{0x146,0x147,0x14A,0x14B})param[index]=255;
-            CloneRow(npcs,npcDonor,paramID,"Imported Firelink "+p.Name,param);
+            CloneRow(npcs,npcDonor,paramID,"Imported friendly "+sourceMap+" "+p.Name,param);
             var model=(MSBB.Model.Enemy)donorModel.DeepCopy();model.Name=target;model.SibPath=model.SibPath.Replace(TemplateModel,target,StringComparison.OrdinalIgnoreCase);models.Add(model);
             var actor=(MSBB.Part.Enemy)donor.DeepCopy();actor.Name=target+"_0000";actor.ModelName=target;actor.EntityID=entityID;actor.NPCParamID=paramID;actor.ThinkParamID=-1;
             actor.TalkID=-1;actor.CharaInitID=-1;actor.Position=p.Position+offset;actor.Rotation=p.Rotation;actor.Scale=p.Scale*bake.ProportionScale;actor.CollisionName=collisionName;actor.PatrolInfoName=null!;

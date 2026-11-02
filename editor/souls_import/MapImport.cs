@@ -11,18 +11,18 @@ internal static partial class Program {
         var map=Get("--map");var target=Get("--target-map");foreach(var id in new[]{map,target})if(!Regex.IsMatch(id,@"\Am\d\d_\d\d_\d\d_\d\d\z"))throw new ArgumentException("Invalid map identifier");
         bool importItems=values.TryGetValue("--item-policy",out var itemPolicy);
         if(importItems&&(profile.Id!="DS1R"||itemPolicy!="ds1-bloodborne"))throw new NotSupportedException("Item policy currently supports ds1-bloodborne for DS1R only");
-        var supported=profile.Id is "DS1" or "DS1R"?map is "m10_02_00_00" or "m10_01_00_00":map=="m10_04_00_00";
-        if(!supported)throw new NotSupportedException("Supported maps: DS1 Firelink/Undead Burg or DS2 Majula");
+        var supported=profile.Id is "DS1" or "DS1R"?MapDestination.AdditionalMaps.ContainsKey(map):map=="m10_04_00_00";
+        if(!supported)throw new NotSupportedException("Supported maps: DS1 Firelink, Burg, Darkroot, Catacombs or DS2 Majula");
         var destination=MapDestination.Select(values.GetValueOrDefault("--destination","replacement"),profile.Id,map,target);
         var native=Canonical(Get("--native-root"));var output=Canonical(Get("--output"));foreach(var source in new[]{root,native})if(output.Equals(source,StringComparison.OrdinalIgnoreCase)||output.StartsWith(source.TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))throw new IOException("Output must be outside source game folders");
         if(File.Exists(output)||Directory.Exists(output))throw new IOException("Choose a new output folder");
         Vector3 Parse(string key){var p=Get(key).Split(',').Select(s=>float.Parse(s,System.Globalization.CultureInfo.InvariantCulture)).ToArray();if(p.Length!=3||p.Any(f=>!float.IsFinite(f)||Math.Abs(f)>10000))throw new ArgumentException("Invalid coordinate triple: "+key);return new(p[0],p[1],p[2]);}
         var from=Parse("--source-anchor");var to=Parse("--target-anchor");var offset=to-from;
         var requestedSpawnOffset=values.ContainsKey("--spawn-offset")?(Vector3?)Parse("--spawn-offset"):null;
-        using var sourceMap=new StaticMapSource(root,profile.Id,map);
+        using var sourceMap=new StaticMapSource(root,profile.Id,map,MapDestination.SliceParts(map));
         var spawnOffset=requestedSpawnOffset??(sourceMap.PlayerStart is {} start?start-from+Vector3.UnitY:new Vector3(-4,1,-2));
         var spawn=to+spawnOffset;
-        var sourceCollision=profile.Id is "DS2" or "DS2S"?LegacySourceCollision.Read(profile.Id,map,sourceMap.ReadAsset,offset):profile.Id=="DS1R"?SourceCollision.Read(profile.Id,map,sourceMap.ReadAsset,offset):null;
+        var sourceCollision=profile.Id is "DS2" or "DS2S"?LegacySourceCollision.Read(profile.Id,map,sourceMap.ReadAsset,offset):profile.Id=="DS1R"?SourceCollision.Read(profile.Id,map,sourceMap.ReadAsset,offset,MapDestination.SliceCollisions(map)):null;
         var nativeRoot=Path.Combine(native,"dvdroot_ps4");
         var overlay=values.TryGetValue("--native-overlay",out var overlayPath)?Path.Combine(Canonical(overlayPath),"dvdroot_ps4"):null;
         string? NativeAsset(string path)=>overlay!=null&&File.Exists(Path.Combine(overlay,path))?Path.Combine(overlay,path):File.Exists(Path.Combine(nativeRoot,path))?Path.Combine(nativeRoot,path):null;
@@ -39,12 +39,15 @@ internal static partial class Program {
         if(target=="m24_00_00_00"){msb.Events.Sounds.Clear();msb.Events.Generators.Clear();}
         var pieceTemplate=donor.Parts.MapPieces.First();var removedScenery=destination.Additional?0:MapReplacement.PruneScenery(msb);var parkedActors=destination.Additional?0:MapReplacement.ParkActors(msb);var colTemplate=msb.Parts.Collisions.First();var pieceLighting=donor.Parts.MapPieces.First(p=>p.GparamConfig.LightSetID==0).GparamConfig.DeepCopy();
         var nativeFlver=File.ReadAllBytes(Path.Combine(nativeRoot,"map/m24_01_00_00/m24_01_00_00_004570.flver.dcx"));var originalFlver=FLVER2.Read(nativeFlver);var materialTemplate=originalFlver.Materials[0];var meshTemplate=originalFlver.Meshes.First(m=>m.MaterialIndex==0);
+        // Other source areas reuse texture basenames with different pixels.
+        // Retain the published Firelink/Burg namespace and isolate new maps.
+        var texturePrefix=area+"_import_"+(map is "m10_02_00_00" or "m10_01_00_00"?"":map+"_");
         var convertedTextures=new Dictionary<string,TPF.Texture>(StringComparer.OrdinalIgnoreCase);var reports=new List<string>();
         string Image(string path,string fallback,IReadOnlyDictionary<string,TPF.Texture> local,bool color=false){
             var key=ModelName(path);TPF.Texture? source=local.GetValueOrDefault(key);
-            if(source==null){key="__"+fallback;if(!convertedTextures.ContainsKey(key)){var pixel=fallback=="normal"?new byte[]{128,128,255,255}:fallback=="black"?new byte[]{0,0,0,255}:new byte[]{255,255,255,255};var dds=SkinRetarget.RgbaTexture(pixel);convertedTextures[key]=new TPF.Texture(area+"_import_"+key,105,0,dds,TPF.TPFPlatform.PS4);}if(path.Length>0)reports.Add("Missing source texture: "+path+" -> "+fallback);return convertedTextures[key].Name;}
+            if(source==null){key="__"+fallback;if(!convertedTextures.ContainsKey(key)){var pixel=fallback=="normal"?new byte[]{128,128,255,255}:fallback=="black"?new byte[]{0,0,0,255}:new byte[]{255,255,255,255};var dds=SkinRetarget.RgbaTexture(pixel);convertedTextures[key]=new TPF.Texture(texturePrefix+key,105,0,dds,TPF.TPFPlatform.PS4);}if(path.Length>0)reports.Add("Missing source texture: "+path+" -> "+fallback);return convertedTextures[key].Name;}
             if(color)key+="_srgb";
-            if(!convertedTextures.ContainsKey(key)){var dds=source.HeaderizeExt(out var extension);var header=new DDS(dds);if(extension!=".dds"||header.dwWidth<1||header.dwHeight<1||header.dwWidth>8192||header.dwHeight>8192||dds.Length>128*1024*1024)throw new InvalidDataException("Unsupported source texture: "+key);if(color)dds=SkinRetarget.NativeSrgbColor(dds);if(fallback=="normal")dds=MapMaterial.Normal(dds,profile.Id);header=new DDS(dds);convertedTextures[key]=SkinRetarget.NativeTexture(area+"_import_"+key,dds);}
+            if(!convertedTextures.ContainsKey(key)){var dds=source.HeaderizeExt(out var extension);var header=new DDS(dds);if(extension!=".dds"||header.dwWidth<1||header.dwHeight<1||header.dwWidth>8192||header.dwHeight>8192||dds.Length>128*1024*1024)throw new InvalidDataException("Unsupported source texture: "+key);if(color)dds=SkinRetarget.NativeSrgbColor(dds);if(fallback=="normal")dds=MapMaterial.Normal(dds,profile.Id);header=new DDS(dds);convertedTextures[key]=SkinRetarget.NativeTexture(texturePrefix+key,dds);}
             return convertedTextures[key].Name;
         }
         FLVER2.Material ConvertMaterial(IFlverMaterial material,string materialName,IReadOnlyDictionary<string,TPF.Texture> local) {
@@ -92,6 +95,7 @@ internal static partial class Program {
                 ToneEV:Setting("--exposure-ev",-.4f),FogStrength:Setting("--fog-strength",.30f),FogDistance:Setting("--fog-distance",80f),FogStart:Setting("--fog-start",25f),FogColorScale:Setting("--fog-color-scale",.35f));
             var allPlacements=sourceMap.Placements;
             MSB1? legacyMap=profile.Id is "DS1" or "DS1R"?MSB1.Read(sourceMap.ReadAsset($"map/MapStudio/{map}.msb")??sourceMap.ReadAsset($"map/MapStudio/{map}.msb.dcx")??throw new FileNotFoundException("Source MSB unavailable")):null;
+            if(legacyMap!=null)MapDestination.Slice(map,legacyMap);
             var bossPlan=profile.Id=="DS1R"&&map=="m10_01_00_00"?BossEncounterSource.Load(sourceMap.ReadAsset,profile.Id,map,definitions!):null;
             var encounterFogNames=bossPlan?.Encounters.SelectMany(e=>new[]{e.EntryFog}.Concat(e.ExitFogs)).Select(f=>f.Name).ToHashSet(StringComparer.Ordinal)??[];
             var environment=legacyMap==null?null:MapEnvironment.Load(sourceMap.ReadAsset,path=>File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null,profile.Id,map,target,definitions!,
@@ -127,13 +131,16 @@ internal static partial class Program {
             int posedCorpses=0;
             foreach(var placementGroup in placements.GroupBy(ModelKey)) {
                 var first=placementGroup.First();var modelName=first.Model;
-                if(profile.Id is "DS1" or "DS1R" && modelName.StartsWith("m9",StringComparison.Ordinal)) {
-                    var skyData=sourceMap.ReadModel(modelName)??throw new FileNotFoundException("Source sky unavailable: "+modelName);
+                // DS1's m9 range also contains distant terrain and effects. Only
+                // actual sky materials can use the unlit sky conversion.
+                var skySource=profile.Id is "DS1" or "DS1R" && modelName.StartsWith("m9",StringComparison.Ordinal)
+                    ?SourceFlver.Read(sourceMap.ReadModel(modelName)??throw new FileNotFoundException("Source background unavailable: "+modelName),profile.Id):null;
+                if(skySource!=null&&MapEnvironment.HasSkyMaterials(skySource)) {
                     var sourceMaterials=BND3.Read(sourceMap.ReadAsset("mtd/Mtd.mtdbnd.dcx")??throw new FileNotFoundException("Source material definitions unavailable"));
                     materialBinder??=BND4.Read(ReadNative("mtd/allmaterialbnd.mtdbnd.dcx")??throw new FileNotFoundException("Native material definitions unavailable"));
                     MTD Definition(IReadOnlyList<BinderFile> files,string path)=>MTD.Read(files.Single(f=>Leaf(f.Name).Equals(Leaf(path),StringComparison.OrdinalIgnoreCase)).Bytes);
                     var skyTextures=sourceMap.TexturesForModel(modelName);
-                    var sky=MapEnvironment.BakeSky(SourceFlver.Read(skyData,profile.Id),FLVER2.Read(ReadNative("map/m24_01_00_00/m24_01_00_00_900000.flver.dcx")??throw new FileNotFoundException("Native sky template unavailable")),
+                    var sky=MapEnvironment.BakeSky(skySource,FLVER2.Read(ReadNative("map/m24_01_00_00/m24_01_00_00_900000.flver.dcx")??throw new FileNotFoundException("Native sky template unavailable")),
                         path=>Definition(sourceMaterials.Files,path),path=>Definition(materialBinder.Files,path),
                         path=>@"N:\SPRJ\data\Model\map\"+area+@"\tex\"+Image(path,"white",skyTextures,profile.Id=="DS1R")+".tif","BBImport_"+map);
                     foreach(var material in sky.Materials) {
@@ -208,14 +215,15 @@ internal static partial class Program {
                 objectCollisionBindings.Add(new{sourceName,actorName,sourceReference,targetCollision=actor.CollisionName,sourceCollision=boundCollision?[slot].SourceName});
             }
             MapCharacters.Export? characters=null;
-            if(profile.Id is "DS1" or "DS1R" && map=="m10_02_00_00") {
-                characters=MapCharacters.BakeFirelink(sourceMap.ReadAsset,profile.Id,map,definitions!,nativeRoot,msb,offset,slots[0].Name,breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx"));
+            if(profile.Id is "DS1" or "DS1R" && map is "m10_02_00_00" or "m10_01_00_00") {
+                characters=MapCharacters.BakeFriendly(sourceMap.ReadAsset,profile.Id,map,definitions!,nativeRoot,msb,offset,slots[0].Name,breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx"));
                 msb.Models.Enemies.AddRange(characters.Models);msb.Parts.Enemies.AddRange(characters.Actors);
-                foreach(var actorReport in characters.Reports.Where(r=>r.EntityID.HasValue)){var actor=characters.Actors.Single(p=>p.EntityID==actorReport.EntityID);actor.GparamConfigStruct=Lighting(actorReport.SourceName);SourceGroups(actor,actorReport.SourceName);}
+                foreach(var actorReport in characters.Reports.Where(r=>r.EntityID.HasValue)){var actor=characters.Actors.Single(p=>p.EntityID==actorReport.EntityID);actor.GparamConfigStruct=Lighting(actorReport.SourceName);SourceGroups(actor,actorReport.SourceName);
+                    if(boundCollision!=null&&sourceParts?.GetValueOrDefault(actorReport.SourceName) is MSB1.Part.Enemy original)actor.CollisionName=slots[MapCollisionBindings.ObjectSlot(boundCollision,original.CollisionName,actor.Position)].Name;}
                 foreach(var (path,bytes) in characters.Files)Write(path,bytes);
             }
             MapMerchants.Export? merchantCharacters=null;
-            if(profile.Id=="DS1R"&&legacyMap!=null&&boundCollision!=null) {
+            if(profile.Id=="DS1R"&&(map is "m10_02_00_00" or "m10_01_00_00")&&legacyMap!=null&&boundCollision!=null) {
                 merchantCharacters=MapMerchants.Bake(sourceMap.ReadAsset,ReadStaged,profile.Id,map,definitions!,nativeRoot,msb,offset,boundCollision,slots,
                     characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadStaged("param/gameparam/gameparam.parambnd.dcx")!);
                 msb.Models.Enemies.AddRange(merchantCharacters.Models);msb.Parts.Enemies.AddRange(merchantCharacters.Actors);
@@ -265,7 +273,8 @@ internal static partial class Program {
                 items=MapItems.Bake(sourceMap.ReadAsset,ReadNative,legacyMap,msb,map,definitions!,nativeRoot,offset,boundCollision,slots,
                     enemySpawns.Spawns,hellkite?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??enemySpawns.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??
                     characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,
-                    rewardLots:bossPlan?.Encounters.SelectMany(e=>(e.Rewards.Immediate is {} immediate?new[]{immediate.ID}:Array.Empty<int>()).Concat(e.Rewards.Delayed.Select(l=>l.ID))).Distinct().ToArray());
+                    rewardLots:(bossPlan?.Encounters.SelectMany(e=>(e.Rewards.Immediate is {} immediate?new[]{immediate.ID}:Array.Empty<int>()).Concat(e.Rewards.Delayed.Select(l=>l.ID)))??[])
+                        .Concat(characters?.Reports.Any(r=>r.SourceEntityID==6001&&r.EntityID.HasValue)==true?new[]{1000}:[]).Distinct().ToArray());
                 foreach(var pickup in items.Pickups)msb.Parts.Objects.Single(p=>p.Name==pickup.TargetPart).GparamConfigStruct=Lighting(pickup.SourcePart);
                 foreach(var (path,bytes) in items.Files)Write(path,bytes);
             }
@@ -286,6 +295,7 @@ internal static partial class Program {
             MapWorldState.Result? worldState=null;
             MapTalk.Result? dialogue=null;
             MapMerchantTalk.Result? merchantDialogue=null;
+            MapSolaire.Result? solaire=null;
             IReadOnlyList<MapQuestState.Presence> npcAvailability=[];
             if(profile.Id=="DS1R"&&map=="m10_02_00_00"&&legacyMap!=null&&boundCollision!=null&&characters!=null) {
                 MapQuestState.VerifyReservations(nativeRoot);
@@ -297,6 +307,17 @@ internal static partial class Program {
                 var availability=MapQuestState.Availability(worldState.Script,actors,sourceScript);npcAvailability=availability.Bindings;
                 Write(eventPath,MapQuestState.Initialize(availability.Script,sourceMap.ReadAsset("event/common.emevd.dcx")??throw new FileNotFoundException("Source initial quest states unavailable")));
                 dialogue=MapTalk.Export(msb,profile.Id,map,nativeRoot,definitions!,sourceMap.ReadAsset,MapQuestState.Flag,actors,Write,readNative:ReadStaged,nativeMap:baseMap);
+            }
+            if(profile.Id=="DS1R"&&legacyMap!=null) {
+                MapQuestState.VerifyReservations(nativeRoot,MapNpcQuestState.Flags.Values.Append(MapNpcQuestState.InitialFlag));
+                string path="event/"+baseMap+".emevd.dcx";var script=ReadStaged(path)??throw new FileNotFoundException("Imported map events unavailable");
+                var common=sourceMap.ReadAsset("event/common.emevd.dcx")??throw new FileNotFoundException("Source NPC defaults unavailable");
+                if(map=="m10_01_00_00"&&characters!=null&&items!=null) {
+                    var actors=characters.Reports.Where(r=>r.EntityID.HasValue).ToDictionary(r=>r.SourceEntityID,r=>r.EntityID!.Value);
+                    solaire=MapSolaire.Apply(script,sourceMap.ReadAsset("event/"+map+".emevd.dcx")!,common,actors[6001],items.Lots.Single(l=>l.SourceID==1000));script=solaire.Script;
+                    dialogue=MapTalk.Export(msb,profile.Id,map,nativeRoot,definitions!,sourceMap.ReadAsset,MapNpcQuestState.Flag,actors,Write,readNative:ReadStaged,nativeMap:baseMap);
+                }
+                Write(path,MapNpcQuestState.Initialize(script,common));
             }
             if(merchantCharacters!=null) {
                 var actors=merchantCharacters.Reports.ToDictionary(r=>r.SourceEntityID,r=>r.EntityID);
@@ -341,14 +362,20 @@ internal static partial class Program {
             foreach(var player in msb.Parts.GetEntries().OfType<MSBB.Part.Player>()){player.Position=spawn;player.Rotation=Vector3.Zero;}
             foreach(var point in msb.Events.GetEntries().OfType<MSBB.Event.SpawnPoint>()){var region=msb.Regions.GetEntries().Single(r=>r.Name==point.SpawnPointName);region.Position=spawn;region.Rotation=Vector3.Zero;}
             var textures=MapDestination.TextureArchive(destination,ReadNative);int nextTexture=textures.Files.Select(f=>f.ID).DefaultIfEmpty(-1).Max()+1;foreach(var texture in convertedTextures.Values){var tpf=new TPF{Platform=TPF.TPFPlatform.PS4,Encoding=1,Flag2=3};tpf.Textures.Add(texture);var encoded=tpf.Write(DCX.Type.DCX_DFLT_10000_44_9);var existing=textures.Files.SingleOrDefault(f=>Leaf(f.Name)==texture.Name+".tpf.dcx");if(existing==null)textures.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,nextTexture++,texture.Name+".tpf.dcx",encoded));else if(!existing.Bytes.Span.SequenceEqual(encoded))throw new InvalidDataException("Shared imported texture conflicts: "+texture.Name);}textures.Write(out var texHeader,out var texData);Write($"map/{area}/{area}_0003.tpfbhd",texHeader);Write($"map/{area}/{area}_0003.tpfbdt",texData);
-            var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadStaged);
+            var sourceAreaNames=boundCollision==null||legacyMap==null||map is not("m10_01_00_00" or "m12_00_00_00" or "m16_00_00_00")?null:boundCollision.Select((c,i)=>(Name:slots[i].Name,Source:legacyMap.Parts.Collisions.SingleOrDefault(p=>p.Name==c.SourceName)))
+                .Where(p=>p.Source!=null).ToDictionary(p=>p.Name,p=>(int)p.Source!.MapNameID);
+            if(sourceAreaNames!=null)foreach(var lampSlot in MapTravel.Lamps.Where(l=>l.SourceMap==map)) {
+                var sourceLamp=legacyMap!.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Single(p=>p.Name==lampSlot.SourcePart);
+                sourceAreaNames[slots[MapCollisionBindings.ObjectSlot(boundCollision!,sourceLamp.CollisionName,sourceLamp.Position+offset)].Name]=lampSlot.SourceAreaName;
+            }
+            var areaName=MapAreaName.Export(msb,profile.Id,map,nativeRoot,sourceMap.ReadAsset,Write,ReadStaged,sourceAreaNames);
             // Fall sensors retain retail metadata; they must not become area
             // banner/lighting floors merely because the area-name stage visits
             // every collision record.
             if(deathBoundaries!=null)foreach(var body in deathBoundaries.Bodies)body.Part.MapNameID=-1;
             var destinations=values.TryGetValue("--connection-targets",out var connectionsPath)?JsonSerializer.Deserialize<Dictionary<string,string>>(File.ReadAllText(connectionsPath))!:new Dictionary<string,string>();
             MapRuntimeLinks.Result? runtimeLinks=null;
-            if(legacyMap!=null&&boundCollision!=null)runtimeLinks=MapRuntimeLinks.Apply(msb,legacyMap,boundCollision,slots,destinations,approachSourceMap:destination.Additional?map:null);
+            if(legacyMap!=null&&boundCollision!=null)runtimeLinks=MapRuntimeLinks.Apply(msb,legacyMap,boundCollision,slots,destinations,approachSourceMap:destination.Additional?map:null,destinationSlices:destination.Additional?MapDestination.SliceVisibility:null);
             else msb.Parts.ConnectCollisions.Clear();
             MapDestination.Finish(msb,destination,ReadStaged,Write);
             if(destination.Additional)MapDestination.VerifyNativeEntityReservations(nativeRoot,msb);
@@ -388,14 +415,14 @@ internal static partial class Program {
             var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,placedBossFog,sourceNoRenderGeometry,filteredAll,missingData,accounted,
                 reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)&&placedBossFog==encounterFogNames.Count};
             var characterReports=characters?.Reports.Where(r=>merchantCharacters?.Reports.Any(m=>m.SourceName==r.SourceName)!=true).ToArray();
-            var report=new{source=profile.Id,map,target,destination=destination.Additional?"additional":"replacement",templateMap=destination.TemplateMap,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
+            var report=new{source=profile.Id,map,target,sourceSlice=MapDestination.SliceParts(map),destination=destination.Additional?"additional":"replacement",templateMap=destination.TemplateMap,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
                 placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot,items.PickupCarrier,items.Limits},
-                worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=worldState==null?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,npcAvailability},dialogue,merchantDialogue,
+                worldState=worldState==null?null:new{worldState.Report,worldState.Bindings},questState=profile.Id!="DS1R"?null:new{initialFlag=MapQuestState.InitialFlag,flags=MapQuestState.Flags,expandedInitialFlag=MapNpcQuestState.InitialFlag,expandedFlags=MapNpcQuestState.Flags,npcAvailability,solaire=solaire==null?null:new{solaire.Actor,solaire.GiftLot,solaire.CollectionFlag,solaire.VisibleStates,solaire.Limitations}},dialogue,merchantDialogue,
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",navigation=navigation?.Report,deathBoundaries=deathBoundaries?.Report,
                 collisionResidency=destination.Additional?"Collision Draw groups retain both physical layers in loaded imported blocks. Original Display/Backread and actor/scenery groups, enable flags and geometry are preserved. Connected-scene residency is broader; multi-area memory/culling behavior remains approximate.":"Original source collision groups retained",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
                 breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,bossSource=bossPlan,hellkite=hellkite?.Details,bossEncounters=bossEncounters==null?null:new{bossEncounters.Encounters,bossEncounters.Limits},ladders=ladders==null?null:new{ladders.Bindings,ladders.Skipped,ladders.Limits},characters=characterReports,merchants=merchantCharacters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
-                environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations=destination.Additional?"Experimental additional map: a fresh Bloodborne MSB contains only emitted source geometry, converted collision, adapted actors/treasures and explicitly adapted world/quest records. Original native map layouts, collision archives and event scripts are preserved. Source AI, full quests, water physics and complete collision material behavior are not ported. Source stair materials retain their native no-slide classification; static source navigation coverage and unconverted gates/cross-mesh links are recorded in navigation.Limits. Native material shaders, GI and source animation/behavior adaptation retain the limits recorded by each stage. The destination finalizer adds entry/return travel and lamps; their interactions, save behavior and connected-map transitions require gameplay validation with a copied save.":"Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
+                environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),bonfireCollisionBindings=legacyMap==null||boundCollision==null?null:legacyMap.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Where(p=>p.ModelName=="o0200").Select(p=>new{sourcePart=p.Name,targetCollision=slots[MapCollisionBindings.ObjectSlot(boundCollision,p.CollisionName,p.Position+offset)].Name}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations=destination.Additional?"Experimental additional map: a fresh Bloodborne MSB contains only emitted source geometry, converted collision, adapted actors/treasures and explicitly adapted world/quest records. Original native map layouts, collision archives and event scripts are preserved. Source AI, full quests, water physics and complete collision material behavior are not ported. Source stair materials retain their native no-slide classification; static source navigation coverage and unconverted gates/cross-mesh links are recorded in navigation.Limits. Native material shaders, GI and source animation/behavior adaptation retain the limits recorded by each stage. The destination finalizer adds entry/return travel and lamps; their interactions, save behavior and connected-map transitions require gameplay validation with a copied save.":"Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
             bool hollowCombat=enemySpawns?.Spawns.Any(p=>p.HollowCombat!=null)==true;
             if(bossEncounters!=null||hollowCombat) {
                 string heap=hollowCombat?"1024":"768";

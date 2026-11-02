@@ -11,9 +11,9 @@ internal static class SourceCorpsePose {
     internal sealed record Plan(IReadOnlyList<Placement> Placements,IReadOnlyList<string> Limits);
     internal static bool IsCorpse(string profile,string model)=>profile=="DS1R"&&model is "o0500" or "o0502" or "o0504";
     internal static bool Supports(string profile,string model,int animation)=>profile=="DS1R"&&(model switch {
-        "o0500"=>animation is 10 or 11 or 20 or 21 or 31 or 35 or 42 or 50 or 51 or 81 or 100,
+        "o0500"=>animation is 10 or 11 or 20 or 21 or 31 or 35 or 42 or 50 or 51 or 81 or 82 or 90 or 100,
         "o0502"=>animation is 10 or 41 or 42,
-        "o0504"=>animation is 61 or 81,
+        "o0504"=>animation is 60 or 61 or 70 or 81,
         _=>false
     });
 

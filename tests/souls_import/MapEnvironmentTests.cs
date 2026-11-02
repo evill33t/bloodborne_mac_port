@@ -207,7 +207,10 @@ internal static class MapEnvironmentTests {
         var bad=Profile();bad.Params.Single(p=>p.Key=="LightScattering : ParamEditor").Fields.Reverse();Reject(()=>MapEnvironment.Convert(src.Light,src.Fog,src.Scatter,new Dictionary<string,byte[]>{{"phase",bad.Write()}},bindings));
         var duplicateIndex=Profile();duplicateIndex.UnkParamExtras.Add(duplicateIndex.UnkParamExtras[0].Clone());Reject(()=>MapEnvironment.Convert(src.Light,src.Fog,src.Scatter,new Dictionary<string,byte[]>{{"phase",duplicateIndex.Write()}},bindings));
         src.Light.Rows[0].Cells.Single(c=>c.Def.InternalName=="colR_0").Value=float.NaN;Reject(()=>MapEnvironment.Convert(src.Light,src.Fog,src.Scatter,new Dictionary<string,byte[]>{{"phase",input}},bindings));
-        var skySource=Sky(false);var native=Sky(true);var nativeBytes=native.Write();var sky=MapEnvironment.BakeSky(skySource,native,p=>Definition(true,p.Contains("cloud")?.3f:7),_=>Definition(false,2),_=>"owned_sky.tif","Fixture");
+        var skySource=Sky(false);var native=Sky(true);var nativeBytes=native.Write();Check(MapEnvironment.HasSkyMaterials(skySource),"Source sky material classification");
+        var terrain=Sky(false);foreach(var m in terrain.Materials)m.MTD=@"N:\FRPG\data\INTERROOT_x64\mtd\map\M[DB].mtd";
+        Check(!MapEnvironment.HasSkyMaterials(terrain),"Darkroot distant terrain must not be classified as sky by its m9 model ID");
+        var sky=MapEnvironment.BakeSky(skySource,native,p=>Definition(true,p.Contains("cloud")?.3f:7),_=>Definition(false,2),_=>"owned_sky.tif","Fixture");
         Check(sky.Model.Meshes.Count==2&&sky.Materials.Count==2,"Supported cloud/dome meshes were omitted or malformed landscape included");
         var reopened=FLVER2.Read(sky.Model.Write());Check(reopened.Meshes.Sum(m=>m.Vertices.Count)==6,"Sky FLVER did not round trip");Near(reopened.Meshes[0].Vertices[0].Colors[0].A,.25f);Near(reopened.Meshes[0].Vertices[0].Colors[0].R,.5f);
         Near((float)sky.Materials[0].Definition.Params.Single(p=>p.Name=="g_DiffuseColorPower").Value,.3f);Near((float)sky.Materials[1].Definition.Params.Single(p=>p.Name=="g_DiffuseColorPower").Value,7);

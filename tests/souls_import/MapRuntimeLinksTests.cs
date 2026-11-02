@@ -32,6 +32,13 @@ internal static class MapRuntimeLinksTests {
         bool rejected=false;
         try {MapRuntimeLinks.Apply(native,source,chunks,[a,b],new Dictionary<string,string>{{"m10_01_00_00","m24_00_00_00"},{"m10_01_00_01","m24_02_00_00"}});}catch(InvalidDataException){rejected=true;}
         Check(rejected,"Wildcard ambiguity silently chose a destination");
+        link.CollisionName="source_floor";Array.Clear(link.DispGroups);link.DispGroups[0]=1;
+        var sliced=new Dictionary<string,int>{{"m10_01_00_00",62}};
+        var excluded=MapRuntimeLinks.Apply(native,source,chunks,[a,b],new Dictionary<string,string>{{"m10_01_00_00","m40_06_00_00"}},destinationSlices:sliced);
+        Check(excluded.Links.Count==0&&excluded.Unavailable.Single().Contains("outside the imported destination slice"),"An unrelated entrance was routed into a different room's slice");
+        link.DispGroups[1]=1u<<30;
+        var included=MapRuntimeLinks.Apply(native,source,chunks,[a,b],new Dictionary<string,string>{{"m10_01_00_00","m40_06_00_00"}},destinationSlices:sliced);
+        Check(included.Links.Count==2&&included.Unavailable.Count==0&&native.Parts.ConnectCollisions.All(p=>p.DispGroups[1]==1u<<30),"The authored entrance or destination slice mask was lost");
         // Additional Firelink preloads the actual aqueduct group from the stair
         // base. Earlier source connectors request different Burg subgroups.
         var approachSource=new MSB1();var approachFloor=new MSB1.Part.Collision{Name="h0027B2_0000",ModelName="h0027B2",HitFilterID=8};approachSource.Parts.Collisions.Add(approachFloor);

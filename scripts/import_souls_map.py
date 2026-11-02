@@ -54,6 +54,8 @@ def main(argv=None):
     parser.add_argument("--destination", choices=tuple(DESTINATIONS),
                         help="Replace the test area, or add Firelink alongside the original Bloodborne maps")
     parser.add_argument("--attach-undead-burg", action="store_true", help="Compose Firelink and Undead Burg with native collision-triggered loading")
+    parser.add_argument("--attach-darkroot", action="store_true", help="Attach Darkroot Garden and Basin to the additional Lordran maps")
+    parser.add_argument("--attach-catacombs", action="store_true", help="Attach the Catacombs to the additional Lordran maps")
     parser.add_argument("--import-items", action="store_true", help="Experimental DS1R consumable/key pickups and hollow loot conversion; copied test saves only")
     parser.add_argument("--source-anchor")
     parser.add_argument("--target-anchor")
@@ -116,11 +118,41 @@ def main(argv=None):
     if args.attach_undead_burg:
         if job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or target != primary_target:
             raise ValueError("--attach-undead-burg requires DS1R Firelink into " + primary_target)
-        job["connected_maps"] = [{"source_map": "m10_01_00_00", "target_map": secondary_target}]
+        previous = job.setdefault("connected_maps", [])
+        burg = {"source_map": "m10_01_00_00", "target_map": secondary_target}
+        if burg not in previous:
+            previous.insert(0, burg)
+    for enabled, source_map, target_map in ((args.attach_darkroot, "m12_00_00_00", "m40_04_00_00"),
+                                           (args.attach_catacombs, "m13_00_00_00", "m40_05_00_00")):
+        if enabled:
+            if destination != "additional":
+                raise ValueError("Darkroot/Catacombs require the additional destination")
+            attached = {"source_map": source_map, "target_map": target_map}
+            if attached not in job.setdefault("connected_maps", []):
+                job["connected_maps"].append(attached)
     connected = job.get("connected_maps", [])
-    if connected and (job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00" or
-                      connected != [{"source_map": "m10_01_00_00", "target_map": secondary_target}]):
-        raise ValueError("Unsupported Firelink/Undead Burg allocation for " + destination)
+    allocations = {"m10_01_00_00": secondary_target}
+    if destination == "additional":
+        allocations.update(m12_00_00_00="m40_04_00_00", m13_00_00_00="m40_05_00_00", m16_00_00_00="m40_06_00_00")
+    if not isinstance(connected, list) or any(not isinstance(m, dict) or
+            set(m) != {"source_map", "target_map"} or not isinstance(m["source_map"], str) or
+            allocations.get(m["source_map"]) != m["target_map"] for m in connected):
+        raise ValueError("Unsupported connected map allocation for " + destination)
+    if len({m["source_map"] for m in connected}) != len(connected):
+        raise ValueError("Duplicate connected source map")
+    if connected and (job["profile"] != "DS1R" or job["source_map"] != "m10_02_00_00"):
+        raise ValueError("Connected imports require DS1R Firelink as the root")
+    if any(m["source_map"] == "m12_00_00_00" for m in connected) and not any(
+            m["source_map"] == "m10_01_00_00" for m in connected):
+        raise ValueError("Darkroot requires connected Undead Burg for its source entrances")
+    # The actual Basin bonfire and its cave floor belong to M16. M12 contains
+    # only a duplicate marker. Add the explicit cave slice after root validation.
+    cave = {"source_map": "m16_00_00_00", "target_map": "m40_06_00_00"}
+    if any(m["source_map"] == "m12_00_00_00" for m in connected):
+        if cave not in connected:
+            connected.append(cave)
+    elif cave in connected:
+        raise ValueError("The Basin cave requires connected Darkroot")
     dotnet = job.get("dotnet") or shutil.which("dotnet") or "/usr/local/share/dotnet/dotnet"
     helper = Path(job.get("helper", str(REPO / "out/map-editor/souls-import/SoulsImport.dll"))).expanduser().resolve()
     env = dict(os.environ, DOTNET_CLI_HOME=str(REPO / "out/map-editor/dotnet-home"))
@@ -213,13 +245,16 @@ def main(argv=None):
         job.update(schema="bbmap-import-job-1", root=str(root), native_root=str(native), output=str(output), helper=str(helper))
         (staging / "import-job.json").write_text(json.dumps(job, indent=2) + "\n")
         (staging / "source-plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+        if not args.plan_only:
+            from map_coverage import audit_folder
+            (staging / "coverage.json").write_text(json.dumps(audit_folder(staging), indent=2) + "\n")
         conversion = json.loads((staging / "conversion.json").read_text()) if (staging / "conversion.json").is_file() else {}
         pending = ["source AI/quests/dialogue", "unsupported items/chests/conditional treasures" if conversion.get("items") else "source items", "source music/ambience", "source water rendering/physics",
                    "cross-mesh/cross-map navigation and stateful gates" if conversion.get("navigation") else "source navigation"]
         if not connected:
             pending.append("connected-map loading")
         else:
-            pending.append("additional area connections beyond Firelink/Undead Burg")
+            pending.append("area connections outside the imported map set")
         pending.append("exact source fog/tonemap/cubemaps" if conversion.get("environmentRows") else "source sky/lighting")
         manifest = {"schema": "bbmap-import-manifest-1", "source": job["profile"], "map": job["source_map"],
                     "target": target, "destination": destination, "plan_only": args.plan_only,

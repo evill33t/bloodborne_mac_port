@@ -17,7 +17,7 @@ internal static class MapTalkVoices {
     static readonly string[] BankSuffixes=["","_eng","_ded","_esa","_ese","_frf","_iti","_jaj","_ptb"];
 
     internal static Result Export(IReadOnlyList<Owner> owners,Func<string,byte[]?> readSource,
-        Func<string,byte[]?> readNative,Action<string,byte[]> write) {
+        Func<string,byte[]?> readNative,Action<string,byte[]> write,int firstVoice=FirstVoice) {
         byte[] Source(string p)=>readSource(p)??throw new FileNotFoundException("Source voice asset unavailable",p);
         byte[] Native(string p)=>readNative(p)??throw new FileNotFoundException("Native voice asset unavailable",p);
         if(owners.Count is <1 or >10||owners.Select(o=>o.Model).Distinct(StringComparer.Ordinal).Count()!=owners.Count)
@@ -37,7 +37,7 @@ internal static class MapTalkVoices {
         var defaultProject=Native("sound/sprj_c7110.fev");
         var source=Source("sound/frpg_sm10.fsb");var header=Native("sound/sprj_sm24_eng.fsb");
         var pending=new Dictionary<string,byte[]>(StringComparer.Ordinal);var projects=new List<Project>();var clips=new List<Clip>();
-        int nextVoice=FirstVoice;
+        int nextVoice=firstVoice;
         foreach(var owner in owners) {
             var selected=owner.SourceVoices.Distinct().ToArray();
             var prepared=Prepare(source,header,selected,nextVoice);nextVoice=checked(nextVoice+prepared.Clips.Count);

@@ -128,6 +128,22 @@ else:
         self.assertFalse(self.output.exists())
         self.assertEqual(list(self.output.parent.iterdir()), [])
 
+    def test_darkroot_includes_the_adjoining_basin_cave_and_publishes_coverage(self):
+        result = self.run_job("--destination", "additional", "--attach-undead-burg",
+                              "--attach-darkroot", "--attach-catacombs")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.output / "dvdroot_ps4/shared").read_text(),
+                         "m10_02_00_00;m10_01_00_00;m12_00_00_00;m13_00_00_00;m16_00_00_00;")
+        report = json.loads((self.output / "conversion.json").read_text())
+        self.assertEqual([p["target_map"] for p in report["connectedMaps"]],
+                         ["m40_03_00_00", "m40_04_00_00", "m40_05_00_00", "m40_06_00_00"])
+        self.assertEqual(len(json.loads((self.output / "coverage.json").read_text())["maps"]), 5)
+
+    def test_darkroot_requires_its_burg_entrance(self):
+        result = self.run_job("--destination", "additional", "--attach-darkroot")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.output.exists())
+
     def test_additional_destination_finalizes_both_composed_maps(self):
         result = self.run_job("--destination", "additional", "--attach-undead-burg", "--import-items")
         self.assertEqual(result.returncode, 0, result.stderr)

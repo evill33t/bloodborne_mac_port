@@ -1050,16 +1050,27 @@ python3 scripts/import_souls_map.py \
 ```
 
 The fixed allocation is `m40_02_00_00` for Firelink and `m40_03_00_00` for Burg.
-Both maps keep the same source coordinate frame. New scenes contain imported
+Add `--attach-darkroot --attach-catacombs` to include Garden/Basin in
+`m40_04_00_00` and the Catacombs in `m40_05_00_00`. Darkroot requires Burg in
+the same job; use `--attach-undead-burg` when starting from a Firelink-only job.
+Darkroot also attaches the actual Basin bonfire cave from source `m16_00_00_00`
+as a small separate scene `m40_06_00_00`. Only its authored cave room, bonfire,
+paired floor collision and corresponding navigation are included. Darkroot's
+duplicate bonfire dummy has no cave floor. The rest of New Londo, the Valley
+elevator and the boss-gated Abyss checkpoint remain outside this slice.
+All attached maps keep the same source coordinate frame. New scenes contain imported
 records and their own event roots, collision archives, environment and texture
 resources. Original map MSBs, collision, environment and local event scripts stay
 in place. Shared parameters, materials and localized text are composed as before;
 the Dream receives an additional headstone with a menu for the imported lamps.
 
 Native lamp controllers, objects and common events provide activation and return
-travel. The Firelink entry is available initially; Burg appears after its lamp is
-activated. ReturnPoint rows use separate chair slots and retain native death
-checkpoint registration. Quest and item flag identities stay unchanged between
+travel. Every repeat-travel entry requires its own lamp activation, including
+Firelink. A separate **Enter Lordran** action is available while no imported lamp
+is active; entering alone does not activate a lamp or change the death checkpoint.
+The entrance uses its own nonregistering ReturnPoint and bypasses native lamp
+initialization. Lamp ReturnPoint rows use separate chair slots and retain native
+death checkpoint registration. Quest and item flag identities stay unchanged between
 replacement and additional exports; lamp state has a separate reservation.
 `destination-travel.json` records the versioned lamp/return-point/flag allocation
 and native dependency hashes. An occupied entity, flag, chair or text reservation
@@ -1067,14 +1078,76 @@ fails the export before publication.
 
 The additional headstone faces the Dream's path. Its rotation preserves the
 model's visible center and base height; the messenger keeps its interaction
-position. Per-map load lists declare both connected scenes, and their dialogue
+position. Per-map load lists declare all connected scenes, and their dialogue
 is composed into the native loader's shared area talk bank.
+Lamp event listeners are hosted once in the area script, following retail
+Bloodborne's area-lamp pattern. This keeps activation and return handlers
+available when a neighboring block is streamed. Area entry clears stale
+activation/return requests while preserving lamp unlocks and the current
+headstone arrival request.
 
-Copied-save gameplay checks cover the headstone menus, travel to each imported
+Earlier two-map copied-save gameplay checks cover the headstone menus, travel to each imported
 lamp, Burg lamp activation, native return to the Dream, Firelink death respawn,
 and normal save/quit followed by a fresh process. Burg's new unlock and the
 three Madman's Knowledge collected from Firelink's Humanity pickup persisted.
 The game files and original saves were unchanged.
+
+The expanded registry replaces all nine actual source bonfires in these areas,
+including the adjoining Basin cave, and retains the existing Burg approach lamp.
+It therefore has ten independent lamps. Unused source dummy warp/altar records do
+not become bonfires. The first two registrations and chair identities retain
+existing mod-save compatibility. Multiple lamps in one map compose their MSB,
+talk and event records; their checkpoints and activation flags remain distinct.
+Garden/Basin and Burg/Parish retain separate localized area titles on the source
+entrance collision triggers; lamp arrival floors also select the correct title.
+Actual bonfires use their authored source player-arrival regions and headings,
+rather than deriving a spawn from the lamp's visual orientation. Unnamed floors
+initialize a valid area name without overriding an established regional title.
+
+Solaire's friendly Burg appearance uses his actual four-piece covered armor and
+source 7845 sun-gazing idle. His first encounter includes the introduction, both
+choices, refusal/retry paths, advice and repeat speech, with original English
+audio and localized subtitles. The White Sign Soapstone gift has a separate
+inventory identity and one-time collection flag; its multiplayer use is not
+implemented. Accepting it advances 1000 to 1001 and keeps him at the overlook.
+Later Anor Londo travel, hostile combat, summons and the full quest are separate
+work. Forty-four source NPC state ranges receive their verified fresh defaults
+only when empty; existing imported progression is retained.
+
+Copied-save native checks cover Solaire's appearance, introduction, first refusal
+and retry, both acceptance choices, gift award and 1000-to-1001 transition. A normal
+save/quit and fresh process retained the gift collection flag, dialogue progress,
+Solaire's presence and the three lamps activated during that test. These checks
+do not establish his later quest or summon behavior.
+
+The new-area export and actor inventory are not a complete campaign conversion.
+`coverage.json` lists missing actors, treasures, lamp coverage and source event
+program fingerprints for every attached map. Appearance alone never marks an
+NPC quest complete. Inspect it with:
+
+```sh
+python3 scripts/map_coverage.py /path/to/private-test-data/Mods/Lordran
+```
+
+Darkroot/Catacombs mobs, conditional populations, complete NPC quests and
+mechanisms still require explicit adapters. In particular, Hydra's body and seven
+heads require a different rig/part strategy; a single donor reskin cannot preserve
+its source encounter. The current importer has a 256-bone append guard; native
+Bloodborne assets include larger rigs with 16-bit vertex bone indices, so this is
+an importer limitation rather than a proven engine limit. Source severing,
+projectiles and quest behavior still need explicit conversion. Expanded lamp
+checks cover native activation of all ten lamps, their gated headstone entries,
+and persistence of all ten unlocks across a normal save and fresh process.
+Garden, Sunlight Altar, Burg Bonfire, Vamos and Basin headstone arrivals were
+checked against their source arrival points; native Basin return travel also
+passed. A copied save with no active imported lamps reached Firelink through
+the separate entrance without activating a lamp. Activating Firelink then
+unlocked only Firelink in the gravestone menu. Remaining arrival points, routes
+through all attached maps, and complete campaign save progression remain
+unverified. The area-level listeners passed native Basin activation and return
+travel. After staging once at the outside approach, controller input traversed
+the source-authored cave bends to within 0.53m of its lamp; no intervening player
+position, actor or flag writes were used.
 
 The connected additional maps now include real source navigation. DS1R NVM placements
 are baked into native Havok navigation meshes, trees and directed graphs, with matching

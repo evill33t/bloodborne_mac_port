@@ -61,6 +61,14 @@ static class MapAreaNameTests {
                 Check(names.MapNameId==30001&&map.Parts.Collisions.All(p=>p.MapNameID==-names.MapNameId),"Majula must keep positive FMG IDs and request the name through signed native collision IDs");
             }
             Console.WriteLine("PASS: imported area names use isolated collision IDs and source localizations; existing native text and source binders remain unchanged");
+            var darkroot=new BND3();darkroot.Files.Add(new BinderFile(Binder.FileFlags.Flag1,19,"locations.fmg",Names((1200,"Darkroot Garden"),(1201,"Darkroot Basin")).Write()));
+            map.Parts.Collisions.Add(new MSBB.Part.Collision{Name="unnamed",ModelName="h000000",MapNameID=2410});
+            outputs.Clear();
+            var regions=MapAreaName.Export(map,"DS1R","m12_00_00_00",temporary.FullName,p=>p=="msg/ENGLISH/item.msgbnd.dcx"?darkroot.Write():null,outputs.Add,
+                sourceNames:new Dictionary<string,int>{{"floor",1200},{"annex",-1201},{"unnamed",-1}});
+            Check(regions.Regions.Count==2&&regions.Regions.Single(r=>r.SourceID==1201).EnglishName=="Darkroot Basin","Basin title lost inside shared Darkroot map");
+            Check(map.Parts.Collisions[0].MapNameID!=map.Parts.Collisions[1].MapNameID&&map.Parts.Collisions[2].MapNameID==regions.MapNameId,"Distinct source area triggers or unnamed floor initialization lost");
+            foreach(var bytes in outputs.Values){var names=FMG.Read(BND4.Read(bytes).Files.Single(f=>f.ID==19).Bytes);Check(names.Entries.Any(e=>e.Text=="Darkroot Basin")&&names.Entries.Any(e=>e.Text=="Darkroot Garden"),"Missing localized title fallback for one region");}
         } finally {temporary.Delete(true);}
     }
 }

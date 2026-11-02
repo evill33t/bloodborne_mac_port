@@ -22,7 +22,7 @@ internal static class MapItemPolicy {
     };
     internal static bool IsQuest(PARAM.Row row) {
         int kind=Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="goodsType").Value);
-        return kind==1||row.ID is 115 or 116 or 220 or 374 or 375 or 376 or 384 or >=390 and <=396 or >=700 and <=711 or 1110 or 1120 or 1130;
+        return kind==1||row.ID is 100 or 115 or 116 or 220 or 374 or 375 or 376 or 384 or >=390 and <=396 or >=700 and <=711 or 1110 or 1120 or 1130;
     }
     internal static Conversion? Map(int category,int id,int count,bool quest) {
         if(count<0||count>99)throw new InvalidDataException("Source item quantity exceeds the native stack budget");
