@@ -46,7 +46,7 @@ internal static class MapEnemySpawns {
         MSBB destination,Vector3 offset,IReadOnlyList<MapCollisionBindings.Chunk> chunks,IReadOnlyList<MSBB.Part.Collision> slots,
         byte[] gameParamBytes,string? nativeMap=null,Func<string,byte[]?>? readNative=null,int? ordinaryFirstEntity=null) {
         if(ordinaryFirstEntity is <10000 or >int.MaxValue-1000)throw new ArgumentOutOfRangeException(nameof(ordinaryFirstEntity));
-        NonHumanoidEnemies.Profile? Special(MSB1.Part.Enemy p)=>NonHumanoidEnemies.Select(p,sourceMap)??BossEnemyCharacters.Select(p,sourceMap);
+        NonHumanoidEnemies.Profile? Special(MSB1.Part.Enemy p)=>FoliageCombat.Select(p,sourceMap)?FoliageCombat.Profile:NonHumanoidEnemies.Select(p,sourceMap)??BossEnemyCharacters.Select(p,sourceMap);
         bool Encounter(MSB1.Part.Enemy p)=>BossEnemyCharacters.Select(p,sourceMap)!=null;
         var selected=source.Parts.Enemies.Where(p=>p.TalkID<=0&&p.CharaInitID<0&&
             (SupportedParams.Contains(p.NPCParamID)&&p.ModelName=="c"+(p.NPCParamID/100)&&p.InitAnimID==-1||CemeterySkeleton(p,sourceMap)||Special(p)!=null)).ToArray();
@@ -77,10 +77,11 @@ internal static class MapEnemySpawns {
         int firstRatEntity=sourceMap=="m10_02_00_00"?4029950:checked(firstEntity+950),nextRatEntity=firstRatEntity;
         var entities=destination.Parts.GetEntries().Select(p=>p.EntityID).Concat(destination.Events.GetEntries().Select(e=>e.EntityID)).Concat(destination.Regions.GetEntries().Select(r=>r.EntityID)).ToHashSet();
         foreach(var group in selected.GroupBy(p=>(p.ModelName,p.NPCParamID))) {
-            bool skeleton=CemeterySkeleton(group.First(),sourceMap);var special=Special(group.First());bool encounter=Encounter(group.First()),rat=special==NonHumanoidEnemies.Rat;
+            bool skeleton=CemeterySkeleton(group.First(),sourceMap);var special=Special(group.First());bool encounter=Encounter(group.First()),rat=special==NonHumanoidEnemies.Rat,foliage=special==FoliageCombat.Profile;
             int encounterModel=group.Key.NPCParamID switch {225000=>8950,224000=>8951,334003=>8952,535000=>8953,535001=>8954,_=>0};
             int ratModel=sourceMap=="m10_02_00_00"?8820:8821;
-            int next=rat?ratModel:encounter?encounterModel:special!=null?nextSpecialModel:skeleton?nextSkeletonModel:nextModel,limit=rat?ratModel+1:encounter?encounterModel+1:special!=null?8900:skeleton?9800:9700;
+            int foliageModel=group.Key.NPCParamID==233000?8825:8826;
+            int next=foliage?foliageModel:rat?ratModel:encounter?encounterModel:special!=null?nextSpecialModel:skeleton?nextSkeletonModel:nextModel,limit=foliage?foliageModel+1:rat?ratModel+1:encounter?encounterModel+1:special!=null?8900:skeleton?9800:9700;
             while(next<limit&&(used.Contains(next*100)||destination.Models.Enemies.Any(m=>m.Name=="c"+next)||File.Exists(Path.Combine(nativeRoot,"chr/c"+next+".chrbnd.dcx"))||special!=null&&(Directory.EnumerateFiles(Path.Combine(nativeRoot,"chr"),"c"+next+".*").Any()||File.Exists(Path.Combine(nativeRoot,"action/script/c"+next+".hks"))||Directory.EnumerateFiles(Path.Combine(nativeRoot,"sound"),"sprj_c"+next+".*").Any()||Directory.EnumerateFiles(Path.Combine(nativeRoot,"sound"),"sprj_c"+next+"_*.fsb").Any())))next++;
             if(next>=limit)throw new InvalidDataException("Imported enemy namespace exhausted");
             int id=next,paramID=id*100;if(!encounter&&!rat&&special!=null)nextSpecialModel=next+1;else if(special==null&&skeleton)nextSkeletonModel=next+1;else if(special==null)nextModel=next+1;
@@ -105,12 +106,12 @@ internal static class MapEnemySpawns {
             // Armoured c2540/c2550/c2560 variants carry other equipment.
             bool hasTorch=group.Key.ModelName=="c2500"&&masks.Contains(1);
             var hollow=ordinary?HollowCombatCharacters.Package(sourceRead,Native,profile!,target,appearance.Model,appearance.Textures,masks,clothResult,files):null;
-            var bake=hollow?.Skin??(encounter?BossEnemyCharacters.Package(sourceRead,Native,special!,target,masks,files):special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):
+            var bake=hollow?.Skin??(foliage?FoliageCombat.Package(sourceRead,Native,target,masks,files):encounter?BossEnemyCharacters.Package(sourceRead,Native,special!,target,masks,files):special!=null?NonHumanoidEnemies.Package(sourceRead,Native,special,target,masks,files):
                 MapCharacters.Package(appearance.Model,appearance.Textures,"DS1R",template,target,nativeCharacter,noTorchAnimation,nativeScript,files,masks,allowLargeHumanoid:skeleton&&group.Key.ModelName=="c2910"));
             var actorMap=ordinary?hollowMap:special!=null?MSBB.Read(Native("map/MapStudio/"+special.Map+".msb.dcx")):donorMap;
-            var actorDonor=ordinary?actorMap.Parts.Enemies.First(p=>p.ModelName==HollowCombatProfiles.NativeModel):special!=null?actorMap.Parts.Enemies.First(p=>p.ModelName==special.Native):donor;
+            var actorDonor=ordinary?actorMap.Parts.Enemies.First(p=>p.ModelName==HollowCombatProfiles.NativeModel):special!=null?actorMap.Parts.Enemies.First(p=>p.ModelName==special.Native&&(!foliage||p.NPCParamID==special.Npc&&p.ThinkParamID==special.Think)):donor;
             var rowDonor=special!=null?npcs.Rows.Single(r=>r.ID==special.Npc):paramDonor;
-            string actorTemplate=ordinary?HollowCombatProfiles.NativeModel:special?.Native??template;int actorThink=special?.Think??templateParam;
+            string actorTemplate=ordinary?HollowCombatProfiles.NativeModel:special?.Native??template;int actorThink=foliage?SourceEnemyAi.FoliageGoal:special?.Think??templateParam;
             if(skeleton)MapSkeletonAnimations.Apply(sourceRead,group.Key.ModelName,target,bake,files);
             var roleParams=new Dictionary<int,int>();
             if(ordinary) {
@@ -137,7 +138,7 @@ internal static class MapEnemySpawns {
                 if(rat){if(entity>=firstRatEntity+10)throw new InvalidDataException("Imported rat entity namespace exhausted");nextRatEntity=entity+1;}
                 else if(!encounter&&special!=null){if(entity>=firstEntity+950)throw new InvalidDataException("Imported Parish enemy entity namespace exhausted");nextSpecialEntity=entity+1;}else if(special==null&&skeleton){if(entity>=2420000)throw new InvalidDataException("Imported skeleton entity namespace exhausted");nextSkeletonEntity=entity+1;}else if(special==null)nextEntity=entity+1;
                 entities.Add(entity);
-                int collision=encounter||rat?MapCollisionBindings.ObjectSlot(chunks,sourceActor.CollisionName,sourceActor.Position+offset):Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
+                int collision=encounter||rat||foliage?MapCollisionBindings.ObjectSlot(chunks,sourceActor.CollisionName,sourceActor.Position+offset):Enumerable.Range(0,chunks.Count).FirstOrDefault(i=>chunks[i].SourceName==sourceActor.CollisionName,0);
                 var actor=(MSBB.Part.Enemy)actorDonor.DeepCopy();actor.Name=target+"_"+reports.Count.ToString("D4");actor.ModelName=target;
                 var actorRole=ordinary?profiles[sourceActor.Name]:null;
                 actor.EntityID=entity;actor.NPCParamID=actorRole==null?paramID:roleParams[actorRole.NativeNpc];actor.ThinkParamID=actorRole?.NativeThink??actorThink;actor.TalkID=-1;actor.CharaInitID=-1;
@@ -150,6 +151,8 @@ internal static class MapEnemySpawns {
         }
         npcFile.Bytes=MapCharacters.WriteRows(npcs);
         var combatParameters=HollowProjectiles.Apply(game.Write(DCX.Type.DCX_DFLT_10000_44_9),projectileBindings);
+        var foliageOwners=reports.Where(p=>p.SourceModel=="c2330"&&p.NativeAdapter=="c2050").Select(p=>(Model:int.Parse(p.TargetModel[1..]),SourceNpc:p.SourceNPCParamID)).Distinct().ToArray();
+        if(foliageOwners.Length>0)combatParameters=FoliageCombat.Parameters(combatParameters,sourceRead,definitions,foliageOwners);
         files.Add("param/gameparam/gameparam.parambnd.dcx",HollowCombatProfiles.Viscerals(combatParameters,
             reports.Where(p=>p.HollowCombat!=null).Select(p=>int.Parse(p.TargetModel[1..])).Distinct().ToArray()));
         string aiPath="script/"+(nativeMap??(sourceMap=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00"))+".luabnd.dcx";
@@ -160,10 +163,11 @@ internal static class MapEnemySpawns {
         if(hasHollows)ai=MapNativeAi.Merge(ai,Native("script/"+HollowCombatProfiles.NativeAi+".luabnd.dcx"),2630);
         foreach(var profile in specialProfiles)
             ai=MapNativeAi.Merge(ai,Native("script/"+profile!.Ai+".luabnd.dcx"),int.Parse(profile.Native[1..]));
+        if(foliageOwners.Length>0)ai=SourceEnemyAi.Foliage(ai,sourceRead,Native);
         files.Add(aiPath,ai);
         foreach(var (path,bytes) in MapNativeAi.Fallbacks(ai,path=>readNative?.Invoke(path)??
             (File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null)))files.Add(path,bytes);
-        return new(files,reports,skipped,[..BossEnemyCharacters.Limitations,..HollowCombatProfiles.Limitations,..(projectileBindings.Count>0?HollowProjectiles.Limitations:Array.Empty<string>()),"Ordinary hollow source bodies and equipment keep an independent animated rig. Explicit native weapon-role controllers and source hit/shot windows replace the shared torch-melee wrapper. Native physical attack anchors, locomotion, clip timing, defense and health remain approximations. The item adapter replaces native donor loot where enabled.",
+        return new(files,reports,skipped,[..BossEnemyCharacters.Limitations,..HollowCombatProfiles.Limitations,..(foliageOwners.Length>0?FoliageCombat.Limitations:Array.Empty<string>()),..(projectileBindings.Count>0?HollowProjectiles.Limitations:Array.Empty<string>()),"Ordinary hollow source bodies and equipment keep an independent animated rig. Explicit native weapon-role controllers and source hit/shot windows replace the shared torch-melee wrapper. Native physical attack anchors, locomotion, clip timing, defense and health remain approximations. The item adapter replaces native donor loot where enabled.",
             "Cemetery skeletons retain their prior native wrapper and filtered torch effects. Skeleton attack superarmor is aligned with source basic attacks. Other hollow roles no longer inherit the c2610 torch attack bank.",
             "Firelink's identified c2900/c2910 cemetery skeletons retain source appearance, equipment masks, placement and stature. Source 9001/9061 bone-pile awakening and living heavy-hit 2014/2020/2040 motion are retargeted onto native playback slots, with source wake groups and protection windows. Combat AI, attacks, hitboxes, health, death and effects remain native; necromancer resurrection, original movesets and giant attack reach are not converted. Other special-pose enemies remain disabled.",
             "The Parish armored boar and Titanite Demon retain their complete source skin, segment lengths and source animation on appended rig tracks; native body tracks, locomotion, attack timing, hitboxes, AI and HP remain in use. The cloned native character capsule uses the matching source hitHeight/hitRadius/hitYOffset fields. Extra native states reuse explicitly mapped source actions. Their source armor, lightning/projectiles, unique death persistence and original combat behavior are not converted. Native physical/attack anchors can differ from the visible source body and require gameplay validation.",

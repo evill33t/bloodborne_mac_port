@@ -239,7 +239,7 @@ internal static partial class Program {
             if(profile.Id=="DS1R"&&legacyMap!=null&&boundCollision!=null) {
                 enemySpawns=MapEnemySpawns.Bake(sourceMap.ReadAsset,legacyMap,map,definitions!,nativeRoot,msb,offset,boundCollision,slots,
                     merchantCharacters?.GameParamBytes??characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,nativeMap:baseMap,readNative:destination.Additional?ReadStaged:ReadNative,
-                    ordinaryFirstEntity:destination.Additional&&map=="m10_01_00_00"?4039000:null);
+                    ordinaryFirstEntity:destination.Additional?map switch {"m10_01_00_00"=>4039000,"m12_00_00_00"=>4049000,"m13_00_00_00"=>4059000,"m16_00_00_00"=>4069000,_=>null}:null);
                 foreach(var spawnReport in enemySpawns.Spawns){var actor=msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID);actor.GparamConfigStruct=Lighting(spawnReport.SourceName);
                     var original=legacyMap.Parts.Enemies.Single(p=>p.Name==spawnReport.SourceName);
                     bool ungroupedRat=spawnReport.SourceModel=="c1201"&&spawnReport.NativeAdapter=="c1100"&&original.DrawGroups.All(x=>x==0)&&original.DispGroups.All(x=>x==0);

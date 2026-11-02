@@ -158,7 +158,8 @@ internal static class NonHumanoidEnemies {
         if(!Matrix4x4.Invert(plan.Original.Local[0],out var inverse))throw new InvalidDataException("Singular native locomotion root");
         foreach(var f in clips) {
             var sourceClip=Clip(sourceSlot?.Invoke(f.ID-1000000000)??SourceSlot(profile,f.ID-1000000000));
-            f.Bytes=NativeRigAppend.Clip(f.Bytes.ToArray(),plan,time=>{var pose=sourceClip.Sample(Math.Min(sourceClip.Duration,time*sourceClip.Duration));pose[0]*=inverse;return pose;},preserveAddedRootWorld:true);
+            try{f.Bytes=NativeRigAppend.Clip(f.Bytes.ToArray(),plan,time=>{var pose=sourceClip.Sample(Math.Min(sourceClip.Duration,time*sourceClip.Duration));pose[0]*=inverse;return pose;},preserveAddedRootWorld:true);}
+            catch(InvalidDataException e){throw new InvalidDataException("Imported "+profile.Source+" playback "+profile.Native+"/"+(f.ID-1000000000)+": "+e.Message,e);}
         }
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
         if(character.Files.Any(f=>f.ID==100))throw new InvalidDataException("Native enemy reserves imported texture binder ID");

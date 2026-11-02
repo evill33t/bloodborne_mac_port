@@ -1129,8 +1129,9 @@ NPC quest complete. Inspect it with:
 python3 scripts/map_coverage.py /path/to/private-test-data/Mods/Lordran
 ```
 
-Darkroot/Catacombs mobs, conditional populations, complete NPC quests and
-mechanisms still require explicit adapters. In particular, Hydra's body and seven
+Most Darkroot/Catacombs mobs, conditional populations, complete NPC quests and
+mechanisms still require explicit adapters. Twelve ordinary Darkroot foliage
+placements now have the bounded combat adapter described below. Hydra's body and seven
 heads require a different rig/part strategy; a single donor reskin cannot preserve
 its source encounter. The current importer has a 256-bone append guard; native
 Bloodborne assets include larger rigs with 16-bit vertex bone indices, so this is
@@ -1148,6 +1149,53 @@ unverified. The area-level listeners passed native Basin activation and return
 travel. After staging once at the outside approach, controller input traversed
 the source-authored cave bends to within 0.53m of its lamp; no intervening player
 position, actor or flag writes were used.
+
+The foliage adapter selects twelve explicit `c2330` placements with source
+Think233000 and no wake animation. Fourteen hidden wake/ambush placements and the
+disabled Butterfly helper remain omitted. Owned models `c8825`/`c8826` append the
+complete source rig to native `c2050`, preserving source segment lengths and
+weights. Source leaf material blend modes select native cutout materials; the
+opaque trunk remains opaque. Additional-area enemy allocations have separate
+entity ranges so attached scenes cannot reuse Firelink/Burg's ordinary IDs.
+
+The owned battle goal882500 retains source attack selection, spacing and
+interruption helpers. A bounded Lua5.0 parser reads the actual source prototype,
+constant and closure tables. It preserves raw strings, namespaces all imported
+helpers and globals, and packages the 37 transitive helpers in the same chunk.
+Two helpers capture the source literal20; their upvalues close before the
+original root registers are reused. Source programs and engine enum values are
+checked against the audited inputs. Native AI programs and registrations remain
+unchanged. This is one explicitly adapted source goal, not a general guarantee
+that arbitrary Souls AI can run unchanged in Bloodborne.
+
+Source actions3002/3003/3005/3006 use source body motion, contact windows, damage
+and source-rig contact sockets. Both hands in3005/3006 retain simultaneous,
+distinct contact indices. Native event groups own the new events; cancel gates
+are grouped by their gate IDs, matching the native format. The owned contact
+reservation101..122 is checked against the donor model. Source attack fields
+are copied only across the verified shared parameter prefix, with explicit
+native damage/effect classifications and no unconverted source special effects.
+Source paired grab3004 is redirected to left claw3003 until attacker/victim
+playback is converted. Dormant donor attacks and projectile contacts are disabled.
+The existing item stage gives these adapted enemies the same10% one-vial roll.
+
+Native locomotion, action durations, generic logic, physical/ragdoll anchors,
+effects, health multipliers and overall damage balance remain approximations.
+The source base HP129 does not imply live HP129: the current native wrapper
+produced280 in the smoke test. The copied-save check staged the player on a
+verified path floor, then used controller lock-on/attacks. Foliage chased the
+player, received a28-damage punch and dealt damage: player HP594 became407 and
+then reached the QA-only one-HP safety floor. No enemy state or combat HP writes
+were used. These observations establish contact damage in that encounter; they
+do not establish every action, full route traversal or source combat balance.
+
+`tests/test_foliage_combat.sh` checks the twelve-placement boundary, both owned
+rigs, all280 preserved native clip channel payloads,36 independently decoded
+source/additive poses, material masks, contact ownership, simultaneous indices,
+parameter preservation and original asset hashes. `tests/test_lua50.sh` checks
+real shipped chunks, byte-exact round trips, owned substitutions and malformed
+input rejection. Both use local game files and a built Smithbox checkout; no
+game scripts, meshes or animations are included in the repository.
 
 The connected additional maps now include real source navigation. DS1R NVM placements
 are baked into native Havok navigation meshes, trees and directed graphs, with matching

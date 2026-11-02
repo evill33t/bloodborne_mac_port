@@ -23,6 +23,9 @@
     <Compile Include="../../editor/souls_import/HollowDeathMotion.cs" Link="HollowDeathMotion.cs"/>
     <Compile Include="../../editor/souls_import/HollowSourceSkin.cs" Link="HollowSourceSkin.cs"/>
     <Compile Include="../../editor/souls_import/HollowProjectiles.cs" Link="HollowProjectiles.cs"/>
+    <Compile Include="../../editor/souls_import/FoliageCombat.cs" Link="FoliageCombat.cs"/>
+    <Compile Include="../../editor/souls_import/SourceEnemyAi.cs" Link="SourceEnemyAi.cs"/>
+    <Compile Include="../../editor/souls_import/Lua50.cs" Link="Lua50.cs"/>
     <Compile Include="../../editor/souls_import/MapEnemySpawns.cs" Link="MapEnemySpawns.cs"/>
     <Compile Include="../../editor/souls_import/SourceClothPose.cs" Link="SourceClothPose.cs"/>
     <Compile Include="../../editor/souls_import/SourceEquipmentMounts.cs" Link="SourceEquipmentMounts.cs"/>

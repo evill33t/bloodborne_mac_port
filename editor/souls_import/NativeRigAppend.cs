@@ -125,7 +125,12 @@ internal static class NativeRigAppend {
                 }
                 poses.AddRange(values);
             }
-            var encoded=NativeSpline.Encode(poses,plan.Added.Count,count,dt,plan.Original.Name,plan.Added.Select(bone=>bone.Name).ToArray(),allowMirroredScale:true,allowZeroScaleTracks:allowZeroAddedBones);
+            // c2050's additive2400 is a two-frame hold spanning3.333 seconds.
+            // Its added channels are constant identity deltas. Only the extra
+            // compressed payload is copied from this temporary encoder bank;
+            // the actual native duration/frame interval remain byte-exact.
+            float encodeDt=blend==1&&frames==2&&dt>1&&dt<=600&&dt==p.Float(a+16)?1:dt;
+            var encoded=NativeSpline.Encode(poses,plan.Added.Count,count,encodeDt,plan.Original.Name,plan.Added.Select(bone=>bone.Name).ToArray(),allowMirroredScale:true,allowZeroScaleTracks:allowZeroAddedBones);
             var extra=new NativeAnimation.Pack(encoded);int ea=extra.Object("hkaSplineCompressedAnimation");var ed=extra.Array(ea+152,1,64*1024*1024);int eEnd=extra.Int(extra.Array(ea+104,4,256).At),mask=plan.Added.Count*4;
             newStarts.Add(checked((int)stream.Length));stream.Write(input.AsSpan(p.Data+data.At+start,n*4));stream.Write(encoded.AsSpan(extra.Data+ed.At,mask));
             stream.Write(input.AsSpan(p.Data+data.At+start+n*4,used-n*4));stream.Write(encoded.AsSpan(extra.Data+ed.At+mask,eEnd-mask));

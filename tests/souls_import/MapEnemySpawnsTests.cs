@@ -161,7 +161,17 @@ static class MapEnemySpawnsTests {
                 }
             }
             var old=BND4.Read(composed);composed=result.Files["param/gameparam/gameparam.parambnd.dcx"];var game=BND4.Read(composed);
-            foreach(var f in old.Files.Where(f=>Leaf(f.Name) is not("NpcParam.param" or "BehaviorParam.param" or "Bullet.param")))Check(game.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Enemy export overwrote an unrelated parameter entry");
+            foreach(var f in old.Files.Where(f=>Leaf(f.Name) is not("NpcParam.param" or "BehaviorParam.param" or "Bullet.param" or "ThrowParam.param")))Check(game.Files.Single(n=>n.ID==f.ID).Bytes.Span.SequenceEqual(f.Bytes.Span),"Enemy export overwrote an unrelated parameter entry: "+Leaf(f.Name));
+            var oldThrows=ImportParam.Read(old.Files.Single(f=>Leaf(f.Name)=="ThrowParam.param").Bytes,"THROW_INFO_BANK",64,1);
+            var newThrows=ImportParam.Read(game.Files.Single(f=>Leaf(f.Name)=="ThrowParam.param").Bytes,"THROW_INFO_BANK",64,1);
+            var oldThrowIDs=oldThrows.Rows.Select(r=>r.ID).ToHashSet();var retainedThrows=newThrows.Rows.Where(r=>oldThrowIDs.Contains(r.ID)).ToArray();
+            Check(oldThrows.Rows.Count==retainedThrows.Length&&oldThrows.Rows.Zip(retainedThrows).All(p=>p.First.ID==p.Second.ID&&p.First.Name==p.Second.Name&&ImportParam.Payload(p.First).SequenceEqual(ImportParam.Payload(p.Second))),"Visceral conversion changed an existing native/composed throw");
+            var visceralModels=result.Spawns.Where(p=>p.HollowCombat!=null).Select(p=>int.Parse(p.TargetModel[1..])).Distinct().ToArray();
+            Check(newThrows.Rows.Count==oldThrows.Rows.Count+visceralModels.Length*2,"Owned hollow visceral population changed");
+            foreach(int model in visceralModels)foreach(int donor in new[]{12630,22630}) {
+                var expected=ImportParam.Payload(oldThrows.Rows.Single(r=>r.ID==donor));BitConverter.GetBytes(model).CopyTo(expected,4);
+                Check(ImportParam.Payload(newThrows.Rows.Single(r=>r.ID==donor-2630+model)).SequenceEqual(expected),"Owned visceral does not preserve its native paired animation contract");
+            }
             var oldNpcs=MapCharacters.NativeRows(old.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes,false);
             var npcs=MapCharacters.NativeRows(game.Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes,false);
             for(int i=0;i<oldNpcs.Rows.Count;i++)Check(npcs.Rows[i].ID==oldNpcs.Rows[i].ID&&npcs.Rows[i].Name==oldNpcs.Rows[i].Name&&MapCharacters.Payload(npcs.Rows[i]).SequenceEqual(MapCharacters.Payload(oldNpcs.Rows[i])),"Existing composed NPC row/order/null-name changed");
