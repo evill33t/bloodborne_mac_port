@@ -91,6 +91,15 @@ static class HollowSourceSkinTests {
                         var badModel=FLVER2.Read(prepared);badModel.Nodes.Single(n=>n.Name=="c2540_weapon").Name="other_character";Reject(()=>HollowSourceSkin.Rig(badModel.Write(),nativeModel,nativeSkeleton,reference,masks:masks,sourceMuzzleIDs:new[]{1}),"Unrelated dummy1 accepted");
                     }
                 }
+                var eyes=src.Dummies.Where(d=>d.ReferenceID==199).ToArray();Check(eyes.Length==2,"Source hollow eye pair changed");
+                foreach(var eye in eyes) {
+                    var rebound=HollowSourceSkin.RebindSocket(eye,prepared,plan,250);sockets.Add((eye,rebound));
+                    Check(rig.Names[rebound.AttachBoneIndex]=="DS1_Head"&&rebound.FollowAttachBone==eye.FollowAttachBone,"Blood-stain eye does not follow visible source head");
+                }
+                foreach(short id in new short[]{7,90,201,220,240}) {
+                    var socket=src.Dummies.Single(d=>d.ReferenceID==id);var rebound=HollowSourceSkin.RebindSocket(socket,prepared,plan,id);sockets.Add((socket,rebound));
+                    Check(rebound.AttachBoneIndex>=84,"Body effect still follows taller native controller");
+                }
                 Check(rig.Names.Take(84).SequenceEqual(nativeRig.Names)&&rig.Local.Take(84).SequenceEqual(nativeRig.Local)&&rig.Parents.Take(84).SequenceEqual(nativeRig.Parents),"Native controller bones changed");
                 foreach(var b in plan.Added){string name=b.Name[4..];Check(Error(sourceBind[src.Nodes.FindIndex(n=>n.Name==name)],targetBind[Array.IndexOf(rig.Names,b.Name)])<1e-6f,"Named source bind frame changed");}
                 bool Selected(FLVER2.Mesh m){var match=System.Text.RegularExpressions.Regex.Match(src.Materials[m.MaterialIndex].Name,@"#(\d+)#");return !match.Success||masks.Contains(int.Parse(match.Groups[1].Value));}

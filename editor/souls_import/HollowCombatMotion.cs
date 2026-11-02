@@ -120,7 +120,12 @@ internal static class HollowCombatMotion {
             if(source.IDs.Contains(offset+n))return offset+n;if(source.IDs.Contains(n))return n;
             int replacement=n switch {
                 2003=>2004,2060=>2014,2110=>2100,2211 or 2220 or 2221=>2200,2261 or 2270 or 2271=>2250,2303=>2302,
-                >=2600 and <=2623=>2020,>=2900 and <=2903=>2020,
+                // Native interrupt reactions are standing directional hits.
+                // Source2020 is a full knockdown/get-up, not their equivalent.
+                >=2600 and <=2623 when n%10<=3=>new[]{2000,2001,2002,2004}[n%10],
+                // Native visceral-ready waits retain their native state gates;
+                // show source guard-break stagger instead of a knockdown.
+                >=2900 and <=2903=>2100,
                 _=>-1
             };
             if(replacement>=0){Require(source.IDs.Contains(replacement),"source reaction fallback missing");return replacement;}
@@ -177,7 +182,7 @@ internal static class HollowCombatMotion {
             Require(gates.Length==0||prototype!=null,"native continuation gate prototype missing");
             // SoulsFormats.GetClone omits Group. Retained events must keep
             // their original target-owned membership through serialization.
-            var output=animation.Events.Where(e=>!map.Combat||(e.Type is not(1 or 2)&&!Gates.Contains(Jump(e)))).Select(e=>{Require(e.Group==null||animation.EventGroups.Contains(e.Group),"native event group is not owned by its action");var copy=e.GetClone(false);copy.Group=e.Group;return copy;}).ToList();
+            var output=animation.Events.Where(e=>(!map.Combat||(e.Type is not(1 or 2)&&!Gates.Contains(Jump(e))))&&!GunEffect(plan,e)).Select(e=>{Require(e.Group==null||animation.EventGroups.Contains(e.Group),"native event group is not owned by its action");var copy=e.GetClone(false);copy.Group=e.Group;return copy;}).ToList();
             var foreign=new Dictionary<TAE.EventGroup,TAE.EventGroup>();
             void Add(TAE.Event e,TAE.Event carrier,bool gate) {
                 // Authored TAE windows may outlive the sampled clip: source
@@ -197,5 +202,13 @@ internal static class HollowCombatMotion {
         // Commit only after every source motion/carrier/event has validated.
         foreach(var p in pending){p.Animation.EventGroups.AddRange(p.Groups);p.Animation.Events.Clear();p.Animation.Events.AddRange(p.Events);}
         return new(plan.Model,plan.Role,report,["Visible source poses and their attack/projectile/AI-cancel windows are sampled onto native clip timing. Native combat decisions, physical anchors, damage and projectile types remain approximations.","Only explicit mapped actions change. Source sound, effects, special attacks and weapon-transition visibility are separate adapters."]);
+    }
+    // These are the native rifle discharge/smoke effects, not the arrow's
+    // projectile/impact effects. Their dummy6/80 sockets belong to the donor.
+    static bool GunEffect(Plan plan,TAE.Event e) {
+        if(plan.Role is not("Crossbow" or "CrossbowStationary" or "Bow")||e.Type!=96)return false;
+        var b=e.GetParameterBytes(false);if(b.Length<8)return false;
+        if((BitConverter.ToInt32(b),BitConverter.ToInt32(b,4)) is not((1033000,6) or (610205,80)))return false;
+        Require(b.Length is 16 or 24&&b.AsSpan(12).IndexOfAnyExcept((byte)0)<0,"native rifle effect layout changed");return true;
     }
 }

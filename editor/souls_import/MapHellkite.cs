@@ -10,7 +10,10 @@ internal static class MapHellkite {
     internal const int FlybySeen=52100172,BridgeSeen=52100980,Defeated=52100981,FlybyRunning=52100982,BridgeReady=52100983;
     internal const int FirstEvent=12415780;
     internal static readonly int[] ReservedFlags=[BridgeSeen,Defeated,FlybyRunning,BridgeReady];
-    internal sealed record Clip(int Action,int SourceAction,float Duration,int Frames,int SourceFrames,string SHA256,Vector4 End);
+    internal sealed record CameraCue(float SourceStart,float Start,float End,int Rumble,int Dummy,float BlurStart,float BlurEnd);
+    internal sealed record Clip(int Action,int SourceAction,float Duration,int Frames,int SourceFrames,string SHA256,Vector4 End) {
+        public IReadOnlyList<CameraCue> Camera {get;init;}=[];
+    }
     internal sealed record Report(int BridgeActor,int FlybyActor,int FlybyFlag,int BridgeFlag,int DefeatFlag,int FlybyTrigger,int BridgeTrigger,int BridgeExclusion,int Perch,
         IReadOnlyList<Clip> Clips,IReadOnlyDictionary<long,string> SourceEvents,IReadOnlyList<string> Limits);
     internal sealed record Result(byte[] Script,IReadOnlyDictionary<string,byte[]> Files,IReadOnlyList<MapEnemySpawns.Spawn> Spawns,Report Details);
@@ -53,7 +56,7 @@ internal static class MapHellkite {
             // Keep the retail container, native physical channels and appended
             // source pose splines. Only timing and extracted movement change.
             file.Bytes=BossEntranceMotion.RetimeFlight(file.Bytes.ToArray(),nativeTemplate,clip.Duration,roots,242);
-            var target=tae.Animations.Single(a=>a.ID==action);var flags=sourceTae.Animations.Single(a=>a.ID==from).Events.Where(e=>e.Type==0).ToArray();
+            var target=tae.Animations.Single(a=>a.ID==action);var sourceEvents=sourceTae.Animations.Single(a=>a.ID==from).Events;var flags=sourceEvents.Where(e=>e.Type==0).ToArray();
             // The donor marks these event actions as one-shots; the perch is
             // a loop in both the event instruction and the action metadata.
             Require(target.MiniHeader is TAE.Animation.AnimMiniHeader.Standard,"unsupported native action header");
@@ -67,7 +70,22 @@ internal static class MapHellkite {
                 if(id==82)continue;
                 target.Events.Add(new TAE.Event(Math.Min(flag.StartTime,clip.Duration),Math.Min(flag.EndTime,clip.Duration),0,0,[..data,0,0,0,0],false){Group=group});
             }
-            reports.Add(new(action,from,clip.Duration,count,clip.FrameCount,motion.SHA256,roots[^1]));
+            var cameras=new List<CameraCue>();var cameraGroup=new TAE.EventGroup(144);var blurGroup=new TAE.EventGroup(195);
+            foreach(var camera in sourceEvents.Where(e=>e.Type==144)) {
+                var data=camera.GetParameterBytes(false);Require(data.Length==12&&BitConverter.ToInt16(data)==101&&BitConverter.ToUInt16(data,2) is 3 or 4 or 7,"source camera cue changed");
+                // Source TAE tails can outlive the sampled motion. Keep the
+                // final landing impulse on the last held pose before perch.
+                float start=Math.Min(camera.StartTime,clip.Duration-.1f),end=Math.Min(camera.EndTime,clip.Duration);
+                Require(start>=0&&end>start,"invalid source camera window");
+                float blurStart=Math.Max(0,start-.1f),blurEnd=Math.Min(clip.Duration,end+.35f);
+                target.Events.Add(new(start,end,144,0,[..data,0,0,0,0],false){Group=cameraGroup});
+                // Native feedback blur supplies a short cinematic emphasis;
+                // source camera timing/falloff supplies the actual shake.
+                target.Events.Add(new(blurStart,blurEnd,195,0,new byte[16],false){Group=blurGroup});
+                cameras.Add(new(camera.StartTime,start,end,101,BitConverter.ToUInt16(data,2),blurStart,blurEnd));
+            }
+            if(cameras.Count>0){target.EventGroups.Add(cameraGroup);target.EventGroups.Add(blurGroup);}
+            reports.Add(new(action,from,clip.Duration,count,clip.FrameCount,motion.SHA256,roots[^1]){Camera=cameras});
         }
         taeFile.Bytes=tae.Write();files[path]=bank.Write(DCX.Type.DCX_DFLT_10000_44_9);return reports;
     }
@@ -93,7 +111,18 @@ internal static class MapHellkite {
         var sourceNpcs=PARAM.Read(BND3.Read(source("param/GameParam/GameParam.parambnd.dcx")!).Files.Single(f=>Leaf(f.Name)=="NpcParam.param").Bytes);sourceNpcs.ApplyParamdef(PARAMDEF.XmlDeserialize(Path.Combine(definitions,"NpcParam.xml")));
         var row=sourceNpcs.Rows.Single(r=>r.ID==343000);var masks=Enumerable.Range(0,16).Where(i=>Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="modelDispMask"+i).Value)!=0).ToHashSet();
         var files=new Dictionary<string,byte[]>();
-        var skin=NonHumanoidEnemies.Package(source,Native,Profile,Model,masks,files,action=>(action%1000000) switch{7005=>7005,7012=>7012,2200=>2200,2250=>2250,_=>7006},bake=>Materials(source,bake));
+        var sourceRumble=BND3.Read(source("other/default.rumblebnd")??throw new FileNotFoundException("Source camera bank missing"));
+        var nativeRumble=BND4.Read(Native("other/default.rumblebnd.dcx"));
+        Require(sourceRumble.Files.Single(f=>f.ID==101).Bytes.Span.SequenceEqual(nativeRumble.Files.Single(f=>f.ID==101).Bytes.Span),"source/native camera101 curves differ");
+        var skin=NonHumanoidEnemies.Package(source,Native,Profile,Model,masks,files,action=>(action%1000000) switch{7005=>7005,7012=>7012,2200=>2200,2250=>2250,_=>7006},bake=>Materials(source,bake),
+            (bake,rig)=>{
+                var original=MapCharacters.Authored(source,"c3430").Model;var geometry=FLVER2.Read(original);
+                foreach(short id in new short[]{3,4,7}) {
+                    var socket=geometry.Dummies.Single(d=>d.ReferenceID==id);
+                    bake.Model.Dummies.RemoveAll(d=>d.ReferenceID==id);
+                    bake.Model.Dummies.Add(HollowSourceSkin.RebindSocket(socket,original,rig,id));
+                }
+            });
         var nativeAnimation=BND4.Read(Native("chr/c2730.anibnd.dcx"));
         var clips=Playback(source,files,plan,nativeAnimation.Files.Single(f=>f.ID==1000007012).Bytes.ToArray());
         var donor=npcs.Rows.Single(r=>r.ID==Profile.Npc);var payload=NonHumanoidEnemies.Capsule(MapCharacters.Payload(donor),row,definitions);

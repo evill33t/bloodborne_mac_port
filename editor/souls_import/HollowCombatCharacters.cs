@@ -40,6 +40,7 @@ internal static class HollowCombatCharacters {
         var bake=SkinRetarget.Bake(prepared,render.Write(),textures,masks,HollowSourceSkin.Overrides(plan),target,"DS1R",preserveBoneLengths:true);
         if(bake.DirectWeightShare<.999999)throw new InvalidDataException("Source hollow visible skin lost an authored bone");
         if(muzzleIDs.Length>0)BindMuzzle(bake.Model,prepared,plan,profile);
+        BindBodySockets(bake.Model,prepared,plan);
         NonHumanoidEnemies.OrderRenderNodes(bake.Model);
         visual.Bytes=bake.Model.Write();skeleton.Bytes=plan.Skeleton;
 
@@ -96,5 +97,20 @@ internal static class HollowCombatCharacters {
         if(index<0||target.Dummies.Count(d=>d.ReferenceID==profile.NativeProjectileDummy)!=1)
             throw new InvalidDataException("Native hollow projectile socket changed");
         target.Dummies[index]=HollowSourceSkin.RebindDummy(original,sourceBytes,plan,checked((short)profile.NativeProjectileDummy));
+    }
+    static void BindBodySockets(FLVER2 target,byte[] sourceBytes,NativeRigAppend.Plan plan) {
+        var source=FLVER2.Read(sourceBytes);var eyes=source.Dummies.Where(d=>d.ReferenceID==199).OrderBy(d=>d.Position.X).ToArray();
+        var slots=target.Dummies.Select((d,i)=>(d,i)).Where(p=>p.d.ReferenceID==250).OrderBy(p=>p.d.Position.X).ToArray();
+        if(eyes.Length!=2||slots.Length!=2||eyes.Any(d=>d.AttachBoneIndex<0||source.Nodes[d.AttachBoneIndex].Name!="Head"))
+            throw new InvalidDataException("Source/native hollow eye socket contract changed");
+        for(int i=0;i<2;i++)target.Dummies[slots[i].i]=HollowSourceSkin.RebindSocket(eyes[i],sourceBytes,plan,250);
+        // Native head/body, targeting and corpse-effect anchors must follow
+        // the visible body as well. The numbered source sockets share those
+        // conventions; keep native weapon/attack sockets separate.
+        foreach(short id in new short[]{7,90,201,220,240}) {
+            int at=target.Dummies.FindIndex(d=>d.ReferenceID==id);var authored=source.Dummies.Where(d=>d.ReferenceID==id).ToArray();
+            if(at<0||target.Dummies.Count(d=>d.ReferenceID==id)!=1||authored.Length!=1)throw new InvalidDataException("Source/native body socket contract changed: "+id);
+            target.Dummies[at]=HollowSourceSkin.RebindSocket(authored[0],sourceBytes,plan,id);
+        }
     }
 }

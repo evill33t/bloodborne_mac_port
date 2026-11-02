@@ -81,6 +81,32 @@ internal static class HollowCombatProfiles {
         BitConverter.GetBytes((short)-1).CopyTo(bytes,0x162);
         return bytes;
     }
+    internal static byte[] Viscerals(byte[] parameters,IReadOnlyCollection<int> models) {
+        if(models.Count==0)return parameters.ToArray();
+        if(models.Distinct().Count()!=models.Count||models.Any(m=>m is <9600 or >9699))throw new InvalidDataException("Unsupported hollow visceral owner");
+        var bank=BND4.Read(parameters);var file=bank.Files.Single(f=>f.Name.Replace('\\','/').Split('/').Last()=="ThrowParam.param");
+        var table=PARAM.Read(file.Bytes);
+        if(table.ParamType!="THROW_INFO_BANK"||table.DetectedSize!=64||table.ParamdefDataVersion!=1||table.BigEndian||table.Format2D!=PARAM.FormatFlags1.LongDataOffset)
+            throw new InvalidDataException("Native hollow visceral schema changed");
+        var definition=new PARAMDEF{ParamType="THROW_INFO_BANK",DataVersion=1,Unicode=true};
+        definition.Fields.Add(new PARAMDEF.Field(definition,PARAMDEF.DefType.dummy8,"payload"){ArrayLength=64});table.ApplyParamdef(definition);
+        byte[] Data(PARAM.Row row)=>((byte[])row.Cells.Single().Value).ToArray();
+        var donors=table.Rows.Where(r=>{var p=Data(r);return BitConverter.ToInt32(p)==0&&BitConverter.ToInt32(p,4)==2630;}).ToArray();
+        if(!donors.Select(r=>r.ID).Order().SequenceEqual(new[]{12630,22630})||donors.Any(r=>BitConverter.ToInt32(Data(r),36) is not(33000 or 33200)))
+            throw new InvalidDataException("Native hollow visceral matching contract changed");
+        foreach(int model in models) {
+            if(table.Rows.Any(r=>BitConverter.ToInt32(Data(r),4)==model))throw new InvalidDataException("Hollow visceral defender reservation is occupied");
+            foreach(var donor in donors) {
+                int id=checked(donor.ID-2630+model);if(table.Rows.Any(r=>r.ID==id))throw new InvalidDataException("Hollow visceral row reservation is occupied");
+                var bytes=Data(donor);BitConverter.GetBytes(model).CopyTo(bytes,4);
+                var row=new PARAM.Row(donor){ID=id,Name="Imported hollow visceral "+model+" / "+donor.ID};row.Cells.Single().Value=bytes;
+                int at=table.Rows.FindIndex(r=>r.ID>id);if(at<0)table.Rows.Add(row);else table.Rows.Insert(at,row);
+            }
+        }
+        var nulls=table.Rows.Select((r,i)=>(r.Name,i)).Where(p=>p.Name==null).Select(p=>p.i).ToArray();
+        var written=table.Write();foreach(int index in nulls)Array.Clear(written,64+index*24+16,8);
+        file.Bytes=written;return bank.Write(DCX.Type.DCX_DFLT_10000_44_9);
+    }
     internal static readonly string[] Limitations=[
         "Native c2630 controllers preserve separate melee, shield, firebomb and rifle roles. Source patrols, ambush conditions and complete source AI scripts are not translated.",
         "Spear and rapier roles borrow the native poker-and-shield controller; axe borrows the native cleaver controller. Source visible attacks require the separate authored-motion adapter. Native defense, reactions and reach remain approximate.",

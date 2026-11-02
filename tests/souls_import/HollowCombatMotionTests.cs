@@ -13,6 +13,7 @@ void Check(bool b,string why){if(!b)throw new Exception(why);}
 void Reject(System.Action action,string why){try{action();}catch(Exception e)when(e is InvalidDataException or ArgumentException or NotSupportedException){return;}throw new Exception("Accepted "+why);}
 string Leaf(string p)=>p.Replace('\\','/').Split('/').Last();
 int Jump(TAE.Event e)=>e.Type==0?BitConverter.ToInt32(e.GetParameterBytes(false)):-1;
+bool Gun(TAE.Event e,K role){if(role is not(K.Crossbow or K.CrossbowStationary or K.Bow)||e.Type!=96)return false;var b=e.GetParameterBytes(false);return (BitConverter.ToInt32(b),BitConverter.ToInt32(b,4)) is (1033000,6) or (610205,80);}
 string Group(TAE.Event e){var g=e.Group;if(g==null)return "none";var d=g.GroupData;return $"{g.GroupType}:{d.DataType}:{d.CutsceneEntityType}:{d.CutsceneEntityIDPart1}:{d.CutsceneEntityIDPart2}:{d.Area}:{d.Block}";}
 string Event(TAE.Event e,bool raw=false){var bytes=e.GetParameterBytes(false);int length=bytes.Length;if(!raw)while(length>0&&bytes[length-1]==0)--length;return $"{e.Type}:{e.StartTime:R}:{e.EndTime:R}:{e.Unk04}:{Convert.ToHexString(bytes.AsSpan(0,length))}:{Group(e)}";}
 float Duration(byte[] bytes) {
@@ -36,7 +37,7 @@ foreach(var role in roles) {
     var durations=plan.Mappings.ToDictionary(m=>m.NativeID,m=>physical[plan.NativeMotionID(m.NativeID)]);var current=TAE.Read(taeFile.Bytes);
     var result=HollowCombatMotion.Apply(current,plan,durations);
     Check(current.Animations.All(a=>a.Events.All(e=>e.Group==null||a.EventGroups.Contains(e.Group))),"event references a foreign animation group before write");
-    foreach(var mapping in plan.Mappings){var before=original.Animations.Single(a=>a.ID==mapping.NativeID);var after=current.Animations.Single(a=>a.ID==mapping.NativeID);var kept=before.Events.Where(e=>!mapping.Combat||(e.Type is not(1 or 2)&&Jump(e) is not(23 or 78 or 79 or 86))).Select(e=>Event(e,true)).ToArray();Check(kept.SequenceEqual(after.Events.Take(kept.Length).Select(e=>Event(e,true))),"unrelated native raw parameters changed before serialization");}
+    foreach(var mapping in plan.Mappings){var before=original.Animations.Single(a=>a.ID==mapping.NativeID);var after=current.Animations.Single(a=>a.ID==mapping.NativeID);var kept=before.Events.Where(e=>(!mapping.Combat||(e.Type is not(1 or 2)&&Jump(e) is not(23 or 78 or 79 or 86)))&&!Gun(e,role.Role)).Select(e=>Event(e,true)).ToArray();Check(kept.SequenceEqual(after.Events.Take(kept.Length).Select(e=>Event(e,true))),"unrelated native raw parameters changed before serialization");}
     // SoulsFormats includes alignment bytes in unknown event payloads; their
     // zero padding can grow after the event/time tables change. Raw bytes were
     // checked above; readback checks semantic bytes, allowing only zero tails.
@@ -48,7 +49,7 @@ foreach(var role in roles) {
     foreach(var mapping in plan.Mappings) {
         var before=canonical.Animations.Single(a=>a.ID==mapping.NativeID);var after=readback.Animations.Single(a=>a.ID==mapping.NativeID);
         Check(before.AnimFileName==after.AnimFileName&&before.MiniHeader.Type==after.MiniHeader.Type,"native animation reference changed");
-        var retained=before.Events.Where(e=>!mapping.Combat||(e.Type is not(1 or 2)&&Jump(e) is not(23 or 78 or 79 or 86))).Select(e=>Event(e));
+        var retained=before.Events.Where(e=>(!mapping.Combat||(e.Type is not(1 or 2)&&Jump(e) is not(23 or 78 or 79 or 86)))&&!Gun(e,role.Role)).Select(e=>Event(e));
         var actualRetained=after.Events.Take(retained.Count()).Select(e=>Event(e)).ToArray();var expectedRetained=retained.ToArray();
         int mismatch=Enumerable.Range(0,expectedRetained.Length).FirstOrDefault(i=>expectedRetained[i]!=actualRetained[i],-1);
         Check(mismatch<0,"unrelated native sound/effect/physics event changed: "+role+"/"+mapping.NativeID+" #"+mismatch+" expected "+(mismatch<0?"":expectedRetained[mismatch])+" actual "+(mismatch<0?"":actualRetained[mismatch]));
@@ -67,6 +68,11 @@ foreach(var role in roles) {
             }
         }
         hits+=expected.Count(e=>e.Type==1);shots+=expected.Count(e=>e.Type==2);gates+=expected.Count(e=>e.Type==0);
+    }
+    foreach(var reaction in plan.Mappings.Where(m=>m.NativeID%1000000 is >=2600 and <=2623 or >=2900 and <=2903)) {
+        Check(reaction.SourceID%10000!=2020,"Normal interrupt/visceral wait uses a knockdown");
+        var c=plan.Action(reaction.NativeID).Clip;var w=c.Sample(c.Duration*.5f).ToArray();for(int i=0;i<w.Length;i++)if(c.Bones[i].Parent>=0)w[i]*=w[c.Bones[i].Parent];
+        Check(w[c.Bones.Select((b,i)=>(b.Name,i)).Single(b=>b.Name=="Head").i].Translation.Y>.7f,"Normal hit reaction lies on the floor");
     }
     if(role.Role is K.Crossbow or K.CrossbowStationary or K.Bow) {
         Check(plan.SourceID(2003031)==23000&&plan.SourceID(2003032)==23001,"ranged action lost full source bank");

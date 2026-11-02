@@ -1190,6 +1190,16 @@ the initial idle. Perch actions carry loop metadata in both animation banks.
 event fingerprints, native parameter preservation and first-visit/reload/defeat
 state transitions. Existing native spline round-trip tests also pass.
 
+The cinematic adapter also carries the source local-camera cues into both
+native TAE banks. Source rumble curve `101` is byte-identical to the installed
+native curve; its source falloff distances and animated foot/head attachments
+are retained. A source cue beyond the sampled landing clip is clamped to the
+last held pose. Short native feedback-blur windows accompany these impulses;
+this is an adapted emphasis, not a reconstruction of the source blur pipeline.
+A disposable-save native arrival check observed the blur pulse and its return
+to a clear image, followed by the normal perch. Camera-shake strength has not
+been measured against a matched DS1R capture.
+
 Bounded native tests with disposable saves observed the Burg flight trajectory,
 bridge approach and arrival at the authored perch. A saved-state reload restored
 the perched actor without replaying either flight, and the corrected idle stayed
@@ -1270,6 +1280,36 @@ projectile control recorded hunter HP 594 to 164 to 1. QA used No Dead only in
 its separate save/config and player placement for encounter setup; this does not
 establish ordinary route traversal or a complete playthrough. The 1024 MiB control
 retained over 100 MiB free at its lowest sampled MAIN-heap observation.
+
+Ordinary native interrupt reactions now select standing source hit reactions.
+Their previous fallback, source `2020`, was a complete knockdown/get-up and made
+light hits appear to floor the enemy. Native visceral-ready waits show the
+standing source guard-break stagger while retaining native state gates.
+The eighteen owned hollow models also receive explicit front/back
+`ThrowParam` matches cloned from native `c2630`; distance, angle, state,
+attachment and paired-animation fields remain native. A disposable-save combat
+check observed a normal R1 deal 40 damage without the previous knockdown pose,
+and a charged back attack followed by R1 enter the paired visceral sequence
+(121 charged-hit damage, then 11 and 211 critical damage). Front gun-parry
+viscerals also completed in a separate copied-save encounter: 12 gun damage,
+then the paired critical's 11 and 211 damage. Setup used player placement and
+a private No Dead setting; enemy health, positions and AI were read only.
+These are bounded encounter checks, not coverage of every role or timing window.
+
+Blood-stain eye sockets now follow the visible source head. Head/body,
+targeting and corpse-effect sockets `7`, `90`, `201`, `220` and `240` likewise
+follow the appended source hierarchy instead of the taller native controller.
+Independent serialized-pose checks cover 23,595 anatomical/projectile socket
+frames across the two complete shield/crossbow packages. Ranged hollow actions
+remove the donor rifle's discharge/smoke events at sockets `6` and `80` while
+retaining source projectile timing and the separately bound projectile socket.
+
+World import scale remains 1:1. Measured player head-joint bind heights are
+1.532 m in DS1R and 1.572 m in Bloodborne; these are joint measurements, not
+full character heights. The donor hollow head joint is 1.926 m versus 1.555 m
+for source `c2500`, explaining the old effect-anchor mismatch. NPC source-pose
+checks retain authored hands/feet and posed geometry; they do not establish
+that every character looks identical under the native camera and lighting.
 
 The armored boar has a separate DS1R workflow-1 material adapter. The shipped
 shader's `IF_Z` selects its legacy RGB-specular branch for this authored workflow.

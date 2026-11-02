@@ -134,7 +134,7 @@ internal static class NonHumanoidEnemies {
         }
         return bytes;
     }
-    internal static SkinBake Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,Profile profile,string target,IReadOnlySet<int> masks,Dictionary<string,byte[]> files,Func<int,int>? sourceSlot=null,Action<SkinBake>? adaptMaterials=null) {
+    internal static SkinBake Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,Profile profile,string target,IReadOnlySet<int> masks,Dictionary<string,byte[]> files,Func<int,int>? sourceSlot=null,Action<SkinBake>? adaptMaterials=null,Action<SkinBake,NativeRigAppend.Plan>? adaptRig=null) {
         var source=MapCharacters.Authored(readSource,profile.Source);var character=BND4.Read(readNative("chr/"+profile.Native+".chrbnd.dcx"));var animation=BND4.Read(readNative("chr/"+profile.Native+".anibnd.dcx"));
         var visual=character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase));var skeleton=animation.Files.Single(f=>f.ID==1000000);
         NativeRigAppend.ValidateCharacter(animation.Files.Single(f=>f.ID==7000400).Bytes.ToArray());
@@ -151,6 +151,7 @@ internal static class NonHumanoidEnemies {
         if(bake.DirectWeightShare<.999999)throw new InvalidDataException("Authored enemy skin lost direct source bone weights");
         if(profile==Boar)BoarMaterials.Apply(readSource,source.Model,source.Textures,bake,target);
         adaptMaterials?.Invoke(bake);
+        adaptRig?.Invoke(bake,plan);
         OrderRenderNodes(bake.Model);
         visual.Bytes=bake.Model.Write();skeleton.Bytes=plan.Skeleton;
         var clips=animation.Files.Where(f=>f.ID>=1000000000).ToArray();if(clips.Length!=profile.Clips)throw new InvalidDataException("Native enemy donor clip population changed");

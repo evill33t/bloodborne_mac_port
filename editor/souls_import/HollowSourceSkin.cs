@@ -31,7 +31,7 @@ internal static class HollowSourceSkin {
             if(animated.Contains(source.Nodes[at].Name))return at;
             // The shipped Model_Dmy is a static, disconnected authoring frame;
             // it has no animation channel. Its root space is source Master.
-            if(at==node&&Key(source.Nodes[at].Name)!="modeldmy")throw new InvalidDataException("Unrecognized unanimated source projectile owner: "+source.Nodes[at].Name);
+            if(at==node&&Key(source.Nodes[at].Name) is not("modeldmy" or "modeldmy01"))throw new InvalidDataException("Unrecognized unanimated source socket owner: "+source.Nodes[at].Name);
             at=source.Nodes[at].ParentIndex;
         }
         int master=source.Nodes.FindIndex(n=>n.Name=="Master");
@@ -133,9 +133,12 @@ internal static class HollowSourceSkin {
     }
     internal static IReadOnlyDictionary<string,string> Overrides(NativeRigAppend.Plan plan)=>plan.Added.ToDictionary(b=>b.Name[Prefix.Length..],b=>b.Name,StringComparer.Ordinal);
     internal static FLVER.Dummy RebindDummy(FLVER.Dummy dummy,byte[] sourceModel,NativeRigAppend.Plan plan,short targetReference) {
+        Projectile(FLVER2.Read(sourceModel),dummy);
+        return RebindSocket(dummy,sourceModel,plan,targetReference);
+    }
+    internal static FLVER.Dummy RebindSocket(FLVER.Dummy dummy,byte[] sourceModel,NativeRigAppend.Plan plan,short targetReference) {
         if(targetReference<0)throw new InvalidDataException("Unsupported target projectile dummy reference");
         var source=FLVER2.Read(sourceModel);var target=FLVER2.Read(plan.Model);var sw=SkinRetarget.World(source.Nodes);var tw=SkinRetarget.World(target.Nodes);
-        Projectile(source,dummy);
         var names=Overrides(plan).Keys.ToHashSet(StringComparer.Ordinal);int parent=dummy.ParentBoneIndex<0?source.Nodes.FindIndex(n=>n.Name=="Master"):AnimatedOwner(source,dummy.ParentBoneIndex,names);
         if(parent<0)throw new InvalidDataException("Source projectile parent missing");int index=target.Nodes.FindIndex(n=>n.Name==Prefix+source.Nodes[parent].Name);
         if(index<0||!Matrix4x4.Invert(sw[parent],out var inverse))throw new InvalidDataException("Source projectile target parent missing/singular");

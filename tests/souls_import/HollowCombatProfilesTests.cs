@@ -15,6 +15,18 @@ static class HollowCombatProfilesTests {
             var table=PARAM.Read(bank.Single(f=>Leaf(f.Name)==name+".param").Bytes);table.ApplyParamdef(PARAMDEF.XmlDeserialize(definition));return table;
         }
         string bb=Path.GetFullPath(Path.Combine(definitions,"../../BB/Defs"));
+        var visceralBank=BND4.Read(HollowCombatProfiles.Viscerals(nativeBytes,Enumerable.Range(9600,18).ToArray()));
+        var throwsBefore=Table(nativeBank.Files,"ThrowParam",Path.Combine(bb,"ThrowParam.xml"));var throwsAfter=Table(visceralBank.Files,"ThrowParam",Path.Combine(bb,"ThrowParam.xml"));
+        string Fields(PARAM.Row row,bool omitDef=false)=>JsonSerializer.Serialize(row.Cells.Where(c=>!omitDef||c.Def.InternalName!="DefChrId").ToDictionary(c=>c.Def.InternalName,c=>c.Value));
+        Check(throwsAfter.Rows.Count==throwsBefore.Rows.Count+36,"Not all hollow wrappers accept front/back viscerals");
+        foreach(var row in throwsBefore.Rows)Check(Fields(row)==Fields(throwsAfter.Rows.Single(r=>r.ID==row.ID)),"Original native visceral row changed");
+        foreach(int model in Enumerable.Range(9600,18))foreach(int id in new[]{12630,22630}) {
+            var row=throwsAfter.Rows.Single(r=>r.ID==id-2630+model);
+            Check(Convert.ToInt32(row.Cells.Single(c=>c.Def.InternalName=="DefChrId").Value)==model&&Fields(row,true)==Fields(throwsBefore.Rows.Single(r=>r.ID==id),true),"Visceral matching changed native range, gates, animations or attachment");
+        }
+        foreach(var file in nativeBank.Files.Where(f=>Leaf(f.Name)!="ThrowParam.param"))Check(file.Bytes.Span.SequenceEqual(visceralBank.Files.Single(f=>f.ID==file.ID).Bytes.Span),"Visceral adaptation changed another parameter");
+        Reject(()=>HollowCombatProfiles.Viscerals(visceralBank.Write(),new[]{9600}),"Occupied visceral defender accepted");
+        Reject(()=>HollowCombatProfiles.Viscerals(nativeBytes,new[]{2630}),"Native defender could be overwritten");
         var sourceRows=Table(sourceBank.Files,"NpcParam",Path.Combine(definitions,"NpcParam.xml"));
         var nativeRows=Table(nativeBank.Files,"NpcParam",Path.Combine(bb,"NpcParam.xml"));
         var nativeThinks=Table(nativeBank.Files,"NpcThinkParam",Path.Combine(bb,"NpcThinkParam.xml"));

@@ -149,7 +149,9 @@ internal static class MapEnemySpawns {
             }
         }
         npcFile.Bytes=MapCharacters.WriteRows(npcs);
-        files.Add("param/gameparam/gameparam.parambnd.dcx",HollowProjectiles.Apply(game.Write(DCX.Type.DCX_DFLT_10000_44_9),projectileBindings));
+        var combatParameters=HollowProjectiles.Apply(game.Write(DCX.Type.DCX_DFLT_10000_44_9),projectileBindings);
+        files.Add("param/gameparam/gameparam.parambnd.dcx",HollowCombatProfiles.Viscerals(combatParameters,
+            reports.Where(p=>p.HollowCombat!=null).Select(p=>int.Parse(p.TargetModel[1..])).Distinct().ToArray()));
         string aiPath="script/"+(nativeMap??(sourceMap=="m10_02_00_00"?"m24_01_00_00":"m24_00_00_00"))+".luabnd.dcx";
         var ai=MapNativeAi.Merge(Native(aiPath),Native("script/m22_00_00_00.luabnd.dcx"));
         var specialProfiles=selected.Select(Special).Where(p=>p!=null).Distinct().ToArray();

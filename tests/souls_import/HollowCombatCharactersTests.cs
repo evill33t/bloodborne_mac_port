@@ -121,6 +121,12 @@ static class HollowCombatCharactersTests {
             var reference=From(0);var names=reference.Info.Bones.Select((b,i)=>(b.Name,i)).ToDictionary(x=>x.Name,x=>x.i);var renderToRig=visual.Nodes.Select(n=>Array.IndexOf(rig.Names,n.Name)).ToArray();
             FLVER.Dummy? sourceSocket=profile.Ranged?sourceModel.Dummies.Single(d=>d.ReferenceID==profile.SourceProjectileDummy):null;FLVER.Dummy? socket=profile.Ranged?visual.Dummies.Single(d=>d.ReferenceID==60):null;
             if(socket!=null)Check(visual.Nodes[socket.AttachBoneIndex].Name=="DS1_"+sourceModel.Nodes[sourceSocket!.AttachBoneIndex].Name&&socket.FollowAttachBone==sourceSocket.FollowAttachBone&&socket.UseUpwardVector==sourceSocket.UseUpwardVector,"Muzzle lost animated source attachment after render sorting");
+            var observedSockets=new List<(FLVER.Dummy Source,FLVER.Dummy Native)>();if(socket!=null)observedSockets.Add((sourceSocket!,socket));
+            var sourceEyes=sourceModel.Dummies.Where(d=>d.ReferenceID==199).OrderBy(d=>d.Position.X).ToArray();var nativeEyes=visual.Dummies.Where(d=>d.ReferenceID==250).OrderBy(d=>d.Position.X).ToArray();
+            Check(sourceEyes.Length==2&&nativeEyes.Length==2&&nativeEyes.All(d=>visual.Nodes[d.AttachBoneIndex].Name=="DS1_Head"),"Blood-stain eyes do not follow the visible source head");
+            for(int eye=0;eye<2;eye++)observedSockets.Add((sourceEyes[eye],nativeEyes[eye]));
+            foreach(short body in new short[]{7,90,201,220,240})observedSockets.Add((sourceModel.Dummies.Single(d=>d.ReferenceID==body),visual.Dummies.Single(d=>d.ReferenceID==body)));
+            bool Gun(TAE.Event e){if(!profile.Ranged||e.Type!=96)return false;var b=e.GetParameterBytes(false);return (BitConverter.ToInt32(b),BitConverter.ToInt32(b,4)) is (1033000,6) or (610205,80);}
             int localPoses=0;
             foreach(var file in bank.Files.Where(f=>f.ID>=1000000000)) {
                 int id=file.ID-1000000000;int originalID=ownedDeaths.TryGetValue(id,out var death)?death.NativeCounterpart:id;int sourceID=death?.SourceAction??motion.MotionSourceIDs[id];byte[] before=originalBank.Files.Single(f=>f.ID==1000000000+originalID).Bytes.ToArray(),after=file.Bytes.ToArray();NativeUnchanged(before,after,84,rig.Names.Length);checkedClips++;
@@ -154,10 +160,10 @@ static class HollowCombatCharactersTests {
                         }
                         float error=Vector3.Distance(expected,actual);worstVertex=Math.Max(worstVertex,error);Check(error<.01f,"Full source body/equipment vertex mismatch: "+tuple.Model+"/"+id+" error "+error);vertices++;
                     }
-                    if(socket!=null) {
-                        var ss=sourceSocket!;var old=ss.ParentBoneIndex<0?Matrix4x4.Identity:sourceBind[ss.ParentBoneIndex];var now=bind[socket.ParentBoneIndex];
-                        if(ss.FollowAttachBone&&ss.AttachBoneIndex>=0){old*=Inverse(sourceBind[ss.AttachBoneIndex])*sourceWorld[names[sourceModel.Nodes[ss.AttachBoneIndex].Name]];now*=Inverse(bind[socket.AttachBoneIndex])*world[renderToRig[socket.AttachBoneIndex]];}
-                        foreach(var pair in new[]{(Vector3.Transform(ss.Position,old),Vector3.Transform(socket.Position,now)),(Vector3.TransformNormal(ss.Forward,old),Vector3.TransformNormal(socket.Forward,now)),(Vector3.TransformNormal(ss.Upward,old),Vector3.TransformNormal(socket.Upward,now))}) {
+                    foreach(var (ss,observedSocket) in observedSockets) {
+                        var old=ss.ParentBoneIndex<0?Matrix4x4.Identity:sourceBind[ss.ParentBoneIndex];var now=bind[observedSocket.ParentBoneIndex];
+                        if(ss.FollowAttachBone&&ss.AttachBoneIndex>=0){old*=Inverse(sourceBind[ss.AttachBoneIndex])*sourceWorld[names[sourceModel.Nodes[ss.AttachBoneIndex].Name]];now*=Inverse(bind[observedSocket.AttachBoneIndex])*world[renderToRig[observedSocket.AttachBoneIndex]];}
+                        foreach(var pair in new[]{(Vector3.Transform(ss.Position,old),Vector3.Transform(observedSocket.Position,now)),(Vector3.TransformNormal(ss.Forward,old),Vector3.TransformNormal(observedSocket.Forward,now)),(Vector3.TransformNormal(ss.Upward,old),Vector3.TransformNormal(observedSocket.Upward,now))}) {
                             float error=Vector3.Distance(pair.Item1,pair.Item2);worstSocket=Math.Max(worstSocket,error);Check(error<.003f,"Source muzzle frame changed after active-prefix sorting: "+id);
                         }
                         sockets++;
@@ -170,9 +176,10 @@ static class HollowCombatCharactersTests {
             foreach(var after in tae.Animations) {
                 Check(after.Events.All(e=>e.Group==null||after.EventGroups.Contains(e.Group)),"Serialized event references another action's group");
                 var before=originalTae.Animations.Single(a=>a.ID==after.ID);Check(before.AnimFileName==after.AnimFileName&&before.MiniHeader.Type==after.MiniHeader.Type,"Native playback alias changed");
-                if(!mappings.TryGetValue(checked((int)after.ID),out var map)||!map.Combat)Check(before.Events.Select(Event).SequenceEqual(after.Events.Select(Event)),"Unmapped/noncombat native action changed");
+                bool mapped=mappings.TryGetValue(checked((int)after.ID),out var map);
+                if(!mapped||!map!.Combat)Check(before.Events.Where(e=>!mapped||!Gun(e)).Select(Event).SequenceEqual(after.Events.Select(Event)),"Unmapped/noncombat native action changed: "+after.ID);
                 else {
-                    var retained=before.Events.Where(e=>e.Type is not(1 or 2)&&Jump(e) is not(23 or 78 or 79 or 86)).Select(Event).ToArray();Check(retained.SequenceEqual(after.Events.Take(retained.Length).Select(Event)),"Native effect/sound/physics event changed");
+                    var retained=before.Events.Where(e=>e.Type is not(1 or 2)&&Jump(e) is not(23 or 78 or 79 or 86)&&!Gun(e)).Select(Event).ToArray();Check(retained.SequenceEqual(after.Events.Take(retained.Length).Select(Event)),"Native effect/sound/physics event changed");
                     var expected=motion.Action(map.NativeID);var timeline=new NativeAnimation.Pack(bank.Files.Single(f=>f.ID==1000000000+motion.NativeMotionID(map.NativeID)).Bytes.ToArray());float duration=timeline.Float(timeline.Object("hkaSplineCompressedAnimation")+16);
                     foreach(int type in new[]{1,2}) {
                         var sourceEvents=expected.Events.Where(e=>e.Type==type).ToArray();var actual=after.Events.Where(e=>e.Type==type).ToArray();Check(actual.Length==sourceEvents.Length,"Source hit/shot multiplicity lost in final BND");

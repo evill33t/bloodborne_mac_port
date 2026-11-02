@@ -72,6 +72,15 @@ static class HellkiteTests {
         var timeActs=TAE.Read(animation.Files.Single(f=>f.ID==3000000).Bytes);
         foreach(var clip in result.Details.Clips)Check(((TAE.Animation.AnimMiniHeader.Standard)timeActs.Animations.Single(a=>a.ID==clip.Action).MiniHeader).IsLoopByDefault==(clip.SourceAction==7006),"Perch must loop in both native behavior banks");
         Check(timeActs.Animations.Where(a=>!result.Details.Clips.Any(c=>c.Action==a.ID)).All(a=>a.Events.Count==0&&a.EventGroups.Count==0),"Unrelated donor action effects survived in the cinematic wrapper");
+        var character=BND4.Read(result.Files["chr/c8960.chrbnd.dcx"]);var model=FLVER2.Read(character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver")).Bytes);
+        foreach(int id in new[]{3,4,7})Check(model.Nodes[model.Dummies.Single(d=>d.ReferenceID==id).AttachBoneIndex].Name.StartsWith("DS1_"),"Camera shake follows a native donor body part");
+        var sourceTimeActs=TAE.Read(BND3.Read(Source("chr/c3430.anibnd.dcx")!).Files.Single(f=>TAE.Is(f.Bytes.ToArray())).Bytes);
+        foreach(var clip in result.Details.Clips) {
+            var cues=timeActs.Animations.Single(a=>a.ID==clip.Action).Events.Where(e=>e.Type==144).ToArray();var feedback=timeActs.Animations.Single(a=>a.ID==clip.Action).Events.Where(e=>e.Type==195).ToArray();
+            var expected=sourceTimeActs.Animations.Single(a=>a.ID==clip.SourceAction).Events.Where(e=>e.Type==144).ToArray();
+            Check(cues.Length==(clip.SourceAction==7005?5:clip.SourceAction==7012?1:0)&&cues.Length==feedback.Length&&cues.Length==expected.Length,"Source camera cue coverage lost");
+            for(int i=0;i<cues.Length;i++)Check(cues[i].GetParameterBytes(false).AsSpan(0,12).SequenceEqual(expected[i].GetParameterBytes(false))&&cues[i].StartTime>=0&&cues[i].EndTime<=clip.Duration&&feedback[i].StartTime<=cues[i].StartTime&&feedback[i].EndTime>=cues[i].EndTime,"Camera falloff, attachment or blur timing changed");
+        }
         foreach(var binding in result.Details.Clips) {
             var bytes=animation.Files.Single(f=>f.ID==1000000000+binding.Action).Bytes.ToArray();var pack=new NativeAnimation.Pack(bytes);int a=pack.Object("hkaSplineCompressedAnimation"),frame=pack.Object("hkaDefaultAnimatedReferenceFrame");
             Check(Math.Abs(pack.Float(a+16)-binding.Duration)<.00001f&&pack.Int(a+20)==242&&pack.Int(a+56)==binding.Frames,"Native duration/dimensions changed");var data=pack.Array(a+152,1,64*1024*1024);var root=pack.Array(frame+56,16,1024);
