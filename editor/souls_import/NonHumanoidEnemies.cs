@@ -36,6 +36,7 @@ internal static class NonHumanoidEnemies {
         model.Nodes=order.Select(i=>original[i]).ToList();int active=model.Nodes.Count(Active);
         foreach(var dummy in model.Dummies){dummy.ParentBoneIndex=Link(dummy.ParentBoneIndex);dummy.AttachBoneIndex=Link(dummy.AttachBoneIndex);}
         foreach(var mesh in model.Meshes) {
+            int maximumBone=mesh.UseBoneWeights?SkinRetarget.MaximumBoneIndex(model,mesh):ushort.MaxValue;
             mesh.NodeIndex=Remap(mesh.NodeIndex);
             if(mesh.BoneIndices.Count>0)mesh.BoneIndices=mesh.BoneIndices.Select(Remap).ToList();
             else foreach(var vertex in mesh.Vertices) {
@@ -45,7 +46,7 @@ internal static class NonHumanoidEnemies {
             foreach(var vertex in mesh.Vertices)for(int i=0;i<(mesh.UseBoneWeights?4:1);i++) {
                 if(mesh.UseBoneWeights&&vertex.BoneWeights[i]==0)continue;
                 int bone=SkinRetarget.Bone(mesh,mesh.UseBoneWeights?vertex.BoneIndices[i]:vertex.NormalW);
-                if(bone<0||bone>=active||bone>255)throw new InvalidDataException("Nonhumanoid skin references an inactive or unencodable render node");
+                if(bone<0||bone>=active||bone>maximumBone)throw new InvalidDataException("Nonhumanoid skin references an inactive or unencodable render node");
             }
         }
         var after=SkinRetarget.World(model.Nodes);

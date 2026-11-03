@@ -45,13 +45,13 @@ internal static class NativeRigAppend {
     }
     internal static Plan Create(byte[] nativeModel,byte[] skeleton,IReadOnlyList<Bone> added) {
         var rig=NativeAnimation.Skeleton(skeleton);int original=rig.Names.Length,total=original+added.Count;
-        if(added.Count==0||total>256||rig.Names[0]!="Master"||rig.Parents[0]!=-1)throw new InvalidDataException("Unsupported native rig append population");
+        if(added.Count==0||total>512||rig.Names[0]!="Master"||rig.Parents[0]!=-1)throw new InvalidDataException("Unsupported native rig append population");
         var names=rig.Names.ToHashSet(StringComparer.Ordinal);
         for(int i=0;i<added.Count;i++)if(!names.Add(added[i].Name)||string.IsNullOrEmpty(added[i].Name)||added[i].Name.Length>128||added[i].Name.Any(char.IsControl)||added[i].Parent<0||added[i].Parent>=original+i||added[i].Bind.ParentIndex>=original+i||added[i].Bind.ParentIndex< -1)
             throw new InvalidDataException("Invalid appended bone name/parent/order");
         var edit=new Edit(skeleton);var p=edit.Pack;int obj=p.Object("hkaSkeleton");
         if(p.Array(obj+120,8,16).Count!=0)throw new InvalidDataException("Partitioned native skeleton append is unsupported");
-        var bones=p.Array(obj+40,16,256);var parents=p.Array(obj+24,2,256);var reference=p.Array(obj+56,48,256);
+        var bones=p.Array(obj+40,16,512);var parents=p.Array(obj+24,2,512);var reference=p.Array(obj+56,48,512);
         var boneBytes=skeleton.AsSpan(p.Data+bones.At,bones.Count*16).ToArray().Concat(new byte[added.Count*16]).ToArray();
         int newBones=edit.Array(obj+40,total,boneBytes);
         for(int i=0;i<original;i++)edit.Pointer(newBones+i*16,p.Pointer(bones.At+i*16));
@@ -106,7 +106,7 @@ internal static class NativeRigAppend {
         int blend=input[p.Data+b+80];
         if(tracks!=n||p.Int(a+24)!=0||p.Int(a+68)!=n*4||blockFrames!=256||frames<2||frames>65536||blocks!=(frames-2)/255+1||blend>1||p.String(b+16)!=plan.Original.Name||p.Array(a+120,4,256).Count!=0||p.Array(a+136,4,256).Count!=0)
             throw new InvalidDataException("Unsupported native spline append contract");
-        var binding=p.Array(b+32,2,256);if(binding.Count!=n||Enumerable.Range(0,n).Any(i=>p.Short(binding.At+i*2)!=i))throw new InvalidDataException("Native bone bindings are not identity ordered");
+        var binding=p.Array(b+32,2,512);if(binding.Count!=n||Enumerable.Range(0,n).Any(i=>p.Short(binding.At+i*2)!=i))throw new InvalidDataException("Native bone bindings are not identity ordered");
         var data=p.Array(a+152,1,64*1024*1024);var starts=p.Array(a+88,4,256);var ends=p.Array(a+104,4,256);
         if(starts.Count!=blocks||ends.Count!=blocks||p.Int(starts.At)!=0)throw new InvalidDataException("Invalid native spline block table");
         using var stream=new MemoryStream();var newStarts=new List<int>();var newEnds=new List<int>();

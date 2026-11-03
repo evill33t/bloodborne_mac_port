@@ -159,6 +159,11 @@ internal static class SkinRetarget {
         if(mesh is FLVER2.Mesh f){if(f.BoneIndices.Count==0)return index;if(index<0 || index>=f.BoneIndices.Count)throw new InvalidDataException("Invalid mesh bone palette index");return f.BoneIndices[index];}
         var palette=((FLVER0.Mesh)mesh).BoneIndices;if(palette.Length==0)return index;if(index<0 || index>=palette.Length)throw new InvalidDataException("Invalid mesh bone palette index");return palette[index];
     }
+    internal static int MaximumBoneIndex(FLVER2 model,FLVER2.Mesh mesh) {
+        var layouts=mesh.VertexBuffers.SelectMany(b=>model.BufferLayouts[b.LayoutIndex]).Where(m=>m.Semantic==FLVER.LayoutSemantic.BoneIndices).ToArray();
+        if(layouts.Length!=1)throw new InvalidDataException("The native skin template has ambiguous bone indices: "+string.Join(",",mesh.VertexBuffers.SelectMany(b=>model.BufferLayouts[b.LayoutIndex]).Select(m=>m.Semantic+":"+m.Type)));
+        return layouts[0].Type switch {FLVER.LayoutType.UByte4=>byte.MaxValue,FLVER.LayoutType.UShort4=>ushort.MaxValue,_=>throw new InvalidDataException("Unsupported native skin bone-index layout")};
+    }
     // Fit a whole bone segment, including its distal joint. A rigid bind-pose
     // delta aligns only the proximal joint and tears differently weighted skin
     // when the two skeletons have different limb lengths.
@@ -170,11 +175,14 @@ internal static class SkinRetarget {
         float s=ratio-1;var stretch=new Matrix4x4(1+s*u.X*u.X,s*u.X*u.Y,s*u.X*u.Z,0,s*u.Y*u.X,1+s*u.Y*u.Y,s*u.Y*u.Z,0,s*u.Z*u.X,s*u.Z*u.Y,1+s*u.Z*u.Z,0,0,0,0,1);
         return rigid*Matrix4x4.CreateTranslation(-targetStart)*stretch*Matrix4x4.CreateFromQuaternion(rotation)*Matrix4x4.CreateTranslation(targetStart);
     }
-    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveBoneLengths=false,IReadOnlyDictionary<int,string>? rigidMeshAnchors=null,IReadOnlyDictionary<string,Matrix4x4>? equipmentMounts=null){
+    internal static SkinBake Bake(Memory<byte> sourceBytes,Memory<byte> nativeBytes,IReadOnlyList<TPF.Texture> textures,IReadOnlySet<int>? masks=null,IReadOnlyDictionary<string,string>? overrides=null,string textureOwner="c9998",string? sourceProfile=null,bool fitSegments=false,bool allowLargeHumanoid=false,bool preserveSourceDimensions=false,bool preserveBoneLengths=false,IReadOnlyDictionary<int,string>? rigidMeshAnchors=null,IReadOnlyDictionary<string,Matrix4x4>? equipmentMounts=null,bool playerArmor=false){
         if(!Regex.IsMatch(textureOwner,@"\Ac\d{4,5}\z"))throw new ArgumentException("Invalid texture owner");
         string OwnedTexture(string name)=>textureOwner+"_import_"+name;
         IFlver source=FLVER2.Is(sourceBytes.ToArray())?FLVER2.Read(sourceBytes):FLVER0.Is(sourceBytes.ToArray())?FLVER0.Read(sourceBytes):throw new InvalidDataException("Unsupported source FLVER");
         var native=FLVER2.Read(nativeBytes);if(native.Header.Version is not(0x20013 or 0x20014) || native.Header.BigEndian)throw new InvalidDataException("Choose a Bloodborne template FLVER");
+        bool Supported(string mtd)=>playerArmor?Leaf(mtd).Equals("P[ARSN].mtd",StringComparison.OrdinalIgnoreCase):mtd.EndsWith("C[ARSN].mtd",StringComparison.OrdinalIgnoreCase);
+        var template=native.Meshes.FirstOrDefault(m=>m.UseBoneWeights&&Supported(native.Materials[m.MaterialIndex].MTD))??throw new InvalidDataException("The native template has no supported "+(playerArmor?"player armor":"skinned C[ARSN]")+" material");
+        int maximumBone=MaximumBoneIndex(native,template);
         if(source.Meshes.Count>10000 || source.Meshes.Sum(m=>(long)m.Vertices.Count)>VertexLimit)throw new InvalidDataException("Source character exceeds the mesh budget");
         var rigidAnchors=new Dictionary<int,int>();
         if(rigidMeshAnchors!=null) {
@@ -232,7 +240,7 @@ internal static class SkinRetarget {
         var endpoints=new Dictionary<string,string>{{"pelvis","spine"},{"spine","spine1"},{"spine1","neck"},{"neck","head"}};
         foreach(string side in new[]{"l","r"})foreach(var (start,end) in new[]{("clavicle","upperarm"),("upperarm","forearm"),("forearm","hand"),("foretwist","hand"),("thigh","calf"),("calf","foot"),("calftwist","foot"),("foot","toe0"),("finger0","finger01"),("finger1","finger11"),("finger2","finger21")})endpoints.Add(side+start,side+end);
         int Target(int i){
-            var target=Match(i);if(target>255)throw new InvalidDataException("Destination bone index exceeds the template's byte layout");
+            var target=Match(i);if(target>maximumBone)throw new InvalidDataException("Destination bone index exceeds the template's actual vertex layout");
             if(!ready[i]){
                 int anchor=bindSource[i];var mount=Matrix4x4.Identity;bool authoredMount=equipmentMounts?.TryGetValue(source.Nodes[i].Name,out mount)==true;
                 if(authoredMount) {
@@ -244,7 +252,6 @@ internal static class SkinRetarget {
                 if(!Matrix4x4.Invert(changed[i],out var inv))throw new InvalidDataException("Singular retarget transform");normals[i]=Matrix4x4.Transpose(inv);ready[i]=true;
             }return target;
         }
-        var template=native.Meshes.FirstOrDefault(m=>m.UseBoneWeights && native.Materials[m.MaterialIndex].MTD.EndsWith("C[ARSN].mtd",StringComparison.OrdinalIgnoreCase))??throw new InvalidDataException("The native template has no supported skinned C[ARSN] material");
         var material=native.Materials[template.MaterialIndex];var buffers=template.VertexBuffers.Select(b=>new FLVER2.VertexBuffer(b.LayoutIndex){BufferIndex=b.BufferIndex}).ToArray();
         var textureSource=textures.GroupBy(t=>t.Name,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.OrdinalIgnoreCase);var used=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var normalTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var colorTextures=new HashSet<string>(StringComparer.OrdinalIgnoreCase);var fallbacks=new List<string>();
         bool packedShininess=sourceProfile is "DS1R" or "DS2" or "DS2S";

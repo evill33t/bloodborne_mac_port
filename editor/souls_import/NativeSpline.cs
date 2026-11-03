@@ -8,7 +8,9 @@ using System.Text;
 // THREECOMP40 quaternion and sixteen-bit translation/scale quantization profile.
 internal static class NativeSpline {
     internal static byte[] Encode(IReadOnlyList<Matrix4x4> samples,int trackCount,int frameCount,float frameDuration,string skeletonName,IReadOnlyList<string> trackNames,bool allowMirroredScale=false,IReadOnlySet<int>? allowZeroScaleTracks=null) {
-        if(trackCount is <1 or >256||frameCount is <2 or >256||samples.Count!=trackCount*frameCount||
+        // Transform bindings are signed16, independent of byte-sized frame
+        // knots. The Hydra append needs more than256 tracks.
+        if(trackCount is <1 or >512||frameCount is <2 or >256||samples.Count!=trackCount*frameCount||
             !float.IsFinite(frameDuration)||frameDuration is <.00001f or >1||string.IsNullOrEmpty(skeletonName)||skeletonName.Length>128||skeletonName.Any(char.IsControl)||
             trackNames.Count!=trackCount||trackNames.Any(n=>string.IsNullOrEmpty(n)||n.Length>256||n.Any(char.IsControl))||trackNames.Distinct(StringComparer.Ordinal).Count()!=trackCount)
             throw new InvalidDataException("Native spline dimensions, timing or skeleton name are invalid");

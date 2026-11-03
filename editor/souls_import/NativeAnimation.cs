@@ -57,7 +57,7 @@ internal static class NativeAnimation {
         for(int i=0;i<local.Count;i++)At(i);return output;
     }
     internal static Rig Skeleton(byte[] bytes,bool allowMirroredScale=false) {
-        var p=new Pack(bytes);int obj=p.Object("hkaSkeleton");var bones=p.Array(obj+40,16,256);var parents=p.Array(obj+24,2,256);var poses=p.Array(obj+56,48,256);
+        var p=new Pack(bytes);int obj=p.Object("hkaSkeleton");var bones=p.Array(obj+40,16,512);var parents=p.Array(obj+24,2,512);var poses=p.Array(obj+56,48,512);
         if(bones.Count<1||bones.Count!=parents.Count||bones.Count!=poses.Count)throw new InvalidDataException("Native animation skeleton arrays disagree");
         var names=new string[bones.Count];var parent=new int[bones.Count];var local=new Matrix4x4[bones.Count];
         for(int i=0;i<names.Length;i++){names[i]=p.String(bones.At+i*16);parent[i]=p.Short(parents.At+i*2);if(parent[i]<-1||parent[i]>=names.Length)throw new InvalidDataException("Invalid native animation parent");local[i]=p.Transform(poses.At+i*48,allowMirroredScale);}

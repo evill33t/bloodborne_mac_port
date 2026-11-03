@@ -57,6 +57,7 @@ internal static class MapNpcQuestState {
         var flags=Enumerable.Range(1000,890).Where(f=>!MapQuestState.Flags.ContainsKey(f)).ToDictionary(f=>f,f=>52601100+f-1000);
         int[] dialogue=[11010590,11010591,11010594,71010050,71010051,71010052,71010053,71010054,71010055,71010056,71010057,71010058];
         for(int i=0;i<dialogue.Length;i++)flags.Add(dialogue[i],52411100+i);
+        flags.Add(11010860,52411112); // Havel: append-only persistent death.
         return flags;
     }
     internal static int Flag(int source)=>MapQuestState.Flags.TryGetValue(source,out int old)?old:Flags.TryGetValue(source,out int owned)?owned:throw new NotSupportedException("Unreserved source NPC flag: "+source);

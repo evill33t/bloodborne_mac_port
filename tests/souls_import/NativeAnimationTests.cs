@@ -63,6 +63,10 @@ for(int frame=0;frame<quaternionFixture.Length;++frame)QuantizedTransform(quater
 var maximumFixture=Enumerable.Repeat(Matrix4x4.Identity,256).ToArray();var maximumPack=new RawPack(NativeSpline.Encode(maximumFixture,1,256,.01f,"FixtureSkeleton",["Master"]));
 Assert(maximumPack.Pose(maximumPack.Animation(256,1),255)[0]==Matrix4x4.Identity,"Native spline cannot encode its maximum byte knot endpoint");
 Reject(()=>NativeSpline.Encode(maximumFixture,1,257,.01f,"FixtureSkeleton",["Master"]),"multiple blocks beyond verified encoder scope");
+var wideNames=Enumerable.Range(0,512).Select(i=>"Bone"+i).ToArray();var wideSamples=Enumerable.Repeat(Matrix4x4.Identity,1024).ToArray();
+var widePack=new RawPack(NativeSpline.Encode(wideSamples,512,2,.01f,"WideSkeleton",wideNames));var wideClip=widePack.Animation(2,512);
+Assert(widePack.Binding("WideSkeleton",wideClip.Object,512)&&widePack.TrackNames(wideClip.Object).SequenceEqual(wideNames)&&widePack.Pose(wideClip,1)[511]==Matrix4x4.Identity,"Sixteen-bit transform bindings truncated above255 tracks");
+Reject(()=>NativeSpline.Encode(Enumerable.Repeat(Matrix4x4.Identity,1026).ToArray(),513,2,.01f,"WideSkeleton",Enumerable.Range(0,513).Select(i=>"Bone"+i).ToArray()),"track allocation above bounded512-track scope");
 Reject(()=>NativeSpline.Encode(sampledFixture,0,3,.01f,"FixtureSkeleton",[]),"zero transform tracks");
 Reject(()=>NativeSpline.Encode(sampledFixture,2,3,float.NaN,"FixtureSkeleton",["Root","Detail"]),"non-finite spline duration");
 Reject(()=>NativeSpline.Encode(sampledFixture,2,3,.01f,"FixtureSkeleton",["Root"]),"missing native track names");
@@ -234,7 +238,7 @@ sealed class RawPack {
     internal (int Type,float Duration,int Tracks,int FloatTracks) Header(){int obj=Objects["hkaSplineCompressedAnimation"];return(I(Data+obj+12),F(Data+obj+16),I(Data+obj+20),I(Data+obj+24));}
     internal (int Frames,int MaximumFrames,float FrameDuration,float BlockDuration,float Inverse) Timing(){int obj=Objects["hkaSplineCompressedAnimation"];return(I(Data+obj+56),I(Data+obj+64),F(Data+obj+80),F(Data+obj+72),F(Data+obj+76));}
     internal string[] TrackNames(int animation) {
-        var annotations=Array(animation+40,24,256);var names=new string[annotations.Count];
+        var annotations=Array(animation+40,24,512);var names=new string[annotations.Count];
         for(int i=0;i<names.Length;++i){int at=annotations.At+i*24;names[i]=Text(Data+Pointer(at));Check(Array(at+8,16,256).Count==0,"Unexpected named annotation events");}
         return names;
     }
@@ -317,7 +321,7 @@ sealed class RawPack {
         return result;
     }
     internal bool Binding(string skeletonName,int animation,int bones) {
-        int b=Objects["hkaAnimationBinding"];var map=Array(b+32,2,256);
+        int b=Objects["hkaAnimationBinding"];var map=Array(b+32,2,512);
         Check(Text(Data+Pointer(b+16))==skeletonName&&Reference(b+24)==animation&&map.Count==bones&&bytes[Data+b+80]==0,"Invalid native animation binding");
         for(int i=0;i<bones;++i)Check(S(Data+map.At+i*2)==i,"Native animation bindings are not identity bone order");
         Check(Array(b+48,2,256).Count==0&&Array(b+64,2,256).Count==0,"Unexpected native float or partition bindings");

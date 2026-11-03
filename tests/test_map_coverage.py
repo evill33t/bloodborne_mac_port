@@ -29,6 +29,16 @@ class CoverageTests(unittest.TestCase):
     def test_old_inventory_does_not_look_complete(self):
         self.assertFalse(audit_map({"actors": []}, {})["complete"])
 
+    def test_havel_combat_report_keeps_quest_unverified(self):
+        plan = {"map": "m10_01_00_00", "actors": [{"Name": "c0000_0010", "ModelName": "c0000", "kind": "Enemy",
+                "values": {"EntityID": 6580, "CharaInitID": 6580, "TalkID": -1}}],
+                "objects": [], "treasures": [], "eventPrograms": []}
+        result = audit_map(plan, {"havel": {"SourceName": "c0000_0010"}})
+        self.assertEqual(result["missingRuntimeActors"], 0)
+        self.assertEqual(result["actors"][0]["target"], "c0000")
+        self.assertEqual(result["actors"][0]["quest"], "unverified")
+        self.assertFalse(result["complete"])
+
     def test_cave_slice_does_not_claim_the_abyss_or_new_londo(self):
         plan = {"map": "m16_00_00_00", "actors": [{"Name": "four-kings", "ModelName": "c5390", "kind": "Enemy", "values": {}}],
                 "treasures": [], "eventPrograms": [], "objects": [

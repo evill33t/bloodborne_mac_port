@@ -12,6 +12,9 @@ def audit_map(plan, converted, travel=()):
         return {"map": plan.get("map"), "status": "inventory-incomplete", "complete": False}
     spawned = {p["SourceName"]: p for p in (converted.get("enemySpawns") or {}).get("Spawns", [])}
     characters = {p["SourceName"]: p for p in converted.get("characters") or [] if p.get("TargetModel")}
+    if converted.get("havel"):
+        havel = converted["havel"]
+        characters[havel["SourceName"]] = {"TargetModel": "c0000"}
     merchant_reports = converted.get("merchants") or []
     if isinstance(merchant_reports, dict):
         merchant_reports = merchant_reports.get("Reports", [])
