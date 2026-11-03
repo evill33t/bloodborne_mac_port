@@ -2810,3 +2810,35 @@ hook/whole-set verifier pass. The verifier covers the movie prologue and its
 disable switch; the ARM64 fallback compiles with warnings as errors. Shell syntax
 and `git diff --check` pass. This revision has no new gameplay or performance
 measurement; the maintainer's reported benchmark is separate review evidence.
+
+## 2026-11-02: issue triage (#128 Gherman, #117 cost, #109 blur, #125-#127 pipelines)
+
+M4 Max, macOS 27, master 50274ee, scratch data dir with the reporters' saves, 1080p, upscaler off.
+
+- **#128 (Gherman invisible): the original game's behaviour, not the port** (owner). The attached
+  save shows it here too (Hunter's Dream workshop, the chair by the teapot table empty, the Talk
+  prompt still there), the same at 30 FPS with no FPS patch, with no skipped draws, rejected
+  pipelines or render guard lines. The `parts/lg_a_9700(_l)` and `parts/wp_a_6010` "not found"
+  opens are not in the 1.09 dvdroot either (`am/bd/hd_a_9700` are), so they happen on a PS4 too.
+- **"vertex attribute 0 format Undefined" (108 pipelines, #125/#126/#127):** the V# of attribute 0
+  has data format 0 (invalid) when the key is made (`vk_pipeline_cache.cpp` RefreshGraphicsKey →
+  `SurfaceFormat` → `eUndefined`). Most come from the pipeline-cache preload in the first second.
+  Never seen in our logs (0 in this run too, nor in the user's last five sessions), so it is
+  specific to those caches or setups. An invalid V# reads zeros on GCN, so a position stream of
+  zeros draws nothing there as well: skipping is probably equivalent, and these are not the
+  cause of the default face in #125 (sliders and the kept face work on our copy, owner test).
+- **#117 cost (MetalFX Quality 2560x1440, Hunter's Dream, cap 60):** first single runs looked
+  equal (startup patch 8.4-9.4, live path 8.6-9.0 ms/frame GPU), but two back-to-back pairs on the
+  merged tree put the live path behind in both: 11.4-11.8 vs 9.2-9.7 and 7.9-8.1 vs 7.5-7.6
+  ms/frame (old path selected with `BB_RENDER_RES=1706x960`), so ~5-20%. The Mac was on battery,
+  hence the spread between pairs. Expected: on the live path the game's post-processing runs at
+  1920x1080 (27% more pixels than 1706x960) and scene targets are resolved back. Worst frames the
+  same (18-24 ms). The owner held #117 (MACOS_BACKLOG, Stability).
+- **#109 (blurry until restart):** the screenshot (M2 16 GB, 1280x720, upscaler off, cap 30) is a
+  motion-blur smear over a still scene: the game's velocity input is wrong, not the scaling. Two
+  "Failed to find exact image match for copy addr=0x70f1ee0000, size=0x10000" warnings, one 37 s
+  before the screenshot. Not reproduced.
+- **#121 (black screen from the start):** the hang watchdog only counted after the first flip,
+  so a game that never flips ran until killed (1 min 47 s in the report). It now stops after
+  `BB_HANG_FIRST_SECONDS` (180) with a thread dump. A normal start flips within 3 s of the
+  watchdog starting (`BB_HANG_FIRST_SECONDS=3` did not trip).
