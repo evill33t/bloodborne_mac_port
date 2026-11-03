@@ -1133,9 +1133,10 @@ Most Darkroot/Catacombs mobs, conditional populations, complete NPC quests and
 mechanisms still require explicit adapters. Twelve ordinary Darkroot foliage
 placements now have the bounded combat adapter described below. Hydra's body and seven
 heads require a different rig/part strategy; a single donor reskin cannot preserve
-its source encounter. The current importer has a 256-bone append guard; native
-Bloodborne assets include larger rigs with 16-bit vertex bone indices, so this is
-an importer limitation rather than a proven engine limit. Source severing,
+its source encounter. The importer now supports up to 512 bones/tracks with
+checks against the actual native vertex index layout. A 356-bone Hydra fixture
+roundtrips its weighted indices and sampled poses, but does not spawn a playable
+Hydra. Source severing,
 projectiles and quest behavior still need explicit conversion. Expanded lamp
 checks cover native activation of all ten lamps, their gated headstone entries,
 and persistence of all ten unlocks across a normal save and fresh process.
@@ -1686,3 +1687,30 @@ A copied enemy snapped to static collision was exported and loaded in the game o
 save. Original and copy remained at 150 HP and moved under game AI during a nine-second live
 observation. The test used native lamp travel and player-only placement to bring them within loading
 range; it never wrote enemy transforms, health or AI.
+
+## Havel conversion checkpoint
+
+The additional DS1R Burg import now includes Havel in his source tower position,
+with source armor, Dragon Tooth, Greatshield, and an adapted source battle goal.
+Owned player-NPC motion banks supply 57 source attack, guard and movement clips;
+other actions retain explicit native fallbacks. This shares the native `c0000`
+controller while preserving the hunter's existing animation entries.
+
+A fresh five-area export passed copied-save combat: Havel pursued and attacked,
+took damage from normal pad attacks, died at zero HP, awarded 3000 Blood Echoes,
+and remained disabled after Dream travel, returning, a normal save, and a fresh
+process. The diagnostic run used
+player no-death protection and read-only enemy observers; enemy health and quest
+flags were never set by the test controls. All 16 manual save/settings hashes
+remained unchanged. The armor fixture also checks every weighted bind against
+the native body, including newly activated joints whose donor binds were placeholders.
+
+This is a bounded combat adapter. Grip transitions, charge preparation, shield
+bash, paired critical attacks, native physics/damage balance, keyed tower doors
+and the excluded equipment reward remain incomplete or approximate. Coverage
+continues to mark his quest unverified and the campaign partial.
+
+Hydra now has a checked source physics reader for all 97 capsules, 96 constraints,
+the two skeleton mappings and seven severing-event identities. The source-only
+fixture checks original joint pivots and head ownership, and rejects malformed
+profiles. It does not emit native physics or spawn Hydra in the game.

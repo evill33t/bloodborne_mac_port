@@ -400,3 +400,68 @@ that bank. Its separate file callback can reject filenames before a filesystem
 request, depending on the native loader configuration and allow-list. Validate
 actual file requests, finite speech completion and captured game audio rather
 than treating subtitle display or FEV readback as playback proof.
+
+## Player-class enemies: Havel bridge
+
+Player NPCs use the shared native `c0000` controller. Havel therefore reserves
+weapon bank 185 and hold banks 85/86, with owned equipment/parameter rows,
+rather than replacing the hunter's existing motions. Native custom selectors
+need explicit clip children and Character animation-name bindings. Preserve
+original child indexes and their no-match fallback when appending those names.
+Native event aliases and physical HKX aliases must be resolved separately.
+
+The native player loader reads a fixed fourteen-path animation archive table
+(`0x532fd60`, loop `0x18dfe42..0x18dfea0` in the checked executable). Extra TXT
+declarations do not extend this table. Owned clips are appended to the existing
+`c0000_a8x.anibnd.dcx` and `c0000_a9x.anibnd.dcx`; all retail members remain
+unchanged. Opening those archives in game establishes resource reachability,
+not that every converted action has played successfully.
+
+Native CharaInit equipment fields reference `WeaponGenParam`, whose rows then
+reference `EquipParamWeapon`. Creating only the latter leaves the weapon models
+unrequested. Player armor and rigid weapons also require their actual native
+`P[ARSN]` and `P[Weapon]_[ARSN]_NoCM` contracts, including low-detail part paths.
+An enemy `C[ARSN]` material is insufficient for a player part.
+
+Retail apparel can have disabled, disconnected placeholder joints with names
+matching real player joints. Before weighting one, reconstruct its bind from
+the named native body joint; enabling it alone deforms the imported mesh.
+Retain each part's hierarchy, validate its authored weighted binds against the
+body, and remap all references when moving enabled joints into the active prefix.
+The Havel fixture checks every exported weighted bind within 0.001 of the native
+body, including the native leg part's small authored differences.
+
+Source Havel uses logic 10000. Native logic 12000 schedules a left-slot equipment
+switch before generic battle setup while the primary shield is equipped; this
+is unsuitable for his single-slot loadout. Use native generic logic 10000 and
+the adapted source battle goal. Preserve verified source/native helper contracts
+instead of rewriting numeric literals throughout shared helpers.
+
+The bounded copied-save v20 smoke verified movement and exchanged damage,
+with Havel the only observed enemy within six metres at the player damage
+transition. The fresh v21 export includes the corrected armor binds. Standard
+pad attacks reduced Havel from 1034 HP to zero, awarded 3000 Blood Echoes, and
+set the owned death flag. After Dream travel and returning, then a normal save
+and fresh process, he remained disabled.
+Tests used a diagnostic player no-death floor and never wrote enemy health or
+quest flags. Complete action parity, keyed doors, and quests remain unverified.
+
+## Large character rig boundary
+
+The animation and appended-rig codecs support up to 512 tracks/bones when the
+actual render template has a sufficient index layout. Do not infer an 8-bit
+index limit from a different native template. The large-rig fixture retains
+Hydra's 246 source bones plus 110 native controller bones and independently
+checks weighted indices above 255 and spline poses. Its single-block frame
+limit remains 256. This establishes serialization support, not Hydra combat:
+source hurtboxes, severed heads, projectiles, and quest events need dedicated
+adapters rather than native donor hitbox approximations.
+
+`HydraPhysicsSource` reads the dedicated source profile: 97 capsules, 95 plain
+hinges plus one ragdoll joint, both 246/97-bone mappings, and seven event-owned
+head branches. The source's all-zero extracted-motion QS is absent data, not
+an identity pose. All capsule collision filters are zero; the 28 head capsules
+are identified through PWV records and checked against the severing events.
+The remaining 69 capsules have no head-part ownership. Preserve the PWV fields
+whose meanings remain unknown. This reader emits no native physics or PWV;
+their layouts and the source plain-hinge atoms require explicit translation.
