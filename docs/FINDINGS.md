@@ -2842,3 +2842,15 @@ M4 Max, macOS 27, master 50274ee, scratch data dir with the reporters' saves, 10
   so a game that never flips ran until killed (1 min 47 s in the report). It now stops after
   `BB_HANG_FIRST_SECONDS` (180) with a thread dump. A normal start flips within 3 s of the
   watchdog starting (`BB_HANG_FIRST_SECONDS=3` did not trip).
+
+## 2026-11-03: native menu PR #76 rebased onto current master
+
+Rebased onto `a88dd8a` while preserving upstream mouse-wheel/vertical/menu-combo
+settings, guest-memory refresh, startup watchdog and render guards. Display choices
+from configuration are recomputed on restart while explicit overrides survive.
+Standalone shared protocol 12 distinguishes the current native-menu layout from previously
+published incompatible layouts; the combined dev layout uses protocol 13. Rebuild game and native GPU binaries together.
+Both GPU architectures, runtime/hosts and launcher build; 64 Python tests, native
+settings/menu hooks, restart/display checks, cross-architecture rings, production
+GPU split and the Metal overlay (normal and API validation) pass. No gameplay or
+packaged-app check was repeated. Details: [NATIVE_MAC_SETTINGS.md](NATIVE_MAC_SETTINGS.md#upstream-rebase-3-november-2026).

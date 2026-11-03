@@ -94,11 +94,12 @@ int main() {
     // Keep the user's unsupported provider and every unowned launcher key and the shared framegen preference.
     Write(config, "upscaler=fsr411\npreset=0\nfps_cap=40\ngame_timing=variable\nfullscreen=1\n"
                   "metal_hud=1\ntexture_compression=0\nfsr4_invert_jitter=1\n"
-                  "mouse_look=1\nmouse_sensitivity=2.25\nmouse_invert_y=1\n"
+                  "mouse_look=1\nmouse_sensitivity=2.25\nmouse_vertical=1.75\nmouse_invert_y=1\npad_menu_combo=0\n"
                   "future_launcher=leave me alone\nframegen=1\nframegen_multiplier=3\n");
     BbSettings::Load();
     assert(BbSettings::Get().mouse_look && BbSettings::Get().mouse_sensitivity == 2.25f &&
-           BbSettings::Get().mouse_invert_y);
+           BbSettings::Get().mouse_invert_y && BbSettings::Get().mouse_vertical == 1.75f &&
+           !BbSettings::Get().pad_menu_combo);
     BbSettings::ConfigureUpscalerSupport(true, false);
     assert(Get(BBMAC_UPSCALER) == BbSettings::UpscalerFsr411);
     assert(BbSettings::Get().upscaler == BbSettings::UpscalerMetalFx);
@@ -182,7 +183,8 @@ int main() {
     assert(Count(text, "fullscreen=1") == 1 && Count(text, "metal_hud=1") == 1);
     assert(Count(text, "texture_compression=0") == 1);
     assert(Count(text, "mouse_look=1") == 1 && Count(text, "mouse_sensitivity=2.25") == 1);
-    assert(Count(text, "mouse_invert_y=1") == 1);
+    assert(Count(text, "mouse_invert_y=1") == 1 && Count(text, "mouse_vertical=1.75") == 1);
+    assert(Count(text, "pad_menu_combo=0") == 1);
     assert(Count(text, "future_launcher=leave me alone") == 1 && Count(text, "framegen=1") == 1);
     BbSettings::Load();
     BbSettings::ConfigureUpscalerSupport(true, true);
@@ -191,7 +193,8 @@ int main() {
     assert(Get(BBMAC_FULLSCREEN) == 1 && Get(BBMAC_METAL_HUD) == 1);
     assert(Get(BBMAC_TEXTURE_COMPRESSION) == 0 && Get(BBMAC_RESTART_NEEDED) == 0);
     assert(BbSettings::Get().mouse_look && BbSettings::Get().mouse_sensitivity == 2.25f &&
-           BbSettings::Get().mouse_invert_y);
+           BbSettings::Get().mouse_invert_y && BbSettings::Get().mouse_vertical == 1.75f &&
+           !BbSettings::Get().pad_menu_combo);
 
     // Adaptive from the launcher survives unrelated overlay/native saves and reloads.
     assert(Set(BBMAC_GAME_TIMING, 2) && Get(BBMAC_RESTART_NEEDED) == 1);

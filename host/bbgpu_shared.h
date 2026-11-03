@@ -36,7 +36,7 @@
 #define BBGPU_GUEST_MAX UINT64_C(0xfc00000000)
 
 #define BBGPU_SHARED_MAGIC 0x31424742u /* "BGB1" */
-#define BBGPU_SHARED_VERSION 11u /* Combined trophies, native Mac Settings, mouse wheel and co-op records. */
+#define BBGPU_SHARED_VERSION 13u /* Combined trophies, native Mac Settings, mouse wheel and co-op; distinct from standalone native-menu v12. */
 #define BBGPU_CONTROL_SIZE (UINT64_C(4) << 20) /* control block and rings */
 /* Command buffer copies (game side, at submit; the host parses these): the game may rewrite its
  * command buffers once the submit returns, before the host has parsed them. */
