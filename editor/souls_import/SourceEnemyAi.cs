@@ -55,6 +55,7 @@ internal static class SourceEnemyAi {
         // native goals must not supply values to these source-only globals.
         var strings=Lua50.All(root).SelectMany(f=>f.Constants).OfType<byte[]>().Select(System.Text.Encoding.UTF8.GetString).ToHashSet(StringComparer.Ordinal);
         var names=owned.Where(strings.Contains).ToDictionary(n=>n,n=>"DS1_Foliage_"+n,StringComparer.Ordinal);
+        Lua50.RelocateIfCallbacks(root,names,new Dictionary<int,int>{{233000,FoliageGoal}},nativeCommon.Files.Single(f=>Leaf(f.Name)=="if.lua").Bytes.Span);
         var bytes=Lua50.Rewrite(Lua50.Write(root),names,new Dictionary<string,double>{{"GOAL_Jujin233000_Battle",FoliageGoal}});
         var target=BND4.Read(destination);var infoFile=target.Files.Single(f=>Leaf(f.Name).EndsWith(".luainfo",StringComparison.Ordinal));var info=LUAINFO.Read(infoFile.Bytes);
         Require(!info.Goals.Any(g=>g.ID==FoliageGoal||g.Name==FoliageName),"owned foliage goal is occupied");

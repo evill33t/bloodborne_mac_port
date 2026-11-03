@@ -4,7 +4,7 @@ using System.Numerics;
 internal static class CatacombsCreaturesCharacters {
     internal const int ContactBase=1000;
     internal sealed record Contact(int Judge,int Kind);
-    internal sealed record Result(SkinBake Skin,CatacombsCreaturesActions Actions,IReadOnlyList<Contact> Contacts,int Clips,int VisibleBones);
+    internal sealed record Result(SkinBake Skin,CatacombsCreaturesActions Actions,IReadOnlyList<Contact> Contacts,int Clips,int VisibleBones,CatacombsCreaturesPhysics.Report? Physics=null);
     static string Leaf(string p)=>Path.GetFileName(p.Replace('\\','/'));
     static void Need(bool b,string why){if(!b)throw new InvalidDataException("Catacombs character: "+why);}
     static IReadOnlySet<int> ZeroTracks(NativeRigAppend.Plan plan)=>HollowSourceSkin.HiddenEquipmentBones(plan).Where(i=>System.Text.RegularExpressions.Regex.IsMatch(new string(plan.Added[i].Name[4..].Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray()),@"\A(?:rweapon\d*|lweapon\d*|lshield|sword|bpw00|bow|bowstring|arrow\d*|wcloth\d*)\z")).ToHashSet();
@@ -75,6 +75,20 @@ internal static class CatacombsCreaturesCharacters {
             }
             entry.Bytes=tae.Write();files[path]=bank.Write(DCX.Type.DCX_DFLT_10000_44_9);
         }
-        return new(skin,actions,contacts.OrderBy(c=>c.Judge).ThenBy(c=>c.Kind).ToArray(),profile.Clips,SourceAnimation.Load(selected,sourceModel,0).Bones.Count);
+        CatacombsCreaturesPhysics.Report? physics=null;
+        if(profile.Native=="c2610"&&sourceModel is "c2900" or "c2910" or "c2650" or "c2930") {
+            // The playback prefix controls locomotion; hurt bodies must follow
+            // the appended source rig that actually drives the visible body.
+            var nativeCharacter=BND4.Read(native("chr/c2610.chrbnd.dcx"));
+            var completeRig=BND4.Read(files[path]).Files.Single(f=>f.ID==1000000).Bytes.ToArray();
+            var converted=CatacombsCreaturesPhysics.Convert(nativeCharacter.Files.Single(f=>f.ID==300).Bytes.ToArray(),
+                nativeCharacter.Files.Single(f=>Leaf(f.Name).EndsWith(".hkxpwv",StringComparison.OrdinalIgnoreCase)).Bytes.ToArray(),
+                CatacombsCreaturesPhysicsSource.Load(source,sourceModel),completeRig);
+            string characterPath="chr/"+target+".chrbnd.dcx";var character=BND4.Read(files[characterPath]);
+            character.Files.Single(f=>f.ID==300).Bytes=converted.Physics;
+            character.Files.Single(f=>Leaf(f.Name).EndsWith(".hkxpwv",StringComparison.OrdinalIgnoreCase)).Bytes=converted.Pwv;
+            files[characterPath]=character.Write(DCX.Type.DCX_DFLT_10000_44_9);physics=converted.Report;
+        }
+        return new(skin,actions,contacts.OrderBy(c=>c.Judge).ThenBy(c=>c.Kind).ToArray(),profile.Clips,SourceAnimation.Load(selected,sourceModel,0).Bones.Count,physics);
     }
 }

@@ -42,6 +42,7 @@ internal static class HavelAi {
         interrupt.Constants=steps.Constants;interrupt.Code=steps.Code;interrupt.Functions=steps.Functions;
         var all=Lua50.All(root).SelectMany(f=>f.Constants).OfType<byte[]>().Where(b=>b.All(c=>c<128)).Select(Encoding.ASCII.GetString).ToHashSet(StringComparer.Ordinal);
         var names=owned.Where(all.Contains).ToDictionary(n=>n,n=>"DS1_Havel_"+n,StringComparer.Ordinal);
+        Lua50.RelocateIfCallbacks(root,names,new Dictionary<int,int>{{6580,HavelParameters.Think}},nativeCommon.Files.Single(f=>Leaf(f.Name)=="if.lua").Bytes.Span);
         var bytes=Lua50.Rewrite(Lua50.Write(root),names,enums,new Dictionary<double,double>{{1012799,leashRegion}});
         destination=MapNativeAi.Merge(destination,native("script/aicommon.luabnd.dcx"),7040,[10000]);
         var target=BND4.Read(destination);var infoFile=target.Files.Single(f=>Leaf(f.Name).EndsWith(".luainfo",StringComparison.Ordinal));var info=LUAINFO.Read(infoFile.Bytes);

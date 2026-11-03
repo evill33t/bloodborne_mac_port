@@ -26,7 +26,7 @@ static class HydraActionsTests {
         var info=LUAINFO.Read(bank.Files.Single(f=>Leaf(f.Name).EndsWith(".luainfo",StringComparison.Ordinal)).Bytes);
         Need(info.Goals.Single(g=>g.ID==HydraAi.Goal).Name==HydraAi.Name,"Owned goal registration wrong");
         var root=Lua50.Read(bank.Files.Single(f=>Leaf(f.Name)=="883000_battle.lua").Bytes.ToArray());
-        Need(Lua50.Globals(root,true).All(n=>n.StartsWith("DS1_Hydra_",StringComparison.Ordinal)),"Hydra overrides shared native globals");
+        Need(Lua50.Globals(root,true).All(n=>n.StartsWith("DS1_Hydra_",StringComparison.Ordinal)||n=="OnIf_883000"),"Hydra overrides shared native globals");
         Need(Lua50.All(root).Any(f=>f.Constants.Contains(883000d))&&!Lua50.Globals(root).Contains("GOAL_LakeBeast_m12_353001_Battle"),"Owned goal constant missing");
         var sourceBank=BND3.Read(Source("script/m12_00_00_00.luabnd.dcx")!);var before=Lua50.Read(sourceBank.Files.Single(f=>Leaf(f.Name)=="353001_battle.lua").Bytes.ToArray());
         foreach(var (a,b) in Lua50.All(before).Zip(Lua50.All(root))) {

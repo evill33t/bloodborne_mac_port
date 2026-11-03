@@ -41,6 +41,7 @@ internal static class HydraAi {
         foreach(var (file,hash) in wrappers)Need(Convert.ToHexStringLower(SHA256.HashData(nativeCommon.Files.Single(f=>Leaf(f.Name)==file).Bytes.Span))==hash,"native subgoal changed: "+file);
         var strings=Lua50.All(root).SelectMany(f=>f.Constants).OfType<byte[]>().Where(b=>b.All(c=>c<128)).Select(System.Text.Encoding.ASCII.GetString).ToHashSet(StringComparer.Ordinal);
         var names=owned.Where(strings.Contains).ToDictionary(n=>n,n=>"DS1_Hydra_"+n,StringComparer.Ordinal);
+        Lua50.RelocateIfCallbacks(root,names,new Dictionary<int,int>{{353001,Goal}},nativeCommon.Files.Single(f=>Leaf(f.Name)=="if.lua").Bytes.Span);
         var bytes=Lua50.Rewrite(Lua50.Write(root),names,new Dictionary<string,double>{{SourceGoal,Goal}});
         destination=MapNativeAi.Merge(destination,nativeBytes,7040,[10000,11000]);
         var target=BND4.Read(destination);var infoFile=target.Files.Single(f=>Leaf(f.Name).EndsWith(".luainfo",StringComparison.Ordinal));var info=LUAINFO.Read(infoFile.Bytes);

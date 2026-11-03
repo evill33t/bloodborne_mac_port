@@ -27,6 +27,7 @@ internal static class CatacombsCreaturesAi {
                 Need(value==nativeEnums[global],"source/native enum mismatch "+global);enumValues[global]=value;
             }
             var strings=Lua50.All(root).SelectMany(f=>f.Constants).OfType<byte[]>().Where(b=>b.All(c=>c<128)).Select(Encoding.ASCII.GetString).ToHashSet(StringComparer.Ordinal);var rename=owned.Where(strings.Contains).ToDictionary(n=>n,n=>ownedPrefix+n,StringComparer.Ordinal);
+            Lua50.RelocateIfCallbacks(root,rename,new Dictionary<int,int>{{sourceGoal,goal}},nativeCommon.Files.Single(f=>Leaf(f.Name)=="if.lua").Bytes.Span);
             Need(!info.Goals.Any(g=>g.ID==goal||g.Name==name),"owned battle goal occupied");int id=1000;while(target.Files.Any(f=>f.ID==id))id++;
             target.Files.Add(new(entry.Flags,id,@"N:\SPRJ\data\INTERROOT_ps4\script\ai\out\"+goal+"_battle.lua",Lua50.Rewrite(Lua50.Write(root),rename,enumValues)));
             info.Goals.Add(new(goal,name,true,false,null));foreach(string global in rename.Values.Order(StringComparer.Ordinal))if(known.Add(global))globals.Globals.Add(global);

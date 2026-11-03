@@ -56,5 +56,7 @@
     <Reference Include="Havok.HKX2"><HintPath>$(SmithboxOutput)/Havok.HKX2.dll</HintPath></Reference>
     <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
     <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+    <Compile Include="../../editor/souls_import/CatacombsCreaturesPhysics.cs"/>
+    <Compile Include="../../editor/souls_import/CatacombsCreaturesPhysicsSource.cs"/>
   </ItemGroup>
 </Project>

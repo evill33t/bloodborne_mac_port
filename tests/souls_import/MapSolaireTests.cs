@@ -76,6 +76,9 @@ internal static class MapSolaireTests {
         foreach(var r in MapNpcQuestState.Ranges){int count=Enumerable.Range(r.First,r.Last-r.First+1).Count(f=>flags.GetValueOrDefault(F(f)));Check(count==1,"NPC state defaults are not mutually exclusive");}
         var repeat=new EventMachine(initCode,flags);repeat.Run();Check(repeat.Writes.Count==0,"Repeated expansion initialization writes saved state");
         Check(MapNpcQuestState.Ranges.Length==44&&MapNpcQuestState.Flags.Values.Distinct().Count()==MapNpcQuestState.Flags.Count,"Expansion ownership aliases");
+        Check(F(6)==52411116&&F(11300000)==52411117&&F(11010181)==52411165&&
+            F(71010035)==52411167&&F(71010040)==52411168&&F(71020067)==52411169,
+            "Pinwheel/Griggs append-only ownership changed");
         MapQuestState.VerifyReservations(nativeRoot,MapNpcQuestState.Flags.Values.Append(MapNpcQuestState.InitialFlag));
         var lot=new MapItems.Lot(1000,90001000,50000000,52100750,[new(100,900100,1,"quest-item","")],0);
         var result=MapSolaire.Apply(initialized.Write(),source,common,4039710,lot);var script=EMEVD.Read(result.Script);

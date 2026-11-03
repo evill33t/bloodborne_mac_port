@@ -39,6 +39,35 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(result["actors"][0]["quest"], "unverified")
         self.assertFalse(result["complete"])
 
+    def test_conditional_quest_actors_have_models_without_completing_quests(self):
+        residents = {"dusk": "c8910", "patches": "c8911", "griggs": "c8913",
+                     "oswald": "c8914", "andre": "c8915"}
+        plan = {"map": "m10_02_00_00", "actors": [
+            {"Name": name, "ModelName": "c0000", "kind": "Enemy",
+             "values": {"CharaInitID": 1, "TalkID": 1}} for name in residents
+        ], "objects": [], "treasures": [], "eventPrograms": []}
+        converted = {name: {"SourceName": name, "Model": model}
+                     for name, model in residents.items()}
+        result = audit_map(plan, converted)
+        self.assertEqual(result["missingRuntimeActors"], 0)
+        self.assertEqual({p["name"]: p["target"] for p in result["actors"]}, residents)
+        self.assertTrue(all(p["quest"] == "unverified" for p in result["actors"]))
+        self.assertFalse(result["complete"])
+
+    def test_thorolund_party_models_override_original_petrus(self):
+        names = {"rhea": "c8916", "vince": "c8917", "nico": "c8918", "petrus": "c8919"}
+        plan = {"map": "m10_02_00_00", "actors": [
+            {"Name": name, "ModelName": "c0000", "kind": "Enemy",
+             "values": {"CharaInitID": 1, "TalkID": 1}} for name in names
+        ], "objects": [], "treasures": [], "eventPrograms": []}
+        converted = {"characters": [{"SourceName": "petrus", "TargetModel": "c8901"}],
+                     "thorolund": {"Actors": [{"SourceName": name, "Model": model}
+                                             for name, model in names.items()]}}
+        result = audit_map(plan, converted)
+        self.assertEqual(result["missingRuntimeActors"], 0)
+        self.assertEqual({p["name"]: p["target"] for p in result["actors"]}, names)
+        self.assertFalse(result["complete"])
+
     def test_cave_slice_does_not_claim_the_abyss_or_new_londo(self):
         plan = {"map": "m16_00_00_00", "actors": [{"Name": "four-kings", "ModelName": "c5390", "kind": "Enemy", "values": {}}],
                 "treasures": [], "eventPrograms": [], "objects": [

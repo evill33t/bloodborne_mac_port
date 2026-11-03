@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>annotations</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="MapOswaldQuestTests.cs"/>
+    <Compile Include="../../editor/souls_import/SourcePlayerActions.cs"/>
+    <Compile Include="$(SmithboxOutput)/../../src/Smithbox.Program/Utilities/Havok/SplineCompressedAnimation.cs" Link="SmithboxSplineDecoder.cs"/>
+    <Compile Include="../../editor/souls_import/MapOswaldQuest.cs"/>
+    <Compile Include="../../editor/souls_import/MapOswaldDialogue.cs"/>
+    <Compile Include="../../editor/souls_import/MapCharacters.cs"/>
+    <Compile Include="../../editor/souls_import/EnemyProportions.cs"/>
+    <Compile Include="../../editor/souls_import/MapCharacterAnimations.cs"/>
+    <Compile Include="../../editor/souls_import/NativeAnimation.cs"/>
+    <Compile Include="../../editor/souls_import/NativeSpline.cs"/>
+    <Compile Include="../../editor/souls_import/NativeRigAppend.cs"/>
+    <Compile Include="../../editor/souls_import/SourceEquipmentMounts.cs"/>
+    <Compile Include="../../editor/souls_import/SourceAnimation.cs"/>
+    <Compile Include="../../editor/souls_import/SourceCollision.cs"/>
+    <Compile Include="../../editor/souls_import/MapCollision.cs"/>
+    <Compile Include="../../editor/souls_import/MapCollisionBindings.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFace.cs"/>
+    <Compile Include="../../editor/souls_import/NpcFaceMaterial.cs"/>
+    <Compile Include="../../editor/souls_import/NpcAppearance.cs"/>
+    <Compile Include="../../editor/souls_import/NpcBodyShape.cs"/>
+    <Compile Include="../../editor/souls_import/SkinRetarget.cs"/>
+    <Compile Include="../../editor/souls_import/MapNpcQuestState.cs"/>
+    <Compile Include="../../editor/souls_import/MapQuestState.cs"/>
+    <Compile Include="../../editor/souls_import/MapTalkVoices.cs"/>
+    <Compile Include="../../editor/souls_import/NativeTalkBank.cs"/>
+    <Compile Include="../../editor/souls_import/NativeEventReservations.cs"/>
+    <Compile Include="../../editor/souls_import/ImportParam.cs"/>
+    <Reference Include="Andre.SoulsFormats"><HintPath>$(SmithboxOutput)/Andre.SoulsFormats.dll</HintPath></Reference>
+    <Reference Include="Pfim"><HintPath>$(SmithboxOutput)/Pfim.dll</HintPath></Reference>
+    <Reference Include="Havok.HKX2"><HintPath>$(SmithboxOutput)/Havok.HKX2.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

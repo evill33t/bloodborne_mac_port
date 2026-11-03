@@ -61,12 +61,24 @@ internal static class MapNpcQuestState {
         flags.Add(11200801,52411113); // Basin Hydra defeat.
         flags.Add(11200800,52411114); // Dusk's golden golem defeat.
         flags.Add(703,52411115); // Source new-visit gate after Hydra.
+        flags.Add(6,52411116); // Pinwheel defeat; source global boss flag.
+        flags.Add(11300000,52411117); // Pinwheel introduction seen.
         for(int i=0;i<7;i++)flags.Add(11205300+i,52411120+i); // Individual severed heads.
         for(int i=0;i<10;i++)flags.Add(11300850+i,52411130+i); // Six necromancers, two lizards, Titanite Demon and Black Knight.
         int[] dusk=[71200001,71200002,11200590,11200591];for(int i=0;i<dusk.Length;i++)flags.Add(dusk[i],52411140+i);
         flags.Add(71200000,52411144); // Dusk introduction completed.
         int[] patches=[11300403,11305037,11305038,11300592,11300593,71310066,71310067,71310076,71310077];for(int i=0;i<patches.Length;i++)flags.Add(patches[i],52411150+i);
         int[] patchesGift=[71310068,11300590,71310070,71310071,71310072,11300591];for(int i=0;i<patchesGift.Length;i++)flags.Add(patchesGift[i],52411159+i);
+        flags.Add(11010181,52411165); // Residence door: Griggs rescue prerequisite.
+        // 52411166 belongs to the door's key-eligibility controller.
+        int[] griggs=[71010035,71010040,71020067];for(int i=0;i<griggs.Length;i++)flags.Add(griggs[i],52411167+i);
+        int[] oswald=[11010581,71800057,11016111,71800058];for(int i=0;i<oswald.Length;i++)flags.Add(oswald[i],52411170+i);
+        flags.Add(71010000,52411174); // Andre introduction completed.
+        flags.Add(11017140,52411175); // Andre's one-stock Crest of Artorias.
+        flags.Add(11200100,52411176); // Garden Crest gate opened.
+        flags.Add(11200101,52411177); // Sif approach gate opened.
+        int[] thorolund=[11020560,11020692,11020693,11300005,71020080,71310023,71310024,71310025,11026109,71310032,71310033,11026110];
+        for(int i=0;i<thorolund.Length;i++)flags.Add(thorolund[i],52411178+i);
         return flags;
     }
     internal static int Flag(int source) {

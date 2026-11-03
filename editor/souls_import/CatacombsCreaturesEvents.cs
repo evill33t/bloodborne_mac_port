@@ -21,7 +21,10 @@ internal static class CatacombsCreaturesEvents {
                 int actor=actors[p.EntityID].EntityID;var e=new EMEVD.Event(next++,EMEVD.Event.RestBehaviorType.Restart);
                 e.Instructions.AddRange([
                     I(1003,101,(byte)0,(byte)1,(byte)0,flag),I(2004,12,actor,(byte)1),
-                    I(4,14,(sbyte)1,actor,(byte)5,1),I(3,0,(sbyte)2,(byte)1,(byte)0,flag),I(0,0,(sbyte)-1,(byte)1,(sbyte)1),I(0,0,(sbyte)-1,(byte)1,(sbyte)2),I(0,0,(sbyte)0,(byte)1,(sbyte)-1),
+                    // Retail BB compares the supplied value against current HP.
+                    // Equality reaches the exact immortal clamp without entering
+                    // collapse at full HP (native compare5 means value <= HP).
+                    I(4,14,(sbyte)1,actor,(byte)0,1),I(3,0,(sbyte)2,(byte)1,(byte)0,flag),I(0,0,(sbyte)-1,(byte)1,(sbyte)1),I(0,0,(sbyte)-1,(byte)1,(sbyte)2),I(0,0,(sbyte)0,(byte)1,(sbyte)-1),
                     I(1003,101,(byte)0,(byte)1,(byte)0,flag),I(2004,1,actor,(byte)0),I(2004,15,actor,(byte)1),
                     I(2003,18,actor,7006,(byte)0,(byte)0,(byte)0),I(1001,0,2.5f),I(2003,18,actor,7004,(byte)1,(byte)0,(byte)0),I(1001,0,2.5f),
                     I(1003,101,(byte)0,(byte)1,(byte)0,flag),I(2004,8,actor,CatacombsCreaturesParameters.Heal,(byte)0),I(2003,18,actor,7007,(byte)0,(byte)0,(byte)0),I(1001,0,3.4333334f),

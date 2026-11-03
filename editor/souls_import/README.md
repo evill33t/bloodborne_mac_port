@@ -31,10 +31,31 @@ for native tests; test-only observer/placement controls are separate artifacts.
   and outfit, source rescue poses/voices, interruptible dialogue and choice.
 - Havel: upper/lower keyed doors, source moving leaves and collision,
   persistent open state and converted Watchtower Basement/Master Key checks.
+- Griggs: Residence Key door, rescue conversation and subsequent Firelink
+  arrival, with source face, outfit and voices. The Residence door requires
+  its actual key; the source does not accept the Master Key there.
+- Andre: source appearance and forge idle, first conversations and a real
+  one-stock Crest of Artorias purchase for 20,000 Blood Echoes. The Garden
+  entrance requires this Crest; Sif's approach gate opens without it. Both
+  gates retain two moving leaves, source timing and solid collision.
+- Parish bell and Oswald: an actual bell-lever interaction sets the upper
+  bell state; Oswald's source appearance and conversation become available
+  afterward. Killing the Gargoyles alone does not ring the bell.
+- Thorolund party: Rhea, Vince and Nico arrive after Capra's defeat. The
+  source farewell and area reload govern departure, Petrus's absence and
+  subsequent return. Existing death states stay absent. All four have source
+  faces, outfits and voices; Rhea retains her kneeling pose.
 - Catacombs: 63 skeleton/giant/necromancer/bonewheel actors with source AI,
-  collapse/reassembly while their linked necromancer survives; 12 Wisps,
+  linked collapse/reassembly controllers; 12 Wisps,
   Titanite Demon, axe Black Knight and two Crystal Lizards with source
-  request/lifecycle/reward handling.
+  request/lifecycle/reward handling. Six core character packages now carry
+  converted source bodies, joint constraints and animation/ragdoll mappings.
+- Pinwheel: source boss and fourteen stateful illusion helpers, encounter fog,
+  authored entry regions, AI attacks, teleport/summoning controllers, persistent
+  defeat, 15,000 Blood Echoes and the Rite of Kindling. Separate saved reward
+  phases preserve the immediate quest item and five-second consumable delay.
+  Catacombs ladders retain ten authored endpoint
+  sets; the exit ladder is registered only after Pinwheel's defeat.
 - Catacombs environment: separate indoor/outdoor fog, source material gains,
   animated insect overlays through native texture scrolling. Explicit texture
   references between source object archives are resolved with bounded traversal,
@@ -61,18 +82,35 @@ temporary collapse adapter. Native effects replace incompatible source FXR1
 resources, and some sounds/transient effects remain absent. Titanite Demon's
 paired impale currently uses an ordinary source strike.
 
-Pinwheel and his 14 illusion helpers remain disabled: their source requests,
-regions, flags, relocation and phased spawning require an encounter adapter.
+Copied-save native combat confirms skeleton lock-on and damage, collapse at
+the immortal 1-HP clamp, healing and protection release while its necromancer
+lives. Killing another cohort's necromancer disables that cohort's reassembly;
+its linked skeleton then dies normally. The integer-HP gate uses equality to
+avoid the verified native comparison that entered collapse at full health.
+These bounded checks do not establish every loadout or final ragdoll behavior.
+Pinwheel's source cutscene, music and original effects remain unported, and
+his complete encounter requires native gameplay validation. The imported Rite
+of Kindling is an inventory quest item; lamp kindling is not implemented.
 Network/Gravelord-only populations and dummy placements are not fresh enemies.
 Later Dusk/Patches services, hostile NPC combat and full quest chains remain
 incomplete. Patches' equipment-driven armed idle is approximated by a verified
-source unarmed idle. The importer does not claim campaign completion.
+source unarmed idle. Sorcery/miracle services, Andre's forging and equipment
+stock, Oswald's absolution/covenant services, the Thorolund Tomb rescue and later
+quest stages remain unsupported. Source per-visit dialogue flags are retained;
+their common-world reset is not guessed. The importer does not claim campaign
+completion.
 
 ## Focused checks
 
 The runners use `SMITHBOX_DIR` and accept the source DS1R folder followed by
 the native Bloodborne `dvdroot_ps4` folder. Optional output paths are documented
 by each runner's arguments.
+
+The Catacombs creature regression also reads the supported decrypted native
+executable to verify the integer-HP predicate's actual comparison order. Set
+`BB_NATIVE_ELF` to that ELF; its default is the existing ignored QA extraction.
+The equality gate is intentional: the native integer comparison differs from
+the HP-ratio and NPC-part predicates used by boss phases and head cuts.
 
 ```sh
 bash tests/test_basin_water.sh "$DS1R_ROOT" "$BB_ASSETS"
@@ -86,11 +124,22 @@ bash tests/test_hydra_events.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_golden_golem.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_dusk_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_map_doors.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_additional_doors.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_griggs_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_andre_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_crest_gate.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_parish_bell.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_oswald_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_thorolund_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_catacombs_environment.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_catacombs_creatures.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_catacombs_creatures_physics.sh "$DS1R_ROOT" "$BB_ASSETS" "$STAGED_MOD_ROOT"
 bash tests/test_catacombs_special.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_catacombs_bridges.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_patches_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_pinwheel.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_catacombs_ladders.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_lua50.sh "$DS1R_ROOT" "$BB_ASSETS"
 ```
 
 Native acceptance includes visual water/fog comparison, attacks and head cuts,

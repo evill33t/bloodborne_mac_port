@@ -172,7 +172,7 @@ internal static class MapItems {
             var actor=group.First();var row=npcs.Rows.Single(r=>r.ID==actor.NPCParamID);
             if(group.Select(p=>p.SourceNPCParamID).Distinct().Count()!=1||group.Any(p=>p.TargetModel!=actor.TargetModel)||
                 !System.Text.RegularExpressions.Regex.IsMatch(actor.TargetModel,@"\Ac\d{4}\z")||actor.NPCParamID/100!=int.Parse(actor.TargetModel[1..])||
-                row.Name==null||!new[]{"Imported hollow ","Imported cemetery skeleton ","Imported Parish enemy ","Imported boss encounter actor ","Imported rat ","Imported Hellkite ","Imported Hydra ","Imported Golden Golem ","Imported Catacombs creature "}.Any(prefix=>row.Name.StartsWith(prefix,StringComparison.Ordinal)))
+                row.Name==null||!new[]{"Imported hollow ","Imported cemetery skeleton ","Imported Parish enemy ","Imported boss encounter actor ","Imported rat ","Imported Hellkite ","Imported Hydra ","Imported Golden Golem ","Imported Catacombs creature ","Imported Pinwheel "}.Any(prefix=>row.Name.StartsWith(prefix,StringComparison.Ordinal)))
                 throw new InvalidDataException("Blood Vial drop owner is not an adapted enemy: "+actor.NPCParamID);
             var original=sourceNpcs.Rows.Single(r=>r.ID==actor.SourceNPCParamID);
             var selected=Enumerable.Range(1,6).Select(i=>Number(original,"itemLotId_"+i)).Where(id=>id>0).Select(ConvertGroup).Where(r=>r!=null).Select(r=>r!.TargetID).Distinct().ToList();

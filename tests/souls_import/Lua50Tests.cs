@@ -38,6 +38,22 @@ static class Lua50Tests {
         if(args.Length>2){Directory.CreateDirectory(args[2]);File.WriteAllBytes(Path.Combine(args[2],"882500_battle.lua"),Lua50.Write(combined));}
         Check(combined.Functions.Length==42&&combined.Code.Count(w=>(w&63)==33)==2,"Source helper closure or capture CLOSE instructions missing");
         Check(Lua50.Globals(combined,true).All(n=>n.StartsWith("DS1_Foliage_",StringComparison.Ordinal)),"Imported source helper overrides native globals");
+        var pinwheelBank=BND3.Read(Read(Path.Combine(args[0],"script/m13_00_00_00.luabnd.dcx")));
+        var callbackChunk=pinwheelBank.Files.Single(f=>Leaf(f.Name)=="332000_battle.lua").Bytes.ToArray();
+        var callbackRoot=Lua50.Read(callbackChunk);
+        Check(Lua50.Exports(callbackRoot).ContainsKey("OnIf_332000"),"Shipped Pinwheel If callback disappeared");
+        var callbackNames=Lua50.Globals(callbackRoot,true).ToDictionary(n=>n,n=>"Private_"+n,StringComparer.Ordinal);
+        var dispatcher=native.Files.Single(f=>Leaf(f.Name)=="if.lua").Bytes.ToArray();
+        var goals=new Dictionary<int,int>{{332000,888000}};
+        Reject(()=>Lua50.RelocateIfCallbacks(callbackRoot,new(callbackNames),goals,dispatcher[..^1]));
+        Reject(()=>Lua50.RelocateIfCallbacks(callbackRoot,new(),goals,dispatcher));
+        var aliased=new Dictionary<string,string>(callbackNames){{"other","OnIf_888000"}};
+        Reject(()=>Lua50.RelocateIfCallbacks(callbackRoot,aliased,goals,dispatcher));
+        Lua50.RelocateIfCallbacks(callbackRoot,callbackNames,goals,dispatcher);
+        var callbackAfter=Lua50.Read(Lua50.Rewrite(callbackChunk,callbackNames,new Dictionary<string,double>()));
+        Check(Lua50.Exports(callbackAfter).ContainsKey("OnIf_888000")&&!Lua50.Exports(callbackAfter).ContainsKey("OnIf_332000"),"Native If callback hidden or kept source ID");
+        Check(Lua50.Globals(callbackAfter,true).All(n=>n.StartsWith("Private_",StringComparison.Ordinal)||n=="OnIf_888000"),"Callback fix released unowned globals");
+        Check(Lua50.All(callbackRoot).Zip(Lua50.All(callbackAfter)).All(p=>p.First.Code.SequenceEqual(p.Second.Code)),"Callback edit changed source control flow");
         foreach(var file in native.Files.Where(f=>!Leaf(f.Name).EndsWith(".luainfo",StringComparison.Ordinal)&&!Leaf(f.Name).EndsWith(".luagnl",StringComparison.Ordinal)))
             Check(bank.Files.Single(f=>f.ID==file.ID).Bytes.Span.SequenceEqual(file.Bytes.Span),"Original native AI was changed");
         Reject(()=>SourceEnemyAi.Foliage(owned,Source,Native));

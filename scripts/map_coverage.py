@@ -15,6 +15,19 @@ def audit_map(plan, converted, travel=()):
     if converted.get("havel"):
         havel = converted["havel"]
         characters[havel["SourceName"]] = {"TargetModel": "c0000"}
+    # Quest-owned friendly actors are emitted outside the ordinary enemy and
+    # initial-appearance adapters. Presence may be conditional; an exported
+    # actor still has a model even while its source quest keeps it hidden.
+    for key, model in (("dusk", "c8910"), ("patches", "c8911"),
+                       ("griggs", None), ("oswald", "c8914"),
+                       ("andre", "c8915")):
+        resident = converted.get(key)
+        if resident:
+            characters[resident["SourceName"]] = {
+                "TargetModel": resident.get("Model") or model,
+            }
+    for resident in (converted.get("thorolund") or {}).get("Actors", []):
+        characters[resident["SourceName"]] = {"TargetModel": resident["Model"]}
     merchant_reports = converted.get("merchants") or []
     if isinstance(merchant_reports, dict):
         merchant_reports = merchant_reports.get("Reports", [])

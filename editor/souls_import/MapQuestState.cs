@@ -270,7 +270,7 @@ internal static class MapQuestState {
 
     internal record Presence(int SourceEntity,int TargetEntity,int EventID,int[] AbsentFlags);
     internal static (byte[] Script,IReadOnlyList<Presence> Bindings) Availability(byte[] native,
-        IReadOnlyDictionary<int,int> actorEntities,byte[] sourceScript) {
+        IReadOnlyDictionary<int,int> actorEntities,byte[] sourceScript,bool thorolund=false) {
         var source=EMEVD.Read(sourceScript);var sourcePre=source.Events.Single(e=>e.ID==50);
         // Source11020110 protects Anastacia before its later death/resurrection
         // logic. Retain only that initial protection on the imported actor.
@@ -290,7 +290,18 @@ internal static class MapQuestState {
             if(!sourcePre.Instructions.Skip(c.At).Take(c.Code.Length).Zip(c.Code).All(p=>p.First.Bank==p.Second.Bank&&p.First.ID==p.Second.ID&&p.First.ArgData.AsSpan().SequenceEqual(p.Second.ArgData))||sourcePre.Instructions.Count<c.At+c.Code.Length)
                 throw new InvalidDataException("Source Firelink NPC availability contract changed: "+c.Entity);
             if(!actorEntities.TryGetValue(c.Entity,out int entity)||entity<=0)throw new InvalidDataException("Missing initial Firelink NPC: "+c.Entity);
-            int eventID=12415810+bindings.Count;var flags=c.Flags.Select(Flag).ToArray();
+            // The source preconstructor hides Petrus1192. Its independent death
+            // controllers also disable backread for1196/1198 on each load.
+            if(thorolund&&c.Entity==6080)foreach(var (id,state) in new[]{(11020567,1196),(11020569,1198)}) {
+                var death=source.Events.Single(e=>e.ID==id);
+                bool Bound(int instruction,int bank,int opcode,int sourceByte,byte[] raw)=>
+                    death.Instructions.Count>instruction&&death.Instructions[instruction].Bank==bank&&death.Instructions[instruction].ID==opcode&&
+                    death.Instructions[instruction].ArgData.AsSpan().SequenceEqual(raw)&&death.Parameters.Any(p=>p.InstructionIndex==instruction&&p.TargetStartByte==0&&p.SourceStartByte==sourceByte&&p.ByteCount==4);
+                if(!sourcePre.Instructions.Any(i=>i.Bank==2000&&i.ID==0&&i.ArgData.AsSpan().SequenceEqual(Ins(2000,0,0,id,6080,1190,1209,state).ArgData))||
+                   !Bound(9,2003,2,12,Ins(2003,2,0,(byte)1).ArgData)||!Bound(11,2004,37,0,Ins(2004,37,0).ArgData))
+                    throw new InvalidDataException("Source Petrus death availability contract changed");
+            }
+            int eventID=12415810+bindings.Count;var flags=(thorolund&&c.Entity==6080?c.Flags.Concat(new[]{1196,1198}):c.Flags).Select(Flag).ToArray();
             if(script.Events.Any(e=>e.ID==eventID))throw new InvalidDataException("NPC availability event namespace occupied");
             initial.Add(Ins(2004,5,entity,(byte)1));
             foreach(int flag in flags){initial.Add(Ins(1003,1,(byte)1,(byte)0,(byte)0,flag));initial.Add(Ins(2004,5,entity,(byte)0));}

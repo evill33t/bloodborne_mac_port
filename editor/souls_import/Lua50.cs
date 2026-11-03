@@ -17,6 +17,22 @@ internal static class Lua50 {
         internal Function[] Functions=[];
     }
     static void Require(bool value,string message){if(!value)throw new InvalidDataException("Lua 5.0: "+message);}
+    // Native GOAL_COMMON_If builds "OnIf_" + GetBattleGoalId() at runtime.
+    // These exported callbacks must follow the relocated numeric goal ID;
+    // ordinary private-helper prefixes cannot participate in that dispatch.
+    internal static void RelocateIfCallbacks(Function root,Dictionary<string,string> names,IReadOnlyDictionary<int,int> goals,ReadOnlySpan<byte> nativeDispatcher) {
+        var exports=Exports(root);
+        var callbacks=goals.Where(g=>exports.ContainsKey("OnIf_"+g.Key)).ToArray();
+        if(callbacks.Length==0)return;
+        Require(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(nativeDispatcher))==
+            "d4f1eee368ca3200d1637bbf965faaa2b19af26cf6a743d95a6c14a08af29717","native If dispatcher changed");
+        foreach(var goal in callbacks) {
+            string source="OnIf_"+goal.Key,target="OnIf_"+goal.Value;
+            Require(goal.Key>0&&goal.Value>0&&names.ContainsKey(source),"unowned If callback");
+            Require(!names.Any(n=>n.Key!=source&&n.Value==target),"If callback relocation aliases another global");
+            names[source]=target;
+        }
+    }
     static string Text(byte[] bytes)=>new UTF8Encoding(false,true).GetString(bytes);
     internal static Function Read(byte[] bytes) {
         Require(bytes.Length is >22 and <=16*1024*1024&&bytes.AsSpan(0,22).SequenceEqual(Header),"unsupported bytecode ABI or size");
