@@ -54,12 +54,15 @@ for native tests; test-only observer/placement controls are separate artifacts.
   authored entry regions, AI attacks, teleport/summoning controllers, persistent
   defeat, 15,000 Blood Echoes and the Rite of Kindling. Separate saved reward
   phases preserve the immediate quest item and five-second consumable delay.
-  Catacombs ladders retain ten authored endpoint
-  sets; the exit ladder is registered only after Pinwheel's defeat.
+  Native target socket220 follows the source marker instead of the giant
+  carrier's head. Catacombs ladders retain ten authored endpoint sets; the exit
+  ladder is registered only after Pinwheel's defeat.
 - Catacombs environment: separate indoor/outdoor fog, source material gains,
   animated insect overlays through native texture scrolling. Explicit texture
   references between source object archives are resolved with bounded traversal,
-  including shared statue textures.
+  including shared statue textures. The exact Catacombs alpha backdrop retains
+  its source visibility groups. Pinwheel's arena uses its own losslessly copied
+  specular capture without changing lighting in other rooms.
 - Patches: source bridge/lever geometry and keyframed collision, trap and manual
   controls, saved orientation, real NPC face/outfit, first meeting and
   forgiveness dialogue, one-time Humanity gift converted to Madman's Knowledge.
@@ -88,9 +91,18 @@ lives. Killing another cohort's necromancer disables that cohort's reassembly;
 its linked skeleton then dies normally. The integer-HP gate uses equality to
 avoid the verified native comparison that entered collapse at full health.
 These bounded checks do not establish every loadout or final ragdoll behavior.
-Pinwheel's source cutscene, music and original effects remain unported, and
-his complete encounter requires native gameplay validation. The imported Rite
-of Kindling is an inventory quest item; lamp kindling is not implemented.
+Copied-save Pinwheel checks cover genuine fog admission and arena entry, normal
+weapon damage, teleportation, low-health illusions, defeat, the three converted
+rewards, exit-ladder climbing and persistence after area travel. This is a
+bounded smoke, not campaign or every-attack validation. Pinwheel's source
+cutscene, music and original effects remain unported. The imported Rite of
+Kindling is an inventory quest item; lamp kindling is not implemented.
+
+Pinwheel's authored specular capture is retained, but source diffuse GI and
+DS1 single-texture baked lightmaps remain unconverted. Bloodborne's two-texture
+RNM DOL layout is not treated as an interchangeable lightmap. Warm candle-lit
+room matching remains incomplete; no global exposure or invented roof hides
+this limitation.
 Network/Gravelord-only populations and dummy placements are not fresh enemies.
 Later Dusk/Patches services, hostile NPC combat and full quest chains remain
 incomplete. Patches' equipment-driven armed idle is approximated by a verified
@@ -132,6 +144,8 @@ bash tests/test_parish_bell.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_oswald_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_thorolund_quest.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_catacombs_environment.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_catacombs_backdrop.sh "$DS1R_ROOT" "$BB_ASSETS"
+bash tests/test_pinwheel_environment.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_catacombs_creatures.sh "$DS1R_ROOT" "$BB_ASSETS"
 bash tests/test_catacombs_creatures_physics.sh "$DS1R_ROOT" "$BB_ASSETS" "$STAGED_MOD_ROOT"
 bash tests/test_catacombs_special.sh "$DS1R_ROOT" "$BB_ASSETS"

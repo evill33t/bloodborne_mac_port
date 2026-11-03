@@ -45,6 +45,13 @@ internal static class PinwheelCharacters {
             short id=checked((short)Socket(dummy.ReferenceID));
             skin.Model.Dummies.Add(Rebind(dummy,id));
         }
+        // The native target consumer enumerates body sockets220..227, not the
+        // private500+ source namespace. Keep its semantic ID but follow the
+        // authored Pinwheel marker instead of the Chapel Giant's head motion.
+        // Other common/effect sockets retain their separate native contracts.
+        var sourceLock=sourceModel.Dummies.Single(d=>d.ReferenceID==220);
+        var nativeLock=skin.Model.Dummies.Select((d,i)=>(d,i)).Single(p=>p.d.ReferenceID==220);
+        skin.Model.Dummies[nativeLock.i]=Rebind(sourceLock,220);
         NonHumanoidEnemies.OrderRenderNodes(skin.Model);visual.Bytes=skin.Model.Write();skeleton.Bytes=plan.Skeleton;
         character.Files.Single(f=>f.ID==300).Bytes=physics.Physics;pwvFile.Bytes=pwv;
         var parameters=PinwheelParameters.Build(composedRead("param/gameparam/gameparam.parambnd.dcx"),sourceRead,definitions,actions,sockets);

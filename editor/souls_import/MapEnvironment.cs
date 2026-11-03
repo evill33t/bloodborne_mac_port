@@ -222,16 +222,30 @@ internal static class MapEnvironment {
         if(nativeTemplateMap!=null)result.Limitations.Add("Complete native environment template "+nativeTemplateMap+" cloned for "+targetMap+"; target sparse override profiles are bypassed. Source lighting, fog and tone rows are converted independently; native environment maps and shader response remain approximations.");
         return result;
     }
-    internal static bool HasSkyMaterials(FLVER2 source)=>source.Meshes.Any(m=>SkyMaterial(source.Materials[m.MaterialIndex].MTD));
+    // Catacombs' authored background uses a generic alpha MTD instead of the
+    // sky-specific names used by Firelink. Keep this exception bound to its
+    // actual source map/model/diffuse identity, not all alpha materials or m9s.
+    static bool CatacombsBackdrop(IFlverMaterial material,string? sourceMap,string? sourceModel,string? sourceProfile)=>
+        sourceProfile=="DS1R"&&sourceMap=="m13_00_00_00"&&sourceModel=="m9900B0"&&Leaf(material.MTD)=="M[D]_Alp.mtd"&&
+        material.Textures.Count(t=>t.ParamName=="g_Diffuse")==1&&material.Textures.Single(t=>t.ParamName=="g_Diffuse").Path.Replace('\\','/').Split('/').Last()=="m13_sky.tga";
+    internal static bool HasSkyMaterials(FLVER2 source,string? sourceMap=null,string? sourceModel=null,string? sourceProfile=null)=>
+        source.Meshes.Any(m=>SkyMaterial(source.Materials[m.MaterialIndex].MTD)||CatacombsBackdrop(source.Materials[m.MaterialIndex],sourceMap,sourceModel,sourceProfile));
     static bool SkyMaterial(string path)=>path.Contains("cloud",StringComparison.OrdinalIgnoreCase)||path.Contains("_Sky[",StringComparison.OrdinalIgnoreCase)||path.Contains("_m9000_M[D]",StringComparison.OrdinalIgnoreCase);
-    internal static EnvironmentSky BakeSky(FLVER2 source,FLVER2 native,Func<string,MTD> sourceDefinition,Func<string,MTD> nativeDefinition,Func<string,string> texturePath,string materialPrefix) {
+    internal static EnvironmentSky BakeSky(FLVER2 source,FLVER2 native,Func<string,MTD> sourceDefinition,Func<string,MTD> nativeDefinition,Func<string,string> texturePath,string materialPrefix,
+        string? sourceMap=null,string? sourceModel=null,string? sourceProfile=null) {
         if(!Regex.IsMatch(materialPrefix,@"\A[A-Za-z0-9_]{1,48}\z"))throw new ArgumentException("Invalid imported sky material prefix");
         if(native.Header.Version is not(0x20013 or 0x20014)||native.Header.BigEndian)throw new InvalidDataException("Choose a Bloodborne native sky template");
         var result=FLVER2.Read(native.Write());result.Materials.Clear();result.Meshes.Clear();result.Dummies.Clear();result.Nodes=[new(){Name="root",ParentIndex=-1,Scale=Vector3.One}];
         var geometry=new StaticMapGeometry(source,"DS1R");var definitions=new List<EnvironmentMaterial>();var notes=new List<string>();int total=0;
         foreach(var mesh in source.Meshes) {
-            var sourceMaterial=source.Materials[mesh.MaterialIndex];bool cloud=sourceMaterial.MTD.Contains("cloud",StringComparison.OrdinalIgnoreCase),dome=sourceMaterial.MTD.Contains("_Sky[",StringComparison.OrdinalIgnoreCase),distant=sourceMaterial.MTD.Contains("_m9000_M[D]",StringComparison.OrdinalIgnoreCase);
+            var sourceMaterial=source.Materials[mesh.MaterialIndex];bool backdrop=CatacombsBackdrop(sourceMaterial,sourceMap,sourceModel,sourceProfile);
+            bool cloud=sourceMaterial.MTD.Contains("cloud",StringComparison.OrdinalIgnoreCase)||backdrop,dome=sourceMaterial.MTD.Contains("_Sky[",StringComparison.OrdinalIgnoreCase),distant=sourceMaterial.MTD.Contains("_m9000_M[D]",StringComparison.OrdinalIgnoreCase);
             if(!cloud&&!dome&&!distant){notes.Add("Non-sky source mesh omitted: "+sourceMaterial.MTD);continue;}
+            if(backdrop) {
+                if(source.Meshes.Count!=1||mesh.Vertices.Count!=294||mesh.FaceSets.Any(f=>f.Flags==FLVER2.FaceSet.FSFlags.None&&f.CullBackfaces))
+                    throw new InvalidDataException("Authored Catacombs background geometry changed");
+                notes.Add("Exact DS1R Catacombs m9900B0/M[D]_Alp/m13_sky background retained with a native alpha sky carrier. Preserve source groups and transform; it is not an invented arena roof and may be culled inside the boss room.");
+            }
             if((long)total+mesh.Vertices.Count>100000)throw new InvalidDataException("Source sky exceeds the geometry budget");
             if(distant)notes.Add("Source distant landscape geometry and diffuse colors retained with a native unlit sky material; its source lighting response is approximated.");
             var template=native.Meshes.FirstOrDefault(m=>native.Materials[m.MaterialIndex].MTD.EndsWith(cloud?"M_Sky_daytime_[Dn]_Alp.mtd":"M_Sky_daytime_[Dn].mtd",StringComparison.OrdinalIgnoreCase))??
