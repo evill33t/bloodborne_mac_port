@@ -58,9 +58,24 @@ internal static class MapNpcQuestState {
         int[] dialogue=[11010590,11010591,11010594,71010050,71010051,71010052,71010053,71010054,71010055,71010056,71010057,71010058];
         for(int i=0;i<dialogue.Length;i++)flags.Add(dialogue[i],52411100+i);
         flags.Add(11010860,52411112); // Havel: append-only persistent death.
+        flags.Add(11200801,52411113); // Basin Hydra defeat.
+        flags.Add(11200800,52411114); // Dusk's golden golem defeat.
+        flags.Add(703,52411115); // Source new-visit gate after Hydra.
+        for(int i=0;i<7;i++)flags.Add(11205300+i,52411120+i); // Individual severed heads.
+        for(int i=0;i<10;i++)flags.Add(11300850+i,52411130+i); // Six necromancers, two lizards, Titanite Demon and Black Knight.
+        int[] dusk=[71200001,71200002,11200590,11200591];for(int i=0;i<dusk.Length;i++)flags.Add(dusk[i],52411140+i);
+        flags.Add(71200000,52411144); // Dusk introduction completed.
+        int[] patches=[11300403,11305037,11305038,11300592,11300593,71310066,71310067,71310076,71310077];for(int i=0;i<patches.Length;i++)flags.Add(patches[i],52411150+i);
+        int[] patchesGift=[71310068,11300590,71310070,71310071,71310072,11300591];for(int i=0;i<patchesGift.Length;i++)flags.Add(patchesGift[i],52411159+i);
         return flags;
     }
-    internal static int Flag(int source)=>MapQuestState.Flags.TryGetValue(source,out int old)?old:Flags.TryGetValue(source,out int owned)?owned:throw new NotSupportedException("Unreserved source NPC flag: "+source);
+    internal static int Flag(int source) {
+        // The nested source event and the outer caster-death event represent
+        // the same six deaths. Normalize that explicit alias before ownership
+        // lookup; the reservation dictionary itself must stay one-to-one.
+        if(source is >=11300801 and <=11300806)source=11300850+source-11300801;
+        return MapQuestState.Flags.TryGetValue(source,out int old)?old:Flags.TryGetValue(source,out int owned)?owned:throw new NotSupportedException("Unreserved source NPC flag: "+source);
+    }
     static EMEVD.Instruction Ins(int bank,int id,params object[] args)=>new(bank,id,args);
     static bool Same(EMEVD.Instruction a,EMEVD.Instruction b)=>a.Bank==b.Bank&&a.ID==b.ID&&a.Layer==b.Layer&&a.ArgData.SequenceEqual(b.ArgData);
     internal static byte[] Initialize(byte[] native,byte[] sourceCommon) {

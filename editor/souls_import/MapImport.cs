@@ -101,16 +101,41 @@ internal static partial class Program {
             var environment=legacyMap==null?null:MapEnvironment.Load(sourceMap.ReadAsset,path=>File.Exists(Path.Combine(nativeRoot,path))?File.ReadAllBytes(Path.Combine(nativeRoot,path)):null,profile.Id,map,target,definitions!,
                 legacyMap.Parts.GetEntries().Where(p=>p is MSB1.Part.MapPiece or MSB1.Part.Object or MSB1.Part.Collision or MSB1.Part.Enemy)
                     .Select(p=>new EnvironmentBinding(p.Name,p.LightID,p.FogID,p.ScatterID,p.ShadowID,p is MSB1.Part.Collision,p.ToneMapID,p.ToneCorrectID)).ToArray(),calibration,destination.Additional||target=="m24_00_00_00"?"m24_01_00_00":null);
+            BasinEnvironment.Result? basinEnvironment=null;
+            if(environment!=null&&destination.Additional&&profile.Id=="DS1R"&&map=="m12_00_00_00"&&legacyMap!=null) {
+                basinEnvironment=BasinEnvironment.Apply(environment,sourceMap.ReadAsset,ReadStaged,definitions!,legacyMap);
+                foreach(var file in basinEnvironment.Files)Write(file.Key,file.Value);
+            }
+            if(environment!=null&&profile.Id=="DS1R"&&map=="m13_00_00_00")CatacombsEnvironment.Apply(environment,sourceMap.ReadAsset,definitions!);
             if(environment!=null)foreach(var file in environment.Files)Write(file.Path,file.Bytes);
             MSBB.Part.GparamConfigStruct Lighting(string name)=>environment?.Bindings.GetValueOrDefault(name)?.DeepCopy()??pieceLighting.DeepCopy();
             var sourceParts=legacyMap?.Parts.GetEntries().ToDictionary(p=>p.Name,StringComparer.Ordinal);
             void SourceGroups(MSBB.Part targetPart,string sourceName,bool backread=true) {
                 if(sourceParts==null||!sourceParts.TryGetValue(sourceName,out var sourcePart))return;
+                if(map=="m12_00_00_00")SourceReflections.CopyFlags(sourcePart,targetPart);
                 Array.Clear(targetPart.DrawGroups);Array.Copy(sourcePart.DrawGroups,targetPart.DrawGroups,sourcePart.DrawGroups.Length);
                 Array.Clear(targetPart.DispGroups);Array.Copy(sourcePart.DispGroups,targetPart.DispGroups,sourcePart.DispGroups.Length);
                 if(backread){Array.Clear(targetPart.BackreadGroups);Array.Copy(sourcePart.DrawGroups,targetPart.BackreadGroups,sourcePart.DrawGroups.Length);}
             }
             BND4? materialBinder=null;List<string> skyLimitations=[];
+            SourceMapMaterials? sourceMaterials=null;
+            BasinWater? basinWater=null;
+            if(profile.Id=="DS1R"&&map=="m12_00_00_00") {
+                var sourceDefinitions=BND3.Read(sourceMap.ReadAsset("mtd/Mtd.mtdbnd.dcx")??throw new FileNotFoundException("Basin source materials unavailable"));
+                materialBinder=BND4.Read(ReadStaged("mtd/allmaterialbnd.mtdbnd.dcx")??throw new FileNotFoundException("Native materials unavailable"));
+                MTD Definition(IReadOnlyList<BinderFile> files,string path)=>MTD.Read(files.Single(f=>Leaf(f.Name).Equals(Leaf(path),StringComparison.OrdinalIgnoreCase)).Bytes);
+                basinWater=new(path=>Definition(sourceDefinitions.Files,path),ReadNative,path=>Definition(materialBinder.Files,path));
+                foreach(var texture in basinWater.NativeTextures)if(!convertedTextures.TryAdd(texture.Key,texture.Value))throw new InvalidDataException("Basin native water texture ownership collision: "+texture.Key);
+                sourceMaterials=new(path=>Definition(sourceDefinitions.Files,path),path=>Definition(materialBinder.Files,path),map);
+            }
+            if(profile.Id=="DS1R"&&map=="m13_00_00_00") {
+                var sourceDefinitions=BND3.Read(sourceMap.ReadAsset("mtd/Mtd.mtdbnd.dcx")??throw new FileNotFoundException("Catacombs source materials unavailable"));
+                materialBinder=BND4.Read(ReadStaged("mtd/allmaterialbnd.mtdbnd.dcx")??throw new FileNotFoundException("Native materials unavailable"));
+                MTD Definition(IReadOnlyList<BinderFile> files,string path)=>MTD.Read(files.Single(f=>Leaf(f.Name).Equals(Leaf(path),StringComparison.OrdinalIgnoreCase)).Bytes);
+                sourceMaterials=new(path=>Definition(sourceDefinitions.Files,path),path=>Definition(materialBinder.Files,path));
+            }
+            var bridgeNames=destination.Additional&&profile.Id=="DS1R"&&legacyMap!=null?MapCatacombsBridges.SourceNames(map,legacyMap):new HashSet<string>(StringComparer.Ordinal);
+            var doorNames=destination.Additional&&profile.Id=="DS1R"&&legacyMap!=null?MapDoors.SourceNames(map,legacyMap):new HashSet<string>(StringComparer.Ordinal);
             int sourceSkyVertices=0;
 
             MapBreakables.Export? breakables=null;
@@ -124,7 +149,7 @@ internal static partial class Program {
                 foreach(var (path,bytes) in breakables.Files)Write(path,bytes);
                 foreach(var (sourceName,actorName) in breakables.SourceActors){var actor=breakables.Objects.Single(p=>p.Name==actorName);actor.GparamConfigStruct=Lighting(sourceName);SourceGroups(actor,sourceName);}
             }
-            var placements=allPlacements.Where(p=>breakables?.ConsumedNames.Contains(p.Name)!=true&&!encounterFogNames.Contains(p.Name)).ToArray();
+            var placements=allPlacements.Where(p=>breakables?.ConsumedNames.Contains(p.Name)!=true&&!encounterFogNames.Contains(p.Name)&&!doorNames.Contains(p.Name)&&!bridgeNames.Contains(p.Name)).ToArray();
             var corpsePlan=SourceCorpsePose.Resolve(profile.Id,map,legacyMap,sourceMap.ReadAsset);
             var corpseByName=corpsePlan.Placements.ToDictionary(p=>p.Name,StringComparer.Ordinal);
             string ModelKey(StaticPlacement p)=>corpseByName.TryGetValue(p.Name,out var corpse)?p.Model+"_pose"+corpse.Animation:p.Model;
@@ -136,12 +161,12 @@ internal static partial class Program {
                 var skySource=profile.Id is "DS1" or "DS1R" && modelName.StartsWith("m9",StringComparison.Ordinal)
                     ?SourceFlver.Read(sourceMap.ReadModel(modelName)??throw new FileNotFoundException("Source background unavailable: "+modelName),profile.Id):null;
                 if(skySource!=null&&MapEnvironment.HasSkyMaterials(skySource)) {
-                    var sourceMaterials=BND3.Read(sourceMap.ReadAsset("mtd/Mtd.mtdbnd.dcx")??throw new FileNotFoundException("Source material definitions unavailable"));
+                    var skyDefinitions=BND3.Read(sourceMap.ReadAsset("mtd/Mtd.mtdbnd.dcx")??throw new FileNotFoundException("Source material definitions unavailable"));
                     materialBinder??=BND4.Read(ReadNative("mtd/allmaterialbnd.mtdbnd.dcx")??throw new FileNotFoundException("Native material definitions unavailable"));
                     MTD Definition(IReadOnlyList<BinderFile> files,string path)=>MTD.Read(files.Single(f=>Leaf(f.Name).Equals(Leaf(path),StringComparison.OrdinalIgnoreCase)).Bytes);
                     var skyTextures=sourceMap.TexturesForModel(modelName);
                     var sky=MapEnvironment.BakeSky(skySource,FLVER2.Read(ReadNative("map/m24_01_00_00/m24_01_00_00_900000.flver.dcx")??throw new FileNotFoundException("Native sky template unavailable")),
-                        path=>Definition(sourceMaterials.Files,path),path=>Definition(materialBinder.Files,path),
+                        path=>Definition(skyDefinitions.Files,path),path=>Definition(materialBinder.Files,path),
                         path=>@"N:\SPRJ\data\Model\map\"+area+@"\tex\"+Image(path,"white",skyTextures,profile.Id=="DS1R")+".tif","BBImport_"+map);
                     foreach(var material in sky.Materials) {
                         if(materialBinder.Files.Any(f=>Leaf(f.Name).Equals(material.Name,StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("Imported sky material name already exists");
@@ -160,16 +185,21 @@ internal static partial class Program {
                 else source=FLVER2.Is(raw.ToArray())?SourceFlver.Read(raw,profile.Id):FLVER0.Is(raw.ToArray())?FLVER0.Read(raw):throw new InvalidDataException("No FLVER geometry: "+modelName);
                 var local=sourceMap.TexturesForModel(modelName);
                 var result=FLVER2.Read(nativeFlver);result.Meshes.Clear();result.Materials.Clear();result.Nodes.Clear();result.Nodes.Add(new FLVER.Node{Name="root",ParentIndex=-1,Scale=Vector3.One});result.Dummies.Clear();var geometry=new StaticMapGeometry(source,profile.Id);var nonSolid=new HashSet<int>();
-                foreach(var mesh in source.Meshes){var material=source.Materials[mesh.MaterialIndex];if(SkipMaterial(material.MTD,material.Name,true))continue;if(profile.Id is "DS1" or "DS1R" && material.MTD.Contains("water",StringComparison.OrdinalIgnoreCase)){reports.Add("Water surface omitted: "+material.MTD);continue;}
-                    bool cutout=MapMaterial.Cutout(material.MTD,profile.Id),additive=MapMaterial.LightShaft(material.MTD,profile.Id);
+                foreach(var mesh in source.Meshes){var material=source.Materials[mesh.MaterialIndex];bool water=basinWater?.IsSurface(material)==true;if(!water&&SkipMaterial(material.MTD,material.Name,true))continue;if(!water&&profile.Id is "DS1" or "DS1R" && material.MTD.Contains("water",StringComparison.OrdinalIgnoreCase)){reports.Add("Water surface omitted: "+material.MTD);continue;}
+                    bool cutout=MapMaterial.Cutout(material.MTD,profile.Id),additive=MapMaterial.LightShaft(material.MTD,profile.Id),crawling=sourceMaterials!=null&&SourceMapMaterials.Crawling(material.MTD);
                     if(additive)reports.Add("Native additive light-shaft approximation (source vertex/texture alpha retained; source angle fade and UV scrolling not ported): "+modelName);
-                    var nativeMaterial=ConvertMaterial(material,"Imported_"+result.Materials.Count,local);
-                    var outputMesh=new FLVER2.Mesh{UseBoneWeights=false,MaterialIndex=result.Materials.Count,NodeIndex=meshTemplate.NodeIndex};foreach(var buffer in meshTemplate.VertexBuffers)outputMesh.VertexBuffers.Add(new FLVER2.VertexBuffer(buffer.LayoutIndex){BufferIndex=buffer.BufferIndex});
-                    foreach(var vertex in mesh.Vertices)outputMesh.Vertices.Add(geometry.Bake(mesh,vertex,additive));
+                    FLVER2.Material nativeMaterial;FLVER2.Mesh outputMesh;
+                    if(water)(outputMesh,nativeMaterial)=basinWater!.Convert(material,mesh,geometry,result,area,(path,fallback)=>Image(path,fallback,local));
+                    else {
+                        nativeMaterial=ConvertMaterial(material,"Imported_"+result.Materials.Count,local);
+                        outputMesh=new FLVER2.Mesh{UseBoneWeights=false,MaterialIndex=result.Materials.Count,NodeIndex=meshTemplate.NodeIndex};foreach(var buffer in meshTemplate.VertexBuffers)outputMesh.VertexBuffers.Add(new FLVER2.VertexBuffer(buffer.LayoutIndex){BufferIndex=buffer.BufferIndex});
+                        foreach(var vertex in mesh.Vertices)outputMesh.Vertices.Add(geometry.Bake(mesh,vertex,additive||crawling));
+                    }
                     foreach(var face in StaticMapGeometry.Faces(source,mesh)){var indices=face.Indices;if(indices.Count%3!=0||indices.Any(i=>i<0||i>=mesh.Vertices.Count))throw new InvalidDataException("Invalid source triangle index");foreach(var level in new[]{FLVER2.FaceSet.FSFlags.None,FLVER2.FaceSet.FSFlags.LodLevel1,FLVER2.FaceSet.FSFlags.LodLevel2})outputMesh.FaceSets.Add(new(level,false,face.Cull,face.Unknown,new List<int>(indices)));totalTriangles+=indices.Count/3;}
                     if(outputMesh.Vertices.Count==0||outputMesh.FaceSets.Count==0)continue;
-                    StaticMapUV.Apply(outputMesh,nativeMaterial,profile.Id);
-                    outputMesh.BoundingBox=new(){Min=outputMesh.Vertices.Select(v=>v.Position).Aggregate(Vector3.Min),Max=outputMesh.Vertices.Select(v=>v.Position).Aggregate(Vector3.Max)};result.Materials.Add(nativeMaterial);if(additive||MapMaterial.NonSolidFoliage(material.MTD,material.Textures.FirstOrDefault(t=>MapMaterial.SameSlot(t.ParamName,"g_DiffuseTexture"))?.Path??"",profile.Id))nonSolid.Add(result.Meshes.Count);result.Meshes.Add(outputMesh);totalVertices+=outputMesh.Vertices.Count;
+                    if(!water)StaticMapUV.Apply(outputMesh,nativeMaterial,profile.Id);
+                    sourceMaterials?.Convert(material,nativeMaterial);sourceMaterials?.ApplyCrawling(material,result,nativeMaterial);
+                    outputMesh.BoundingBox=new(){Min=outputMesh.Vertices.Select(v=>v.Position).Aggregate(Vector3.Min),Max=outputMesh.Vertices.Select(v=>v.Position).Aggregate(Vector3.Max)};result.Materials.Add(nativeMaterial);if(water||additive||crawling||MapMaterial.NonSolidFoliage(material.MTD,material.Textures.FirstOrDefault(t=>MapMaterial.SameSlot(t.ParamName,"g_DiffuseTexture"))?.Path??"",profile.Id))nonSolid.Add(result.Meshes.Count);result.Meshes.Add(outputMesh);totalVertices+=outputMesh.Vertices.Count;
                 }
                 if(result.Meshes.Count==0){modelSkips.Add(placementGroup.Key,source.Meshes.Count==0
                     ?("source-no-render-geometry","Source FLVER contains no meshes; no target part was emitted. Source events and interaction behavior are not ported.")
@@ -183,6 +213,14 @@ internal static partial class Program {
                 // fall back to filtered render triangles.
                 if(sourceCollision!=null)continue;
                 var transform=Transform(part);foreach(var mesh in model.Model.Meshes.Where((m,i)=>!model.NonSolid.Contains(i)))foreach(var face in mesh.FaceSets.Where(f=>f.Flags==FLVER2.FaceSet.FSFlags.None)){var ix=face.Indices;for(int i=0;i+2<ix.Count;i+=3){var a=Vector3.Transform(mesh.Vertices[ix[i]].Position,transform);var b=Vector3.Transform(mesh.Vertices[ix[i+1]].Position,transform);var c=Vector3.Transform(mesh.Vertices[ix[i+2]].Position,transform);if(Vector3.Cross(b-a,c-a).LengthSquared()>1e-10f)collision.Add(new(a,c,b));}}
+            }
+            if(sourceMaterials!=null)foreach(var definition in sourceMaterials.Definitions) {
+                if(materialBinder!.Files.Any(f=>Leaf(f.Name).Equals(definition.Name,StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("Imported Catacombs material name already exists");
+                materialBinder.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,materialBinder.Files.Max(f=>f.ID)+1,@"N:\SPRJ\data\Material\mtd\map\BBImport\"+definition.Name,definition.Definition.Write()));
+            }
+            if(basinWater!=null)foreach(var definition in basinWater.Definitions) {
+                if(materialBinder!.Files.Any(f=>Leaf(f.Name).Equals(definition.Name,StringComparison.OrdinalIgnoreCase)))throw new InvalidDataException("Imported Basin water material name already exists");
+                materialBinder.Files.Add(new BinderFile(SoulsFormats.Binder.FileFlags.Flag1,materialBinder.Files.Max(f=>f.ID)+1,@"N:\SPRJ\data\Material\mtd\map\BBImport\"+definition.Name,definition.Definition.Write()));
             }
             if(materialBinder!=null)Write("mtd/allmaterialbnd.mtdbnd.dcx",materialBinder.Write(DCX.Type.DCX_DFLT_10000_44_9));
             // A larger source map may need more collision records than its native donor.
@@ -203,6 +241,7 @@ internal static partial class Program {
             if(highTriangles.Count==0||lowTriangles.Count==0)throw new InvalidDataException("Imported map must have both high and low solid collision");
             if(boundCollision!=null)for(int i=0;i<slots.Length;i++)foreach(var col in msb.Parts.Collisions.Where(c=>c.ModelName==slots[i].ModelName)) {
                 col.GparamConfigStruct=Lighting(boundCollision[i].SourceName);SourceGroups(col,boundCollision[i].SourceName,false);
+                if(map=="m12_00_00_00"&&sourceParts?.GetValueOrDefault(boundCollision[i].SourceName) is MSB1.Part.Collision authoredPlane)SourceReflections.CopyPlane(authoredPlane,col,offset.Y);
                 if(environment?.ShadowBindings.TryGetValue(boundCollision[i].SourceName,out int shadowID)==true)col.SceneGparamConfigStruct.ShadowParamID=shadowID;
                 if(environment?.SceneBindings.TryGetValue(boundCollision[i].SourceName,out var scene)==true){col.SceneGparamConfigStruct.ToneMapID=scene.ToneMapID;if(scene.ColorGradingID is {} grade)col.SceneGparamConfigStruct.ColorGradingID=grade;}
             }
@@ -268,15 +307,61 @@ internal static partial class Program {
                 var dragonNames=hellkite.Spawns.Select(s=>s.SourceName).ToHashSet(StringComparer.Ordinal);
                 enemySpawns=enemySpawns with{Spawns=enemySpawns.Spawns.Concat(hellkite.Spawns).ToArray(),Skipped=enemySpawns.Skipped.Where(s=>!dragonNames.Contains(s.SourceName)).ToArray()};
             }
+            CatacombsCreatures.Result? catacombsCreatures=null;
+            if(destination.Additional&&profile.Id=="DS1R"&&map=="m13_00_00_00"&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
+                NativeEventReservations.Verify(nativeRoot,CatacombsCreaturesEvents.First,300);
+                string path="event/"+baseMap+".emevd.dcx";
+                catacombsCreatures=CatacombsCreatures.Apply(sourceMap.ReadAsset,ReadStaged,p=>ReadNative(p)??throw new FileNotFoundException("Native Catacombs dependency unavailable",p),
+                    legacyMap,msb,offset,boundCollision,slots,definitions!,baseMap,ReadStaged(path)!);
+                foreach(var pair in catacombsCreatures.Files)Write(pair.Key,pair.Value);Write(path,catacombsCreatures.Script);
+                foreach(var spawnReport in catacombsCreatures.Spawns)msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID).GparamConfigStruct=Lighting(spawnReport.SourceName);
+                var consumed=catacombsCreatures.Spawns.Select(s=>s.SourceName).ToHashSet(StringComparer.Ordinal);
+                enemySpawns=enemySpawns with{Spawns=enemySpawns.Spawns.Concat(catacombsCreatures.Spawns).ToArray(),Skipped=enemySpawns.Skipped.Where(s=>!consumed.Contains(s.SourceName)).ToArray(),Limitations=enemySpawns.Limitations.Concat(catacombsCreatures.Limitations).ToArray()};
+            }
+            CatacombsSpecials.Result? catacombsSpecials=null;
+            if(catacombsCreatures!=null&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
+                string path="event/"+baseMap+".emevd.dcx";
+                NativeEventReservations.Verify(nativeRoot,CatacombsSpecialEvents.First,100);
+                catacombsSpecials=CatacombsSpecials.Apply(sourceMap.ReadAsset,ReadStaged,p=>ReadNative(p)??throw new FileNotFoundException("Native Catacombs special dependency unavailable",p),
+                    legacyMap,msb,offset,boundCollision,slots,definitions!,baseMap,ReadStaged(path)!);
+                foreach(var pair in catacombsSpecials.Files)Write(pair.Key,pair.Value);Write(path,catacombsSpecials.Script);
+                foreach(var spawnReport in catacombsSpecials.Spawns)msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID).GparamConfigStruct=Lighting(spawnReport.SourceName);
+                var consumed=catacombsSpecials.Spawns.Select(s=>s.SourceName).ToHashSet(StringComparer.Ordinal);
+                enemySpawns=enemySpawns with{Spawns=enemySpawns.Spawns.Concat(catacombsSpecials.Spawns).ToArray(),Skipped=enemySpawns.Skipped.Where(s=>!consumed.Contains(s.SourceName)).ToArray(),Limitations=enemySpawns.Limitations.Concat(catacombsSpecials.Limitations).ToArray()};
+            }
+            MapHydra.Result? hydra=null;
+            if(destination.Additional&&profile.Id=="DS1R"&&map=="m12_00_00_00"&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
+                string path="event/"+baseMap+".emevd.dcx";
+                NativeEventReservations.Verify(nativeRoot,HydraEvents.FirstEvent,10);
+                hydra=MapHydra.Apply(sourceMap.ReadAsset,p=>ReadNative(p)??throw new FileNotFoundException("Native Hydra dependency unavailable",p),ReadStaged,
+                    legacyMap,msb,offset,boundCollision,slots,definitions!,baseMap,ReadStaged(path)!,importItems?125300100:-1);
+                foreach(var pair in hydra.Files)Write(pair.Key,pair.Value);Write(path,hydra.Script);
+                foreach(var spawnReport in hydra.Spawns)msb.Parts.Enemies.Single(p=>p.EntityID==spawnReport.EntityID).GparamConfigStruct=Lighting(spawnReport.SourceName);
+                foreach(var actor in msb.Parts.Enemies.Where(p=>p.ModelName=="c8831"))actor.GparamConfigStruct=Lighting(hydra.Spawns.Single().SourceName);
+                var consumed=hydra.ConsumedNames.ToHashSet(StringComparer.Ordinal);
+                enemySpawns=enemySpawns with{Spawns=enemySpawns.Spawns.Concat(hydra.Spawns).ToArray(),Skipped=enemySpawns.Skipped.Where(s=>!consumed.Contains(s.SourceName)).ToArray()};
+            }
+            MapGoldenGolem.Result? goldenGolem=null;
+            if(hydra!=null&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
+                string path="event/"+baseMap+".emevd.dcx";
+                goldenGolem=MapGoldenGolem.Apply(sourceMap.ReadAsset,p=>ReadNative(p)??throw new FileNotFoundException("Native golden golem dependency unavailable",p),ReadStaged,
+                    legacyMap,msb,offset,boundCollision,slots,definitions!,baseMap,ReadStaged(path)!);
+                foreach(var pair in goldenGolem.Files)Write(pair.Key,pair.Value);Write(path,goldenGolem.Script);
+                msb.Parts.Enemies.Single(p=>p.EntityID==goldenGolem.Spawn.EntityID).GparamConfigStruct=Lighting(goldenGolem.SourceName);
+                enemySpawns=enemySpawns with{Spawns=enemySpawns.Spawns.Append(goldenGolem.Spawn).ToArray(),Skipped=enemySpawns.Skipped.Where(s=>s.SourceName!=goldenGolem.SourceName).ToArray()};
+            }
             MapItems.Result? items=null;
             if(importItems&&legacyMap!=null&&boundCollision!=null&&enemySpawns!=null) {
                 items=MapItems.Bake(sourceMap.ReadAsset,ReadNative,legacyMap,msb,map,definitions!,nativeRoot,offset,boundCollision,slots,
-                    enemySpawns.Spawns,hellkite?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??enemySpawns.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??
-                    characters?.GameParamBytes??breakables?.Files.GetValueOrDefault("param/gameparam/gameparam.parambnd.dcx")??ReadNative("param/gameparam/gameparam.parambnd.dcx")!,
+                    enemySpawns.Spawns,ReadStaged("param/gameparam/gameparam.parambnd.dcx")??throw new FileNotFoundException("Composed item parameters unavailable"),
                     rewardLots:(bossPlan?.Encounters.SelectMany(e=>(e.Rewards.Immediate is {} immediate?new[]{immediate.ID}:Array.Empty<int>()).Concat(e.Rewards.Delayed.Select(l=>l.ID)))??[])
-                        .Concat(characters?.Reports.Any(r=>r.SourceEntityID==6001&&r.EntityID.HasValue)==true?new[]{1000}:[]).Distinct().ToArray());
+                        .Concat(characters?.Reports.Any(r=>r.SourceEntityID==6001&&r.EntityID.HasValue)==true?new[]{1000}:[]).Concat(hydra!=null?new[]{35300100}:[]).Concat(map=="m13_00_00_00"?new[]{1200}:[]).Concat(catacombsSpecials?.RewardSourceLots??[]).Distinct().ToArray());
                 foreach(var pickup in items.Pickups)msb.Parts.Objects.Single(p=>p.Name==pickup.TargetPart).GparamConfigStruct=Lighting(pickup.SourcePart);
                 foreach(var (path,bytes) in items.Files)Write(path,bytes);
+                if(catacombsSpecials!=null) {
+                    string eventPath="event/"+baseMap+".emevd.dcx";
+                    Write(eventPath,CatacombsSpecialEvents.Rewards(ReadStaged(eventPath)!,catacombsSpecials.Source,items.Lots.ToDictionary(l=>l.SourceID,l=>l.TargetID)));
+                }
             }
             MapBossEncounters.Result? bossEncounters=null;
             MapLadders.Result? ladders=null;
@@ -327,6 +412,16 @@ internal static partial class Program {
                     .Select(p=>new KeyValuePair<string,byte[]>(p.Relative,File.ReadAllBytes(p.Path))).ToArray();
                 merchantDialogue=MapMerchantTalk.Export(msb,map,baseMap,nativeRoot,definitions!,sourceMap.ReadAsset,ReadStaged,actors,Write,staged);
             }
+            MapDuskQuest.Result? dusk=null;
+            if(goldenGolem!=null&&legacyMap!=null&&boundCollision!=null) {
+                NativeEventReservations.Verify(nativeRoot,12416020,10);
+                string path="event/"+baseMap+".emevd.dcx";
+                dusk=MapDuskQuest.Apply(sourceMap.ReadAsset,p=>ReadNative(p)??throw new FileNotFoundException("Native Dusk dependency unavailable",p),ReadStaged,
+                    legacyMap,msb,offset,boundCollision,slots,definitions!,nativeRoot,baseMap,ReadStaged(path)!);
+                foreach(var pair in dusk.Files)Write(pair.Key,pair.Value);Write(path,dusk.Script);
+                msb.Parts.Enemies.Single(p=>p.EntityID==dusk.Entity).GparamConfigStruct=Lighting(dusk.SourceName);
+                if(enemySpawns!=null)enemySpawns=enemySpawns with{Skipped=enemySpawns.Skipped.Where(s=>s.SourceName!=dusk.SourceName).ToArray()};
+            }
             MapHavel.Result? havel=null;
             if(destination.Additional&&profile.Id=="DS1R"&&map=="m10_01_00_00"&&legacyMap!=null&&boundCollision!=null) {
                 string path="event/"+baseMap+".emevd.dcx";
@@ -335,6 +430,47 @@ internal static partial class Program {
                 foreach(var pair in havel.Files)Write(pair.Key,pair.Value);Write(path,havel.Script);
                 msb.Parts.Enemies.Single(p=>p.EntityID==MapHavel.Entity).GparamConfigStruct=Lighting(havel.Details.SourceName);
                 if(enemySpawns!=null)enemySpawns=enemySpawns with{Skipped=enemySpawns.Skipped.Where(s=>s.SourceName!=havel.Details.SourceName).ToArray()};
+            }
+            MapDoors.Result? doors=null;
+            if(doorNames.Count>0&&legacyMap!=null&&boundCollision!=null) {
+                MapDoors.VerifyReservations(nativeRoot);
+                string path="event/"+baseMap+".emevd.dcx";
+                var doorTextures=new Dictionary<string,TPF.Texture>(StringComparer.OrdinalIgnoreCase);
+                foreach(var model in allPlacements.Where(p=>doorNames.Contains(p.Name)).Select(p=>p.Model).Distinct())
+                    foreach(var pair in sourceMap.TexturesForModel(model))doorTextures.TryAdd(pair.Key,pair.Value);
+                doors=MapDoors.Apply(sourceMap.ReadAsset,ReadNative,ReadStaged,legacyMap,msb,offset,boundCollision,slots,
+                    ReadStaged(path)!,map,baseMap,originalFlver,m=>ConvertMaterial(m,"Imported_door",doorTextures),pieceLighting);
+                foreach(var pair in doors.Files)Write(pair.Key,pair.Value);Write(path,doors.Script);
+                foreach(var binding in doors.Bindings)msb.Parts.Objects.Single(p=>p.EntityID==binding.Entity).GparamConfigStruct=Lighting(binding.SourceName);
+            }
+            MapCatacombsBridges.Result? catacombsBridges=null;
+            if(bridgeNames.Count>0&&legacyMap!=null&&boundCollision!=null) {
+                string path="event/"+baseMap+".emevd.dcx";
+                MapCatacombsBridges.VerifyReservations(nativeRoot);
+                var bridgeTextures=new Dictionary<string,TPF.Texture>(StringComparer.OrdinalIgnoreCase);
+                foreach(var model in allPlacements.Where(p=>bridgeNames.Contains(p.Name)).Select(p=>p.Model).Distinct())
+                    foreach(var pair in sourceMap.TexturesForModel(model))bridgeTextures.TryAdd(pair.Key,pair.Value);
+                catacombsBridges=MapCatacombsBridges.Apply(sourceMap.ReadAsset,ReadNative,ReadStaged,legacyMap,msb,offset,boundCollision,slots,
+                    ReadStaged(path)!,map,baseMap,originalFlver,m=>ConvertMaterial(m,"Imported_Catacombs_mechanism",bridgeTextures),pieceLighting);
+                foreach(var pair in catacombsBridges.Files)Write(pair.Key,pair.Value);Write(path,catacombsBridges.Script);
+                foreach(var binding in catacombsBridges.Bindings)msb.Parts.Objects.Single(p=>p.EntityID==binding.Entity).GparamConfigStruct=Lighting(binding.SourceName);
+            }
+            MapPatchesQuest.Result? patches=null;
+            if(catacombsBridges!=null&&items!=null&&legacyMap!=null&&boundCollision!=null) {
+                NativeEventReservations.Verify(nativeRoot,MapPatchesQuest.FirstEvent,5);
+                string path="event/"+baseMap+".emevd.dcx";
+                patches=MapPatchesQuest.Apply(sourceMap.ReadAsset,p=>ReadNative(p)??throw new FileNotFoundException("Native Patches dependency unavailable",p),ReadStaged,
+                    legacyMap,msb,offset,boundCollision,slots,definitions!,nativeRoot,baseMap,ReadStaged(path)!,items.Lots.Single(l=>l.SourceID==1200));
+                foreach(var pair in patches.Files)Write(pair.Key,pair.Value);Write(path,patches.Script);
+                msb.Parts.Enemies.Single(p=>p.EntityID==patches.Entity).GparamConfigStruct=Lighting(patches.SourceName);
+                if(enemySpawns!=null)enemySpawns=enemySpawns with{Skipped=enemySpawns.Skipped.Where(s=>s.SourceName!=patches.SourceName).ToArray()};
+            }
+            if(map=="m12_00_00_00"&&sourceParts!=null) {
+                void Reflection(string sourceName,MSBB.Part actor){if(sourceParts.TryGetValue(sourceName,out var fromPart))SourceReflections.CopyFlags(fromPart,actor);}
+                if(enemySpawns!=null)foreach(var actor in enemySpawns.Spawns)Reflection(actor.SourceName,msb.Parts.Enemies.Single(p=>p.EntityID==actor.EntityID));
+                if(hydra!=null)foreach(var actor in msb.Parts.Enemies.Where(p=>p.ModelName=="c8831"))Reflection(hydra.Spawns.Single().SourceName,actor);
+                if(dusk!=null)Reflection(dusk.SourceName,msb.Parts.Enemies.Single(p=>p.EntityID==dusk.Entity));
+                if(doors!=null)foreach(var binding in doors.Bindings)Reflection(binding.SourceName,msb.Parts.Objects.Single(p=>p.EntityID==binding.Entity));
             }
             MapDeathBoundaries.Result? deathBoundaries=null;
             if(profile.Id=="DS1R"&&legacyMap!=null&&sourceCollision!=null)
@@ -410,6 +546,8 @@ internal static partial class Program {
                 MSBB.Part? targetPart=null;string status;string? reason=null;
                 if(staticTargets.TryGetValue(part.Name,out var staticPart)){targetPart=staticPart;status="placed-static";}
                 else if(breakables?.SourceActors.TryGetValue(part.Name,out var actorName)==true){targetPart=breakableTargets![actorName];status="placed-breakable";reason="Source visuals use native approximate fracture physics; source object events and interactions are not ported.";}
+                else if(doors?.Bindings.SingleOrDefault(d=>d.SourceName==part.Name) is {} door){targetPart=msb.Parts.Objects.Single(p=>p.EntityID==door.Entity);status="placed-door";reason="Source swing and leaf collision with native keyed object action and persistent open state.";}
+                else if(catacombsBridges?.Bindings.SingleOrDefault(d=>d.SourceName==part.Name) is {} mechanism){targetPart=msb.Parts.Objects.Single(p=>p.EntityID==mechanism.Entity);status="placed-mechanism";reason="Source moving bridge/lever, keyframed solid collision, persistent orientation and Patches trap conditions.";}
                 else if(fogTargets?.TryGetValue(part.Name,out var fogActor)==true){targetPart=msb.Parts.Objects.Single(p=>p.Name==fogActor);status="placed-boss-fog";reason="Source-sized native physical fog wall with native particles and encounter-controlled admission.";}
                 else if(modelSkips.TryGetValue(ModelKey(part),out var skipped)){status=skipped.Status;reason=skipped.Reason;}
                 else throw new InvalidDataException("Unaccounted source placement: "+part.Name);
@@ -420,9 +558,10 @@ internal static partial class Program {
             int PlacementCount(string status)=>placementResults.Count(p=>p.status==status);
             int placedStatic=PlacementCount("placed-static"),placedBreakable=PlacementCount("placed-breakable"),placedBossFog=PlacementCount("placed-boss-fog"),sourceNoRenderGeometry=PlacementCount("source-no-render-geometry"),
                 filteredAll=PlacementCount("filtered-all"),missingData=PlacementCount("missing-data");
-            int accounted=placedStatic+placedBreakable+placedBossFog+sourceNoRenderGeometry+filteredAll+missingData;
-            var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,placedBossFog,sourceNoRenderGeometry,filteredAll,missingData,accounted,
-                reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)&&placedBossFog==encounterFogNames.Count};
+            int placedDoors=PlacementCount("placed-door"),placedMechanisms=PlacementCount("placed-mechanism");
+            int accounted=placedStatic+placedBreakable+placedBossFog+placedDoors+placedMechanisms+sourceNoRenderGeometry+filteredAll+missingData;
+            var placementSummary=new{total=allPlacements.Count,placedStatic,placedBreakable,placedBossFog,placedDoors,placedMechanisms,sourceNoRenderGeometry,filteredAll,missingData,accounted,
+                reconciled=accounted==allPlacements.Count&&placedStatic==placed&&placedBreakable==(breakables?.Objects.Count??0)&&placedBossFog==encounterFogNames.Count&&placedDoors==doorNames.Count&&placedMechanisms==bridgeNames.Count};
             var characterReports=characters?.Reports.Where(r=>merchantCharacters?.Reports.Any(m=>m.SourceName==r.SourceName)!=true).ToArray();
             var report=new{source=profile.Id,map,target,sourceSlice=MapDestination.SliceParts(map),destination=destination.Additional?"additional":"replacement",templateMap=destination.TemplateMap,from,to,offset,models=baked.Count,placements=placed,vertices=totalVertices,modelTriangles=totalTriangles,collisionTriangles=highTriangles.Count,lowCollisionTriangles=lowTriangles.Count,collisionChunks=slots.Length,
                 placementSummary,placementResults,runtimeLinks,items=items==null?null:new{items.Lots,items.Pickups,items.Skipped,items.QuestItems,items.VialDropLot,items.PickupCarrier,items.Limits},
@@ -430,8 +569,8 @@ internal static partial class Program {
                 collisionSource=sourceCollision==null?"render-mesh fallback":"original source high/low collision",navigation=navigation?.Report,deathBoundaries=deathBoundaries?.Report,
                 collisionResidency=destination.Additional?"Collision Draw groups retain both physical layers in loaded imported blocks. Original Display/Backread and actor/scenery groups, enable flags and geometry are preserved. Connected-scene residency is broader; multi-area memory/culling behavior remains approximate.":"Original source collision groups retained",
                 sourceCollisionParts=sourceCollision?.Parts.Select(p=>new{p.Name,p.Model,p.Layer,p.HitFilter,p.Profile,p.PlayerSolid,p.TriangleCount,materials=p.Surfaces.Select(s=>s.Material).Distinct().ToArray()}).ToArray(),
-                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,bossSource=bossPlan,hellkite=hellkite?.Details,havel=havel?.Details,bossEncounters=bossEncounters==null?null:new{bossEncounters.Encounters,bossEncounters.Limits},ladders=ladders==null?null:new{ladders.Bindings,ladders.Skipped,ladders.Limits},characters=characterReports,merchants=merchantCharacters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
-                environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),bonfireCollisionBindings=legacyMap==null||boundCollision==null?null:legacyMap.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Where(p=>p.ModelName=="o0200").Select(p=>new{sourcePart=p.Name,targetCollision=slots[MapCollisionBindings.ObjectSlot(boundCollision,p.CollisionName,p.Position+offset)].Name}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations=destination.Additional?"Experimental additional map: a fresh Bloodborne MSB contains only emitted source geometry, converted collision, adapted actors/treasures and explicitly adapted world/quest records. Original native map layouts, collision archives and event scripts are preserved. Source AI, full quests, water physics and complete collision material behavior are not ported. Source stair materials retain their native no-slide classification; static source navigation coverage and unconverted gates/cross-mesh links are recorded in navigation.Limits. Native material shaders, GI and source animation/behavior adaptation retain the limits recorded by each stage. The destination finalizer adds entry/return travel and lamps; their interactions, save behavior and connected-map transitions require gameplay validation with a copied save.":"Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
+                breakableObjects=breakables?.Objects.Count??0,breakableModels=breakables?.Reports,breakableSkipped=breakables?.Skipped,breakableLimits=breakables?.Limits,objectCollisionBindings,posedCorpses,corpsePlan,bossSource=bossPlan,hellkite=hellkite?.Details,havel=havel?.Details,goldenGolem=goldenGolem?.Report,patches=patches==null?null:new{patches.SourceName,patches.Entity,patches.Npc,patches.FaceGenID,patches.Pose,patches.Dialogue,patches.GiftLot,patches.CollectionFlag,patches.Limitations},catacombsBridges=catacombsBridges==null?null:new{catacombsBridges.Bindings,catacombsBridges.Limitations},dusk=dusk==null?null:new{dusk.SourceName,dusk.Entity,dusk.Npc,dusk.Motions,dusk.Limitations},catacombsSpecials=catacombsSpecials==null?null:new{catacombsSpecials.RewardSourceLots,catacombsSpecials.Limitations,catacombsSpecials.SharedNativeEffectVariants},catacombsCreatures=catacombsCreatures==null?null:new{catacombsCreatures.Cohorts,catacombsCreatures.Limitations,catacombsCreatures.SharedNativeEffectVariants},hydra=hydra==null?null:new{hydra.Character,hydra.Heads,heads=hydra.Events.Heads,hydra.SharedEffectVariants,hydra.Events.SourceEventHash,hydra.Events.Limits},doors=doors==null?null:new{doors.Bindings,doors.Limits,doors.NativeHashes},bossEncounters=bossEncounters==null?null:new{bossEncounters.Encounters,bossEncounters.Limits},ladders=ladders==null?null:new{ladders.Bindings,ladders.Skipped,ladders.Limits},characters=characterReports,merchants=merchantCharacters?.Reports,enemySpawns=enemySpawns==null?null:new{enemySpawns.Spawns,enemySpawns.Skipped,enemySpawns.Limitations,Awakenings=skeletonAwakenings},sourceSkyVertices,sourceSkyLimitations=skyLimitations,
+                basinEnvironment=basinEnvironment?.Report,basinWater=basinWater==null?null:new{surfaces=basinWater.Surfaces,limitations=BasinWater.Limitations},environmentRows=environment?.Rows,environmentCalibration=environment?.Calibration,environmentLimitations=environment?.Limitations,collisionEnvironment=boundCollision?.Select((c,i)=>new{target=slots[i].Name,source=c.SourceName}).ToArray(),bonfireCollisionBindings=legacyMap==null||boundCollision==null?null:legacyMap.Parts.GetEntries().OfType<MSB1.Part.ObjectBase>().Where(p=>p.ModelName=="o0200").Select(p=>new{sourcePart=p.Name,targetCollision=slots[MapCollisionBindings.ObjectSlot(boundCollision,p.CollisionName,p.Position+offset)].Name}).ToArray(),areaName,areaNameBanner="not yet verified in gameplay",spawn,textures=convertedTextures.Count,originalParts,removedScenery,parkedActors,selectedSky,removedSky,nonSolidMeshes=baked.Values.Sum(v=>v.NonSolid.Count),finalMapPieces=msb.Parts.MapPieces.Count,notes=reports.Distinct().ToArray(),limitations=destination.Additional?"Experimental additional map: a fresh Bloodborne MSB contains only emitted source geometry, converted collision, adapted actors/treasures and explicitly adapted world/quest records. Original native map layouts, collision archives and event scripts are preserved. Source AI, full quests, water physics and complete collision material behavior are not ported. Source stair materials retain their native no-slide classification; static source navigation coverage and unconverted gates/cross-mesh links are recorded in navigation.Limits. Native material shaders, GI and source animation/behavior adaptation retain the limits recorded by each stage. The destination finalizer adds entry/return travel and lamps; their interactions, save behavior and connected-map transitions require gameplay validation with a copied save.":"Experimental map replacement: source high/low solid collision where supported; converted source light sets/scattering and sky where supported, using native Bloodborne material shaders. Source AI, full quest chains, water physics, collision material behavior and navigation are not ported. Only the explicit Firelink pool state, initial NPC availability and bounded conversations in worldState/questState/dialogue are adapted. Imported urns use native approximate fracture physics; verified corpse clips are baked to static poses. Terrain blending uses its first texture layer. Unused original scenery removed; native actors parked as dummy records; referenced scenery and props relocated horizontally outside the play area; unused native collision bodies moved below the scene. Source sky/cloud geometry and texture colors imported for DS1; see environment and sky limitations. Spawn regions point to the imported map; lantern travel remains unverified. Use an isolated copied save."};
             bool hollowCombat=enemySpawns?.Spawns.Any(p=>p.HollowCombat!=null)==true;
             if(bossEncounters!=null||hollowCombat) {
                 string heap=hollowCombat?"1024":"768";

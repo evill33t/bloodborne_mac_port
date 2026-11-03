@@ -126,6 +126,10 @@ internal static partial class Program {
                 var owner=Regex.Match(path.Replace('\\','/'),@"/map/(m\d\d)/tex/",RegexOptions.IgnoreCase);
                 if(owner.Success)IndexArea(owner.Groups[1].Value.ToLowerInvariant());
             }
+            if(profile is "DS1" or "DS1R") {
+                var objects=SourceObjectTextures.Resolve(paths.Where(p=>!result.ContainsKey(ModelName(p))&&!textureCache.ContainsKey(ModelName(p))),assets.Read);
+                foreach(var (name,texture) in objects.Textures)result.TryAdd(name,texture);
+            }
             foreach(var key in paths.Select(ModelName).Distinct(StringComparer.OrdinalIgnoreCase)) {
                 if(result.ContainsKey(key))continue;
                 if(!textureCache.ContainsKey(key)&&textureFiles.TryGetValue(key,out var entry))

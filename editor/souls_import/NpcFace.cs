@@ -139,7 +139,12 @@ internal static class NpcFace {
             }
             for(int v=0;v<assigned.Length;++v) {
                 int original=map.Indices[v];var normal=normals[original];
-                if(!Finite(normal)||normal.LengthSquared()<1e-12f)throw new InvalidDataException("Invalid generated FaceGen normal");
+                if(!Finite(normal)||normal==Vector3.Zero)throw new InvalidDataException($"Invalid generated FaceGen normal: row {id}, mesh {m}, vertex {v}/TRI {original}");
+                // Patches' authored small-eye morph has valid eye-rim area
+                // normals below1e-12 squared. Area is not a validity threshold.
+                // Rescale those nonzero vectors before normalization; keep the
+                // source geometry/direction and reject true degeneracy above.
+                if(normal.LengthSquared()<1e-12f)normal/=Math.Max(Math.Abs(normal.X),Math.Max(Math.Abs(normal.Y),Math.Abs(normal.Z)));
                 if(!assigned[v])uv[v]=fallbackUv.GetValueOrDefault(original);
                 if(MathF.Round(uv[v].X*1024)<short.MinValue||MathF.Round(uv[v].X*1024)>short.MaxValue||MathF.Round(uv[v].Y*1024)<short.MinValue||MathF.Round(uv[v].Y*1024)>short.MaxValue)
                     throw new InvalidDataException("Generated FaceGen UV exceeds the packed source layout");

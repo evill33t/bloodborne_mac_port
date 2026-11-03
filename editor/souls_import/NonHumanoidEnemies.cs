@@ -135,7 +135,7 @@ internal static class NonHumanoidEnemies {
         }
         return bytes;
     }
-    internal static SkinBake Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,Profile profile,string target,IReadOnlySet<int> masks,Dictionary<string,byte[]> files,Func<int,int>? sourceSlot=null,Action<SkinBake>? adaptMaterials=null,Action<SkinBake,NativeRigAppend.Plan>? adaptRig=null) {
+    internal static SkinBake Package(Func<string,byte[]?> readSource,Func<string,byte[]> readNative,Profile profile,string target,IReadOnlySet<int> masks,Dictionary<string,byte[]> files,Func<int,int>? sourceSlot=null,Action<SkinBake>? adaptMaterials=null,Action<SkinBake,NativeRigAppend.Plan>? adaptRig=null,Func<NativeRigAppend.Plan,SourceAnimation,float,IReadOnlyList<Matrix4x4>>? sourceSample=null,Func<NativeRigAppend.Plan,IReadOnlySet<int>>? zeroAddedBones=null) {
         var source=MapCharacters.Authored(readSource,profile.Source);var character=BND4.Read(readNative("chr/"+profile.Native+".chrbnd.dcx"));var animation=BND4.Read(readNative("chr/"+profile.Native+".anibnd.dcx"));
         var visual=character.Files.Single(f=>Leaf(f.Name).EndsWith(".flver",StringComparison.OrdinalIgnoreCase));var skeleton=animation.Files.Single(f=>f.ID==1000000);
         NativeRigAppend.ValidateCharacter(animation.Files.Single(f=>f.ID==7000400).Bytes.ToArray());
@@ -159,7 +159,7 @@ internal static class NonHumanoidEnemies {
         if(!Matrix4x4.Invert(plan.Original.Local[0],out var inverse))throw new InvalidDataException("Singular native locomotion root");
         foreach(var f in clips) {
             var sourceClip=Clip(sourceSlot?.Invoke(f.ID-1000000000)??SourceSlot(profile,f.ID-1000000000));
-            try{f.Bytes=NativeRigAppend.Clip(f.Bytes.ToArray(),plan,time=>{var pose=sourceClip.Sample(Math.Min(sourceClip.Duration,time*sourceClip.Duration));pose[0]*=inverse;return pose;},preserveAddedRootWorld:true);}
+            try{f.Bytes=NativeRigAppend.Clip(f.Bytes.ToArray(),plan,time=>{if(sourceSample!=null)return sourceSample(plan,sourceClip,Math.Min(sourceClip.Duration,time*sourceClip.Duration));var pose=sourceClip.Sample(Math.Min(sourceClip.Duration,time*sourceClip.Duration));pose[0]*=inverse;return pose;},preserveAddedRootWorld:true,allowZeroAddedBones:zeroAddedBones?.Invoke(plan));}
             catch(InvalidDataException e){throw new InvalidDataException("Imported "+profile.Source+" playback "+profile.Native+"/"+(f.ID-1000000000)+": "+e.Message,e);}
         }
         character.Files.RemoveAll(f=>Leaf(f.Name).EndsWith("_c.hkx",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).EndsWith(".clm2",StringComparison.OrdinalIgnoreCase)||Leaf(f.Name).Equals("div_data.txt",StringComparison.OrdinalIgnoreCase)||TPF.Is(f.Bytes.ToArray()));
