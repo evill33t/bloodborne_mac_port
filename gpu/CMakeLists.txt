@@ -529,3 +529,15 @@ add_executable(bbmap-prepare ../host/map_prepare.cpp shim/bbport_map_charts.cpp
 target_include_directories(bbmap-prepare PRIVATE shim)
 target_compile_features(bbmap-prepare PRIVATE cxx_std_20)
 target_link_libraries(bbmap-prepare PRIVATE miniz::miniz)
+
+# CPU-only validation of the production GPU boundary helper.
+add_executable(gnm-submit-validation-test EXCLUDE_FROM_ALL ../tests/test_gnm_submit_validation.cpp)
+target_include_directories(gnm-submit-validation-test PRIVATE shim)
+target_compile_options(gnm-submit-validation-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+add_executable(gnm-submit-api-test EXCLUDE_FROM_ALL ../tests/test_gnm_submit_api.cpp ../tests/test_gpu_runtime_stubs.cpp)
+target_include_directories(gnm-submit-api-test PRIVATE shim shadps4 third_party/gcn/include)
+target_link_libraries(gnm-submit-api-test PRIVATE bbgpu)
+target_compile_options(gnm-submit-api-test PRIVATE -UNDEBUG)
+if (APPLE)
+    target_link_options(gnm-submit-api-test PRIVATE -Wl,-export_dynamic)
+endif()
