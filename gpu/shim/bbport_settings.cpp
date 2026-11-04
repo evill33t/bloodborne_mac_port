@@ -28,7 +28,14 @@ const char* Path() {
 /// Keys Save() writes; every other key=value line of the file is kept as it is (future launcher
 /// options, the removed FSR 4 checks fsr4_auto_exposure/fsr4_invert_jitter, ...).
 /// `renderer` (metal|vulkan until 0.5.2) is owned but no longer written: saving drops it.
+std::string_view Trim(std::string_view text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return {};
+    return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+}
+
 bool OwnedKey(const std::string& key) {
+    if (Trim(key) == "metalfx_white_scene_fix") return true;
     static constexpr const char* owned[] = {
         "upscaler", "preset", "sharpen", "sharpness", "jitter", "reactive", "object_motion",
         "reactive_scale", "reactive_threshold", "reactive_max", "debug_view", "show_fps", "achievement_banners",
@@ -36,7 +43,7 @@ bool OwnedKey(const std::string& key) {
         "screen_lighting", "screen_lighting_ao", "screen_lighting_gi",
         "model_lod", "output_res", "map_view", "map_fog",
         "menu_language", "compass", "compass_position", "bloodstains", "team_pings", "ping_key", "free_camera",
-        "live_resolution", "shader_compile", "renderer", "fps_cap", "game_timing",
+        "live_resolution", "metalfx_white_scene_fix", "shader_compile", "renderer", "fps_cap", "game_timing",
         "fullscreen", "metal_hud", "texture_compression",
         "mouse_look", "mouse_sensitivity", "mouse_vertical", "mouse_invert_y", "pad_menu_combo"};
     for (const char* k : owned) {
@@ -152,6 +159,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         v.map_view = std::clamp(i, 0, 3);
     } else if (key == "map_fog") {
         v.map_fog = i != 0;
+    } else if (Trim(key) == "metalfx_white_scene_fix") {
+        v.metalfx_white_scene_fix = Trim(value) == "1";
     } else if (key == "live_resolution") {
         v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
     } else if (key == "shader_compile") {
@@ -203,6 +212,7 @@ void Load() {
     v.screen_lighting = ScreenLightingOff;
     v.screen_lighting_ao = 0.5f; v.screen_lighting_gi = 0.7f;
     v.menu_language=BbLanguage::GameLanguage();
+    v.metalfx_white_scene_fix = false;
     for (int e = 0; e < EffectCount; ++e) {
         v.effects[e] = Effects[e].default_on;
     }
@@ -284,6 +294,7 @@ void Load() {
     v.startup_fullscreen = v.fullscreen;
     v.startup_metal_hud = v.metal_hud;
     v.startup_texture_compression = v.texture_compression;
+    v.startup_metalfx_white_scene_fix = v.metalfx_white_scene_fix;
 }
 
 void ConfigureUpscalerSupport(bool metalfx, bool fsr3, bool spatial) {
@@ -431,6 +442,7 @@ void Save() {
     std::fprintf(file, "model_lod=%d\noutput_res=%dx%d\n", v.model_lod.load(),
                  OutputWidths[v.output_res], OutputHeights[v.output_res]);
     // Read by run.sh at start.
+    std::fprintf(file, "metalfx_white_scene_fix=%d\n", int(v.metalfx_white_scene_fix));
     std::fprintf(file, "live_resolution=%s\n", v.live_resolution < 0 ? "auto"
                                                   : v.live_resolution ? "1" : "0");
     static constexpr const char* compile_modes[] = {"wait", "skip", "balanced"};

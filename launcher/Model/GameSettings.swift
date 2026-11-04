@@ -184,6 +184,7 @@ struct GameSettings: Equatable {
     var reactiveMax = 0.9
     var objectMotion = false
     var liveResolution = LiveResolution.off
+    var metalfxWhiteSceneFix = false
     /// bbport.ini texture_compression, read by run.sh at start (scripts/launch_settings.sh:
     /// 0 = BB_LAZY_TEXTURE_USAGE=0).
     var textureCompression = true
@@ -254,6 +255,7 @@ struct GameSettings: Equatable {
         if let v = number("reactive_max", 0...1) { reactiveMax = v }
         if let v = flag("object_motion") { objectMotion = v }
         if let v = ini["live_resolution"], let l = LiveResolution(rawValue: v) { liveResolution = l }
+        metalfxWhiteSceneFix = ini["metalfx_white_scene_fix"] == "1"
         if let v = flag("texture_compression") { textureCompression = v }
         cheats = Cheats.parse(ini["cheats"])
     }
@@ -304,6 +306,7 @@ struct GameSettings: Equatable {
         ini["reactive_max"] = String(format: "%.2f", reactiveMax)
         ini["object_motion"] = objectMotion ? "1" : "0"
         ini["live_resolution"] = ultrawide ? "0" : liveResolution.rawValue
+        ini["metalfx_white_scene_fix"] = metalfxWhiteSceneFix ? "1" : "0"
         ini["texture_compression"] = textureCompression ? "1" : "0"
         ini["cheats"] = Cheats.format(cheats)
     }

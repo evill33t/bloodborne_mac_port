@@ -71,6 +71,8 @@ int main() {
     Get().hdr = false; Get().hdr_paper_white = 0.75f; Get().hdr_peak = 0.0f;
     assert(Get().screen_lighting == ScreenLightingLow && Get().screen_lighting_ao == 0.6f &&
            Get().screen_lighting_gi == 1.2f);
+    assert(!Get().metalfx_white_scene_fix && !Get().startup_metalfx_white_scene_fix);
+    Get().metalfx_white_scene_fix = true;
     Get().preset = 3;
     Get().map_view = 3;Get().compass=false;Get().compass_position=2;
     Get().bloodstains=false;Get().team_pings=false;Get().ping_key=3;Get().free_camera=true;
@@ -134,6 +136,35 @@ int main() {
     assert(Count(text, "pad_menu_combo=0") == 1);
     assert(Count(text, "mouse_sensitivity=2.25") == 1 && Count(text, "mouse_invert_y=1") == 1);
     assert(Count(text, "mouse_vertical=0.75") == 1);
+    assert(Count(text, "metalfx_white_scene_fix=1") == 1);
+    Load();
+    assert(Get().metalfx_white_scene_fix && Get().startup_metalfx_white_scene_fix);
+    Get().metalfx_white_scene_fix = false;
+    Save();
+    assert(Count(Read(path), "metalfx_white_scene_fix=0") == 1);
+    Load();
+    assert(!Get().metalfx_white_scene_fix && !Get().startup_metalfx_white_scene_fix);
+    // Reloading a missing or malformed key cannot retain a previous enabled value.
+    for (const char* entry : {"", "metalfx_white_scene_fix=2\n", "metalfx_white_scene_fix=true\n"}) {
+        Get().metalfx_white_scene_fix = true;
+        f = std::fopen(path, "w");
+        assert(f);
+        std::fputs(entry, f);
+        std::fclose(f);
+        Load();
+        assert(!Get().metalfx_white_scene_fix && !Get().startup_metalfx_white_scene_fix);
+    }
+    f = std::fopen(path, "w");
+    assert(f);
+    std::fputs("  metalfx_white_scene_fix = 1 \r\n", f);
+    std::fclose(f);
+    Load();
+    assert(Get().metalfx_white_scene_fix && Get().startup_metalfx_white_scene_fix);
+    Get().metalfx_white_scene_fix = false;
+    Save();
+    assert(Count(Read(path), "metalfx_white_scene_fix=0") == 1);
+    Load();
+    assert(!Get().metalfx_white_scene_fix);
     setenv("BB_ULTRAWIDE_RES", "3840x1080", 1);
     f = std::fopen(path, "w");
     assert(f);

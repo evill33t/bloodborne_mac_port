@@ -138,6 +138,8 @@ struct Values {
     /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest
     /// on the Steam Deck and older GPUs), -1 auto (off on a Mac), 1 on. On restart.
     std::atomic<int> live_resolution{0};
+    /// Opt-in native guest targets for MetalFX white scenes above 1080p; on restart.
+    std::atomic<bool> metalfx_white_scene_fix{false};
     /// A draw whose pipeline is still compiling in the background: Wait waits for it (a hitch,
     /// correct image), Skip leaves the draw out until it is ready (no hitch, an object may be
     /// missing for a few frames), Balanced waits within a small time budget and skips past it.
@@ -172,6 +174,7 @@ struct Values {
     bool startup_fullscreen = false;
     bool startup_metal_hud = false;
     bool startup_texture_compression = true;
+    bool startup_metalfx_white_scene_fix = false;
 };
 
 Values& Get();
