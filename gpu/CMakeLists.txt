@@ -541,3 +541,8 @@ target_compile_options(gnm-submit-api-test PRIVATE -UNDEBUG)
 if (APPLE)
     target_link_options(gnm-submit-api-test PRIVATE -Wl,-export_dynamic)
 endif()
+
+# CPU-only validation of the production GPU boundary helper.
+add_executable(pm4-contracts-test EXCLUDE_FROM_ALL ../tests/test_pm4_contracts.cpp)
+target_include_directories(pm4-contracts-test PRIVATE shim)
+target_compile_options(pm4-contracts-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
