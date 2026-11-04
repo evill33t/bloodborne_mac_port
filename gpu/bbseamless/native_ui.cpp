@@ -218,6 +218,13 @@ extern "C" void bbseamless_frame(uint32_t* buttons,uint8_t sticks[4],uint8_t* l2
     view.has_load=bbcoop_team_load_view(&view.load);
     view.has_rot=bbcoop_rot_view(&view.rot);
     view.has_travel=bbcoop_team_travel_view(&view.travel);
+    view.travel_lamp_name[0]=0;
+    if(view.has_travel && (view.travel.question || view.travel.waiting)) {
+        const auto& names=LampNames();const auto found=names.find(view.travel.lamp_name_id);
+        const std::string name=view.travel.lamp_name_id<0?BbLanguage::Text(language,"Hunter's Dream"):
+                               found!=names.end()?found->second:std::string{};
+        std::snprintf(view.travel_lamp_name,sizeof(view.travel_lamp_name),"%s",name.c_str());
+    }
     view.has_invasion=bbcoop_invasion_view(&view.invasion);
     bbcoop_duel_view(&view.duel);
     view.duel_id=0;view.duel_name[0]=0;
