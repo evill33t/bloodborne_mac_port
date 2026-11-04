@@ -2046,3 +2046,434 @@ fixtures, launcher model/Stop lifecycle, settings, runtime/semaphore/pad, shared
 and the Metal overlay (plain and validation layer) pass. This refresh did not repeat
 gameplay, packaged-app or optional real-image installation checks. Detailed results:
 [ADAPTIVE_FPS.md](ADAPTIVE_FPS.md#upstream-refresh-25-october-2026).
+## 2026-10-25: the slow Macs are 16–18 GB Macs on macOS 27 (report survey)
+
+Every performance issue and attached log was surveyed (two read-only investigations). Persistently
+slow (5–17 FPS) reports after 0.5.0 all come from `bbgpu-host-macos27` on a 16–18 GB Mac:
+#19 M1 Pro 16 GB, #22 M5 16 GB, #53/#69 M3 Pro 18 GB, a Reddit M2 Pro. Not slow: the same M3 Pro
+18 GB model on macOS 15.7 (50–62 FPS at 1080p), 16 GB Airs on macOS 26 (#47, #25 after its fix),
+big Macs on 27 (M4 Max 48 GB −4%, M2 Max 64 GB, M5 Max 36 GB after the 0.5.0 arena fix).
+#22 is the cleanest A/B: the same M5 16 GB ran 0.4 (one MoltenVK process, the 27 host could not
+start) at 45–60 FPS; every split-mode 0.5.x build about 4x slower.
+
+The slow Macs are not GPU-bound. #69 (M3 Pro, 0.5.5, BB_FRAME_STATS): GPU busy 27–31 ms but
+only 37–44% of wall time, frames-ahead waits 57–67 ms, GPU ticks block the GPU thread 86–89%; on
+the title menu 6–14 draws, GPU busy 5–6 ms, still only 23–26 FPS. So a fixed delay per submission
+before the GPU starts, the signature of #6 (idle GPU, 1.2 s submit-to-start, constant wiring) and
+#42 (`IOGPUCommandDescriptor::prepare: required > max`). Wired 9.97 of 18 GB, swap 0.
+
+Suspects (unconfirmed): (1) the GPU driver's wired-memory limit on small Macs under macOS 27, so
+residency (the 6 GiB arena is in a queue residency set and declared on every encoder, the same
+size on every Mac) is re-wired per submission; (2) something specific to split mode on 27 (the
+mirrored guest memory, the exec-time reservation host). The arena is direct memory + 1 GiB
+(`buffer_cache.cpp`), only the texture budget scales with RAM (`texture_cache.cpp`).
+
+DiAvisoo's bbport-mac-optimized (the Reddit comparison) is KosmicKrisp (Vulkan on Metal) with a
+sparse arena, tested only on an M2 Max 64 GB, and has been marked obsolete in favour of this port
+since 2026-10-20; no M2 Pro result for it was found.
+
+To confirm on a slow Mac: `log show --last 2m --predicate 'eventMessage CONTAINS "required > max"'`
+while slow; `sysctl iogpu.wired_limit_mb`; then (diagnostic, resets at reboot)
+`sudo sysctl iogpu.wired_limit_mb=14000` on an 18 GB Mac; and one at a time BB_GC_BUDGET_MB=6000,
+BB_ARENA_GIB=5, BB_ARENA_LAZY=0, BB_FRAMES_AHEAD=2 with the benchmark. If (1) holds, the fix is an
+arena that grows with the game's mappings (backlog idea (d), placement heaps / sparse-like).
+
+## 2026-10-25: full screen vs window on an external 4K display (Reddit: "full screen is slower")
+
+Several Reddit players report full screen slower than a window, especially on external displays.
+Not reproduced on the M4 Max (48 GB, macOS 27) with an external 4K panel (GS27U, "looks like
+1920x1080", 120 Hz, main display); throughput pass (standing, 45 s), test data:
+
+| | window (3840x1902 px) | full screen (3840x2160) | full screen, drawable = image size |
+|---|---|---|---|
+| 1080p, 120 cap | 119.2 FPS, 1% low 70.2 | 119.8, 99.7 | 119.6, 91.2 |
+| 1080p, uncapped, no vsync | 122.9, 75.8 | 120.1, 85.6 | 119.6, 77.8 |
+| 1440p render, uncapped, no vsync (GPU 95% busy) | 110.8, 75.5 | 111.6, 88.0 | 110.8, 75.2 |
+
+- The frame is prepared at the window's pixel size (`PrepareFrame` fits the image into the window),
+  so in full screen the post-process pass, the present copy and the three drawables are at the
+  display's full backing size (5120x2880 for "looks like 2560x1440" on a 4K panel). On this Mac
+  that costs nothing measurable, even GPU-bound.
+- Game Mode turns on for full-screen runs (gamepolicyd logs `gameDidLaunch`, other apps' states
+  change) but bb-probe's and bbgpu-host's thread priorities are the same as in a window.
+- Experiment on branch `fullscreen-drawable`: `BB_FULLSCREEN_DRAWABLE=output` sizes the frame and
+  drawable to the image (in the display's shape) and lets Core Animation scale; `BB_DISPLAY=n`
+  opens on the n-th display (#60). Not merged: no gain here; the drawable size follows each
+  image, so it changes during loads (1080p loading screen vs 1440p scene); the overlay is drawn
+  at the smaller size. *Next:* logs and benchmark reports from affected players (Mac, display,
+  scaling, refresh rate, window vs full screen), and `BB_HIGH_DPI=0` as their quick test.
+- **Direct vs composited (Metal HUD), later the same evening.** Full screen with nothing over the
+  window is presented *Direct*; a window, or another app over it, is *Composited*. Without frame
+  generation Direct costs nothing here: 4K native, 120 cap, 74.9-75.8 FPS full screen (Direct,
+  sawtooth of one and two refreshes) vs 74.6 windowed. **With #64's frame generation it does:**
+  the owner measured 60 real / 120 displayed composited but 40 / 80 Direct (interpolator delta
+  23.67 vs 16.71 ms): a real + generated pair often takes three refreshes. Reported on #64.
+- **Game Mode:** the packaged master app's scripted benchmark (own save, 1080p, test data), window
+  vs `BB_FULLSCREEN=1` via launch.conf (gamepolicyd active for both, far more app-state changes in
+  full screen): route 60.0 / 60.0 FPS (1% low 37.8 vs 42.5), uncapped 108.4 vs 107.1, bb-probe
+  CPU 208% / 259% in both. No Game Mode penalty on this Mac.
+- Still untested: a scaled mode on the external panel ("looks like 2560x1440" = 5120x2880
+  surface), a 60 Hz external display, and slower Macs.
+
+## 2026-10-26: 16-18 GB Macs slow down to 10-20 FPS: pinned GPU memory (#69)
+
+Reported on 16-18 GB Macs on macOS 27 (#69: M3 Pro, 14 GPU cores, 18 GB, 27.0.1): 54 FPS at load,
+then 10-20 FPS within a minute, at 1080p native, upscaler off. The reporter found that
+`BB_ARENA_GIB=5 BB_GC_BUDGET_MB=6000` restores 59-60 FPS. Their slow logs show ~9 GB of GPU
+allocations (6.5 GiB of it resident buffers: the 6 GiB arena and the 520 MiB page table and
+fault buffer), under Metal's working set, no texture evictions, and `required > max` kernel
+messages (`requiredBytes` ~17-20 GB against `maxWired` 14.3 GB).
+
+**Reproduction on the M4 Max (48 GB).** `sudo sysctl iogpu.wired_limit_mb=14000` (Metal's
+working set 37.4 → 13.7 GiB, the reporter's is 13.3) alone does not reproduce it: 60 FPS. With
+a helper holding 30 GiB of locked, incompressible memory as well (~18 GB left, swap in use), it
+does: 53 FPS then 15-17, as reported. The benchmark route drifts at low frame rates, so the
+comparisons below stand at the route's start (benchmark throughput pass capped at 60, 90 s,
+1080p native, upscaler off, windowed, no patches or mods).
+
+| Build / setting | Resident GPU buffers | FPS after the first 15 s |
+|---|---|---|
+| master (0.5.8) | 6,664 MiB | 15-17 |
+| `BB_GC_BUDGET_MB=6000` (texture budget ~1.4 GB, 405 images freed) | 6,664 MiB | 15-20 |
+| PR #85 (page table and fault buffer only with direct memory access) | 6,144 MiB | 21-30 |
+| `BB_ARENA_GIB=5` | 5,640 MiB | 45-60 |
+| `BB_ARENA_GIB=5 BB_GC_BUDGET_MB=6000` (the reporter's) | 5,640 MiB | 52-60 |
+| #85 + `BB_ARENA_GIB=5` | 5,120 MiB | 58-60 |
+| **#85 + #86 `BB_ARENA_LAYOUT=runs`** | **3,530 MiB** | **58-60** |
+
+The texture budget does not matter; the pinned (wired) buffers do. A fixed 5 GiB arena is not a
+safe default: with 6 GiB of direct memory (16:10, ultrawide) the game's mappings reach past
+5.0 GiB, and a request past the arena stops the game. #86's `runs` layout pins only the three
+runs the game maps for the GPU (3,325 + 13 + 0.125 MiB, 64 MiB guard each) and covers any
+mapping. The full benchmark route with #85 + #86 runs under the same limits: 58-60 FPS,
+`result=ok`, 25.2 million arena requests all inside a run, no late run changes, no fallback.
+
+**For 0.5.9 (a test build first):** #85 for every Mac; `runs` by default on Macs with 24 GB or less, or with
+Metal's working set at 18 GiB or less; `legacy` on the others (`BB_ARENA_LAYOUT` chooses).
+
+## 2026-10-26: the opening-movie freeze and crash on new games (#46, #50, #51, #24, #84)
+
+Reported only on 16-18 GB Macs (macOS 27), never reproduced on the M4 Max until now: the opening
+movie of a new game (and, per Reddit, the movie after signing the contract) freezes (`no new frame
+for 30 seconds`) or crashes (`signal 11 at guest offset 0x26c01c3`, address 0xd2).
+
+**Reproduction without a slow Mac.** A new game driven through `BB_PAD_FILE` (title → Play
+Offline → New Game → brightness → controls → movie; scratch scripts `ng/start.sh`,
+`ng/to-movie.sh`, `ng/stress-run.sh`) on an empty test save, with 16 busy-loop processes started
+when the movie begins. Unstressed it reaches the Contract screen at ~150 s at 60 FPS; stressed
+(movie at ~32 FPS) it failed 5 of 5 runs: 4 freezes at the movie's end (3101-3155 frames) and one
+`0x26c01c3` crash.
+
+**Two causes:**
+
+1. **Freeze: AvPlayer stop request lost.** New hang report (`runtime_thread_dump_all`, printed by
+   the hang watchdog: every guest thread's runtime wait and call chain, read with the thread
+   suspended, host frames named with `dladdr`) showed main in `sceAvPlayerClose →
+   ~AvPlayerSource → Stop → Thread::Join`, GXRenderThread waiting for main. At EOF the demuxer
+   joins the decoders, and `Libraries::Kernel::Thread::Join` *moves the jthread out*; the owner's
+   `Stop()` then called `RequestStop()` on the empty object, so the video decoder, waiting for a
+   frame buffer the closing game never returns, was never told to stop. Fix: `Thread` keeps the
+   jthread's `stop_source`, and `RequestStop`/`Stop` go through it.
+2. **Crash: an unlocked path on GXRenderThread's immediate context.** During the movie the main
+   thread records into GXRenderThread's context from `0x28fe7c0` (directly at `0x28feb09` /
+   `0x28feb40`, and via `0x21696c0 → 0x26bc2e0 → 0x26bc320`, the draw list that faults on a null
+   item), outside `0xebb960`. gnmdriver now also logs a write to an owned context *while another
+   thread holds the context lock* ("outside the context lock"), with the call chain, and the
+   handover line prints the previous user's chain too. Locking only `0x21696c0` still crashed
+   (the direct writes); `0x28fe7c0` is now hooked (20-byte prologue incl. `and rsp,-32`, no stack
+   arguments). `BB_MOVIE_LOCK=0` leaves it unhooked (A/B, fallback).
+
+| stressed runs (16 busy) | froze | crashed | overlaps/run | reached Contract |
+|---|---|---|---|---|
+| before | 4 of 5 | 1 of 5 | 22 | 0 of 5 |
+| player fix only (`BB_MOVIE_LOCK=0`) | 0 of 3 | 1 of 3 (GPU process, `SignalEop`) | 12-32 | 2 of 3 |
+| both fixes | 0 of 4 | 0 of 4 | 0 | 4 of 4 |
+
+Gameplay cost: benchmark route 60.0 FPS, 11 frames over 33 ms (master 2-10); the new hook never
+waited during the route (no wait lines), so that is run-to-run noise.
+
+
+## 2026-10-27: GPU process crash in StageSpecialization (#74), 5120x2160 (#93)
+
+**#74** (Ebrietas fight, also Forbidden Woods; 0.5.4.5-0.5.7, with and without mods): ~100 "SRT
+walker load N faulted" warnings, then signal 11 at address 0x8 in `Shader::StageSpecialization`.
+In the 0.5.7 library the faulting instruction (`+0x2c0`, `ldr x10, [x9, #0x8]`) is
+`Info::ReadUdReg` for a vertex attribute's V#: the table pointer in user data is **0**. The SRT
+walker survives such reads (fault recovery), `ReadUdReg` on the GPU thread did not. GCN reads
+through faulting addresses return zero, so table pointers below 64 KiB now read zeros in
+`ReadUdReg`, `ReadTessConstantBuffer` and the walker. The walker no longer marks such loads
+zeroed for good either (that kept the shader's tables at zero after the game filled them in).
+Not reproduced in game here (no save at Ebrietas); test_srt_walker covers the walker side.
+Throughput benchmark, native 1080p, M4 Max: ~105 FPS uncapped as before, no walker warnings.
+
+**5120x2160** (21:9, the "Resolution Patch 5120x2160" already in patches/Bloodborne.xml): the
+throughput benchmark (Central Yharnam) renders the scene at 5120x2160 with the HUD in place,
+60-61 FPS on the M4 Max, 7168 MiB resident buffers, no texture allocation failures in 40 s
+standing. The launcher warns below 24 GB as for 3440x1440.
+
+## 2026-10-28: 5120x2160 drew no level and crashed on load (#93)
+
+The 0.5.10 entry above was wrong: the 60 FPS at 5120x2160 came from a frame with no level in it.
+A screenshot of the same run shows the characters, items, HUD and sky, but no buildings or
+ground. The reporter (M5 Max, 36 GB, macOS 27.2) saw missing textures or a crash 9 s into
+loading: signal 11 at guest 0x2166b8a, reading +0x38 of a null texture. The caller (0xef6d81)
+creates one of the character renderer's textures with 0x2165c10, reports the error through
+0xee5de0(6), and carries on with the null.
+
+Cause: the ultrawide presets keep the retail first graphics heap (2287 MiB, 0x04B36DD8) and
+enlarge only the texture pool (886 → 1536 MiB, 6144 MiB DMEM). That holds up to 4K's pixel count;
+5120x2160 has a third more, and its render targets do not fit.
+
+Fix: above 3840x2160 pixels (only 5120x2160 today), patches.py also writes the community
+patch's 3952 MiB first heap, and launch_settings.sh asks for 8192 MiB DMEM (9 GiB GPU arena,
+about 2 GB more than the other ultrawide sizes). Central Yharnam then draws the level: 2190
+draws/frame instead of 1660, about 48 FPS uncapped on the M4 Max (GPU busy 20.9 ms/frame).
+
+## 2026-10-28: absent graphics bind record (#99)
+
+The 0.5.10 report faults in the **x86-64 game process**, at guest offset
+`0x2169edc`, with address zero and RAX/RBX/RDI zero. This differs from the native
+GPU descriptor fault covered by #74/#97 and 0.5.10.
+
+### Evidence and behavior
+
+The prepared Bloodborne 1.09 image places the fault inside the graphics resource
+dispatcher at `0x2169ec0`. Its recorded caller at `0xe2f130` passes a resource
+record as the third argument. The dispatcher calls the identity accessor at
+`0x26a94c0`, then dereferences the returned record. A null record therefore reaches
+the exact reported instruction and address. The record's family and type select
+Gnm writers, including the shader-register writer at `0x1077850`.
+
+The dispatcher already sends unsupported families/types through the context
+finalizer at `0x26af700`, without updating a binding. The runtime guard routes a
+null record through that same finalizer, passing `context + 0x10` and retaining
+its return value. Every non-null record executes the original instructions.
+The hook checks the entry, accessor, existing finalization tail and finalizer
+bytes before installing, and refuses a different image. The moved entry
+instructions contain no relative addressing. Set `BB_NULL_BIND_GUARD=0` to disable
+the guard for comparison. The first eight null records are logged.
+
+This is containment of the reported null dereference. The source of the missing
+record remains unknown. A skipped bind may leave earlier graphics state in use.
+The preceding `Undefined vertex attribute 0` pipeline failures are not proven to
+cause this guest fault and are not repaired here. The logs show transient arena
+growth and spare allocations, but do not establish exhausted memory pools.
+
+### Validation
+
+`tests/test_render_guard.c` reads instruction windows from a private prepared
+1.09 ELF. It distributes no game image. It replaces the dispatcher's external
+writers and finalizer with recorders, then checks:
+
+- The unmodified null-record case faults specifically at `0x2169edc`, address
+  zero, in an isolated child.
+- All 40 non-null family/type/counter cases preserve full context bytes, ordered
+  writer arguments and return values after installation.
+- Null records match the original unsupported-family path for both tested
+  counter states; a later valid record continues to work.
+- Disabled, undersized and mismatching images remain unpatched.
+
+Run on an x86-64 host or under Rosetta:
+
+```sh
+clang -arch x86_64 -std=c11 -O2 -g -Wall -Wextra -Werror -I. -Isrc \
+  tests/test_render_guard.c src/runtime_render_guard.c -o out/render-guard-test
+out/render-guard-test /private/path/to/prepared/eboot.elf
+```
+
+`build_macos.sh --test` also runs this fixture when `BB_RENDER_GUARD_ELF` is set;
+otherwise it explicitly reports a skip.
+Hopper via REA corroborated the dispatcher control flow; the differential test
+executes the original dispatcher instructions rather than the decompiler output.
+
+The complete `BB_LTO=OFF bash build_macos.sh --test` run passed locally, with
+`BB_RENDER_GUARD_ELF` set, including both GPU architectures, runtime/launcher,
+shared-ring/GPU-split and Metal fixtures. Xcode's macro compiler and Metal tests
+required execution outside the restricted filesystem sandbox.
+
+The fixture does not execute the real finalizer or Gnm writers. It proves the
+routing and observed dispatch equivalence, not long-session gameplay stability,
+visual correctness after an absent bind, or a fix for the missing resource's
+origin. The reporter's 101-minute Hunter's Dream session has not been reproduced.
+
+## 2026-10-29: GPU watchdog counted CPU delays as a GPU stall (#106)
+
+The 0.5.11 report on an M4 with 16 GB exits after 87 min 49 s: tick 475858 is
+reported committed, 475857 complete, with no progress for 3002 ms. This is the
+native GPU host's watchdog exit (75), followed by the guest process stopping.
+It is distinct from the null-pointer faults in #97/#99. The last archive write
+had taken about 8 s; earlier writes took about 13 s. The window had become
+occluded earlier. Neither observation by itself establishes a GPU deadlock.
+
+Two false-timeout paths reproduce with the original `Metal::Device` on real Metal:
+
+- `Commit` publishes its tick before calling Metal's `commit`. Holding the CPU
+  before forwarding that call arms the watchdog for work Metal has not received.
+- The watchdog reads only `gpu_tick`, which advances in a CPU completion handler.
+  Blocking an earlier completion handler leaves that counter behind after the
+  GPU has already signaled the command buffer's final shared event. The old
+  watchdog then exits even though the GPU completed the work.
+
+The watchdog now reads the existing GPU shared event as well as the handler
+counter, and arms a new tick after Metal's `commit` returns. Only the watchdog
+uses the event to observe progress: `KnownGpuTick`, `IsFree`, `Wait`, resource
+retirement and the existing failure handler keep their completion-handler
+semantics. The watchdog retains the shared event through its detached thread's
+lifetime. Its 3000 ms default, zero-to-disable setting and late-wake handling are
+unchanged. A timeout now logs both the GPU event and handler counters.
+
+Apple documents that [GPU event signals follow the preceding GPU commands](https://developer.apple.com/documentation/metal/about-synchronization-events)
+and that [completion handlers run on an undefined CPU thread and should not block](https://developer.apple.com/library/archive/documentation/Miscellaneous/Conceptual/MetalProgrammingGuide/Cmd-Submiss/Cmd-Submiss.html).
+This makes the existing final signal an independent progress observation, without
+changing when the renderer can reuse resources.
+
+`tests/test_mtl_watchdog.mm` executes isolated child processes with a shortened
+200 ms watchdog deadline. Before the fix, both delayed-handler and delayed-commit
+cases exit 75; after the fix, they survive 700 ms delays. The handler case also
+checks that resources remain in flight until the handler is released. Idle and
+disabled-watchdog cases survive. A real unsatisfied GPU event wait still exits 75,
+including when queued after a completed GPU signal with a delayed handler. Event
+waits have a bounded rescue and each child has a parent-enforced timeout. No game
+files are required. `build_macos.sh --test` runs the fixture normally and with
+Metal validation alongside the existing native Metal tests.
+
+The supplied log has no GPU-event counter or command-buffer state at failure.
+These regressions prove watchdog defects compatible with the report; they do not
+prove which path triggered that session, nor exclude a genuine GPU stall there.
+The 87-minute session and the reporter's 16 GB/macOS 27.2 environment have not been
+reproduced. The new counter diagnostic distinguishes delayed CPU bookkeeping
+from missing GPU signals in subsequent reports.
+
+## 2026-10-30: null shader unbind after the #99 guard (#113)
+
+The posted 0.5.11 report reaches `0x216a08c`, address zero, immediately after
+`Render guard: absent shader bind record (#99)`. The game ran about 91 minutes
+on an M3 Max while moving through the Cathedral Ward passage. The supplied
+excerpt, rather than a full diagnostic archive, is the available session evidence.
+The earlier empty-scissor warnings and archive writes do not establish its cause.
+
+The #99 guard covered only the bind dispatcher (`0x2169ec0`). The matching
+unbind dispatcher (`0x216a070`) calls the same identity accessor at `0x26a94c0`,
+then reads the record's family at `0x216a08c`. A null record reaches that exact
+instruction with RAX/RDI zero, RBX equal to the context, and RSI at context +
+`0xb730`, matching the report. The recorded return address `0xe2f181` belongs to
+the unbind callback at `0xe2f160`; the bind callback is at `0xe2f130`.
+
+A private original-code fixture compiled with the unchanged 0.5.11 guard
+reproduces the sequence: its original bind callback skips the null record, then
+its original unbind callback faults at `0x216a08c`, with the reported register
+relationships. Focused disassembly and Hopper analysis corroborate the accessor
+and the common finalizer; the executable code, not the pseudocode, is used by the
+fixture. No game instructions or assets are distributed with the test.
+
+The guard now checks both dispatcher entries and their existing finalization
+tails. A null unbind follows the original unsupported-family path through
+`0x26af700(context + 0x10)`. It does not dereference the absent payload, emit an
+unbind for an unknown record, or decrement a counter whose bind was skipped.
+Non-null records still execute the original instructions. The new entry is
+installed only when its own signature and tail match; an unrecognized unbind
+keeps the existing #99 bind protection. The existing `BB_NULL_BIND_GUARD=0`
+switch disables all guarded operations. Recoveries have separate bounded logging.
+
+The same object's value callback (`0xe2f190`) can then query the record through
+`0x216a2f0`. A second original-code negative control, with bind and unbind guarded,
+reaches another null access at `0x216a31b`, address 4. The query guard routes a
+missing record through the original type-16 rejection (error 7), before any
+payload access or output write. An intentionally unsupported eight-byte record
+selects that path; it is never a valid graphics resource. Running the original
+query also preserves its optional context flush. Its entry, bounds check/error
+branch and return tail must match; mismatches retain the existing bind/unbind
+guards. The original value callback then returns false, leaves the output alone
+and retains its retryable phase instead of crashing.
+
+Validation under x86-64/Rosetta:
+
+- The bind-only baseline reproduces the posted bind-then-unbind fault and
+  registers. Original null binds and unbinds also fault at their respective
+  reported instructions in isolated children.
+- 120 non-null cases (both dispatchers, all tested families/types, three counter
+  states) preserve writer arguments/order, payload bytes, complete context bytes
+  and return values.
+- Original callbacks with a missing record retain their phase transitions,
+  finalize twice and match unsupported records without changing the shader
+  counter. A subsequent valid pair on the same context matches the original
+  unsupported-then-valid sequence. The missing-record value callback fails
+  cleanly after unbind.
+- Twelve representative non-null queries preserve original context, payload,
+  output, call order and return values. Null queries match type-16 rejection
+  with flush on/off and with/without an output pointer.
+- Six cases run the original finalizer's empty-context path and preserve its
+  cursor update and return value. Dirty-resource-list finalization and real Gnm
+  writers remain outside this fixture's coverage.
+- Disabled/undersized inputs and four shared/bind signature mismatches install
+  nothing. Two unbind mismatches preserve the bind guard and leave the unbind
+  unchanged. Two query mismatches retain bind/unbind protection and leave the
+  query unchanged. The runtime builds with warnings as errors; the ARM64 no-op
+  fallback compiles.
+
+The existing runtime fixture and 19 Python patch tests also pass. GPU and
+launcher code did not change; their complete suites were not rerun.
+
+This contains the reported null unbind and its known deferred query continuation.
+It does not explain why the record disappeared or recreate its graphics state.
+The 91-minute passage route, long-session stability, image correctness after a
+missing record, and performance have not been replayed or measured here.
+
+## 2026-11-02: skip conflicting external patches without blocking launch (#79)
+
+The reviewer's enabled external FPS patch (`90909090` at PS4 `0x00a3fc3f`)
+conflicts with the built-in 60 FPS preset. Before this change, `compile_external`
+called `audit.add` outside its per-patch `ValueError` handler, so the exception
+reached the CLI and exited 1 before `run.sh` could start the game. The new CLI
+regression reproduces that exact error and exit status on the rebased baseline.
+
+Move the overlap check into the existing per-external-patch handler. A conflict
+now emits `Patches: skipped <file>/<name>: ...` and discards that entire patch;
+preflight validates all effective bytes before recording any ownership. The
+built-in writes remain, and later patches in the same collection or another file
+still load. Explicit `Overrides` declarations and identical overlaps retain their
+existing behavior. Conflicts between built-in/generated groups remain fatal.
+
+Rebased onto master `50274ee`, retaining its newer opening-movie hook and unsafe
+condition-wait filtering. The runtime preflight also honors `BB_MOVIE_LOCK=0` for
+that hook, alongside the existing context-lock/frame-pool switches.
+
+Validation: 27 Python patch tests (including the failing-then-passing CLI repro,
+whole-patch rejection without output/audit residue, external-to-external conflicts
+and explicit overrides), five restart tests, three ultrawide tests and the native
+hook/whole-set verifier pass. The verifier covers the movie prologue and its
+disable switch; the ARM64 fallback compiles with warnings as errors. Shell syntax
+and `git diff --check` pass. This revision has no new gameplay or performance
+measurement; the maintainer's reported benchmark is separate review evidence.
+
+## 2026-11-02: issue triage (#128 Gherman, #117 cost, #109 blur, #125-#127 pipelines)
+
+M4 Max, macOS 27, master 50274ee, scratch data dir with the reporters' saves, 1080p, upscaler off.
+
+- **#128 (Gherman invisible): the original game's behaviour, not the port** (owner). The attached
+  save shows it here too (Hunter's Dream workshop, the chair by the teapot table empty, the Talk
+  prompt still there), the same at 30 FPS with no FPS patch, with no skipped draws, rejected
+  pipelines or render guard lines. The `parts/lg_a_9700(_l)` and `parts/wp_a_6010` "not found"
+  opens are not in the 1.09 dvdroot either (`am/bd/hd_a_9700` are), so they happen on a PS4 too.
+- **"vertex attribute 0 format Undefined" (108 pipelines, #125/#126/#127):** the V# of attribute 0
+  has data format 0 (invalid) when the key is made (`vk_pipeline_cache.cpp` RefreshGraphicsKey →
+  `SurfaceFormat` → `eUndefined`). Most come from the pipeline-cache preload in the first second.
+  Never seen in our logs (0 in this run too, nor in the user's last five sessions), so it is
+  specific to those caches or setups. An invalid V# reads zeros on GCN, so a position stream of
+  zeros draws nothing there as well: skipping is probably equivalent, and these are not the
+  cause of the default face in #125 (sliders and the kept face work on our copy, owner test).
+- **#117 cost (MetalFX Quality 2560x1440, Hunter's Dream, cap 60):** first single runs looked
+  equal (startup patch 8.4-9.4, live path 8.6-9.0 ms/frame GPU), but two back-to-back pairs on the
+  merged tree put the live path behind in both: 11.4-11.8 vs 9.2-9.7 and 7.9-8.1 vs 7.5-7.6
+  ms/frame (old path selected with `BB_RENDER_RES=1706x960`), so ~5-20%. The Mac was on battery,
+  hence the spread between pairs. Expected: on the live path the game's post-processing runs at
+  1920x1080 (27% more pixels than 1706x960) and scene targets are resolved back. Worst frames the
+  same (18-24 ms). The owner held #117 (MACOS_BACKLOG, Stability).
+- **#109 (blurry until restart):** the screenshot (M2 16 GB, 1280x720, upscaler off, cap 30) is a
+  motion-blur smear over a still scene: the game's velocity input is wrong, not the scaling. Two
+  "Failed to find exact image match for copy addr=0x70f1ee0000, size=0x10000" warnings, one 37 s
+  before the screenshot. Not reproduced.
+- **#121 (black screen from the start):** the hang watchdog only counted after the first flip,
+  so a game that never flips ran until killed (1 min 47 s in the report). It now stops after
+  `BB_HANG_FIRST_SECONDS` (180) with a thread dump. A normal start flips within 3 s of the
+  watchdog starting (`BB_HANG_FIRST_SECONDS=3` did not trip).

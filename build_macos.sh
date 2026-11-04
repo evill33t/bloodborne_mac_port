@@ -90,10 +90,12 @@ fi
 if [[ ${1:-} == --test ]]; then
     bash scripts/test_fps_timing.sh
     python3 tests/test_launcher_stop.py
-    "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_host.c "${libraries[@]}" -Wl,-rpath,"$PREFIX/lib" -o out/pad-test
+    "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_pad.c src/runtime_bindings.c src/runtime_host.c "${libraries[@]}" -Wl,-rpath,"$PREFIX/lib" -o out/pad-test
     out/pad-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_runtime.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/runtime-test
     out/runtime-test
+    "$CC" "${cflags[@]}" -I. -Isrc tests/test_render_guard.c src/runtime_render_guard.c -o out/render-guard-test
+    out/render-guard-test
     "$CC" "${cflags[@]}" -Isrc tests/test_file_mods.c -o out/file-mods-test
     out/file-mods-test
     "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_sema.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/sema-test
@@ -122,6 +124,9 @@ if [[ ${1:-} == --test ]]; then
             -Wall -Wextra -Werror tests/test_srt_walker.cpp -L"${walker#*:}" -lbbgpu \
             -Wl,-rpath,"$ROOT/${walker#*:}" -o "out/srt-walker-test-${walker%%:*}"
         "out/srt-walker-test-${walker%%:*}"
+        # Vertex/tessellation descriptor reads use the same bounded guest-fault recovery.
+        cmake --build "${walker#*:}" --target shader-userdata-test >/dev/null
+        "${walker#*:}/shader-userdata-test"
     done
     # Metal-native M1: Metal::Object, Device ticks and limits, Metal::Encoder (arm64, no window);
     # again under Metal's validation layer.
@@ -132,6 +137,12 @@ if [[ ${1:-} == --test ]]; then
         glslang -V --quiet tests/data/spec_const.comp -o out/spec_const.spv  # the Specialize test's module
         out/mtl-encoder-test
         MTL_DEBUG_LAYER=1 out/mtl-encoder-test
+        # Watch actual GPU signals rather than delayed CPU handlers; retain real-stall exits.
+        /usr/bin/clang++ -arch arm64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -std=c++20 -fobjc-arc -O2 -g \
+            -Wall -Wextra -Werror -Igpu/shim -Igpu/shadps4 -I"$ARM64_PREFIX/include" tests/test_mtl_watchdog.mm gpu/shim/common/logging/log.cpp gpu/shim/common/assert.cpp out/gpu-arm64/libbbmetal_core.a -L"$ARM64_PREFIX/lib" -lfmt \
+            -framework Metal -framework Foundation -o out/mtl-watchdog-test
+        out/mtl-watchdog-test
+        MTL_DEBUG_LAYER=1 out/mtl-watchdog-test
         # Metal-native M3: the rasterizer's draw helper (core part), plain and under validation.
         /usr/bin/clang++ -arch arm64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -std=c++20 -fobjc-arc -O2 -g \
             -Wall -Wextra -Werror -Igpu/shim -Igpu/shadps4 -I"$ARM64_PREFIX/include" tests/test_mtl_draw.mm gpu/shim/common/logging/log.cpp gpu/shim/common/assert.cpp out/gpu-arm64/libbbmetal_core.a -L"$ARM64_PREFIX/lib" -lfmt \

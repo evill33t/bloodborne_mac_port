@@ -4,11 +4,11 @@ import SwiftUI
 
 struct LauncherView: View {
     /// The window's content size (main.swift).
-    static let size = CGSize(width: 920, height: 680)
+    static let size = CGSize(width: 920, height: 730)
 
     @ObservedObject var model: LauncherModel
 
-    private enum Page: Hashable { case general, advanced }
+    private enum Page: Hashable { case general, advanced, controls }
     @State private var page = Page.general
 
     var body: some View {
@@ -21,6 +21,7 @@ struct LauncherView: View {
             Picker("", selection: $page) {
                 Text("General").tag(Page.general)
                 Text("Advanced").tag(Page.advanced)
+                Text("Controls").tag(Page.controls)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -30,6 +31,7 @@ struct LauncherView: View {
                 switch page {
                 case .general: general
                 case .advanced: advanced
+                case .controls: ControlsView(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -122,6 +124,14 @@ struct LauncherView: View {
                         Text("Full screen").tag(true)
                     }
                     .pickerStyle(.segmented)
+                    if model.showsDisplayChoice {
+                        Picker("Display", selection: $model.settings.display) {
+                            Text("Main display").tag(String?.none)
+                            ForEach(model.displayChoices) { Text($0.name).tag(Optional($0.uuid)) }
+                        }
+                        Text("The game opens on this display, in a window or full screen. If it isn't connected, the main display is used.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Picker("Frame rate cap", selection: $model.settings.frameCap) {
                         ForEach(FrameCap.allCases) { Text($0.label).tag($0) }
                     }
@@ -166,21 +176,6 @@ struct LauncherView: View {
                         Toggle(effect.label, isOn: effectBinding(effect.key))
                     }
                     Toggle("Show FPS", isOn: $model.settings.showFPS)
-                    Toggle("Metal Performance HUD", isOn: $model.settings.metalHUD)
-                        .help("Apple's Metal HUD: FPS, GPU time and frame pacing, top right")
-                    Toggle("Skip intro videos", isOn: effectBinding("skip_intro"))
-                }
-                Section("Controls") {
-                    Toggle("Mouse camera", isOn: $model.settings.mouseLook)
-                    Text(model.settings.mouseLook
-                         ? "Click in the game window to turn the camera with the mouse; \u{2318} gives the cursor back. The arrow keys are the d-pad (menus, weapons, items)."
-                         : "The arrow keys turn the camera. Controllers always work.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    DisclosureGroup("Keyboard and mouse") {
-                        ForEach(Controls.rows(mouseLook: model.settings.mouseLook), id: \.0) { row in
-                            LabeledContent(row.0, value: row.1)
-                        }
-                    }
                 }
                 Section("Locations") {
                     FolderRow(title: "Game folder", path: model.config.gameDir?.path ?? "Not chosen",
@@ -226,6 +221,9 @@ struct LauncherView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Startup and debugging") {
+                    Toggle("Skip intro videos", isOn: effectBinding("skip_intro"))
+                    Toggle("Metal Performance HUD", isOn: $model.settings.metalHUD)
+                        .help("Apple's Metal HUD: FPS, GPU time and frame pacing, top right")
                     ForEach(GameSettings.debugEffects) { effect in
                         Toggle(effect.label, isOn: effectBinding(effect.key))
                     }

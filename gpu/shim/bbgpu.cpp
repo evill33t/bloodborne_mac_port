@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Mark Hall
 #include "bbport_write_log.h"
+#include "bbport_arena_runs.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
@@ -103,14 +104,21 @@ public:
 void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     rasterizer = rasterizer_;
     // Existing guest mappings are replayed by the runtime when hooks are installed.
+    // bbport: the invalidate hook is the view table's protection change (host_view_apply); the
+    // GPU runs follow all three (bbport_arena_runs.h, telemetry).
     runtime_memory_set_gpu_hooks(
         [](uintptr_t address, uint64_t size) {
+            BbArenaRuns::OnMap(address, size);
             auto* r = Memory::Instance()->GetRasterizer();
             r->RegisterMemory(address, size);
             r->MapMemory(address, size);
         },
-        [](uintptr_t address, uint64_t size) { Memory::Instance()->GetRasterizer()->UnmapMemory(address, size); },
         [](uintptr_t address, uint64_t size) {
+            BbArenaRuns::OnUnmap(address, size);
+            Memory::Instance()->GetRasterizer()->UnmapMemory(address, size);
+        },
+        [](uintptr_t address, uint64_t size) {
+            BbArenaRuns::OnProtect(address, size);
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });
 }
@@ -202,7 +210,7 @@ bool g_window_ready;
 
 u32 BbDisplayRefreshHz() {
     static const u32 hz = [] {
-        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(Frontend::ChosenDisplay());
         const u32 rate = mode && mode->refresh_rate > 0 ? u32(mode->refresh_rate + 0.5f) : 60;
         std::printf("GPU: vblank follows the display refresh rate, %u Hz\n", rate);
         return std::max<u32>(rate, 60);
@@ -308,6 +316,7 @@ extern "C" int bbgpu_host_fault(uint64_t address, int write) {
 
 extern "C" int bbgpu_host_dispatch(const void* record) {
     const auto* r = static_cast<const BbGpuRecord*>(record);
+    BbArenaRuns::Refresh(); // the view events before this record (ring order)
     if (r->type == BBGPU_REC_TEXT_BEGIN) {
         auto* t = static_cast<const BbGpuTextBegin*>(record);
         BbGpuShared* s = BbSplit::Shared();

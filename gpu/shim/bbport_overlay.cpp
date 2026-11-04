@@ -837,10 +837,18 @@ void DisplayTab(BbSettings::Values& s) {
 
     BeginCard("Mouse");
     Toggle("Mouse camera", s.mouse_look);
-    SliderRow("Sensitivity", s.mouse_sensitivity, 0.2f, 4.0f);
+    SliderRow("Sensitivity", s.mouse_sensitivity, 0.1f, 10.0f);
+    SliderRow("Vertical speed", s.mouse_vertical, 0.25f, 4.0f,
+              "How fast the camera turns up and down, relative to left and right.");
     Toggle("Invert vertical", s.mouse_invert_y);
-    HintBelow("Click in the game window to use the mouse; Cmd gives the cursor back. Left click "
-              "R1, right click L2, middle click R3 (lock on), side buttons R2 and L1.");
+    HintBelow("Click in the game window to use the mouse; Cmd gives the cursor back. Buttons and "
+              "keys: the launcher's Controls page. Turning still too slow? Raise Camera speed in "
+              "the game's own options.");
+    EndCard();
+
+    BeginCard("Controller");
+    Toggle("L3+R3 opens this menu", s.pad_menu_combo);
+    HintBelow("Off: only " BB_MENU_KEYS_UI " opens it, and the game gets both stick clicks.");
     EndCard();
 }
 
@@ -1042,7 +1050,7 @@ void Menu() {
 
         const char* keys[] = {BB_MENU_KEYS_UI, "L3+R3"};
         float x = close_pos.x - 12.0f * base_scale;
-        for (int i = 1; i >= 0; --i) {
+        for (int i = BbSettings::Get().pad_menu_combo ? 1 : 0; i >= 0; --i) {
             const ImVec2 size = Keycap(dl, ImVec2(), keys[i], true);
             x -= size.x;
             Keycap(dl, ImVec2(x, title_pos.y + (title_h - size.y) * 0.5f), keys[i]);
@@ -1478,7 +1486,8 @@ bool HandleEvent(const SDL_Event& event) {
         } else if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
             r3_down = down;
         }
-        if (down && l3_down && r3_down) {
+        if (down && l3_down && r3_down &&
+            (is_open || BbSettings::Get().pad_menu_combo.load(std::memory_order_relaxed))) {
             SetOpen(!is_open);
             held_sticks = true;
             return true;

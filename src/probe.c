@@ -11,6 +11,7 @@
 #include "fps/patch_guard.h"
 #include "gpu/bbgpu.h"
 #include "gpu_process.h"
+#include "runtime_patch_guard.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang.
 #endif
@@ -138,10 +139,17 @@ static void crash_exit(const char *why, int status) {
 }
 /* Hang watchdog: the game flips a frame many times a second, loading screens included. No new
  * flip for BB_HANG_SECONDS (default 30, 0 = off) after the first one means the game is stuck,
- * for example waiting for GPU work that never arrives (#18). A late wake-up (system sleep,
- * the process stopped) restarts the count. */
+ * for example waiting for GPU work that never arrives (#18). Before the first flip the limit is
+ * BB_HANG_FIRST_SECONDS (default 180, 0 = off; a first launch builds its shader cache then): a
+ * game stuck on a black screen from the start (#121) waited forever. A late wake-up (system
+ * sleep, the process stopped) restarts the count. */
+static unsigned hang_first_limit(void) {
+    const char *env = getenv("BB_HANG_FIRST_SECONDS");
+    return env ? (unsigned)strtoul(env, NULL, 10) : 180;
+}
 static void *hang_watchdog(void *arg) {
     const unsigned limit = (unsigned)(uintptr_t)arg;
+    const unsigned first_limit = hang_first_limit();
     uint64_t last = 0;
     struct timespec since, before;
     clock_gettime(CLOCK_MONOTONIC, &since);
@@ -153,7 +161,17 @@ static void *hang_watchdog(void *arg) {
         const uint64_t flips = bbgpu_get_flip_count();
         const int woke_late = now.tv_sec - before.tv_sec > 5;
         before = now;
-        if (flips != last || flips == 0 || woke_late) {
+        if (flips == 0 && !woke_late) {
+            if (first_limit && (unsigned)(now.tv_sec - since.tv_sec) >= first_limit) {
+                char why[160];
+                snprintf(why, sizeof why, "the game stopped responding (no first frame after %u "
+                         "seconds; BB_HANG_FIRST_SECONDS)", first_limit);
+                runtime_thread_dump_all();
+                crash_exit(why, GPU_PROCESS_EXIT_HANG);
+            }
+            continue;
+        }
+        if (flips != last || woke_late) {
             last = flips;
             since = now;
             continue;
@@ -162,6 +180,7 @@ static void *hang_watchdog(void *arg) {
             char why[160];
             snprintf(why, sizeof why, "the game stopped responding (no new frame for %u seconds, %" PRIu64
                      " frames before; BB_HANG_SECONDS)", limit, flips);
+            runtime_thread_dump_all(); /* where each guest thread is stuck (#46) */
             crash_exit(why, GPU_PROCESS_EXIT_HANG);
         }
     }
@@ -568,6 +587,10 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
     if (patch_check==2) fail("patch set overlaps installed adaptive FPS timing");
     if (patch_check) fail("bad patch entry or file extent");
     unsigned char data[4096];
+    const char *conflict=NULL;
+    int checked=runtime_validate_patch_set(f,count,&conflict);
+    if (checked==2) { fprintf(stderr,"Patch conflict: %s\n",conflict); fail("patch set changes required runtime code"); }
+    if (checked) fail("bad patch entry or file extent");
     for (uint64_t i=0;i<count;++i) {
         uint64_t offset=read64(f), length=read64(f);
         if (!length || length>sizeof(data) || !mapped(segments,ns,offset,length) || fread(data,1,length,f)!=length)
@@ -745,12 +768,26 @@ int main(int argc, char **argv) {
     uint64_t size = read64(f), entry = read64(f), ns = read64(f), nr = read64(f);
     import_count = read64(f);
     uint64_t capabilities = memcmp(magic, "BBPROBE1", 8) ? read64(f) : 0;
-    if (capabilities & ~UINT64_C(1)) fail("unknown runtime capabilities");
-    runtime_start(strict_imports ? 0 : capabilities);
+    if (capabilities & ~UINT64_C(3)) fail("unknown runtime capabilities");
     if (!size || size > 512*1024*1024 || entry >= size || !ns || ns > 64 || nr > 1000000 || import_count > 100000)
         fail("boot file limits exceeded");
     int multi=!memcmp(magic,"BBPROBE5",8);
     int linked=!memcmp(magic,"BBPROBE3",8) || !memcmp(magic,"BBPROBE4",8) || multi;
+    /* Bit 1 adds one GS-displacement word before the existing linked metadata.
+     * Older images cannot prove which slot was selected on macOS. Refuse them
+     * before any initializer/entry executes, even with --strict-imports. run.sh
+     * always regenerates linked images, invalidating stale prepared files. */
+    if ((capabilities & 2) && !linked) fail("TLS slot metadata requires a linked image");
+#ifdef __APPLE__
+    if (linked && !(capabilities & 2)) fail("boot image lacks TLS slot metadata; prepare the game again");
+#endif
+    if (linked && (capabilities & 2)) {
+        uint64_t displacement=read64(f);
+        if (displacement>=512*8 || displacement%8) fail("invalid boot TLS displacement");
+        if (displacement!=runtime_thread_gs_displacement())
+            fail("boot TLS slot does not match this runtime; prepare the game again");
+    }
+    runtime_start(strict_imports ? 0 : capabilities & 1);
     int native_libc=linked && !strict_imports && (capabilities&1);
     uint64_t main_tls[4]={0};
     uint64_t nb=0,procparam=0;
@@ -931,6 +968,7 @@ int main(int argc, char **argv) {
     if (adaptive_fps>=0 && bb_fps_install(image,size,adaptive_fps)<0) fail("adaptive FPS timing refused; no game code executed");
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     runtime_install_context_lock(image, size);
+    runtime_install_render_guard(image, size);
     protect(thunks, round_page((import_count + 1) * 32), 5);
     protect(image, round_page(size)+timing_tail, 0);
     int executable_entry = 0;

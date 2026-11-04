@@ -76,12 +76,17 @@ struct Values {
     /// Frame pacing at the FPS cap (vk_presenter.cpp PacingSeconds): even frame times on
     /// variable-refresh displays, about one frame more input latency. bbport.ini frame_pacing; live.
     std::atomic<bool> frame_pacing{false};
-    /// Mouse look (bbport_mouse.cpp): bbport.ini mouse_look, mouse_sensitivity, mouse_invert_y.
+    /// Mouse look (bbport_mouse.cpp): bbport.ini mouse_look, mouse_sensitivity (0.1-10),
+    /// mouse_vertical (vertical speed relative to horizontal, 0.25-4), mouse_invert_y.
     /// Off by default: on, the first left click in the window captures the cursor, for gamepad
     /// players too. Players turn it on in the menu (Display > Mouse camera).
     std::atomic<bool> mouse_look{false};
     std::atomic<float> mouse_sensitivity{1.0f};
+    std::atomic<float> mouse_vertical{1.0f};
     std::atomic<bool> mouse_invert_y{false};
+    /// L3+R3 on a controller opens this menu (#104: pressed by accident in play). Off, only the
+    /// keyboard shortcut opens it and the game gets both stick clicks. bbport.ini pad_menu_combo; live.
+    std::atomic<bool> pad_menu_combo{true};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
     // Fixed at launch: native scene/UI patch dimensions, requiring a restart.
     int ultrawide_width = 0, ultrawide_height = 0;
