@@ -546,3 +546,8 @@ endif()
 add_executable(pm4-contracts-test EXCLUDE_FROM_ALL ../tests/test_pm4_contracts.cpp)
 target_include_directories(pm4-contracts-test PRIVATE shim)
 target_compile_options(pm4-contracts-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+
+# CPU-only validation of the production GPU boundary helper.
+add_executable(upload-reservation-test EXCLUDE_FROM_ALL ../tests/test_upload_reservation.cpp)
+target_include_directories(upload-reservation-test PRIVATE shim)
+target_compile_options(upload-reservation-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
