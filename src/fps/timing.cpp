@@ -7,6 +7,7 @@
 #include "frame_rate_step.h"
 #include "sprj_flipper.h"
 #include "wind_vector_patch.h"
+#include "chalice_step_patch.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -384,6 +385,13 @@ constexpr Site kSixtySites[] = {
 #include "sixty_fps_sites.inc"
 };
 
+// Only complete constructors proven by Paleblood are rewritten. The multi-path
+// leave-modes function and other unqualified code keep their existing behavior.
+struct ChaliceStepSite { std::uint32_t at; const char* was; };
+constexpr ChaliceStepSite kChaliceSteps[] = {
+#include "chalice_step_sites.inc"
+};
+
 // Steps the lists left fixed, made to read the frame's time - the clamped
 // measured frame time the 60 FPS++ cave keeps in its slot (0x575a908) every
 // frame, what the game's task step is at every converted rate. Applied with
@@ -647,7 +655,7 @@ void count_was(const Counted& c, std::uint8_t* out) {
 
 // The game's pace: 30, a converted rate (60, 90, 120), or 0 for uncapped.
 int g_game_fps = 30;
-std::size_t g_sites_applied = 0, g_frame_time_applied = 0, g_cloth_applied = 0;
+std::size_t g_sites_applied = 0, g_frame_time_applied = 0, g_cloth_applied = 0, g_chalice_applied = 0;
 std::atomic<std::uint64_t> g_frames{0};
 // The every-frame values (kRated's each_frame) at every converted rate: where
 // each goes and what it started from; above 60 the cloth's stiffness scale,
@@ -1316,6 +1324,16 @@ int apply_rate(ElfImage* image, int want) {
             }
         }
     }
+    // All original constructor bytes were admitted before any writes. Reuse
+    // the host timing slot without introducing executable tail code.
+    for (const auto& site : kChaliceSteps) {
+        const auto was = hex_bytes(site.was);
+        std::vector<std::uint8_t> replacement;
+        if (!MacChaliceStep::Build(was, va(site.at), g_step_va, replacement))
+            throw std::runtime_error("unreachable Chalice timing slot");
+        write(site.at, replacement.data(), replacement.size());
+        ++g_chalice_applied;
+    }
     // No decompiled camera replacement is installed in this port. Preserve the
     // original constructor/stores; the camera constants in kRated follow dt.
     host_log("original camera constructor retained (%zu defaults)", camera_kept);
@@ -1370,6 +1388,13 @@ void preflight(const ElfImage& image, int cap) {
         for (const auto& site : sites) { const auto was = hex_bytes(site.was); holds(site.at, was.data(), was.size()); }
     };
     group(kSixtySites); group(kFrameTimeSites); group(kWindStepLoads);
+    for (const auto& site : kChaliceSteps) {
+        const auto was = hex_bytes(site.was);
+        holds(site.at, was.data(), was.size());
+        std::vector<std::uint8_t> replacement;
+        if (!MacChaliceStep::Build(was, site.at, image.tail_va + kPreferredGuestSlide, replacement))
+            throw std::runtime_error("unsupported Chalice step constructor");
+    }
     if (cap != 60) { group(kClothSites); holds(kClothScalars, kClothScalarsWas, sizeof(kClothScalarsWas)); }
     for (const auto& d : kDtLoads) {
         const auto was = hex_bytes(d.bytes); holds(d.insn, was.data(), was.size());
@@ -1401,7 +1426,8 @@ extern "C" int bb_fps_install(unsigned char* base, std::uint64_t size, int cap) 
         preflight(image, cap);
         g_slide = image.mem.slide; g_game_fps = cap;
         if (apply_rate(&image, cap) != cap || !g_step_va || !g_wind_step_va || !g_play_ms_va ||
-            g_dt_loads_applied != std::size(kDtLoads)) throw std::runtime_error("incomplete timing installation");
+            g_dt_loads_applied != std::size(kDtLoads) ||
+            g_chalice_applied != std::size(kChaliceSteps)) throw std::runtime_error("incomplete timing installation");
         // The complete decoded instructions belong to timing, including their
         // opcodes. Protecting only the rewritten displacements would admit an
         // external opcode edit that invalidates a redirected load.

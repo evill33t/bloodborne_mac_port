@@ -123,12 +123,34 @@ int main(int argc,char** argv) {
             std::fclose(patch);
         }
         const float target=1.f/(cap ? cap : 240);
+        // Constructor opcodes belong to the complete timing install, and every
+        // redirected gate step reads the same measured slot at every cap.
+        struct GateSite { std::uint32_t at; const char* was; };
+        constexpr GateSite gates[] = {
+#include "src/fps/chalice_step_sites.inc"
+        };
+        std::vector<const float*> gate_steps;
+        for (const auto& gate : gates) {
+            const auto length = std::strlen(gate.was) / 2;
+            const auto offset = gate.at - 0x400000;
+            const auto load = length == 22 ? 11u : 14u;
+            require(bb_fps_conflicts(offset, length), "gate constructor is not protected");
+            require(bytes[offset + load] == 0x8b && bytes[offset + load + 1] == 0x0d,
+                    "gate step is not a slot load");
+            std::int32_t disp;
+            std::memcpy(&disp, bytes + offset + load + 2, 4);
+            const auto slot = bytes + offset + load + 6 + disp;
+            require(slot >= bytes + rounded && slot + 4 <= bytes + size, "gate slot outside timing tail");
+            gate_steps.push_back(reinterpret_cast<const float*>(slot));
+        }
         std::int64_t ms=0; double expected_ms=0;
         for (int k=0;k<1000;++k) {
             const float elapsed=k%3==0 ? .2f : k%3==1 ? .020f : .001f;
             const float expected=std::min(std::max(elapsed,target),1.f/30);
             const auto step=MacTimingVerify::TickInstalled(elapsed);
             require(step.seconds==expected && step.wind_seconds==expected*.5f,"installed time-step drift");
+            for (const auto* gate_step : gate_steps)
+                require(*gate_step == expected, "gate step does not follow measured dt");
             ms+=step.play_ms; expected_ms+=double(expected)*1000;
         }
         require(std::abs(double(ms)-expected_ms)<1.01,"installed play clock loses milliseconds");

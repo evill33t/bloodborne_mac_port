@@ -103,3 +103,32 @@ and with `MTL_DEBUG_LAYER=1`.
 No gameplay, packaged-app session or optional real-1.09-image installation test was
 repeated for this update. The live gameplay results above describe the earlier build;
 the existing experimental limitations still apply.
+
+## Paleblood gate-step enhancement, 4 November 2026
+
+Paleblood `d00cf07` identifies the fixed-step descriptors passed by the Chalice
+Dungeon gate's state, owner, ritual and event methods. The 27 complete RCX-based
+constructors listed in `src/fps/chalice_step_sites.inc` now load the existing
+clamped measured-frame-time slot. Folding the vtable's +16 adjustment into LEA
+makes room for the load without extending the instruction span, adding a code
+cave or replacing the gate's control flow. Installation admits every original
+constructor byte before any mutation, and patch-conflict protection covers the
+complete rewritten spans. The original 30 FPS path remains unmodified.
+
+The larger multi-path leave-modes function and constructor shapes outside this
+qualified list retain their existing behavior. This enhancement does not establish
+correctness of every Chalice path, moving lifts, networked dungeon transitions or
+campaign timing.
+
+Verification executed all 27 original and replacement constructor fragments at
+five step values (270 bounded executions), preserving the vtable, other frame
+bytes and padding. The full existing limiter/numerical/wind suite and 20 negative
+controls pass. Private-image installation passes at 30, 40, 60, 90, 120, 144, 165,
+240 and uncapped; every converted rate checks all 27 slots over 1,001 variable
+frames. Nine corrupted-admission sites, including two new constructor prefixes,
+are refused without modifying image bytes. The source executable is read only;
+these are instruction/fixture checks, with no new gameplay or FPS measurement.
+
+This work remains on the existing `codex/adaptive-fps` branch. Upstream PR #77
+stays closed at the repository owner's request; the personal `dev` integration
+continues to carry the opt-in timing feature.

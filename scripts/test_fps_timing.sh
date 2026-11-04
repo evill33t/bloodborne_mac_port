@@ -10,6 +10,8 @@ flags=(-arch x86_64 -mmacosx-version-min=15.0 -std=c++20 -O2 -g -Wall -Wextra -W
        -ffp-contract=off -fno-fast-math -I.)
 "$cxx" "${flags[@]}" tests/test_fps_timing.cpp tests/fps_reference/limiter.cpp src/fps/timing.cpp -o out/fps/timing-test
 "$cxx" "${flags[@]}" tests/test_fps_install.cpp src/fps/timing.cpp -o out/fps/install-test
+"$cxx" "${flags[@]}" tests/test_chalice_step.cpp -o out/fps/chalice-step-test
+out/fps/chalice-step-test
 export ROSETTA_ADVERTISE_AVX=1
 out/fps/timing-test --self-test > out/fps/baseline.json
 set +e
@@ -56,7 +58,7 @@ PY
         out/fps/install-test --elf "$BB_TIMING_ELF" --cap "$cap" "${patch_args[@]}"
     done
     # Limiter, constants, task-step cave, physics, wind, play-time and cloth admission.
-    for offset in 0x2034770 0x63fc3f 0x2018e3d 0x17f9b69 0x2314a60 0x19419d6 0x493bd00; do
+    for offset in 0x2034770 0x63fc3f 0x2018e3d 0x17f9b69 0x2314a60 0x19419d6 0x493bd00 0x1aa49b9 0x1c12c20; do
         out/fps/install-test --elf "$BB_TIMING_ELF" --cap 120 --mutate "$offset"
     done
 else
