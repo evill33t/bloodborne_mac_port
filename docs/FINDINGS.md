@@ -2057,6 +2057,19 @@ Split validation: both production-Process termination tests pass on macOS with x
 including removal of the merged view and unchanged synthetic source/mod files. Launcher
 build/model tests pass. No private save data is used by these regression tests.
 
+## 2026-10-25: Adaptive timing PR #77 refreshed against 0.5.7
+
+Merged `af0fae2`, retaining upstream mouse/keyboard controls, launcher Stop, benchmark
+and session logs. Both timing and Stop tests remain in the build's test runner; repeated
+settings saves preserve Adaptive selection and mouse preferences together. Timing and
+patch/restart implementation are unchanged from `3a37beb`.
+
+Both GPU architectures, the complete game runtime with the Adaptive adapter, both native
+hosts and launcher build. CPU timing and negative controls, patch/preparation/restart
+fixtures, launcher model/Stop lifecycle, settings, runtime/semaphore/pad, shared rings
+and the Metal overlay (plain and validation layer) pass. This refresh did not repeat
+gameplay, packaged-app or optional real-image installation checks. Detailed results:
+[ADAPTIVE_FPS.md](ADAPTIVE_FPS.md#upstream-refresh-25-october-2026).
 ## 2026-10-25: the slow Macs are 16–18 GB Macs on macOS 27 (report survey)
 
 Every performance issue and attached log was surveyed (two read-only investigations). Persistently
