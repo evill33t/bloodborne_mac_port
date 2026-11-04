@@ -2,7 +2,7 @@
 /* Fixed-width copies only. The arm64 renderer never calls into the x86 game module. */
 #pragma once
 #include "bbcoop.h"
-#define BB_COOP_UI_VERSION 5u
+#define BB_COOP_UI_VERSION 6u
 #define BB_COOP_INVENTORY_MAX 512
 #define BB_COOP_MODEL_WIDTH 560u
 #define BB_COOP_MODEL_HEIGHT 768u
@@ -50,6 +50,7 @@ typedef struct BbCoopUi {
     bbcoop_team_load load;
     bbcoop_rot rot;
     bbcoop_team_travel travel;
+    char travel_lamp_name[96];
     bbcoop_invasion invasion;
     bbcoop_duel duel;
     uint64_t trade_id;

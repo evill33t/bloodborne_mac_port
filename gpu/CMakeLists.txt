@@ -402,6 +402,12 @@ if (APPLE)
     set_source_files_properties(../tests/test_coop_presentation.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(coop-presentation-test PRIVATE bbgpu "-framework Metal" "-framework AppKit")
     target_link_options(coop-presentation-test PRIVATE -Wl,-export_dynamic)
+    add_executable(coop-travel-test EXCLUDE_FROM_ALL ../tests/test_coop_travel.mm ../tests/test_gpu_runtime_stubs.cpp)
+    target_include_directories(coop-travel-test PRIVATE shim shadps4 ..)
+    target_compile_options(coop-travel-test PRIVATE -UNDEBUG)
+    set_source_files_properties(../tests/test_coop_travel.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(coop-travel-test PRIVATE bbgpu "-framework Metal" "-framework Foundation")
+    target_link_options(coop-travel-test PRIVATE -Wl,-export_dynamic)
     # Metal-native M6: every FSR 3.1 blob through the FidelityFX Metal back end to a compute
     # pipeline.
     add_executable(ffx-metal-test EXCLUDE_FROM_ALL ../tests/test_ffx_metal.mm ../tests/test_gpu_runtime_stubs.cpp)

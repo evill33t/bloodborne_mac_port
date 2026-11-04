@@ -761,7 +761,8 @@
     {
       "path": "vendor/core/bloodborne_host_rules_game.cpp",
       "source": "emulator/src/core/bloodborne_host_rules_game.cpp",
-      "sha256": "48c4127c48b790cb23c3599ce0ccab91253174969e4c9adb0180e528a1f17697"
+      "sha256": "48c4127c48b790cb23c3599ce0ccab91253174969e4c9adb0180e528a1f17697",
+      "adapted_sha256": "10f6f211aad0a2044a44053060a3f391ac71fe3123bdcf9b5b5e645d626b74ad"
     },
     {
       "path": "vendor/core/bloodborne_invasion.cpp",

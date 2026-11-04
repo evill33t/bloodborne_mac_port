@@ -765,7 +765,60 @@ void Loading(const BbCoopUi& s) {
         BbCoopStyle::Label(draw,ImVec2(display.x*.5f,display.y*.9f),18*scale,BbCoopStyle::Muted(),"Your companions will join you when the hunt is ready",.5f,display.x*.9f);
     } ImGui::End();
 }
+// Match Kaniel's TeamTravel controls: the lamp-opening press cannot answer, Circle/Escape
+// means Alone (our trip) or No (a teammate's vote). Snapshots arrive at 10 Hz, so latch an
+// answer until the game acknowledges it instead of sending it again on a stale snapshot.
+void TravelQuestion(const BbCoopUi& s) {
+    static bbcoop_team_travel previous{};
+    static bool yes=true,answered=false;
+    static unsigned frames=0;
+    const auto& t=s.travel;
+    const int question=s.has_travel?t.question:0;
+    if(question!=previous.question || t.point!=previous.point || std::strcmp(t.from,previous.from)) {
+        yes=true;answered=false;frames=0;
+    }
+    previous=t;previous.question=question;
+    if(!s.has_travel) return;
+    if(!question) {
+        if(!t.waiting && !t.notice) return;
+        ImGui::SetNextWindowBgAlpha(.6f);
+        if(BbCoopStyle::Begin("Travel with team",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoInputs)) {
+            if(t.waiting) ImGui::Text(T("The team votes on the trip: %.0f s"),double(t.seconds_left));
+            else if(t.notice==1) ImGui::Text(T("%s said no: nobody travels"),Hunter(t.from));
+            else if(t.notice==2) ImGui::Text(T("%s's trip is off"),Hunter(t.from));
+        }
+        ImGui::End();return;
+    }
+    const bool ready=++frames>1 && !answered;
+    if(ready && Pressed({ImGuiKey_LeftArrow,ImGuiKey_RightArrow,ImGuiKey_UpArrow,ImGuiKey_DownArrow,
+                       ImGuiKey_GamepadDpadLeft,ImGuiKey_GamepadDpadRight,ImGuiKey_GamepadDpadUp,ImGuiKey_GamepadDpadDown})) yes=!yes;
+    const bool confirm=ready && Pressed({ImGuiKey_Enter,ImGuiKey_KeypadEnter,ImGuiKey_Space,ImGuiKey_GamepadFaceDown});
+    const bool cancel=ready && Pressed({ImGuiKey_Escape,ImGuiKey_GamepadFaceRight});
+    const float scale=BbCoopStyle::Scale();const auto display=ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowPos(ImVec2(display.x*.5f,display.y*.5f),ImGuiCond_Always,ImVec2(.5f,.5f));
+    ImGui::SetNextWindowSize(ImVec2(520*scale,0));
+    bool choose=false;
+    if(BbCoopStyle::Begin("Travel with team",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoNavInputs|ImGuiWindowFlags_NoNavFocus)) {
+        if(*s.travel_lamp_name) ImGui::TextUnformatted(s.travel_lamp_name);
+        if(question==1) ImGui::TextUnformatted(T("Travel with the team?"));
+        else ImGui::Text(T("%s calls the team here. Go? (%.0f s)"),Hunter(t.from),double(t.seconds_left));
+        ImGui::BeginDisabled(!ready);
+        for(int i=0;i<2;++i) {
+            if(i) ImGui::SameLine();
+            const bool option=i==0;
+            const bool clicked=BbCoopStyle::Button(question==1?(option?"With the team":"Alone"):(option?"Yes":"No"),ImVec2(220*scale,0));
+            if(ImGui::IsItemHovered()) yes=option;
+            if(yes==option) ImGui::GetWindowDrawList()->AddRect(ImGui::GetItemRectMin(),ImGui::GetItemRectMax(),BbCoopStyle::Ink(),0,0,scale);
+            if(clicked) {yes=option;choose=true;}
+        }
+        ImGui::EndDisabled();
+    }
+    ImGui::End();
+    if(choose || confirm || cancel) {Send(BB_COOP_TRAVEL_ANSWER,!cancel && yes);answered=true;}
+}
 void Questions(const BbCoopUi& s) {
+    TravelQuestion(s);
+    if(s.has_travel && s.travel.question) return;
     if(s.trade_id) {
         ImGui::SetNextWindowSize(ImVec2(520*BbCoopStyle::Scale(),0),ImGuiCond_Always);
         if(BbCoopStyle::Begin("Trade offer",nullptr,ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoCollapse)) {
@@ -773,7 +826,6 @@ void Questions(const BbCoopUi& s) {
         } ImGui::End();
     }
     if(s.duel_id) { if(BbCoopStyle::Begin("Team duel invitation",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text(T("%s proposes a duel."),Hunter(s.duel_name));if(BbCoopStyle::Button("Accept duel")) Send(BB_COOP_DUEL_ANSWER,1,"",s.duel_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline duel")) Send(BB_COOP_DUEL_ANSWER,0,"",s.duel_id);}ImGui::End(); }
-    if(s.has_travel && (s.travel.question || s.travel.waiting)) {if(BbCoopStyle::Begin("Travel with team",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text(T("%s%s"),s.travel.from,s.travel.waiting?": waiting for the team":": travel together?");if(s.travel.question) {if(BbCoopStyle::Button("Yes")) Send(BB_COOP_TRAVEL_ANSWER,1);ImGui::SameLine();if(BbCoopStyle::Button("No")) Send(BB_COOP_TRAVEL_ANSWER,0);}if(s.travel.seconds_left>0) ImGui::Text(T("%.0f seconds left"),s.travel.seconds_left);}ImGui::End();}
     if(s.has_load) Loading(s);
 }
 }
@@ -802,6 +854,7 @@ bool CapturesInput() {return capture || trade_capture;}
 bool Shortcut(const SDL_Event& e) {
     if(!enabled || e.type!=SDL_EVENT_KEY_DOWN || e.key.repeat) return false;
     std::scoped_lock lock{snapshot_mutex};
+    if(latest.has_travel && latest.travel.question) return false;
     const int ping_key=BbSettings::Get().ping_key;
     if(e.key.scancode==SDL_GetScancodeFromName(BbSettings::PingKeyNames[ping_key]) && !CapturesInput() && BbSettings::Get().team_pings) {Send(BB_COOP_PING);return true;}
     switch(e.key.scancode) {
@@ -831,6 +884,8 @@ void Render() {
     if(!s.map_screen) map_was_open=false;
     if(s.team_screen || s.has_load)
         BbCoopStyle::HeroBackdrop(ImGui::GetBackgroundDrawList(),ImVec2(0,0),ImGui::GetIO().DisplaySize);
-    Hud(s);if(s.team_screen) Team(s);if(s.map_screen) Map(s);Trade(s);Questions(s);
+    Hud(s);
+    if(!(s.has_travel && s.travel.question)) {if(s.team_screen) Team(s);if(s.map_screen) Map(s);Trade(s);}
+    Questions(s);
 }
 }

@@ -305,6 +305,9 @@ TeamTravelNotice notice = TeamTravelNotice::None;
 std::string notice_from;
 s64 notice_until_ms = 0;
 std::vector<bbcoop::TeamTravel> travel_news; // from the server, for the game thread
+// The receiver holds stream_mutex. Never make it wait for travel_mutex: answering/ticking
+// holds travel_mutex while SendTravel queues an outgoing message under stream_mutex.
+std::mutex travel_news_mutex;
 
 void SendTravel(bbcoop::TeamTravel::Step step, u32 id, s32 point, bool yes = false,
                 const std::string& asker = {}) {
@@ -362,7 +365,7 @@ bool OfferTeamTravel(s32 point) {
 }
 
 void TakeTeamTravelNews(const bbcoop::TeamTravel& travel) {
-    std::scoped_lock lock{travel_mutex};
+    std::scoped_lock lock{travel_news_mutex};
     if (travel_news.size() < 32) {
         travel_news.push_back(travel);
     }
@@ -433,8 +436,11 @@ std::optional<TeamTravelView> ReadTeamTravel() {
 // The game thread: the news, the vote's end, a question nobody answered.
 void TickTeamTravel() {
     std::vector<bbcoop::TeamTravel> news;
+    {
+        std::scoped_lock lock{travel_news_mutex};
+        news.swap(travel_news);
+    } // release the inbox before taking the state lock or sending anything
     std::scoped_lock lock{travel_mutex};
-    news.swap(travel_news);
     const s64 now_ms = SteadyMilliseconds();
     for (const bbcoop::TeamTravel& travel : news) {
         switch (travel.step()) {

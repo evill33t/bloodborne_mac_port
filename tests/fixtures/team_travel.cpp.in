@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Game/transport boundaries are stubs; the travel state machine below is production source.
+
+#include "core/bloodborne_host_rules.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdio>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <vector>
+#define LOG_INFO(...) ((void)0)
+namespace bbcoop {
+class TeamTravel {
+  public:
+    enum Step { ASK, ANSWER, GO, STOPPED };
+    Step step() const { return step_; }
+    void set_step(Step x) { step_ = x; }
+    u32 id() const { return id_; }
+    void set_id(u32 x) { id_ = x; }
+    s32 point() const { return point_; }
+    void set_point(s32 x) { point_ = x; }
+    bool yes() const { return yes_; }
+    void set_yes(bool x) { yes_ = x; }
+    const std::string &asker() const { return asker_; }
+    void set_asker(const std::string &x) { asker_ = x; }
+    const std::string &member() const { return member_; }
+    void set_member(const std::string &x) { member_ = x; }
+
+  private:
+    Step step_{};
+    u32 id_{};
+    s32 point_{};
+    bool yes_{};
+    std::string asker_, member_;
+};
+}
+namespace Core::Bloodborne {
+bool IsParamOfType(std::span<const u8>, std::string_view) { return false; }
+std::optional<u64> FindParamRow(std::span<const u8>, s32) { return std::nullopt; }
+namespace Coop {
+std::mutex map_board_mutex;
+std::chrono::steady_clock::time_point map_board_time = std::chrono::steady_clock::now();
+std::string map_board_member = "host";
+std::vector<MemberMap> map_board;
+s64 clock_ms = 1000;
+s64 SteadyMilliseconds() { return clock_ms; }
+HostRules rules{.travel_together = true, .travel_vote = true};
+HostRules ActiveHostRules() { return rules; }
+bool InPartySession() { return true; }
+bool EventFlagOn(s32) { return false; }
+std::vector<bbcoop::TeamTravel> sent;
+std::vector<s32> trips;
+void SendTeamTravel(const bbcoop::TeamTravel &x) { sent.push_back(x); }
+void RequestTeamTrip(s32 x) { trips.push_back(x); }
+}
+using namespace Coop;
+// TEAM_TRAVEL_IMPLEMENTATION
+int main() {
+    using namespace Core::Bloodborne;
+    using namespace Core::Bloodborne::Coop;
+    std::mutex done_mutex;
+    std::condition_variable cv;
+    bool done = false;
+    std::unique_lock state_lock(travel_mutex);
+    bbcoop::TeamTravel incoming;
+    incoming.set_step(bbcoop::TeamTravel::ASK);
+    incoming.set_id(7);
+    incoming.set_point(2102962);
+    incoming.set_member("guest");
+    std::thread receiver([&] {
+        TakeTeamTravelNews(incoming);
+        {
+            std::lock_guard lock(done_mutex);
+            done = true;
+        }
+        cv.notify_one();
+    });
+    bool received;
+    {
+        std::unique_lock lock(done_mutex);
+        received = cv.wait_for(lock, std::chrono::seconds(1), [&] { return done; });
+    }
+    state_lock.unlock();
+    receiver.join();
+    if (!received) {
+        std::puts("FAIL: network receive waits for travel state while the sender can wait for "
+                  "stream_mutex");
+        return 1;
+    }
+    TickTeamTravel();
+    auto view = ReadTeamTravel();
+    if (!view || view->point != 2102962 || view->from != "guest")
+        return 2;
+    AnswerTeamTravel(false);
+    if (sent.size() != 1 || sent.back().step() != bbcoop::TeamTravel::ANSWER || sent.back().yes())
+        return 3;
+    // Saturation retains the bounded first 32 messages in arrival order.
+    for (u32 id = 1; id <= 40; ++id) {
+        incoming.set_id(id);
+        TakeTeamTravelNews(incoming);
+    }
+    TickTeamTravel();
+    AnswerTeamTravel(true);
+    if (sent.back().id() != 32 || !sent.back().yes())
+        return 4;
+    // The real vote implementation still stops on No and starts a fresh agreed trip.
+    map_board.push_back(MemberMap{.member = "host"});
+    map_board.push_back(MemberMap{.member = "guest"});
+    if (!OfferTeamTravel(2102962))
+        return 5;
+    AnswerTeamTravel(true);
+    u32 id = sent.back().id();
+    incoming.set_step(bbcoop::TeamTravel::ANSWER);
+    incoming.set_id(id);
+    incoming.set_asker("host");
+    incoming.set_yes(false);
+    TakeTeamTravelNews(incoming);
+    TickTeamTravel();
+    if (!trips.empty() || sent.back().step() != bbcoop::TeamTravel::STOPPED)
+        return 6;
+    if (!OfferTeamTravel(2102962))
+        return 7;
+    AnswerTeamTravel(true);
+    incoming.set_id(sent.back().id());
+    incoming.set_yes(true);
+    TakeTeamTravelNews(incoming);
+    TickTeamTravel();
+    if (trips != std::vector<s32>{2102962} || sent.back().step() != bbcoop::TeamTravel::GO)
+        return 8;
+    std::puts("PASS: receive completes with travel state held; ordered bounded inbox, veto and "
+              "agreed trip");
+}
