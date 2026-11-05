@@ -21,6 +21,20 @@ Each item: what was done for now, what the refinement is, and where it lives.
 
 ## 1. Stability
 
+- **Long sessions hang: occlusion queries never finish (#127, #139, maybe #131/#118/#55;
+  2026-11-05, top priority).** The game keeps a list of pending occlusion queries (type 1, read by
+  0x216a2f0 from 16 ZPASS_DONE counts with bit 63) and copies it into its 256 KiB frame heap every
+  frame (0xec6bf0). On the port every type-1 query stays not ready, the list grows during play
+  (~0.9 KiB per 1,000 frames), the heap fills after ~1.5-2 h, then absent records and a hang. Only
+  one PixelPipeStatDump was processed in 130 s of play. *Fix:* find where the game's later
+  begin/end dumps go and complete them; check with the `frame-pool-growth` diagnostics (frame
+  pool peak stays flat, "type 1 0/N not ready"). FINDINGS 2026-11-05. Workaround for players:
+  restart every ~90 min.
+- **Motion blur smears a still picture until restart (#109, 2026-11-05).** M2 16 GB, 1280x720,
+  upscaler off: after a while the whole scene streaks as if moving; restarting clears it, and
+  with motion blur off it never comes back (reporter). The blur pass reads wrong velocity or a
+  stale previous-frame matrix. Two "Failed to find exact image match for copy addr=0x70f1ee0000,
+  size=0x10000" warnings came shortly before the screenshot. Not reproduced here.
 - **Missing movie-audio output device (#123, 2026-11-01).** A checked guard now
   rejects start with a null device and treats null stop like the original
   already-closed path, preserving the callers' unlocks. This contains the
@@ -33,10 +47,10 @@ Each item: what was done for now, what the refinement is, and where it lives.
 - **Forbidden Woods turns white with MetalFX above 1080p (#116, 2026-11-02).** With the startup
   patch (guest targets 1708x960 at 1440p Quality) the scene goes flat white after the passage
   beside the lift; PR #117 (evill33t) read the frame back: MetalFX's input is already one colour,
-  depth still varies, so a game post-process breaks at that size. #117 works around it by putting
-  MetalFX above 1080p on the live path, but that costs ~5-20% GPU in the Hunter's Dream (post at
-  1080p plus proxy resolves; two noisy battery-power A/B pairs, FINDINGS 2026-11-02), so the owner
-  held it. *Fix:* find the pass that first writes the white image (frame capture at the gate with
+  depth still varies, so a game post-process breaks at that size. #117 (merged 2026-11-05 as an
+  opt-in, `metalfx_white_scene_fix`, off by default) puts MetalFX above 1080p on the live path,
+  which costs ~5-20% GPU in the Hunter's Dream (post at 1080p plus proxy resolves; two noisy
+  battery-power A/B pairs, FINDINGS 2026-11-02). *Fix:* find the pass that first writes the white image (frame capture at the gate with
   the reporter's save, 1-2 passes through the passage reproduce it) and fix it on the startup
   path; then #117 is not needed. Workaround for players: start with the upscaler off, then enable
   MetalFX in game.

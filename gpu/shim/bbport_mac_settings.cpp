@@ -23,7 +23,8 @@ bool RestartNeeded() {
         s.live_resolution != s.startup_live_resolution || BbSettings::ResolutionNeedsRestart() ||
         s.fps_cap != s.startup_fps_cap || s.game_timing != s.startup_game_timing ||
         s.fullscreen != s.startup_fullscreen || s.metal_hud != s.startup_metal_hud ||
-        s.texture_compression != s.startup_texture_compression) {
+        s.texture_compression != s.startup_texture_compression ||
+        s.metalfx_white_scene_fix != s.startup_metalfx_white_scene_fix) {
         return true;
     }
     for (int e = 0; e < BbSettings::EffectCount; ++e) {
