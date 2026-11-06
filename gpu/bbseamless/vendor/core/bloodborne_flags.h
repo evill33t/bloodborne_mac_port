@@ -461,6 +461,12 @@ inline constexpr std::array LastRows{
     Range(52900000, 52999999, FlagOwner::Host, FlagCarriesHome,
           "chalice dungeon item flags: left out of the pickups, kept like any other change"),
     Range(53000000, 53999999, FlagOwner::Host, FlagMapPickup, "map item pickups"),
+    Range(72100100, 72100102, FlagOwner::PerPlayer, 0,
+          "the Doll's blessing after a level up (her talk sets 72100100 once her level-up menu "
+          "closed, m21_00 12100112 then plays the kneel on the local player and sets 72100101, "
+          "12100113 turns her to the player and sets 72100102): this game's own. As the host's "
+          "story steps and the game's own flag messages, the host's level up made every guest "
+          "in the Dream kneel (Kaniel 2026-10-30, again 2026-11-03)"),
     Range(72100300, 72100309, FlagOwner::Session, 0,
           "a ritual altar's layer pick (72100300 + layer, for the Dream's warp event "
           "12107100): a request, not progress; as the host's, a guest's game took it and "
@@ -473,6 +479,31 @@ inline constexpr std::array LastRows{
     Range(72102000, 72103999, FlagOwner::Session, FlagHeadstoneTrip,
           "a Dream headstone's \"travel to <lamp>\" (7210MMML for event 12107000): a request, "
           "not progress"),
+    Range(72400380, 72400380, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Adella's first talk done (m24_00 t240322): her gift's menu is this player's"),
+    Range(72400383, 72400384, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Adella's gift talk steps (t240322): this player's"),
+    Range(72400390, 72400390, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Adella's gift given (t240322 sets it with the trigger 72400398): this player's"),
+    Range(72400392, 72400393, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Adella's gift cooldown (72400392, event 12400954 clears it) and its pair: as the "
+          "host's, a guest's talk ended without her menu"),
+    Range(72400480, 72400480, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Arianna's first talk done (m24_00 t240318): this player's"),
+    Range(72400498, 72400499, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Arianna's gift given (72400498, event 12400531 clears it; with the trigger 72400489) "
+          "and its pair: as the host's, a guest's talk took her cooldown. Her gift counts "
+          "72400950-72400954 and 72400394 (Adella's move) stay the party's"),
+    Range(72410300, 72410304, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Iosefka's gift talk (m24_01 t241313): first talk done (72410300), gift given this visit "
+          "(72410301), gift talks (72410302-72410304); as the host's, a guest's talk took her "
+          "\"already gave\" branch and gave no vial (rig iosefka-gift). 72410305 (her move to "
+          "1122) stays the party's"),
+    Range(72410306, 72410308, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Iosefka hit (72410306) and provoked (72410307, 72410308; her apology clears them): "
+          "this player's. The third provocation 72410309 (she turns hostile) is the party's"),
+    Range(72410311, 72410311, FlagOwner::PerPlayer, FlagCarriesHome,
+          "Iosefka's \"won't give now\" heard (event 12410738 clears it): this player's"),
     FlagRange{.first = 72110200,
               .last = 73990219,
               .period = 10000,

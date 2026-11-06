@@ -50,12 +50,15 @@ enum StoredSecret: Equatable {
 }
 
 /// Secrets in the login keychain: the items run.sh reads with `security find-generic-password`
-/// (service bbport-shadnet / bbport-huntersdream, account = the online id). The launcher only
-/// stores, removes and checks for them; it never reads one back.
+/// (service bbport-shadnet / bbport-huntersdream, account = the online id). The launcher reads a public co-op session only to revoke it on sign-out.
 protocol SecretStore {
     func has(service: String, account: String) -> Bool
     func store(service: String, account: String, secret: String) throws
     func remove(service: String, account: String)
+    func load(service: String, account: String) -> String?
+}
+extension SecretStore {
+    func load(service: String, account: String) -> String? { nil }
 }
 
 /// The launcher's view of the online keys in bbport.ini (scripts/launch_settings.sh turns them
@@ -71,6 +74,11 @@ struct OnlineSettings: Equatable {
     var online = false
     var pool = OnlinePool.seamless
     var seamlessServer = ""
+    var seamlessHost = SeamlessHost.local
+    var seamlessGlobalID = ""
+    var seamlessGlobalName = ""
+    var seamlessGlobalExpiry: TimeInterval = 0
+    var seamlessPhantomGlow = true
     var seamlessHostRules = "off"
     var seamlessHarderEnemies = "off"
     /// Empty: the default server.
@@ -102,6 +110,18 @@ struct OnlineSettings: Equatable {
         var result = env
         result["BB_ONLINE"] = online ? "1" : "0"
         result["BB_NET_BACKEND"] = pool == .huntersdream ? "thd" : pool.rawValue
+        if pool == .seamless {
+            result["BB_SEAMLESS_HOST"] = seamlessHost.rawValue
+            result["BB_SHADNET_SERVER"] = seamlessServer.isEmpty ? Self.defaultSeamlessServer : seamlessServer
+            if seamlessHost == .global {
+                result["BB_SHADNET_SERVER"] = SeamlessGlobal.endpoint
+                result["BB_SEAMLESS_GLOBAL_ID"] = seamlessGlobalID
+                result.removeValue(forKey: "BB_SHADNET_NPID")
+                result.removeValue(forKey: "BB_SHADNET_PASSWORD")
+            } else {
+                result.removeValue(forKey: "BB_SEAMLESS_GLOBAL_ID")
+            }
+        }
         return result
     }
 
@@ -116,6 +136,14 @@ struct OnlineSettings: Equatable {
         if let v = flag("online") { online = v }
         shadnetServer = ini["shadnet_server"] ?? ""
         seamlessServer = ini["seamless_server"] ?? ""
+        seamlessHost = SeamlessHost(rawValue: ini["seamless_host"] ?? "local") ?? .local
+        let address = seamlessServer.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let host = URLComponents(string: address.contains("://") ? address : "udp://" + address)?.host
+        if ini["seamless_host"] == nil && host == "seamlesshunt.com" { seamlessHost = .global }
+        seamlessGlobalID = ini["seamless_global_account"] ?? ""
+        seamlessGlobalName = ini["seamless_global_name"] ?? ""
+        seamlessGlobalExpiry = TimeInterval(ini["seamless_global_expires"] ?? "0") ?? 0
+        seamlessPhantomGlow = flag("seamless_phantom_glow") ?? true
         seamlessHostRules = ini["seamless_host_rules"] ?? "off"
         seamlessHarderEnemies = ini["seamless_harder_enemies"] ?? "off"
         shadnetNpid = ini["shadnet_npid"] ?? ""
@@ -146,6 +174,11 @@ struct OnlineSettings: Equatable {
         ini["online_pool"] = pool.rawValue
         let seamless = seamlessServer.trimmingCharacters(in: .whitespaces)
         ini["seamless_server"] = seamless.isEmpty ? nil : seamless
+        ini["seamless_host"] = seamlessHost.rawValue
+        ini["seamless_global_account"] = seamlessGlobalID.isEmpty ? nil : seamlessGlobalID
+        ini["seamless_global_name"] = seamlessGlobalName.isEmpty ? nil : seamlessGlobalName
+        ini["seamless_global_expires"] = seamlessGlobalExpiry > 0 ? String(Int(seamlessGlobalExpiry)) : nil
+        ini["seamless_phantom_glow"] = seamlessPhantomGlow ? "1" : "0"
         ini["seamless_host_rules"] = seamlessHostRules
         ini["seamless_harder_enemies"] = seamlessHarderEnemies
         let server = shadnetServer.trimmingCharacters(in: .whitespaces)

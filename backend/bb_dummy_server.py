@@ -493,6 +493,12 @@ class Store:
                 "ORDER BY created_at DESC, id DESC LIMIT ?)", (*key, *key, self.tomb_cap))
             return cur.lastrowid
 
+    def delete_tombs(self, user_id, ids):
+        # Amanises 2026-10-26: a player takes its own bloodstains back (TombMessRemove).
+        with self.lock, self.conn:
+            for tomb_id in ids:
+                self.conn.execute("DELETE FROM tombstones WHERE id=? AND user_id=?", (tomb_id, user_id))
+
     def list_tombs(self, user_id, areas, get_max):
         rows = self._list_by_areas("tombstones", areas, user_id, self.hide_own("deaths"), get_max)
         return [{"TombMessId": r["id"], "TombData": r["tomb_data"], "MessShellInfo": shell_of(r)[0]}
@@ -764,6 +770,14 @@ def h_TombMessGetList(store, req, uid, chara):
     return {"TombMessList": store.list_tombs(uid, req.get("AreaInfoList") or [], req.get("GetMaxCount"))}
 
 
+def h_TombMessRemove(store, req, uid, chara):
+    ids = _ids(req, "TombMessIdList", "TombMessId")
+    if "TombMessId" in req:
+        ids.append(as_int(req.get("TombMessId"), -1))
+    store.delete_tombs(uid, ids)
+    return {}
+
+
 def h_DeathVisionGet(store, req, uid, chara):
     vision = store.death_vision(as_int(req.get("TombMessId"), -1))
     if vision:
@@ -835,7 +849,39 @@ RESPONSE_FIELDS = {
     "DeathVisionGetResponse": {"DeathVisionData": ""},
     "ChairMessGetListResponse": {"ChairMessList": []},
     "WanderingGhostGetResponse": {"WanderingGhostList": []},
+    # Amanises 2026-10-26: services the game calls, no longer "unmapped".
+    "TombMessRemoveResponse": {},
+    "MultiPlayNetErrorResponse": {},
+    "UserPropertiesMoveCountResponse": {},
+    "UserAgreementGetResponse": {"Agreements": []},
+    "EmergencyNoticeGetResponse": {"NoticeList": []},
+    "ChannelRandomJoinResponse": {},
+    "ChannelAddMaterialResponse": {},
+    "ChannelAddMaterialCompleteNotifyResponse": {},
 }
+
+# Amanises 2026-10-26: the lists cut to the reply's size cap (--reply-bytes). A long bloodstain
+# list (about 155 KB at Cathedral Ward) crashed the game ("Dantelion2 Panic 265", an allocation
+# that failed); 97-106 KB never did. Newest first, so the newest stay.
+REPLY_CAPPED = {
+    "BloodMessGetList": "BloodMessList",
+    "TombMessGetList": "TombMessList",
+    "WanderingGhostGet": "WanderingGhostList",
+}
+
+
+def cap_list(entries, budget):
+    """The first entries whose JSON, as sent (commas between), fits in `budget` bytes."""
+    kept = []
+    used = -1
+    for entry in entries:
+        size = len(json.dumps(entry, separators=(",", ":")).encode("utf-8")) + 1
+        if used + size > budget:
+            break
+        kept.append(entry)
+        used += size
+    return kept
+
 
 # Create-type services in no-store mode still hand back an id so the game's
 # own bookkeeping stays consistent. Field names taken from the captures.
@@ -893,7 +939,11 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "bb-dummy/2.0"
 
     def log_message(self, fmt, *args):
-        sys.stdout.write("[{}] {}\n".format(datetime.datetime.now().strftime("%H:%M:%S"), fmt % args))
+        # A player's name may hold any character: never one the console's code page cannot write
+        # (Windows' cp1252 refused an emoji, and the request died with its connection).
+        line = "[{}] {}\n".format(datetime.datetime.now().strftime("%H:%M:%S"), fmt % args)
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        sys.stdout.write(line.encode(encoding, "backslashreplace").decode(encoding))
         sys.stdout.flush()
 
     def _send(self, body, content_type, extra_headers=()):
@@ -1012,6 +1062,14 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.log_message("POST %s with no MessageId; answering ResKind 0", path)
 
+        capped = REPLY_CAPPED.get(name)
+        if capped and self.server.reply_bytes > 0 and isinstance(payload.get(capped), list):
+            full = payload[capped]
+            payload[capped] = cap_list(full, self.server.reply_bytes)
+            if len(payload[capped]) < len(full):
+                self.log_message("%s reply cut to %d of %d (size cap %d bytes)", name,
+                                 len(payload[capped]), len(full), self.server.reply_bytes)
+
         if name == "ChannelGetDetailsInfo":
             standard_details(request, payload, "ChannelList")
         elif name == "ChannelGetInfo":
@@ -1081,6 +1139,9 @@ def main():
                     help="minutes a player counts as present at a lantern (default 10)")
     ap.add_argument("--tomb-cap", type=int, default=100, metavar="N",
                     help="bloodstains kept per area region (default 100)")
+    ap.add_argument("--reply-bytes", type=int, default=65536, metavar="N",
+                    help="largest message, bloodstain and ghost list sent, in bytes (default 65536; "
+                         "0: no cap). Longer lists crashed the game")
     ap.add_argument("--notice", default=os.path.join(here, "notice.txt"),
                     help="text file shown as the in-game notice: first line title, rest body")
     ap.add_argument("--broadcast", default=os.path.join(here, "broadcast.txt"),
@@ -1117,6 +1178,7 @@ def main():
     httpd.broadcast_path = args.broadcast
     httpd.login_message_path = args.login_message
     httpd.store = store
+    httpd.reply_bytes = args.reply_bytes
     httpd.chalice_store = store or Store(":memory:", (), 0, 0, 0)  # chalice dungeons only
     httpd.chalice_lock = threading.Lock()
     httpd.standard_used = []

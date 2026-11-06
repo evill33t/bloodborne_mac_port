@@ -111,6 +111,104 @@ hunt too, as by its code). Players in no team see the listed teams with room (12
 Invitations and open teams; each shard lists its own. `TeamRequest` actions 19-27, `Team.join`
 12, `LobbyState` fields 7-14.
 
+## Global servers: accounts
+
+The launcher's first Co-op step asks which server: **Local** (a host's own server, by its address:
+the PC's id and per-server ids, exactly as before) or **Global** (the public server). On Global the
+player signs in in the launcher; the game then plays with what the server answered. Kaniel
+2026-11-03: a name and a password, secure by default (`SignIn=password`, the default on a `Hosted`
+server); 2026-11-04: the only sign-in (Sign in with Discord, in 1.3.2's first builds, is gone; the
+Discord status stays). `SignIn=open` is the hosted server as it was before sign-ins (any new id, with
+the signup work): for tests and load tests only.
+
+**Where the password goes.** Only to the Global server, only over HTTPS (`bbport_auth.py`): an
+`http://` address is refused before anything is sent, the certificate and host name are checked
+with the system's certificates, and no redirect is followed. It is never sent to a Local server or
+over the game's link, never logged, never written to `coop.json` or anywhere else; the window
+empties its fields once a request is sent. The launcher keeps only the signed 30-day secret.
+
+**On the server** (`src/password_accounts.h`, `src/webapi_routes_password.cpp`):
+
+- An **Argon2id** hash (Monocypher's, `$argon2id$v=19$m=65536,t=2,p=1$...`): 64 MiB and 2 passes,
+  about 70 ms on a desktop core, 100-150 ms on a cloud vCPU. Hashes run on their own threads
+  (`PasswordHashThreads`, 2) with a bounded queue (`PasswordHashQueue`, 32): past it a request hears
+  `busy` at once. A stored hash made with other parameters is made again at its next good sign-in.
+- **Names**: 3-20 of ASCII letters, digits, `_ - .`, one account a name in any case. The game's id
+  is not the name: it is `u` + 14 hex of an HMAC of the name under the accounts' key (a valid online
+  id, `[A-Za-z0-9_-]{3,16}`), the next salt when its virtual address is taken.
+- **Passwords**: 10-128 characters of anything, no rules about what they are made of. Refused: one
+  holding the name, and the common and breached ones: a few built in, and the list shipped with the
+  server (`CommonPasswordsFile`, `common-passwords.txt` in the data folder, one a line, read as plain
+  data in lower case).
+- **Signup** pays the same kind of work as a new id's hello (`HostedSignupWorkBits`: SHA-256 of
+  `bb signup v1|challenge|name|nonce` with that many leading zero bits; the challenge is the
+  server's, signed, 2 minutes, one account each) and counts against the address's
+  `HostedNewAccountsPerHour`.
+- **Wrong passwords** slow the next tries down: per account 5 free, then a wait that doubles from
+  1 s to 15 minutes; per address 30 free, then up to 5 minutes (households, a carrier's NAT). Never a
+  lock: each wait ends, a good sign-in starts the account's over, and a day without a wrong one
+  forgets it. The answer is `429 {"error":"wait","seconds":N}`, even for the right password.
+- A name nobody has gets **the same answer** as a wrong password (`401 wrong name or password`),
+  after the same work: it is checked against a dummy hash. The waits count for it too.
+- **No email.** Signup gives a one-time **recovery code** (5 groups of 4 Crockford base32, 100 bits),
+  kept only as an HMAC. *Forgot password* takes the name and the code and gives a new password and a
+  new code; the old code and every older sign-in die. *Change password* takes the old one; every
+  older sign-in dies. *Sign out* kills that sign-in and the older ones.
+
+| Route (`WebApiPort`, JSON) | |
+| --- | --- |
+| `GET /bb/auth/config` | `{sign_in: ["password"], work_bits, name_min, name_max, password_min, password_max}` |
+| `POST /bb/auth/challenge` | `{challenge, bits}` |
+| `POST /bb/auth/sign-up` `{name, password, challenge, nonce}` | `{id, secret, name, recovery_code}`; 409 taken; 400 `name`/`password` with `problem` (`length`, `characters`, `short`, `long`, `common`, `name`) or `work` |
+| `POST /bb/auth/sign-in` `{name, password}` | `{id, secret, name}`; 401; 429 `wait` |
+| `POST /bb/auth/change` `{name, password, new_password}` | `{id, secret, name}` |
+| `POST /bb/auth/recover` `{name, recovery_code, new_password}` | `{id, secret, name, recovery_code}` |
+| `POST /bb/auth/sign-out` `{id, secret}` | `{signed_out: true}`; 403 when it is dead already |
+
+**The secret** (`src/signed_accounts.h`) is 8 hex of when it was
+issued and 24 of an HMAC-SHA256 under a key made from the link key, which every shard of a region
+holds, so any shard tells it at a hello with no store shared between them. It holds 30 days; the
+launcher asks for a new sign-in a day early and when the server refuses it. At a hello an id with no
+account is refused (`account: sign in in the launcher first`, and the launcher shows its sign-in
+again), so nobody makes accounts around the sign-in.
+
+**A region.** The accounts live on one shard, the accounts' home (`PasswordHome`, `PASSWORD_HOME`;
+the Helm chart's shard 0). The proxy sends `/bb/auth/*` there; the other shards answer only
+`/bb/auth/config`. A kill (sign out, change, recovery) is kept on the home (`sign_in_not_before`) and
+goes to the directory with the next heartbeat (`revoked`); every shard hears the others' in its
+heartbeat's answer (`revocations`, numbered, the last 31 days) and stops that secret within a
+heartbeat or two (`tests/test_password_region.py`).
+
+| Setting | Default | |
+| --- | --- | --- |
+| `SignIn` / `SIGN_IN` | `password` | `password` or `open` (a `Hosted` server only) |
+| `PasswordHome` / `PASSWORD_HOME` | `true` | the region's accounts' home; `false` on the other shards |
+| `PasswordHashMemoryKiB` | `65536` | Argon2id's memory |
+| `PasswordHashPasses` | `2` | Argon2id's passes |
+| `PasswordHashThreads` | `2` | hashes at once |
+| `PasswordHashQueue` | `32` | hashes waiting; past it `503 busy` |
+| `PasswordTriesPerMinute` | `30` | an address's requests to `/bb/auth/*` |
+| `CommonPasswordsFile` | `common-passwords.txt` | the breached passwords refused |
+| `SignInProxied` | `false` | behind our TLS proxy: see below |
+
+### Running the accounts safely (operators)
+
+- **TLS in front, always.** Caddy (the Helm chart's `tls.mode: caddy`, or your own) terminates
+  HTTPS and proxies to `WebApiPort`; turn on `SignInProxied=true`. Then `/bb/auth/*` is answered
+  only when it came through the proxy (from a loopback or private address, with
+  `X-Forwarded-Proto: https`), because the WebAPI's plain port is open to players too: a password
+  sent to it in clear is refused (`403 https only`), and the launcher never sends one anyway. The
+  limits count the last `X-Forwarded-For`, the one the proxy added.
+- **HSTS**: `Strict-Transport-Security: max-age=31536000` on the site (the chart's Caddyfile sets
+  it).
+- **Request sizes**: the server refuses a body over 4 KB on `/bb/auth/*` (`413`); the chart's
+  Caddyfile caps it at 8 KB before it reaches the server.
+- **Logs**: passwords travel in the body only, never in a URL. shadNet logs no body, no password and
+  no recovery code (`tests/test_password_signin.py` reads its log to be sure); Caddy writes no
+  access log unless asked, and logs no bodies when it does. Never turn on body logging on the proxy.
+- The database holds Argon2id hashes and HMACs only. The accounts' key comes from `link_key.bin`:
+  keep that file as secret as the database (losing it signs everyone out, the passwords stay).
+
 ## The link's handshake and encryption (link version 4)
 
 On for everyone, both sides (`coop/link_auth.h` and `coop/link_crypto.cpp`, shared by shadNet, the
@@ -127,7 +225,7 @@ CC0/BSD-2). Server and games ship together: a game of an older link version gets
 | The server's key pair is made on first start in the data folder (`LinkKeyFile`, default `link_key.bin`, owner-only); its public key is in the log at start and from the admin `key` command | moving the file moves the server's identity; deleting it makes every game warn |
 | The game pins the key the launcher gives it for that server (`KNOWN_SERVER_KEYS` in `bbport_coop.py` for a public server, else the one kept in coop.json `server_keys`). With no key kept (a friend's home host the first time) it takes the first cookie's key and the launcher keeps it from the game's log; another key later is refused and the launcher says so. The launcher learns a key only from the game's own log line and only when it keeps none for that server; a hello whose id or build has control characters is dropped, so no relayed text can forge that line | a public server's key ships with the launcher, so nobody can stand in for it; a home host is trusted on first use, as SSH does: someone on the path at that first link could stand in for it |
 | Every server, hosted or not: at most 20 hellos a second from one address get past the cookie (`Admission::HelloBudget`); hosted, the guard's tighter limit | a hello that opens costs the link thread Diffie-Hellmans |
-| Hosted: a hello for an id with no account must carry a proof-of-work: a nonce such that SHA-256(cookie, id, nonce) starts with `HostedSignupWorkBits` zero bits (default 20, ~0.3 s of one core on average). A hello without it gets an encrypted `Work` answer and the game does it on a thread of its own, then says hello again. Checked with one hash before any password hash or account; an existing account never pays. 2 bits more per doubling of the accounts made in the last minute over `HostedSignupsPerMinute` (60), up to `HostedSignupWorkMaxBits` (20 by default, so no rise: a launch rush of 300 real joins pushed it to the cap in a test; raise it while under attack) | a botnet stays within each address's accounts an hour but made 1181 accounts in 30 s; now each costs it a CPU's while, more than the server's password hashes |
+| Hosted: a hello for an id with no account must carry a proof-of-work: a nonce such that SHA-256(cookie, id, nonce) starts with `HostedSignupWorkBits` zero bits (default 20, ~0.3 s of one core on average). A hello without it gets an encrypted `Work` answer and the game does it on a thread of its own, then says hello again. Checked with one hash before any password hash or account; an existing account never pays. 2 bits more per doubling of the accounts made in the last minute over `HostedSignupsPerMinute` (300: 60 was too slow for a launch rush of real joins), up to `HostedSignupWorkMaxBits` (20 by default, so no rise; raise it while under attack) | a botnet stays within each address's accounts an hour but made 1181 accounts in 30 s; now each costs it a CPU's while, more than the server's password hashes |
 
 `server/loadtest/noise_link.py` is a second implementation on Python's `cryptography` package; the
 test vectors in `tests/contracts/server_link_frames.txt` come from it, and both test suites check

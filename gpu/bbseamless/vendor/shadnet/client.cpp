@@ -296,6 +296,11 @@ bool ShadNetClient::DoConnect() {
         m_state = ShadNetState::FailureConnect;
         return false;
     }
+#ifdef _WIN32
+    // Never inherited by a process this one starts (the in-game restart): a copy there kept the
+    // session open after this process ended, and the server refused the next login.
+    ::SetHandleInformation(reinterpret_cast<HANDLE>(m_sock), HANDLE_FLAG_INHERIT, 0);
+#endif
 
     // Use non-blocking connect + select() so we time out instead of hanging
     // for the OS default TCP timeout (75 s on Linux, >20 s on Windows).

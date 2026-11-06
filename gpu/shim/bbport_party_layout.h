@@ -24,9 +24,10 @@ inline float Scale(float display_h) {
 /// The team screen at scale 1 (bbport_overlay.cpp Team::Draw): its window and the margin beside it,
 /// the inset of its contents, its button row (five buttons over the game) and its four cards.
 inline constexpr float TeamWindowWidth = 1600.0f, TeamWindowMargin = 80.0f, TeamWindowInset = 24.0f;
-inline constexpr float TeamButtonWidth = 260.0f, TeamCardWidth = 290.0f, TeamGap = 24.0f;
+// Amanises 2026-10-29: five cards across (was four of 290).
+inline constexpr float TeamButtonWidth = 260.0f, TeamCardWidth = 250.0f, TeamGap = 24.0f;
 inline constexpr float TeamButtonsWidth = 5 * TeamButtonWidth + 4 * TeamGap;
-inline constexpr float TeamCardsWidth = 4 * TeamCardWidth + 3 * TeamGap;
+inline constexpr float TeamCardsWidth = 5 * TeamCardWidth + 4 * TeamGap;
 
 /// Kaniel 2026-10-26: in a narrow window (4:3 960x720, 16:10 1152x720) the overlay's scale stops at
 /// 0.75 and the team screen ran off both sides: while it is open the overlay scales down to the width.

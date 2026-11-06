@@ -4,6 +4,7 @@
 #include "touch.h"
 #include "invasion_visual.h"
 #include "common/float_chars.h"
+#include "vendor/core/bloodborne_memory_window.h"
 #include <cassert>
 #include <cerrno>
 #include <cstdio>
@@ -12,6 +13,20 @@
 #include <sys/mman.h>
 #include <unistd.h>
 int main() {
+    Core::Bloodborne::MemoryWindows windows;
+    windows.Note(2,0x1000,0x2000,3);
+    assert(windows.Covers(2,0x1000,0x1000,1));
+    assert(!windows.Covers(2,0x1fff,2,1));
+    assert(!windows.Covers(2,0x1000,1,4));
+    assert(!windows.Covers(4,0x1000,1,1)); // a protect/unmap invalidates all old windows
+    assert(!windows.Covers(3,0x1000,1,1)); // writer active
+    assert(!windows.Covers(2,0x1000,0,1));
+    assert(!windows.Covers(2,UINT64_MAX,2,1));
+    windows.Note(3,0x3000,0x4000,1);
+    assert(!windows.Covers(3,0x3000,1,1));
+    assert(!windows.Covers(4,0x3000,1,1)); // a writer's observation is never cached
+    windows.Note(4,0x1000,0x2000,1);
+    assert(windows.Covers(4,0x1000,16,1) && !windows.Covers(4,0x1000,16,2));
     // A cosmetic row may replace only a known blank or its own prior result; preserve mods.
     std::array<uint8_t,BbInvasionVisual::RowSize> blank{},visual{},source{};
     uint16_t state=276;float rate=.7f,duration=-1.f;

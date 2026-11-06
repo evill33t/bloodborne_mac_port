@@ -4,10 +4,12 @@
 #pragma once
 #include <functional>
 #include <memory>
+#include <utility>
 #include <QAtomicInt>
 #include <QByteArray>
 #include <QHash>
 #include <QList>
+#include <QMutex>
 #include <QObject>
 #include <QPair>
 #include <QReadWriteLock>
@@ -63,6 +65,21 @@ struct SharedState {
 
     // The players of each address's signed-in links, for the HTTP ports (http_gate.h).
     HttpGate::Gate httpGate;
+    // Global servers' accounts (signed_accounts.h): made from the link key; empty without one.
+    QByteArray accountsKey;
+    // Sign-ins killed here (a sign out, a password change, a recovery: webapi_routes_password.h),
+    // for the region's other shards: the next heartbeat takes them to the directory.
+    void Revoked(const QString& online_id, qint64 not_before_s) {
+        QMutexLocker lk(&revokedLock);
+        if (revoked.size() < 100'000)
+            revoked.append({online_id, not_before_s});
+    }
+    QList<QPair<QString, qint64>> TakeRevoked() {
+        QMutexLocker lk(&revokedLock);
+        return std::exchange(revoked, {});
+    }
+    QMutex revokedLock;
+    QList<QPair<QString, qint64>> revoked;
 
     // Live usage stats for the read-only stats HTTP server
     mutable QReadWriteLock usageLock;

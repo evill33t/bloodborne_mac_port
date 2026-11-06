@@ -292,4 +292,47 @@ DeathCatch CatchOf(NoDeadCheck check, bool armed, bool down, bool answer, bool b
     return DeathCatch::None;
 }
 
+namespace {
+
+float Apart(const LampPosition& a, const LampPosition& b) {
+    return std::hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+} // namespace
+
+std::optional<LampPosition> SpectateFollow::Tick(s64 now_ms, const LampPosition& teammate,
+                                                 const LampPosition& me, bool teammate_on_ground) {
+    if (teammate_on_ground && (!sampled_at || now_ms - *sampled_at >= SpectateFollowSampleMs)) {
+        sampled_at = now_ms;
+        trail.emplace_back(now_ms, teammate);
+        while (trail.size() > SpectateFollowSamples) {
+            trail.pop_front();
+        }
+    }
+    const float apart = Apart(me, teammate);
+    const auto since_move = [&] { return moved_at ? now_ms - *moved_at : SpectateFollowMoveMs; };
+    // Too close: its copy would stand in the teammate's way. The newest spot far enough away.
+    if (apart < SpectateFollowDodgeMetres && since_move() >= SpectateFollowDodgeMs) {
+        for (auto sample = trail.rbegin(); sample != trail.rend(); ++sample) {
+            if (Apart(sample->second, teammate) >= SpectateFollowDodgeToMetres) {
+                moved_at = now_ms;
+                return sample->second;
+            }
+        }
+        return std::nullopt;
+    }
+    if (apart < SpectateFollowMetres || since_move() < SpectateFollowMoveMs) {
+        return std::nullopt;
+    }
+    // The newest sample old enough, and not on the teammate (it may have stood still since).
+    for (auto sample = trail.rbegin(); sample != trail.rend(); ++sample) {
+        if (now_ms - sample->first >= SpectateFollowLagMs &&
+            Apart(sample->second, teammate) >= SpectateFollowGapMetres) {
+            moved_at = now_ms;
+            return sample->second;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace Core::Bloodborne

@@ -29,6 +29,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -1070,8 +1071,14 @@ std::map<s32, bool>& GuestWorldChanges() {
 }
 
 void SaveGuestWorldChanges() {
-    std::ofstream file{GuestWorldFile(), std::ios::trunc};
-    file << FormatWorldChanges(*guest_world);
+    // The disk can take long: 66 ms on the game's thread in a rig run. The worker writes in order.
+    const auto write = [path = GuestWorldFile(), text = FormatWorldChanges(*guest_world)] {
+        std::ofstream file{path, std::ios::trunc};
+        file << text;
+    };
+    if (!Coop::OffMainOn(OffMainPart::WorldFile) || !Coop::CoopOffMain().Post(write)) {
+        write();
+    }
 }
 
 void ForgetGuestWorldChanges() {
@@ -1671,6 +1678,11 @@ void PS4_SYSV_ABI KeepLocalFlagsFromOthers(u64, GuestRegisterSnapshot* registers
         registers->r15 = (registers->r15 & ~u64{0xFF}) | (*lit ? 1 : 0);
         return;
     }
+    // The Doll's blessing steps: this game's own come back through this message too.
+    if (party_controller && !Invading() &&
+        TakesDollBlessingStep(flag, (registers->r15 & 0xFF) != 0, EventFlagOn(DollBlessingFlag))) {
+        return;
+    }
     // Invasions: the invaded world's flags never go into the invader's (every one stays its own).
     if (!KeepsLocalFlag(party_controller.has_value(), flag) && !Invading()) {
         return;
@@ -1754,16 +1766,89 @@ s64 SteadyMilliseconds() {
         .count();
 }
 
+namespace {
+
+// The last copy of the flag store, for the next one to compare with: the worker's, or the game
+// thread's while the part is switched off there (OffMainPart::Flags).
+std::mutex flags_compared_mutex;
+std::shared_ptr<const FlagStore> flags_compared;
+std::atomic<bool> flags_shared_now{false};
+
+// What the changes do in the game and the party: on the game thread.
+void ActOnFlagChanges(std::vector<s32> set, std::vector<s32> cleared, const FlagStore& current) {
+    const auto list = [](std::span<const s32> flags) {
+        std::string text;
+        for (size_t index = 0; index < std::min<size_t>(flags.size(), 48); ++index) {
+            text += fmt::format(" {}", flags[index]);
+        }
+        if (flags.size() > 48) {
+            text += fmt::format(" (+{})", flags.size() - 48);
+        }
+        return text;
+    };
+    LOG_INFO(Debug, "Bloodborne flags in session: set{} | cleared{}", list(set), list(cleared));
+    AddLampsLitInSession(set);
+    // A ritual or a join writes the current altar's view (a load into a dungeon and the
+    // altar's own reload do too: ShareRitualAltarRecord tells them apart).
+    if (std::ranges::any_of(set, IsCurrentAltarFlag) ||
+        std::ranges::any_of(cleared, IsCurrentAltarFlag)) {
+        ShareRitualAltarRecord(set.size() + cleared.size());
+    }
+    if (!IsPartyGuestRole()) {
+        for (const s32 flag : set) {
+            WatchLampFlag(flag, current);
+        }
+    }
+    if (IsBulkFlagChange(set.size() + cleared.size())) {
+        world_changed_ms.store(SteadyMilliseconds()); // deaths now are no kills
+        LOG_INFO(Debug,
+                 "Bloodborne party: {} flags changed at once (a load), not kept or "
+                 "shared",
+                 set.size() + cleared.size());
+    } else {
+        const FlagChanges changes = LeaveOutRelitLamps({std::move(set), std::move(cleared)});
+        if (IsPartyGuestRole()) {
+            KeepWorldChanges(changes);
+        }
+        PostWorldChanges(changes);
+    }
+}
+
+// Compares a new copy with the last; it is the last from now on. The changes and the copy they
+// were found in, or nothing when none changed.
+std::optional<std::pair<FlagChanges, std::shared_ptr<const FlagStore>>> CompareFlagStore(
+    FlagStore current) {
+    auto store = std::make_shared<const FlagStore>(std::move(current));
+    std::shared_ptr<const FlagStore> before;
+    {
+        std::scoped_lock lock{flags_compared_mutex};
+        before = std::exchange(flags_compared, store);
+    }
+    if (!before || before->flags_per_block != store->flags_per_block) {
+        return std::nullopt;
+    }
+    FlagChanges changes =
+        ChangedFlagsBetween(before->blocks, store->blocks, store->flags_per_block);
+    if (changes.set.empty() && changes.cleared.empty()) {
+        return std::nullopt;
+    }
+    return std::pair{std::move(changes), std::move(store)};
+}
+
+} // namespace
+
 void LogFlagChangesInSession(bool sharing) {
     static std::chrono::steady_clock::time_point last{};
-    static std::optional<FlagStore> previous;
+    flags_shared_now.store(sharing, std::memory_order_relaxed);
     const auto now = std::chrono::steady_clock::now();
     if (!party_controller || now - last < std::chrono::seconds{3}) {
         return;
     }
     last = now;
     if (!sharing) {
-        previous.reset();
+        ForgetRelitLamps();
+        std::scoped_lock lock{flags_compared_mutex};
+        flags_compared.reset();
         return;
     }
     FlagStore current = ReadFlagStore();
@@ -1773,65 +1858,25 @@ void LogFlagChangesInSession(bool sharing) {
     if (traced_flag) {
         WatchFlagWrites(*traced_flag, current);
     }
-    if (previous && previous->flags_per_block == current.flags_per_block) {
-        std::vector<s32> set;
-        std::vector<s32> cleared;
-        size_t old_index = 0;
-        for (const FlagBlock& block : current.blocks) {
-            while (old_index < previous->blocks.size() &&
-                   previous->blocks[old_index].id < block.id) {
-                ++old_index;
-            }
-            if (old_index >= previous->blocks.size() ||
-                previous->blocks[old_index].id != block.id) {
-                continue;
-            }
-            const FlagChanges changes = ChangedFlags(
-                block.id, current.flags_per_block, previous->blocks[old_index].bytes, block.bytes);
-            set.insert(set.end(), changes.set.begin(), changes.set.end());
-            cleared.insert(cleared.end(), changes.cleared.begin(), changes.cleared.end());
+    if (!OffMainOn(OffMainPart::Flags)) {
+        if (auto found = CompareFlagStore(std::move(current))) {
+            ActOnFlagChanges(std::move(found->first.set), std::move(found->first.cleared),
+                             *found->second);
         }
-        if (!set.empty() || !cleared.empty()) {
-            const auto list = [](std::span<const s32> flags) {
-                std::string text;
-                for (size_t index = 0; index < std::min<size_t>(flags.size(), 48); ++index) {
-                    text += fmt::format(" {}", flags[index]);
-                }
-                if (flags.size() > 48) {
-                    text += fmt::format(" (+{})", flags.size() - 48);
-                }
-                return text;
-            };
-            LOG_INFO(Debug, "Bloodborne flags in session: set{} | cleared{}", list(set),
-                     list(cleared));
-            AddLampsLitInSession(set);
-            // A ritual or a join writes the current altar's view (a load into a dungeon and the
-            // altar's own reload do too: ShareRitualAltarRecord tells them apart).
-            if (std::ranges::any_of(set, IsCurrentAltarFlag) ||
-                std::ranges::any_of(cleared, IsCurrentAltarFlag)) {
-                ShareRitualAltarRecord(set.size() + cleared.size());
-            }
-            if (!IsPartyGuestRole()) {
-                for (const s32 flag : set) {
-                    WatchLampFlag(flag, current);
-                }
-            }
-            if (IsBulkFlagChange(set.size() + cleared.size())) {
-                world_changed_ms.store(SteadyMilliseconds()); // deaths now are no kills
-                LOG_INFO(Debug,
-                         "Bloodborne party: {} flags changed at once (a load), not kept or "
-                         "shared",
-                         set.size() + cleared.size());
-            } else {
-                const FlagChanges changes{std::move(set), std::move(cleared)};
-                if (IsPartyGuestRole()) {
-                    KeepWorldChanges(changes);
-                }
-                PostWorldChanges(changes);
-            }
-        }
+        return;
     }
-    previous = std::move(current);
+    // A full queue: the next round compares with the last copy, so no change is lost.
+    CoopOffMain().Post([current = std::make_shared<FlagStore>(std::move(current))] {
+        if (auto found = CompareFlagStore(std::move(*current))) {
+            CoopOffMain().OnGameThread([found =
+                                            std::make_shared<decltype(found)>(std::move(found))] {
+                auto& [changes, store] = **found;
+                if (flags_shared_now.load(std::memory_order_relaxed)) {
+                    ActOnFlagChanges(std::move(changes.set), std::move(changes.cleared), *store);
+                }
+            });
+        }
+    });
 }
 
 void KeepGuestProgress(bool in_session) {

@@ -22,6 +22,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -843,6 +845,7 @@ void Service::StartLog(PartyWorld& world, bool after_wipe, qint64 now_ms, Result
     const u64 epoch = WorldLogEpoch(world.world, ++world.logs);
     const std::vector<WorldLogEntry> entries = world.host.Start(epoch, after_wipe);
     world.proposed.clear();
+    world.enemy_places.clear(); // every map starts over
     if (after_wipe) {
         world.last_wipe_ms = now_ms;
     }
@@ -860,6 +863,7 @@ void Service::ResetMap(PartyWorld& world, std::uint32_t map, qint64 now_ms) {
     const std::vector<WorldLogEntry> entries = world.host.ResetMap(map);
     for (const std::uint32_t on : MapsLoadedWith(map)) {
         world.map_reset_ms[on] = now_ms;
+        world.enemy_places.erase(on);
         for (auto& [name, kills] : world.proposed) {
             kills.erase(on);
         }
@@ -931,6 +935,9 @@ void Service::OnHello(Member& member, const bbcoop::Hello& hello, qint64 now_ms,
     const bool team = party.startsWith("world:");
     member.name = hello.member();
     member.run = hello.run();
+    if (!same_run) {
+        member.cheat_watch.StartOver(); // a new run of its game: judged anew
+    }
     member.host = hello.host();
     member.enemy_owner = hello.enemy_owner();
     PartyWorld& world = WorldFor(member.party, now_ms, result);
@@ -1020,6 +1027,7 @@ void Service::OnLifecycle(Member& member, const bbcoop::Lifecycle& lifecycle, qi
     const QString who = QString::fromStdString(member.name);
     switch (lifecycle.event()) {
     case bbcoop::Lifecycle::WIPE:
+        world.owners.Wipe(now_ms); // its reloads keep the enemy owners (EnemyOwners::Wipe)
         // Invasions: the team wiped with an invader in its world: the invader wins.
         if (const auto invasion = invasions.find(world.name);
             invasion != invasions.end() && invasion->second.joined) {
@@ -1064,6 +1072,9 @@ void Service::OnLifecycle(Member& member, const bbcoop::Lifecycle& lifecycle, qi
     case bbcoop::Lifecycle::JOIN:
     case bbcoop::Lifecycle::LEAVE:
     case bbcoop::Lifecycle::NEW_CHARACTER: {
+        if (lifecycle.event() == bbcoop::Lifecycle::NEW_CHARACTER) {
+            member.cheat_watch.StartOver();
+        }
         const QString event =
             QString::fromStdString(bbcoop::Lifecycle::Event_Name(lifecycle.event()));
         if (lifecycle.host()) {
@@ -1125,6 +1136,10 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
                 DeliverRewards(member, *mailbox, std::move(staged), std::move(ack), now_ms, result);
             }
         }
+        return;
+    }
+    if (envelope.has_character_sheet()) {
+        OnCharacterSheet(member, envelope.character_sheet(), now_ms, result);
         return;
     }
     // An invader in a world, or one on its way with no world of its own: in no world here.
@@ -1197,6 +1212,19 @@ void Service::Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_
     case bbcoop::Envelope::kEnemyHit: {
         bbcoop::Envelope relayed = envelope;
         relayed.mutable_enemy_hit()->set_member(member.name);
+        SendToOthers(world, member, relayed, now_ms);
+        break;
+    }
+    case bbcoop::Envelope::kEnemyPlaces: {
+        // Only the map's owner runs its enemies: its places go to the others now, and are kept
+        // for whoever takes the map over next (HandOverEnemyPlaces).
+        const std::uint32_t map = envelope.enemy_places().map();
+        if (!Decides(world, member, map)) {
+            break;
+        }
+        bbcoop::Envelope relayed = envelope;
+        relayed.mutable_enemy_places()->set_member(member.name);
+        world.enemy_places[map] = {relayed.enemy_places(), {}};
         SendToOthers(world, member, relayed, now_ms);
         break;
     }
@@ -1402,6 +1430,14 @@ void Service::TakeWorld(Member& member, PartyWorld& world, const bbcoop::Envelop
         if (!Decides(world, member, hp.map())) {
             return;
         }
+        // Rig wipe-one-map 2026-11-04: a map that started over alone (ResetMap). Its members'
+        // games hold their HP reports for WorldLogWipeGraceMs from its Reset, so one in that time
+        // left before its game had the Reset: its HP is from before (the host's 482 of 484
+        // stood in the fresh log and the guest's copy took it after its reload).
+        if (const auto reset = world.map_reset_ms.find(hp.map());
+            reset != world.map_reset_ms.end() && now_ms - reset->second < WorldLogWipeGraceMs) {
+            return;
+        }
         const WorldLogHost::Taken taken = world.host.ProposeHp(HpOf(hp, member.name));
         if (taken.stale) {
             return;
@@ -1448,6 +1484,13 @@ void Service::TakeBoard(Member& member, PartyWorld& world, const bbcoop::Envelop
         return;
     }
     case bbcoop::Envelope::kRest:
+        // A rest at a lamp respawns the member's world: as an owner, its enemies are at their
+        // spawns again, and the places it sent are no more.
+        if (envelope.rest().lamp() != 0) {
+            std::erase_if(world.enemy_places, [&](const auto& held) {
+                return held.second.places.member() == member.name;
+            });
+        }
         answer(world.boards.Rest(member.name, envelope.rest(), now_ms), PartyBoards::Rests);
         return;
     case bbcoop::Envelope::kTrophies:
@@ -1457,6 +1500,11 @@ void Service::TakeBoard(Member& member, PartyWorld& world, const bbcoop::Envelop
         member.level = envelope.vitals().level();
         member.covenant_effect = NormalizeCovenantEffect(envelope.vitals().covenant_effect());
         member.boss = envelope.vitals().boss();
+        NoteSuspicion(member,
+                      member.cheat_watch.Vitals(envelope.vitals().vials(),
+                                                envelope.vitals().bullets(),
+                                                envelope.vitals().max(), envelope.vitals().level()),
+                      now_ms, result);
         std::uint32_t wipe_before = 0;
         if (invasions.contains(world.name)) {
             const bbcoop::VitalsBoard board = world.boards.VitalsMessage();
@@ -1558,7 +1606,25 @@ bbcoop::VitalsBoard Service::VitalsBoardOf(const PartyWorld& world) const {
     return board;
 }
 
+void Service::HandOverEnemyPlaces(PartyWorld& world, qint64 now_ms) {
+    for (auto& [map, held] : world.enemy_places) {
+        const std::string owner = world.owners.OwnerOf(map);
+        if (owner.empty() || owner == held.places.member() || owner == held.handed_to) {
+            continue;
+        }
+        for (auto& [key, member] : members) {
+            if (member.party == world.name && member.name == owner) {
+                bbcoop::Envelope envelope;
+                *envelope.mutable_enemy_places() = held.places;
+                SendTo(member, envelope, now_ms);
+                held.handed_to = owner;
+            }
+        }
+    }
+}
+
 void Service::SendOwners(PartyWorld& world, qint64 now_ms, Result& result, Member* only) {
+    HandOverEnemyPlaces(world, now_ms);
     bbcoop::Envelope envelope;
     *envelope.mutable_enemy_owners() = world.owners.Message();
     QStringList owners;
@@ -1599,10 +1665,92 @@ bool Service::Decides(const PartyWorld& world, const Member& member, u32 map) co
     return owner.empty() || owner == member.name;
 }
 
+void Service::OnCharacterSheet(Member& member, const bbcoop::CharacterSheet& sheet, qint64 now_ms,
+                               Result& result) {
+    BloodborneCoop::CharacterSheet now;
+    now.character = sheet.character();
+    now.level = static_cast<s32>(std::min<u32>(sheet.level(), 1'000'000));
+    for (int i = 0; i < sheet.attributes_size() && i < 6; ++i) {
+        now.attributes[static_cast<std::size_t>(i)] = sheet.attributes(i);
+    }
+    now.echoes = sheet.echoes();
+    now.insight = sheet.insight();
+    now.hp = sheet.hp();
+    now.hp_max = sheet.hp_max();
+    now.production = sheet.production();
+    now.cheats = sheet.cheats();
+    now.dev_tools = sheet.dev_tools();
+    now.save_edits = sheet.save_edits();
+    now.autoplay = sheet.autoplay();
+    NoteSuspicion(member, member.cheat_watch.Sheet(now), now_ms, result);
+}
+
+void Service::NoteSuspicion(const Member& member, std::vector<BloodborneCoop::CheatFinding> found,
+                            qint64 now_ms, Result& result) {
+    if (found.empty()) {
+        return;
+    }
+    const QByteArray id =
+        member.online_id.isEmpty() ? QByteArray::fromStdString(member.name) : member.online_id;
+    Suspect& suspect = suspects[id];
+    suspect.online_id = id;
+    suspect.member = member.name;
+    suspect.display = member.display;
+    const auto& last = member.cheat_watch.Last();
+    const std::string character = last ? last->character : std::string{};
+    const QString when = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    QByteArray lines;
+    for (BloodborneCoop::CheatFinding& finding : found) {
+        SuspectFinding& kept = suspect.findings[finding.kind];
+        if (kept.times++ == 0) {
+            kept.first_ms = now_ms;
+        }
+        kept.kind = finding.kind;
+        kept.level = finding.level;
+        kept.text = finding.text;
+        kept.character = character;
+        kept.last_ms = now_ms;
+        result.log.append(
+            QStringLiteral("cheat watch: %1 (%2%3) %4: %5")
+                .arg(QString::fromUtf8(id), QString::fromStdString(member.display),
+                     character.empty() ? QString{}
+                                       : QStringLiteral(", ") + QString::fromStdString(character),
+                     QString::fromUtf8(BloodborneCoop::SuspicionName(finding.level).data()),
+                     QString::fromStdString(finding.text)));
+        const QJsonObject line{
+            {"when", when},
+            {"id", QString::fromUtf8(id)},
+            {"member", QString::fromStdString(member.name)},
+            {"name", QString::fromStdString(member.display)},
+            {"character", QString::fromStdString(character)},
+            {"world", member.party},
+            {"kind", QString::fromStdString(finding.kind)},
+            {"level", QString::fromUtf8(BloodborneCoop::SuspicionName(finding.level).data())},
+            {"text", QString::fromStdString(finding.text)},
+        };
+        lines += QJsonDocument{line}.toJson(QJsonDocument::Compact) + '\n';
+    }
+    if (!folder.isEmpty()) {
+        // Rare (each kind once per run): appended here, on the link's thread.
+        QDir{}.mkpath(folder);
+        QFile file{QDir{folder}.filePath(QString::fromUtf8(SuspectsFile))};
+        if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+            file.write(lines);
+        }
+    }
+}
+
 void Service::TakeTrade(Member& member, PartyWorld& world, const bbcoop::Envelope& envelope,
                         qint64 now_ms, Result& result) {
     switch (envelope.body_case()) {
     case bbcoop::Envelope::kTradeOffer: {
+        // Cheat watch: what it offers (its game took it out of the inventory first).
+        for (const bbcoop::TradeItem& item : envelope.trade_offer().give()) {
+            NoteSuspicion(member,
+                          item.kind() == 1 ? member.cheat_watch.EchoesOffered(item.count())
+                                           : member.cheat_watch.ItemsOffered(item.count()),
+                          now_ms, result);
+        }
         // Hosted: only between members of one started team (a stranger in the party by some other
         // way is nobody to trade with).
         const bbcoop::Team* team = hosted.enabled ? lobby.TeamOf(member.name) : nullptr;
@@ -1640,6 +1788,14 @@ void Service::Deliver(PartyWorld& world, TradeDesk::Result trades, qint64 now_ms
     for (const TradeDesk::Send& send : trades.sends) {
         for (auto& [key, member] : members) {
             if (member.party == world.name && member.name == send.to) {
+                // Cheat watch: the echoes a grant adds are no jump.
+                if (send.envelope.has_trade_grant()) {
+                    for (const bbcoop::TradeItem& item : send.envelope.trade_grant().items()) {
+                        if (item.kind() == 1) {
+                            member.cheat_watch.EchoesGranted(item.count());
+                        }
+                    }
+                }
                 SendTo(member, send.envelope, now_ms);
             }
         }
@@ -1871,6 +2027,15 @@ std::optional<QString> Service::Oversized(const bbcoop::Envelope& envelope) {
             return QStringLiteral("a team world too large");
         }
         break;
+    case bbcoop::Envelope::kCharacterSheet: {
+        const bbcoop::CharacterSheet& sheet = envelope.character_sheet();
+        if (text(sheet.character(), MaxCharacterBytes) || sheet.attributes_size() > 6 ||
+            text(sheet.cheats(), MaxCharacterBytes * 2) ||
+            text(sheet.dev_tools(), MaxCharacterBytes)) {
+            return QStringLiteral("a character sheet too large");
+        }
+        break;
+    }
     case bbcoop::Envelope::kTradeOffer: {
         const bbcoop::TradeOffer& offer = envelope.trade_offer();
         if (text(offer.to(), MaxNameBytes) || text(offer.from_name(), MaxCharacterBytes) ||
@@ -1960,9 +2125,11 @@ Service::Result Service::Tick(qint64 now_ms) {
         for (const TeamLobby::Departure& out : expired.departed) {
             gone.append(QString::fromStdString(out.member));
         }
-        result.log.append(QStringLiteral("team lobby: %1 gone (its game quiet %2 ms while its "
-                                         "team plays, or offline %3 min): out of its team")
+        result.log.append(QStringLiteral("team lobby: %1 gone (its game quiet %2 ms or signed "
+                                         "out %3 ms while its team plays, or offline %4 min): "
+                                         "out of its team")
                               .arg(gone.join(QStringLiteral(", ")))
+                              .arg(QuietGraceMs)
                               .arg(LeftGraceMs)
                               .arg(OfflineGraceMs / 60000));
         TakeOutOfTeams(expired, now_ms, result);
@@ -2041,7 +2208,9 @@ Service::Result Service::Forget(const ServerLink::Endpoint& link) {
         const bool elsewhere = std::any_of(members.begin(), members.end(), [&](const auto& m) {
             return m.first != link.Key() && m.second.lobby == name;
         });
-        if (!elsewhere) {
+        if (elsewhere) {
+            lobby.Restarted(name); // its game came back from another link
+        } else {
             lobby.Leave(name);
             lobby_sent.erase(name);
             lobby_changed = true;
@@ -2646,6 +2815,14 @@ bbcoop::LobbyState Service::LobbyStateFor(const Member& member) const {
             }
         }
         AddFriendsToLobby(state, member.lobby, relations, member.search_query, member.search);
+        // Amanises 2026-10-26: a friend (request, search result) the lobby does not list (a hosted
+        // server lists few) still shows its state and team.
+        for (auto* list : {state.mutable_friends(), state.mutable_friend_requests(),
+                           state.mutable_friend_requests_sent(), state.mutable_search()}) {
+            for (bbcoop::LobbyPlayer& entry : *list) {
+                lobby.Describe(entry.member(), entry);
+            }
+        }
     }
     return state;
 }
@@ -3422,7 +3599,7 @@ void Service::JoinInvasion(PartyWorld& world, Invasion& invasion, qint64 now_ms,
     invader.hostile = true;
     invasion.joined = true;
     invasion.joined_ms = now_ms;
-    // Its slot byte: the configured one, or the first free below the guests' 7/6/5.
+    // Its slot byte: the configured one, or the first free below the guests' 7/6/5/4.
     std::set<std::uint32_t> taken;
     if (const bbcoop::Team* team = lobby.TeamOf(world.session->host())) {
         for (const bbcoop::TeamMember& m : team->members()) {

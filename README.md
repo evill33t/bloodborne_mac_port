@@ -47,16 +47,17 @@ Experimental integrations are opt-in:
 
 **Regular** retains normal gameplay and saves. Its **Online** page also exposes the separate The Hunter's Dream and shadNet pools, with account configuration, connection checks, optional UPnP and credential storage. Their communities and servers have their own compatibility requirements. HTTPS certificate verification is retained for the existing HTTPS backend.
 
-**Seamless Co-op** defaults to **`bloodborne.phobos.services`** and uses the client adapted from Kaniel's [bloodborne-server](https://github.com/lKaniel/bloodborne-server). It includes:
+**Seamless Co-op** defaults to **`bloodborne.phobos.services`** and uses the client adapted from [Yharnam Together v1.4.0](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/releases/tag/v1.4.0). It includes:
 
 - Automatic server-scoped account registration, encrypted authenticated UDP transport, pinned identity for the default host, reconnect handling and isolated per-server save profiles seeded from a copy of the chosen regular saves.
+- Five-hunter teams, team duels, quick match and in-game leader rule editing. Optional **seamlesshunt.com (Global)** host with HTTPS account sign-in, Keychain sessions and per-account saves.
 - Persistent teams and worlds; hunter/name/code invitations, online-hunter and world browsers, ready checks, world selection, session restoration, shared world/event/boss progress, enemy ownership and HP synchronization, and independent travel.
 - Downed/revive/wipe behavior, spectating, death modes and rot, optional enemy scaling/harder enemies, chalice sharing, bloodstain retention, shared trophies and cutscene skip voting.
 - Windows-reference-style co-op presentation, with the Windows launcher hero image behind the team setup window and across “Entering the hunt”: hunter cards, live portraits, readiness/leader marks, party HP/vial/bullet displays, compass, pings, invitations, loading screens and game-styled dialogs. Game art and fonts are read from the player's own files, with fallbacks.
 - Trading carried goods, equipment and Blood Echoes, with offers and acceptance; duel requests and countdowns; host invasion opt-in, invasion search, cancellation and return home.
 - Native red invader appearance and hostile PvP behavior through the guarded compatibility fallback. Victory payouts include Insight, level-based Echoes and a Blood Dreg for an eligible Corruption oath winner. Other inspected covenant PvP lots add no item; this is documented server policy rather than a claim of a complete retail matchmaking/economy recreation.
 - Persistent reward mailboxes and duplicate protection. On the supported Mac save path, an invasion payout is acknowledged only after the character save and receipt commit together; a crash replays an uncommitted payout or acknowledges the matching receipt. Move the **complete** per-server save directory, including hidden receipts, when backing it up.
-- Localized co-op menus, keyboard/controller guides, configurable compass placement, bloodstain/ping visibility and an optional free-camera hotkey.
+- Localized co-op menus, keyboard/controller guides, configurable compass placement, bloodstain/ping visibility and phantom-glow control. Developer free camera is available only in non-production builds.
 
 The client has real Mac-to-Mac gameplay and invasion evidence in the [dated validation record](docs/SEAMLESS_COOP_VALIDATION.md). Mixed Windows/Mac invasions, the unknown retail invasion kind/sign and exhaustive campaign/DLC/chalice coverage remain unverified. See [Client setup](docs/SEAMLESS_COOP_CLIENT.md) and [Invasion rewards](docs/SEAMLESS_INVASION_REWARDS.md) for protocol, reward and recovery details.
 
@@ -160,7 +161,7 @@ Default data lives in `~/Library/Application Support/Bloodborne`:
 
 - `bbport.ini`: renderer, controls and online settings. Packaged apps also keep `launch.conf` here; a checkout keeps it beside `Bloodborne.command`.
 - `user/savedata`: regular saves, unless another folder is selected.
-- `user-seamless/<server-hash>/`: co-op saves and payout receipts for each server.
+- `user-seamless/<server-or-account-hash>/`: co-op saves and payout receipts for each server.
 - `seamless/identities/`: private server-scoped identities. Preserve these with your backups to keep the same account.
 - Generated launch views, prepared images and map/shader caches are separate from the source game folder. `BB_DATA_DIR` and the documented save overrides support isolated setups.
 

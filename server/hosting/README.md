@@ -29,6 +29,7 @@ bloodborne_worlds/
   <world>/world.pb       snapshot; world.pb.1-3 older snapshots
   <world>/journal.pb     append-only, fsynced records since the snapshot
   <world>/trades.pb  team_world.pb  backups/world-YYYYMMDD.pb (7 days)
+  suspects.jsonl         cheat watch: every finding, one JSON line each (admin.sh suspects)
   forgotten/             worlds taken off the list (never deleted): forgotten or retired;
                          each keeps its line in kept_world.pb (admin.sh restore)
 admin.sock               the operator's commands (HostedAdminSocket; owner-only)
@@ -72,6 +73,7 @@ underneath; `SHADNET_BIN`/`SHADNET_HOME` for a systemd install).
 | `restore <folder>` | A folder from `forgotten/` back on the list, to its players, as played now. Worlds put aside before this build come back with a new id and no players (hosted: nobody sees them) |
 | `retire` | Retirement (below) now |
 | `stats` | Players, worlds listed and in memory, the link thread's busy share (last 10 s), hellos refused, datagrams dropped, accounts refused, strike bans |
+| `suspects [id\|name]` | Cheat watch (docs/CHEAT_WATCH.md): the players seen with cheats, the save editor or an edited save since the server started, the surest first, each finding with its level (`certain`, `likely`, `info`), text, character and how many runs. Reports only: nobody is banned for it. `suspects.jsonl` in the worlds' folder keeps every finding across restarts |
 
 ```bash
 ./admin.sh players
@@ -84,6 +86,13 @@ underneath; `SHADNET_BIN`/`SHADNET_HOME` for a systemd install).
 every world nobody started for N days that no team has picked and no game is in: the same move as
 a forgotten world's (on the worlds' writer thread, logged, never deleted). `restore` brings one
 back.
+
+The team rules (enemy strength, Rot, travel together, boss tempo) are the team's: its leader sets
+them on the game's team screen. A team starts with `TeamDefaultRules` (any server), `;`-separated:
+`enemies=auto|fixed`, `hp=`, `damage=`, `poise=` (1 to 10; absent: the standard 3, 1.5, 3), `rot`,
+`travel`, `vote`, `tempo=0|1|2`. Empty (the default) is Auto enemies and nothing else; a setting it
+does not understand is logged and the default kept. Example: `TeamDefaultRules=enemies=auto; hp=2.5`.
+A leader whose launcher has its own rules (a local server's Co-op steps) starts with those instead.
 
 ## Backups
 
@@ -125,6 +134,15 @@ To restore one world on production: stop shadNet, then run
 
 ## Scaling notes
 
+* **Socket buffers.** Every game's datagrams come to one UDP socket, and the kernel drops what
+  overflows it while the link thread is busy. The load tests on a 4-vCPU box stayed comfortable up
+  to 300-400 players only with big buffers, so on a public server set
+  `net.core.rmem_max=33554432` and `net.core.wmem_max=33554432` (`/etc/sysctl.d/90-shadnet.conf`,
+  then `sysctl --system`). shadNet asks for 16 MiB and warns at its start when the system gave
+  less; the sysctl holds on the host, not in a container.
+* **Players on a box.** `ShardCapacity` (350 by default, from those tests) is where a region sends
+  new players on to the next shard; 1000 ran fine on three shards. The cap is soft: with no shard
+  under 90% a hello stays where it came.
 * One process, one Qt event loop for the UDP link/relay and the worlds. The journal `fsync`
   runs on that loop, so put `/data` on local NVMe, not a network volume.
 * Each TCP client gets its own thread and its own SQLite connection (`server.cpp`,

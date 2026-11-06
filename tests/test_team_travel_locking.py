@@ -40,7 +40,8 @@ class TeamTravelLockingTests(unittest.TestCase):
             cpp = Path(directory) / 'fixture.cpp'
             exe = Path(directory) / 'fixture'
             cpp.write_text(fixture)
-            build = compiler + ['-std=c++20', '-pthread',
+            build = compiler + ['-std=c++20', '-pthread', '-DFMT_HEADER_ONLY',
+                                '-I' + str(root / 'deps/arm64/include'),
                                 '-I' + str(root / 'gpu/bbseamless/include'),
                                 '-I' + str(headers), '-I' + str(root / 'server'),
                                 str(cpp), str(headers / 'core/bloodborne_host_rules.cpp'),

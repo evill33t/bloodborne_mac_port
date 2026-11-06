@@ -297,6 +297,103 @@ int TestOutDuelistMayLeave() {
   return 0;
 }
 
+// Amanises 2026-10-29: a teams' duel. The proposer's picks: who is asked and
+// for which team (one left out is not asked); a team shares a side.
+bbcoop::DuelRequest
+Teams(std::initializer_list<std::pair<std::string, u32>> picks) {
+  bbcoop::DuelRequest request = Ask(bbcoop::DuelRequest::PROPOSE);
+  for (const auto &[member, team] : picks) {
+    bbcoop::DuelPick &pick = *request.add_teams();
+    pick.set_member(member);
+    pick.set_team(team);
+  }
+  return request;
+}
+
+// Two against one: ada and bob for the Hunters (2), cy for the Yharnamites
+// (1), dee left out. Teammates share a side; the last team standing wins, and
+// every one of its duelists gets the win, the out one too.
+int TestTwoAgainstOne() {
+  const std::vector<DuelMember> online{
+      {"ada", Yharnam}, {"bob", Yharnam}, {"cy", Yharnam}, {"dee", Yharnam}};
+  DuelReferee referee;
+  DuelReferee::Result result = referee.Request(
+      "ada", Teams({{"ada", 2}, {"bob", 2}, {"cy", 1}}), online, 1'000);
+  CHECK(result.changed);
+  bbcoop::DuelState state = referee.State(1'000);
+  CHECK(state.teams());
+  CHECK(state.duelists_size() == 3);
+  CHECK(Find(state, "dee") == nullptr);
+  CHECK(Find(state, "cy")->side() == 1); // the teams show from the question on
+  referee.Request("bob", Ask(bbcoop::DuelRequest::ACCEPT, 1), online, 1'500);
+  referee.Request("cy", Ask(bbcoop::DuelRequest::ACCEPT, 1), online, 1'600);
+  state = referee.State(1'600);
+  CHECK(state.stage() == bbcoop::DuelState::COUNTDOWN);
+  CHECK(Find(state, "ada")->side() == 2);
+  CHECK(Find(state, "bob")->side() == 2);
+  CHECK(Find(state, "cy")->side() == 1);
+  referee.Tick(online, 1'600 + DuelCountdownMs);
+  CHECK(referee.State(5'000).stage() == bbcoop::DuelState::FIGHTING);
+
+  // bob out: his team still stands (ada), the duel goes on.
+  referee.Request("bob", Ask(bbcoop::DuelRequest::DEFEATED, 1), online, 6'000);
+  CHECK(referee.State(6'000).stage() == bbcoop::DuelState::FIGHTING);
+  // cy out: the Hunters win, both of them.
+  referee.Request("cy", Ask(bbcoop::DuelRequest::DEFEATED, 1), online, 7'000);
+  state = referee.State(7'000);
+  CHECK(state.stage() == bbcoop::DuelState::OVER);
+  CHECK(state.end() == bbcoop::DuelState::WON);
+  CHECK(state.winner() == "ada");
+  CHECK(Find(state, "ada")->wins() == 1);
+  CHECK(Find(state, "bob")->wins() == 1);
+  CHECK(Find(state, "cy")->wins() == 0);
+  return 0;
+}
+
+// Picks that make no duel are refused: all on one team, the proposer on none.
+// A team left empty by the answers ends it (ONE_TEAM); three teams fight to
+// the last one.
+int TestTeamsRefusedAndOneTeam() {
+  const std::vector<DuelMember> online{
+      {"ada", Yharnam}, {"bob", Yharnam}, {"cy", Yharnam}};
+  DuelReferee referee;
+  DuelReferee::Result result =
+      referee.Request("ada", Teams({{"ada", 1}, {"bob", 1}}), online, 1'000);
+  CHECK(!result.changed);
+  CHECK(!result.refused.empty());
+  result =
+      referee.Request("ada", Teams({{"bob", 1}, {"cy", 2}}), online, 1'000);
+  CHECK(!result.refused.empty());
+
+  // cy, the only Yharnamite, says no: the Hunters alone, no duel.
+  referee.Request("ada", Teams({{"ada", 2}, {"bob", 2}, {"cy", 1}}), online,
+                  2'000);
+  referee.Request("bob", Ask(bbcoop::DuelRequest::ACCEPT, 1), online, 2'100);
+  referee.Request("cy", Ask(bbcoop::DuelRequest::DECLINE, 1), online, 2'200);
+  bbcoop::DuelState state = referee.State(2'200);
+  CHECK(state.stage() == bbcoop::DuelState::OVER);
+  CHECK(state.end() == bbcoop::DuelState::ONE_TEAM);
+
+  // Three teams of one: the Great Ones (3) win once the other two are out.
+  referee.Request("ada", Teams({{"ada", 1}, {"bob", 2}, {"cy", 3}}), online,
+                  3'000);
+  referee.Request("bob", Ask(bbcoop::DuelRequest::ACCEPT, 2), online, 3'100);
+  referee.Request("cy", Ask(bbcoop::DuelRequest::ACCEPT, 2), online, 3'200);
+  referee.Tick(online, 3'200 + DuelCountdownMs);
+  referee.Request("ada", Ask(bbcoop::DuelRequest::DEFEATED, 2), online, 7'000);
+  CHECK(referee.State(7'000).stage() == bbcoop::DuelState::FIGHTING);
+  referee.Request("bob", Ask(bbcoop::DuelRequest::DEFEATED, 2), online, 7'500);
+  state = referee.State(7'500);
+  CHECK(state.end() == bbcoop::DuelState::WON);
+  CHECK(state.winner() == "cy");
+  CHECK(Find(state, "cy")->side() == 3);
+
+  // A free for all after it is not a teams' duel.
+  referee.Request("bob", Ask(bbcoop::DuelRequest::PROPOSE), online, 8'000);
+  CHECK(!referee.State(8'000).teams());
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -310,6 +407,8 @@ int main() {
   failed += TestCancel();
   failed += TestLeftAndMap();
   failed += TestOutDuelistMayLeave();
+  failed += TestTwoAgainstOne();
+  failed += TestTeamsRefusedAndOneTeam();
   if (failed != 0) {
     std::cerr << failed << " duel test(s) failed\n";
     return 1;

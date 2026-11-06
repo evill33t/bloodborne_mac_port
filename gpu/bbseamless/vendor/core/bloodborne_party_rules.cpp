@@ -198,6 +198,43 @@ void KeepGuestFullHp() {
              PhantomHpEffect, before);
 }
 
+// SHADPS4_BLOODBORNE_NO_PHANTOM_GLOW=1 (the launcher's switch): see RemovePhantomGlow. Only this
+// player's table changes, so only this player's screen does.
+void HidePhantomGlow() {
+    static const bool wanted = [] {
+        const char* setting = std::getenv("SHADPS4_BLOODBORNE_NO_PHANTOM_GLOW");
+        return setting != nullptr && std::string_view{setting} == "1";
+    }();
+    static bool done = false;
+    static std::chrono::steady_clock::time_point last{};
+    const auto now = std::chrono::steady_clock::now();
+    if (!wanted || done || !party_controller || now - last < std::chrono::seconds{1}) {
+        return;
+    }
+    last = now;
+    const u64 param = FindLoadedParam("SP_EFFECT_VFX_PARAM_ST");
+    if (param == 0) {
+        return;
+    }
+    done = true;
+    const u16 rows = ReadValue<u16>(param, 0x0A);
+    const u64 table_size = 0x40 + u64{rows} * 24;
+    if (!HasMemoryAccess(param, table_size, MemoryProt::CpuRead)) {
+        return;
+    }
+    const auto row =
+        FindParamRow({reinterpret_cast<const u8*>(param), table_size}, PhantomGlowVfxRow);
+    if (!row || !HasMemoryAccess(param + *row, sizeof(s32), MemoryProt::CpuWrite)) {
+        LOG_ERROR(Debug, "Bloodborne SpEffectVfx {} not found; phantoms keep their glow",
+                  PhantomGlowVfxRow);
+        return;
+    }
+    const u64 size = *row + sizeof(s32);
+    const auto before = RemovePhantomGlow({reinterpret_cast<u8*>(param), size});
+    LOG_INFO(Debug, "Bloodborne phantom glow off (SpEffectVfx {} effect {} -> {})",
+             PhantomGlowVfxRow, before.value_or(NoSfx), NoSfx);
+}
+
 } // namespace Coop
 
 namespace {
@@ -347,10 +384,11 @@ bool ScaleParam(ScaledParam& kept, u64 address, std::span<u8> table,
 void MakeEnemiesHarder() {
     // Kaniel 2026-10-25: with the enemy scaling rule the team's size on this map picks the rate,
     // over the player's own setting.
+    // Kaniel 2026-11-05: in a team the team's strength (EnemiesWanted), never each player's own.
     const HostRules rules = ActiveHostRules();
     const std::size_t hunters = rules.enemy_scaling ? HuntersOnMyMap() : 0;
     const std::optional<HarderEnemies> wanted =
-        rules.enemy_scaling ? TeamScaledEnemies(hunters) : harder_enemies;
+        EnemiesWanted(rules, InTeamNow(), hunters, harder_enemies);
     // Kaniel 2026-10-28: the boss tempo rule's turn speed for the boss rows.
     const float turn = ActiveBossTempoTuning().turn;
     static ScaledParam npc_kept;

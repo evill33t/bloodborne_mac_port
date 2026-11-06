@@ -42,6 +42,9 @@ struct HostRules {
     bool travel_vote = false; // only with travel_together
     bool enemy_scaling = false;
     BossTempo boss_tempo = BossTempo::Vanilla;
+    // Kaniel 2026-11-05: the team's enemy strength (TeamRules enemy_hp/damage/poise): a full
+    // team's with enemy_scaling, everyone's without; none, the standard (HarderDefault*).
+    std::optional<HarderEnemies> enemies;
     bool operator==(const HostRules&) const = default;
 };
 
@@ -189,11 +192,27 @@ struct TeamTravelView {
 // Kaniel 2026-10-25 ("it should use our default values in the order"): the enemies for
 // `hunters` players on their map, from the vanilla game (one; none: nullopt) to the launcher's
 // harder default (HarderDefaultHp/Damage/Poise, a full team of TeamSlots), evenly in between.
-constexpr std::size_t TeamSlots = 4;
+constexpr std::size_t TeamSlots = 5; // Amanises 2026-10-29: teams of five (was 4)
 constexpr float HarderDefaultHp = 3.0f;
 constexpr float HarderDefaultDamage = 1.5f;
 constexpr float HarderDefaultPoise = 3.0f;
 std::optional<HarderEnemies> TeamScaledEnemies(std::size_t hunters);
+// The same up to `full` for a full team (the team's strength, Kaniel 2026-11-05).
+std::optional<HarderEnemies> TeamScaledEnemies(std::size_t hunters, const HarderEnemies& full);
+// Kaniel 2026-11-05: the team screen's rules as its leader sets them, one text for the overlay's
+// request (bbcoop_lobby_request BBCOOP_TEAM_RULES): "rot,travel,vote,scale,tempo,hp,damage,poise"
+// (0/1 each, tempo 0-2, the strength 1-10 or 0 for the standard). nullopt when it is not that.
+std::string ScreenRulesText(const HostRules& rules);
+std::optional<HostRules> ParseScreenRules(std::string_view text);
+// The team's strength from its rules' three numbers (TeamRules enemy_hp/damage/poise): all 0 is
+// none (the standard); a 0 among others is that one's standard value.
+std::optional<HarderEnemies> TeamStrength(float hp, float damage, float poise);
+// Kaniel 2026-11-05: the enemy strength this game uses: in a team the team's (`rules.enemies`, the
+// standard when none): Auto (enemy_scaling) by the hunters on this map, Fixed at all times; out of
+// a team Auto by the hunters and Fixed the player's own launcher setting (`own`, none: vanilla).
+std::optional<HarderEnemies> EnemiesWanted(const HostRules& rules, bool in_team,
+                                           std::size_t hunters,
+                                           const std::optional<HarderEnemies>& own);
 // The hunters on `map` by the party's map board: this player and every other member there.
 std::size_t HuntersOnMap(std::span<const MemberMap> board, std::string_view self, u32 map);
 

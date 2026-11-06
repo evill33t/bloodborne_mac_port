@@ -6,6 +6,7 @@
 #include <charconv>
 #include "common/float_chars.h"
 #include <cstring>
+#include <fmt/format.h>
 
 #include "core/bloodborne_host_rules.h"
 
@@ -251,15 +252,89 @@ void TravelVote::Clear() {
     *this = TravelVote{};
 }
 
+namespace {
+constexpr HarderEnemies StandardStrength{HarderDefaultHp, HarderDefaultDamage, HarderDefaultPoise};
+} // namespace
+
 std::optional<HarderEnemies> TeamScaledEnemies(std::size_t hunters) {
+    return TeamScaledEnemies(hunters, StandardStrength);
+}
+
+std::optional<HarderEnemies> TeamScaledEnemies(std::size_t hunters, const HarderEnemies& full) {
     if (hunters <= 1) {
         return std::nullopt;
     }
     const float step =
         static_cast<float>(std::min(hunters, TeamSlots) - 1) / static_cast<float>(TeamSlots - 1);
     const auto between = [&](float harder) { return 1.0f + (harder - 1.0f) * step; };
-    return HarderEnemies{between(HarderDefaultHp), between(HarderDefaultDamage),
-                         between(HarderDefaultPoise)};
+    return HarderEnemies{between(full.hp), between(full.damage), between(full.poise)};
+}
+
+std::string ScreenRulesText(const HostRules& rules) {
+    const HarderEnemies none{0.0f, 0.0f, 0.0f};
+    const HarderEnemies strength = rules.enemies.value_or(none);
+    return fmt::format("{},{},{},{},{},{:g},{:g},{:g}", rules.rot ? 1 : 0,
+                       rules.travel_together ? 1 : 0, rules.travel_vote ? 1 : 0,
+                       rules.enemy_scaling ? 1 : 0, static_cast<int>(rules.boss_tempo), strength.hp,
+                       strength.damage, strength.poise);
+}
+
+std::optional<HostRules> ParseScreenRules(std::string_view text) {
+    std::array<float, 8> values{};
+    std::size_t count = 0;
+    while (count < values.size()) {
+        const std::size_t comma = text.find(',');
+        const std::string_view part = text.substr(0, comma);
+        float value = 0.0f;
+        const auto [end, error] = BbSeamless::FloatChars(part.data(), part.data() + part.size(), value);
+        if (part.empty() || error != std::errc{} || end != part.data() + part.size()) {
+            return std::nullopt;
+        }
+        values[count++] = value;
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        text.remove_prefix(comma + 1);
+    }
+    if (count != values.size()) {
+        return std::nullopt;
+    }
+    const auto flag = [](float value) { return value == 0.0f || value == 1.0f; };
+    const auto rate = [](float value) {
+        return value == 0.0f || (value >= 1.0f && value <= 10.0f);
+    };
+    if (!flag(values[0]) || !flag(values[1]) || !flag(values[2]) || !flag(values[3]) ||
+        !(values[4] == 0.0f || values[4] == 1.0f || values[4] == 2.0f) || !rate(values[5]) ||
+        !rate(values[6]) || !rate(values[7])) {
+        return std::nullopt;
+    }
+    HostRules rules;
+    rules.rot = values[0] == 1.0f;
+    rules.travel_together = values[1] == 1.0f;
+    rules.travel_vote = values[2] == 1.0f;
+    rules.enemy_scaling = values[3] == 1.0f;
+    rules.boss_tempo = static_cast<BossTempo>(static_cast<int>(values[4]));
+    rules.enemies = TeamStrength(values[5], values[6], values[7]);
+    return rules;
+}
+
+std::optional<HarderEnemies> TeamStrength(float hp, float damage, float poise) {
+    if (hp == 0.0f && damage == 0.0f && poise == 0.0f) {
+        return std::nullopt;
+    }
+    return HarderEnemies{hp != 0.0f ? hp : HarderDefaultHp,
+                         damage != 0.0f ? damage : HarderDefaultDamage,
+                         poise != 0.0f ? poise : HarderDefaultPoise};
+}
+
+std::optional<HarderEnemies> EnemiesWanted(const HostRules& rules, bool in_team,
+                                           std::size_t hunters,
+                                           const std::optional<HarderEnemies>& own) {
+    const HarderEnemies team = rules.enemies.value_or(StandardStrength);
+    if (rules.enemy_scaling) {
+        return TeamScaledEnemies(hunters, team);
+    }
+    return in_team ? std::optional<HarderEnemies>{team} : own;
 }
 
 std::size_t HuntersOnMap(std::span<const MemberMap> board, std::string_view self, u32 map) {

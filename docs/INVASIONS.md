@@ -22,7 +22,8 @@ of these are true (`coop/invasions.h`, `InvasionRefusal`):
 - its team's leader allowed invaders (`Team.allow_invaders`), the team is started and its host's
   session is open;
 - it has no invader, on the way or in it (one at a time);
-- fewer than `InvasionMaxPlayers` (4) of its games are in it (the game has 4 player slots);
+- fewer than `InvasionMaxPlayers` (5) of its games are in it (the game's session holds 5 members;
+  4 before teams of 5, Amanises 2026-10-29);
 - no member's vitals say a boss fight is running (`Vitals.boss`);
 - a member is out in the world: not loading, not in the Hunter's Dream (`0x15000000`), not in a
   chalice dungeon (`0x1Dxxxxxx`), and within the level band (20 levels + 20% of the member's,
@@ -105,7 +106,7 @@ are sent only to games that advertise it.
 | --- | --- | --- |
 | `Invasions` | `false` | the kill switch: invasions are off unless this is on |
 | `InvasionKind` | `0xFFFFFFFF` | the invader's GameMan +0x16F0 value in `InvasionStart.session.kind` (**placeholder**: the co-operator's kind) |
-| `InvasionSign` | `4` | its GameMan +0x16F4 value in `InvasionStart.session.sign` (**placeholder**: the slot after the guests' 7/6/5, a guess) |
+| `InvasionSign` | `3` | its GameMan +0x16F4 value in `InvasionStart.session.sign` (**placeholder**: the slot after the guests' 7/6/5/4, a guess; 4 until teams of 5) |
 
 The timings and limits are constants in `coop/invasions.h`: notice 10 s, invasion 10 min, team
 cooldown 15 min, invader+team cooldown 1 h, search 5 min, session limit 4.

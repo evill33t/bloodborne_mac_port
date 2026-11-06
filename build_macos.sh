@@ -53,7 +53,7 @@ cmake -S gpu -B out/gpu -G "${CMAKE_GENERATOR:-Ninja}" -DCMAKE_BUILD_TYPE="$buil
     -DCMAKE_PREFIX_PATH="$PREFIX;$boost" -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew \
     -DBoost_INCLUDE_DIR="$boost/include" \
     -DBB_PGO=off -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" \
-    -DBB_NET="${BB_NET:-ON}" -DBB_SEAMLESS="${BB_SEAMLESS:-ON}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
+    -DBB_NET="${BB_NET:-ON}" -DBB_SEAMLESS="${BB_SEAMLESS:-ON}" -DBB_PRODUCTION="${BB_PRODUCTION:-OFF}" ${protoc:+-DBB_PROTOC="$protoc"} -Wno-dev >/dev/null
 echo "GPU library: LTO ${BB_LTO:-ON}"
 if [[ ${BB_SEAMLESS:-ON} == ON ]]; then
     if ! cmake --build out/gpu --parallel "${BB_BUILD_JOBS:-6}" --target bbseamless > out/seamless-build.log 2>&1; then
@@ -169,7 +169,7 @@ if [[ ${1:-} == --test ]]; then
     "$CC" "${cflags[@]}" -I. -Isrc tests/test_coop_trophy.c src/runtime_coop_trophy.c src/runtime_trophy.c -o out/coop-trophy-test
     out/coop-trophy-test
     PYTHONPYCACHEPREFIX="$ROOT/out/pycache" python3 tests/test_seamless_launch.py
-    /usr/bin/clang++ -std=c++23 "${ARCH[@]}" -Igpu/bbseamless/include -Igpu/bbseamless \
+    /usr/bin/clang++ -std=c++23 "${ARCH[@]}" -Igpu/bbseamless/include -Igpu/bbseamless -Igpu/bbseamless/vendor \
         tests/test_seamless_mac.cpp gpu/bbseamless/mac_epoll.cpp -o out/seamless-mac-test
     out/seamless-mac-test
     bash tests/test_map.sh arm64

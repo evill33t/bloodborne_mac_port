@@ -56,6 +56,12 @@ std::vector<bool> InvaderBodies(std::span<const std::optional<LampPosition>> pos
 // invader in it is nobody to stay for.
 size_t TeamSessionMembers(size_t session_members, bool invader_in_session);
 
+// Whether the invader's game is among the session's other members (their board names, nothing for
+// one not known): the server says it joined seconds before it is in the room, and until then a
+// team guest's one other member is its host (rig 2026-10-31, invade-solo: it left "alone").
+bool InvaderInSession(std::span<const std::optional<std::string>> session_names,
+                      std::string_view invader);
+
 // What the invader's JoinTeamSession writes (GameMan +0x16F0 kind, +0x16F4 sign): the server's
 // kind and sign as they come (never TeamGuestSign: that is a team guest's), or with the fallback a
 // co-operator's kind (`coop_kind`) with the server's slot byte, made hostile after the join.

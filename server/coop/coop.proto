@@ -364,6 +364,21 @@ message EnemyHit {
     string member = 5; // server -> game: whose
 }
 
+// Rig host-arrives-hurt-enemy: game -> server -> the others, from the map's owner about once a
+// second: its enemies that moved from where it first saw them. A member that takes the map over
+// puts them there before it runs them (its own copies stood where they started).
+message EnemyPlace {
+    uint32 handle = 1;
+    Position at = 2;
+    float heading = 3;
+    bool fighting = 4; // the owner's game has a character target for it
+}
+message EnemyPlaces {
+    uint32 map = 1;
+    repeated EnemyPlace places = 2;
+    string member = 3; // server -> game: whose
+}
+
 message HpEnemy {
     uint32 handle = 1;
     sint32 value = 2;
@@ -444,7 +459,28 @@ message Envelope {
         TeamTravel team_travel = 48;
         DuelRequest duel_request = 49;
         DuelState duel_state = 50;
+        EnemyPlaces enemy_places = 51;
+        CharacterSheet character_sheet = 52;
     }
+}
+
+// Cheat watch (coop/cheat_watch.h, Kaniel 2026-11-04): game -> server only, never sent on. What
+// the player's character is (PlayerGameData) and how the game was built and started, when it
+// changes (at most every few seconds) and after each hello. The server notes what no unmodified
+// game shows; it refuses nothing for it.
+message CharacterSheet {
+    string character = 1;            // its name
+    uint32 level = 2;                // 0: no character in the world
+    repeated sint32 attributes = 3;  // Vitality, Endurance, Strength, Skill, Bloodtinge, Arcane
+    sint64 echoes = 4;
+    sint32 insight = 5;
+    sint32 hp = 6;
+    sint32 hp_max = 7;
+    bool production = 8;   // a release build: no cheats, save editor or debug tools in it
+    string cheats = 9;     // the cheat patches it started with ("none")
+    string dev_tools = 10; // the debug menu or camera it started with, "" when none
+    uint32 save_edits = 11; // the save editor's changes this run
+    bool autoplay = 12;    // a rig script drives it
 }
 
 // Invasions (docs/INVASIONS.md): a solo player invades a team's world as a hostile phantom. The
@@ -531,11 +567,19 @@ message DuelRequest {
     Action action = 1;
     uint32 duel = 2;
     uint32 map = 3;
+    // Amanises 2026-10-29: PROPOSE with teams: who fights for which team (1 The Yharnamites, 2 The
+    // Hunters, 3 The Great Ones); only these members are asked. None: free for all, everyone here.
+    repeated DuelPick teams = 4;
+}
+
+message DuelPick {
+    string member = 1;
+    uint32 team = 2;
 }
 
 message Duelist {
     string member = 1;
-    uint32 side = 2;   // free for all: each its own (1, 2, ...); teams later share one
+    uint32 side = 2;   // free for all: each its own (1, 2, ...); a teams' duel: the team (1-3)
     uint32 answer = 3; // 0 not yet, 1 accepted, 2 declined
     bool out = 4;      // defeated in this duel
     uint32 wins = 5;   // duels won while the server ran
@@ -558,6 +602,7 @@ message DuelState {
         MAP = 4;       // a duelist left the duel's map (`ended_by`)
         DECLINED = 5;  // fewer than two accepted
         NO_ANSWER = 6; // the question timed out with fewer than two in
+        ONE_TEAM = 7;  // a teams' duel: those who accepted are all of one team
     }
     uint32 duel = 1; // counts up per party; 0 none yet
     Stage stage = 2;
@@ -569,6 +614,7 @@ message DuelState {
     string ended_by = 8;
     uint32 left_ms = 9;
     string refused = 10; // only to a member whose request was refused: why
+    bool teams = 11;     // a teams' duel: each duelist's side is its team (1-3)
 }
 
 // Team altars (Kaniel's playtest 2026-10-24, emulator bloodborne_altar.h): game -> server ->
@@ -697,6 +743,10 @@ message TeamRequest {
         // the way to mend a world whose new playthrough kept the old one's lamps (asked for twice
         // in the picker). Not while a team plays it.
         RESET_LAMPS = 28;
+        // Amanises 2026-10-25, quick match (public servers: LobbyState.quick_match): a player in
+        // no team joins an open team (open to all, not full) in range of its character's `level`
+        // (0: not known, any team fits), or makes one of its own, open to all, for the next.
+        QUICK_MATCH = 29;
     }
     Action action = 1;
     string member = 2;
@@ -712,6 +762,7 @@ message TeamRequest {
     uint32 death_mode = 12; // DEATH_MODE
     string query = 13; // SEARCH
     Team.Join join = 14; // OPEN
+    uint32 level = 15;   // QUICK_MATCH: the character's level, 0 at the title
 }
 
 // Kaniel 2026-10-25: the host rules, the leader's choice for its whole team, all off by default.
@@ -727,6 +778,12 @@ message TeamRules {
     bool enemy_scaling = 4;
     // Kaniel 2026-10-28: bosses rest less between attacks and turn faster.
     BossTempo boss_tempo = 5;
+    // Kaniel 2026-11-05: the enemies' strength is the team's, not each player's: the multipliers
+    // of their HP, damage and poise, a full team's with enemy_scaling (Auto), everyone's at all
+    // times without it (Fixed). 0 is the standard (HarderDefault*: 3, 1.5, 3).
+    float enemy_hp = 6;
+    float enemy_damage = 7;
+    float enemy_poise = 8;
 }
 
 enum BossTempo {
@@ -764,6 +821,12 @@ message LobbyPlayer {
     State state = 3;
     string team = 4; // the team it is in, if any
     Relation relation = 5;
+    // Amanises 2026-10-26: its team as the lists show it ("<leader>'s team 2/4", open or not, in
+    // the hunt); empty and 0 in no team.
+    string team_leader = 6; // the leader's name
+    uint32 team_members = 7;
+    Team.Join team_join = 8;
+    bool team_started = 9;
 }
 
 message TeamMember {
@@ -829,6 +892,8 @@ message Team {
         OPEN = 2;
     }
     Join join = 12;
+    // Kaniel 2026-11-01: made by quick match: its leader's screen says it waits for hunters.
+    bool quick = 13;
 }
 
 // Amanises 2026-10-25: an open team as a player in no team sees it.
@@ -878,6 +943,8 @@ message LobbyState {
     repeated OpenTeam open_teams = 12;
     repeated TeamAsk asks = 13;
     uint32 team_size = 14;
+    // Kaniel 2026-11-01: this server is a public one: the team screen offers quick match.
+    bool quick_match = 15;
 }
 
 // server -> game: load your save and play the team's world. To every ready member at Start, and

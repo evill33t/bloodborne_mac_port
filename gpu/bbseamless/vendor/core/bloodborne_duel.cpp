@@ -51,8 +51,13 @@ DuelNews DuelFollower::Take(const bbcoop::DuelState& next, std::string_view me, 
     if (!next.refused().empty()) {
         news.refused = next.refused();
     }
-    // A state older than the one followed (a resend) changes nothing.
-    if (next.duel() < state.duel()) {
+    // A state older than the one followed (a resend) changes nothing, unless the followed duel
+    // is finished: then a lower duel is the server counting again, a new party world or a
+    // restarted server (Kaniel 2026-11-03: the host's game kept the old world's duel 8 and never
+    // joined the new world's duel 1, so the others could kill him outside the duel).
+    const bool finished =
+        state.stage() == bbcoop::DuelState::STAGE_NONE || state.stage() == bbcoop::DuelState::OVER;
+    if (next.duel() < state.duel() && !finished) {
         return news;
     }
     const DuelPart before = part;
@@ -113,6 +118,22 @@ std::vector<std::string> DuelFollower::Foes() const {
 bool DuelFollower::MayPropose() const {
     return state.stage() == bbcoop::DuelState::STAGE_NONE ||
            state.stage() == bbcoop::DuelState::OVER;
+}
+
+std::optional<u32> DuelTeamWon(const bbcoop::DuelState& state, std::string_view self) {
+    if (!state.teams() || state.stage() != bbcoop::DuelState::OVER ||
+        state.end() != bbcoop::DuelState::WON) {
+        return std::nullopt;
+    }
+    const auto self_in = std::ranges::find_if(state.duelists(), [&](const bbcoop::Duelist& d) {
+        return d.member() == self && d.answer() == 1;
+    });
+    const auto winner = std::ranges::find_if(
+        state.duelists(), [&](const bbcoop::Duelist& d) { return d.member() == state.winner(); });
+    if (self_in == state.duelists().end() || winner == state.duelists().end()) {
+        return std::nullopt;
+    }
+    return winner->side();
 }
 
 std::optional<s32> DuelHpBack(s32 before, s32 now, s32 max_hp) {

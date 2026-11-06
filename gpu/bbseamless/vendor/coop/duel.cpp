@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <map>
 #include <set>
 
 #include "coop/duel.h"
@@ -40,10 +41,25 @@ void DuelReferee::Start(Result& result, s64 now_ms) {
                         : bbcoop::DuelState::NO_ANSWER);
         return;
     }
-    // Free for all: each duelist its own side, in the order asked.
-    u32 side = 0;
-    for (Seat& seat : seats) {
-        seat.side = seat.answer == 1 ? ++side : 0;
+    if (teams) {
+        // A team's duelists share its side; those in must be of two teams at least.
+        std::set<u32> in_teams;
+        for (Seat& seat : seats) {
+            seat.side = seat.answer == 1 ? seat.team : 0;
+            if (seat.answer == 1) {
+                in_teams.insert(seat.team);
+            }
+        }
+        if (in_teams.size() < 2) {
+            End(result, bbcoop::DuelState::ONE_TEAM);
+            return;
+        }
+    } else {
+        // Free for all: each duelist its own side, in the order asked.
+        u32 side = 0;
+        for (Seat& seat : seats) {
+            seat.side = seat.answer == 1 ? ++side : 0;
+        }
     }
     stage = bbcoop::DuelState::COUNTDOWN;
     until_ms = now_ms + DuelCountdownMs;
@@ -57,7 +73,13 @@ void DuelReferee::End(Result& result, bbcoop::DuelState::End why, const std::str
     end = why;
     ended_by = by;
     if (why == bbcoop::DuelState::WON && !winner.empty()) {
-        ++wins[winner];
+        // Every duelist of the winning side, out or standing (a team wins together).
+        const Seat* won = SeatOf(winner);
+        for (const Seat& seat : seats) {
+            if (seat.answer == 1 && won != nullptr && seat.side == won->side) {
+                ++wins[seat.member];
+            }
+        }
     }
     result.changed = true;
     result.log.push_back(
@@ -76,17 +98,44 @@ DuelReferee::Result DuelReferee::Request(const std::string& member,
         }
         const DuelMember* self = Online(online, member);
         const u32 on = self != nullptr && self->map != 0 ? self->map : request.map();
-        std::vector<Seat> asked{Seat{member, 0, 1, false}};
+        // A teams' duel asks only the members the proposer put on a team.
+        std::map<std::string, u32> picks;
+        for (const bbcoop::DuelPick& pick : request.teams()) {
+            if (pick.team() >= 1 && pick.team() <= DuelTeams) {
+                picks[pick.member()] = pick.team();
+            }
+        }
+        const bool with_teams = request.teams_size() > 0;
+        if (with_teams && !picks.contains(member)) {
+            result.refused = "Put yourself on a team.";
+            return result;
+        }
+        // A team shows as the side from the question on (the asked see who is with them).
+        std::vector<Seat> asked{
+            Seat{member, with_teams ? picks[member] : 0, 1, false, with_teams ? picks[member] : 0}};
         for (const DuelMember& other : online) {
-            if (other.name != member && on != 0 && other.map == on) {
-                asked.push_back(Seat{other.name, 0, 0, false});
+            if (other.name != member && on != 0 && other.map == on &&
+                (!with_teams || picks.contains(other.name))) {
+                const u32 team = with_teams ? picks[other.name] : 0;
+                asked.push_back(Seat{other.name, team, 0, false, team});
             }
         }
         if (asked.size() < 2) {
             result.refused = "Nobody else in your party is here to duel.";
             return result;
         }
+        if (with_teams) {
+            std::set<u32> used;
+            for (const Seat& seat : asked) {
+                used.insert(seat.team);
+            }
+            if (used.size() < 2) {
+                result.refused = "Put hunters on at least two teams.";
+                return result;
+            }
+        }
         ++duel;
+        teams = with_teams;
         stage = bbcoop::DuelState::ASKING;
         proposer = member;
         map = on;
@@ -96,7 +145,8 @@ DuelReferee::Result DuelReferee::Request(const std::string& member,
         ended_by.clear();
         until_ms = now_ms + DuelAskMs;
         result.changed = true;
-        result.log.push_back("duel " + std::to_string(duel) + ": " + member + " proposes, " +
+        result.log.push_back("duel " + std::to_string(duel) + ": " + member + " proposes" +
+                             (teams ? " a teams' duel" : "") + ", " +
                              std::to_string(seats.size() - 1) + " asked");
         return result;
     }
@@ -208,6 +258,7 @@ DuelReferee::Result DuelReferee::Tick(std::span<const DuelMember> online, s64 no
 bbcoop::DuelState DuelReferee::State(s64 now_ms) const {
     bbcoop::DuelState state;
     state.set_duel(duel);
+    state.set_teams(teams);
     state.set_stage(stage);
     state.set_proposer(proposer);
     state.set_map(map);

@@ -86,20 +86,28 @@ int TeamFormsByInvite() {
   return 0;
 }
 
-int TeamHoldsFour() {
+int TeamHoldsFive() {
   TeamLobby lobby = NewLobby();
-  for (const char *m : {"a", "b", "c", "d", "e"}) {
+  for (const char *m : {"a", "b", "c", "d", "e", "f"}) {
     lobby.Arrive(m, m, false);
   }
   lobby.Request("a", Request(Action::CREATE));
   const std::string team = lobby.TeamOf("a")->id();
-  for (const char *m : {"b", "c", "d"}) {
+  for (const char *m : {"b", "c", "d", "e"}) {
     lobby.Request("a", Request(Action::INVITE, m));
     CHECK(lobby.Request(m, Request(Action::ACCEPT, {}, team)).changed);
   }
-  CHECK(lobby.TeamOf("a")->members_size() == 4);
+  // Amanises 2026-10-29: five (was four); the guests' player slots are 7, 6, 5
+  // and 4.
+  CHECK(lobby.TeamOf("a")->members_size() == 5);
+  std::vector<uint32_t> signs;
+  for (const bbcoop::TeamMember &m : lobby.TeamOf("a")->members()) {
+    signs.push_back(m.sign());
+  }
+  std::ranges::sort(signs);
+  CHECK((signs == std::vector<uint32_t>{0, 4, 5, 6, 7}));
   // A full team takes no more: the invite itself is refused.
-  CHECK(!lobby.Request("a", Request(Action::INVITE, "e")).notice.empty());
+  CHECK(!lobby.Request("a", Request(Action::INVITE, "f")).notice.empty());
   return 0;
 }
 
@@ -313,8 +321,34 @@ int AGoneGameLeavesAStartedTeamInSeconds() {
   CHECK(lobby.TeamOf("c") != nullptr && lobby.TeamOf("c")->members_size() == 2);
   // A game's new hello is heard: not quiet any more.
   lobby.Arrive("b", "Player b", true);
-  CHECK(lobby.Expire(3000 + 2 * LeftGraceMs).departed.size() == 1);
+  CHECK(!lobby.Expire(3000 + 2 * LeftGraceMs).changed); // a guest: a blip
+  CHECK(lobby.Expire(3000 + QuietGraceMs).departed.size() == 1);
   CHECK(lobby.TeamOf("c") == nullptr && lobby.TeamOf("b")->leader() == "b");
+  return 0;
+}
+
+// Kaniel 2026-11-02 (rig late-quiet3, link-cut): a guest's quiet link may be a
+// Wi-Fi blip; one of 45 s keeps it in its team. A game signed out (closed, at
+// the title) still leaves after LeftGraceMs, and so does one whose game came
+// back from another link (it restarted: kills-after-crash).
+int ABlipKeepsAGuestInItsTeamASignOutOrRestartDoesNot() {
+  ThreePlaying t;
+  TeamLobby &lobby = t.lobby;
+  lobby.Quiet("c", true, 1000);
+  CHECK(!lobby.Expire(1000 + 45'000).changed);
+  CHECK(lobby.TeamOf("c") != nullptr);
+  lobby.Quiet("c", false, 46'000);
+  CHECK(!lobby.Expire(46'000 + QuietGraceMs).changed);
+  lobby.Leave("b");
+  CHECK(lobby.Expire(50'000).departed.empty());
+  CHECK(lobby.Expire(50'000 + LeftGraceMs - 1).departed.empty());
+  const TeamLobby::Outcome out = lobby.Expire(50'000 + LeftGraceMs);
+  CHECK(out.departed.size() == 1 && out.departed[0].member == "b");
+  lobby.Quiet("c", true, 60'000);
+  lobby.Restarted("c");
+  CHECK(lobby.Expire(60'000 + LeftGraceMs - 1).departed.empty());
+  const TeamLobby::Outcome again = lobby.Expire(60'000 + LeftGraceMs);
+  CHECK(again.departed.size() == 1 && again.departed[0].member == "c");
   return 0;
 }
 
@@ -936,6 +970,45 @@ static int AHostedLobbyListsFewOthers() {
   return 0;
 }
 
+// Amanises 2026-10-26: a hosted lobby lists the players in teams too (after
+// those in none), each with its team's leader, size and join mode.
+static int EveryHunterOnlineShowsWithItsTeam() {
+  for (const bool hosted : {false, true}) {
+    TeamLobby lobby = NewLobby();
+    if (hosted) {
+      lobby.SetHosted(3, 16);
+    }
+    for (const char *m : {"a", "b", "c", "d"}) {
+      lobby.Arrive(m, std::string("Hunter ") + m, false);
+    }
+    lobby.Request("a", Request(Action::CREATE));
+    lobby.Request("a", Request(Action::INVITE, "b"));
+    lobby.Request("b", Request(Action::ACCEPT, {}, lobby.TeamOf("a")->id()));
+    bbcoop::TeamRequest open = Request(Action::OPEN);
+    open.set_join(bbcoop::Team::OPEN);
+    lobby.Request("a", open);
+    const bbcoop::LobbyState state = lobby.StateFor("c");
+    CHECK(state.players_size() == 3);
+    const auto a = std::ranges::find_if(
+        state.players(), [](const auto &p) { return p.member() == "a"; });
+    CHECK(a != state.players().end());
+    CHECK(a->team_leader() == "Hunter a" && a->team_members() == 2);
+    CHECK(a->team_join() == bbcoop::Team::OPEN && !a->team_started());
+    // A player in no team says so; Describe gives the same for any member.
+    const auto d = std::ranges::find_if(
+        state.players(), [](const auto &p) { return p.member() == "d"; });
+    CHECK(d != state.players().end() && d->team().empty() &&
+          d->team_members() == 0);
+    bbcoop::LobbyPlayer b;
+    lobby.Describe("b", b);
+    CHECK(b.team() == a->team() && b.team_leader() == "Hunter a");
+    bbcoop::LobbyPlayer gone;
+    lobby.Describe("nobody", gone);
+    CHECK(gone.state() == bbcoop::LobbyPlayer::OFFLINE && gone.team().empty());
+  }
+  return 0;
+}
+
 // A friend the lobby does not list joins by the team's code: the leader handed
 // it out (its invite), the friend typed it (its accept).
 static int AFriendJoinsByTheTeamsCode() {
@@ -971,18 +1044,20 @@ static int AFriendJoinsByTheTeamsCode() {
   join.set_code(code);
   CHECK(lobby.Request("b", join).notice.empty());
   CHECK(lobby.Request("c", join).notice.empty());
-  CHECK(!lobby.Request("d", join).notice.empty());
-  CHECK(!lobby.TeamOf("d"));
+  CHECK(lobby.Request("d", join)
+            .notice.empty()); // the fifth (Amanises 2026-10-29)
+  CHECK(!lobby.Request("f", join).notice.empty());
+  CHECK(!lobby.TeamOf("f"));
   // Only the leader makes a new code; the old one joins no more.
   CHECK(!lobby.Request("b", Request(Action::NEW_CODE)).notice.empty());
   lobby.Request("c", Request(Action::LEAVE));
   CHECK(lobby.Request("a", Request(Action::NEW_CODE)).changed);
   const std::string fresh = lobby.StateFor("a").team().code();
   CHECK(fresh != code && NormalizeTeamCode(fresh) == fresh);
-  CHECK(!lobby.Request("d", join).notice.empty());
+  CHECK(!lobby.Request("f", join).notice.empty());
   join.set_code(fresh);
-  CHECK(lobby.Request("d", join).notice.empty());
-  CHECK(lobby.TeamOf("d") == lobby.TeamOf("a"));
+  CHECK(lobby.Request("f", join).notice.empty());
+  CHECK(lobby.TeamOf("f") == lobby.TeamOf("a"));
   return 0;
 }
 
@@ -1157,14 +1232,15 @@ int TheLeaderAllowsInvaders() {
   return 0;
 }
 
-// Kaniel 2026-10-25 (host rules): the leader's rules are the team's, all off
-// by default; a member sees them, only the leader sets them, at any time.
+// Kaniel 2026-10-25 (host rules): the leader's rules are the team's; a member
+// sees them, only the leader sets them, at any time. Kaniel 2026-11-05: a team
+// whose maker set none has the server's default, Auto enemies and nothing else.
 int TheLeaderSetsTheTeamsRules() {
   TwoHunters t;
   TeamLobby &lobby = t.lobby;
   const bbcoop::TeamRules none = lobby.StateFor("b").team().rules();
   CHECK(!none.rot() && !none.travel_together() && !none.travel_vote() &&
-        !none.enemy_scaling());
+        none.enemy_scaling());
   bbcoop::TeamRequest rules = Request(Action::RULES);
   rules.mutable_rules()->set_rot(true);
   rules.mutable_rules()->set_enemy_scaling(true);
@@ -1192,6 +1268,87 @@ int TheLeaderSetsTheTeamsRules() {
   CHECK(lobby.Request("a", rules).changed);
   CHECK(back.ParseFromString(lobby.StateFor("b").SerializeAsString()));
   CHECK(back.team().rules().boss_tempo() == bbcoop::BOSS_TEMPO_RELENTLESS);
+  return 0;
+}
+
+// Kaniel 2026-11-05 (public server): the enemies' strength is a team rule. A
+// team made by a player whose game sent no rules (the public server's launcher
+// has no rule steps) takes the server's default rules: Auto, the standard
+// strength (0), unless the server's config set others.
+int ATeamWithoutItsMakersRulesTakesTheServersDefault() {
+  {
+    TwoHunters t;
+    const bbcoop::TeamRules rules = t.lobby.StateFor("b").team().rules();
+    CHECK(rules.enemy_scaling() && rules.enemy_hp() == 0.0f &&
+          rules.enemy_damage() == 0.0f && rules.enemy_poise() == 0.0f);
+  }
+  TeamLobby lobby = NewLobby();
+  bbcoop::TeamRules configured;
+  configured.set_enemy_scaling(false);
+  configured.set_enemy_hp(2.0f);
+  configured.set_enemy_damage(1.25f);
+  configured.set_enemy_poise(2.0f);
+  configured.set_travel_together(true);
+  lobby.SetDefaultRules(configured);
+  lobby.Arrive("a", "Kaniel", false);
+  lobby.Request("a", Request(Action::CREATE));
+  const bbcoop::TeamRules made = lobby.TeamOf("a")->rules();
+  CHECK(!made.enemy_scaling() && made.enemy_hp() == 2.0f &&
+        made.enemy_damage() == 1.25f && made.enemy_poise() == 2.0f &&
+        made.travel_together());
+  // A maker whose game did send rules keeps its own.
+  lobby.Arrive("b", "Ada", false);
+  bbcoop::TeamRequest own = Request(Action::RULES);
+  own.mutable_rules()->set_rot(true);
+  lobby.Request("b", own);
+  lobby.Request("b", Request(Action::CREATE));
+  CHECK(lobby.TeamOf("b")->rules().rot() &&
+        !lobby.TeamOf("b")->rules().travel_together());
+  return 0;
+}
+
+// The server's default rules from shadnet.cfg (TeamDefaultRules): Auto or Fixed
+// enemies and their strength, and the other rules by name; anything unknown or
+// out of range is refused (the server then keeps its own default).
+int TheServersDefaultRulesComeFromItsConfig() {
+  const auto fixed = ParseTeamRules(
+      "enemies=fixed; hp=2.5; damage=1.25; poise=2; rot; travel; vote; tempo=1");
+  CHECK(fixed.has_value());
+  CHECK(!fixed->enemy_scaling() && fixed->enemy_hp() == 2.5f &&
+        fixed->enemy_damage() == 1.25f && fixed->enemy_poise() == 2.0f &&
+        fixed->rot() && fixed->travel_together() && fixed->travel_vote() &&
+        fixed->boss_tempo() == bbcoop::BOSS_TEMPO_AGGRESSIVE);
+  const auto automatic = ParseTeamRules("enemies=auto");
+  CHECK(automatic.has_value() && automatic->enemy_scaling() &&
+        automatic->enemy_hp() == 0.0f && !automatic->rot());
+  CHECK(ParseTeamRules("").has_value() && ParseTeamRules("")->enemy_scaling());
+  CHECK(!ParseTeamRules("enemies=hard"));
+  CHECK(!ParseTeamRules("hp=0.5"));   // weaker than the game's own
+  CHECK(!ParseTeamRules("hp=11"));    // past HarderEnemiesMax
+  CHECK(!ParseTeamRules("tempo=3"));
+  CHECK(!ParseTeamRules("fly"));
+  return 0;
+}
+
+// Kaniel 2026-11-05: the leader sets the enemies' strength (the team screen in
+// its game); every member's state carries it, a member cannot change it.
+int TheLeaderSetsTheEnemiesStrength() {
+  TwoHunters t;
+  TeamLobby &lobby = t.lobby;
+  bbcoop::TeamRequest rules = Request(Action::RULES);
+  rules.mutable_rules()->set_enemy_scaling(false);
+  rules.mutable_rules()->set_enemy_hp(2.5f);
+  rules.mutable_rules()->set_enemy_damage(1.0f);
+  rules.mutable_rules()->set_enemy_poise(1.5f);
+  CHECK(!lobby.Request("b", rules).notice.empty()); // not the leader
+  CHECK(lobby.StateFor("b").team().rules().enemy_scaling());
+  CHECK(lobby.Request("a", rules).changed);
+  bbcoop::LobbyState back;
+  CHECK(back.ParseFromString(lobby.StateFor("b").SerializeAsString()));
+  CHECK(!back.team().rules().enemy_scaling() &&
+        back.team().rules().enemy_hp() == 2.5f &&
+        back.team().rules().enemy_damage() == 1.0f &&
+        back.team().rules().enemy_poise() == 1.5f);
   return 0;
 }
 
@@ -1307,7 +1464,7 @@ int OpenTeamsAreAskedToJoin() {
   lobby.Arrive("c", "Bo", false);
   lobby.Request("a", Request(Action::CREATE));
   const std::string team = lobby.TeamOf("a")->id();
-  CHECK(lobby.StateFor("b").team_size() == 4);
+  CHECK(lobby.StateFor("b").team_size() == 5);
   // Not open: not listed, and not asked.
   CHECK(lobby.StateFor("b").open_teams_size() == 0);
   CHECK(
@@ -1351,9 +1508,13 @@ int OpenTeamsAreAskedToJoin() {
   // Full: not listed, asks refused. Closed: not listed, waiting asks gone.
   lobby.Arrive("d", "Dee", false);
   lobby.Arrive("e", "Eve", false);
+  lobby.Arrive("g", "Gil", false);
   lobby.Request("d", Request(Action::ASK_JOIN, {}, team));
   CHECK(lobby.Request("a", Request(Action::ASK_ACCEPT, "d")).changed);
-  CHECK(lobby.TeamOf("a")->members_size() == 4);
+  lobby.Request("g", Request(Action::ASK_JOIN, {},
+                             team)); // the fifth (Amanises 2026-10-29)
+  CHECK(lobby.Request("a", Request(Action::ASK_ACCEPT, "g")).changed);
+  CHECK(lobby.TeamOf("a")->members_size() == 5);
   CHECK(lobby.StateFor("e").open_teams_size() == 0);
   CHECK(
       !lobby.Request("e", Request(Action::ASK_JOIN, {}, team)).notice.empty());
@@ -1392,20 +1553,87 @@ int OpenTeamsAreAskedToJoin() {
   return 0;
 }
 
+// Amanises 2026-10-25: quick match joins an open team near the character's
+// level, or makes one. Kaniel 2026-11-01: on a public server only, and the team
+// it makes says so.
+int QuickMatchFindsOrMakesAnOpenTeam() {
+  TeamLobby lobby = NewLobby();
+  const auto quick = [](uint32_t level) {
+    bbcoop::TeamRequest request = Request(Action::QUICK_MATCH);
+    request.set_level(level);
+    return request;
+  };
+  CHECK(LevelsMatch(50, 60) && LevelsMatch(100, 120) && !LevelsMatch(30, 60));
+  CHECK(LevelsMatch(0, 200) && LevelsMatch(200, 0));
+  for (const char *who : {"a", "b", "c", "d", "e", "f"}) {
+    lobby.Arrive(who, who, true);
+  }
+  // A home server: not offered, and refused.
+  CHECK(!lobby.StateFor("a").quick_match());
+  CHECK(!lobby.Request("a", quick(50)).notice.empty());
+  CHECK(!lobby.TeamOf("a"));
+  lobby.SetHosted(32, 16);
+  CHECK(lobby.StateFor("a").quick_match());
+  // Nobody open: its own team, open to all, listed to the others.
+  CHECK(lobby.Request("a", quick(50)).changed);
+  const bbcoop::Team *a = lobby.TeamOf("a");
+  CHECK(a && a->leader() == "a" && a->join() == bbcoop::Team::OPEN &&
+        a->quick());
+  CHECK(lobby.StateFor("f").open_teams_size() == 1);
+  // In a team: refused.
+  CHECK(!lobby.Request("a", quick(50)).notice.empty());
+  // A near level joins it; a far one makes its own while one in range is not
+  // there.
+  CHECK(lobby.Request("b", quick(55)).changed &&
+        lobby.TeamOf("b") == lobby.TeamOf("a"));
+  CHECK(lobby.Request("c", quick(150)).changed);
+  const std::string far = lobby.TeamOf("c")->id();
+  CHECK(far != lobby.TeamOf("a")->id());
+  CHECK(lobby.Request("d", quick(140)).changed &&
+        lobby.TeamOf("d")->id() == far);
+  // Unknown level (the title): the fullest open team.
+  CHECK(lobby.Request("e", quick(0)).changed);
+  CHECK(lobby.TeamOf("e") == lobby.TeamOf("a") ||
+        lobby.TeamOf("e")->id() == far);
+  // Teams that ask or are invite only are never joined by quick match.
+  lobby.Request("a", Request(Action::LEAVE));
+  lobby.Request("b", Request(Action::LEAVE));
+  lobby.Request("e", Request(Action::LEAVE));
+  lobby.Request("c", Request(Action::LEAVE));
+  lobby.Request("d", Request(Action::LEAVE));
+  lobby.Request("a", Request(Action::CREATE));
+  bbcoop::TeamRequest ask = Request(Action::OPEN);
+  ask.set_join(bbcoop::Team::ASK);
+  lobby.Request("a", ask);
+  CHECK(lobby.Request("f", quick(50)).changed &&
+        lobby.TeamOf("f") != lobby.TeamOf("a"));
+  // Out of range only: a team of its own (the other still listed to join by
+  // hand).
+  lobby.Request("a", Request(Action::LEAVE));
+  CHECK(lobby.Request("b", quick(200)).changed &&
+        lobby.TeamOf("b") != lobby.TeamOf("f"));
+  CHECK(lobby.StateFor("a").open_teams_size() == 2);
+  return 0;
+}
+
 int main() {
   int failed = 0;
   failed |= TheLeaderSetsTheTeamsRules();
   failed |= RulesSetBeforeATeamGoIntoTheTeam();
+  failed |= ATeamWithoutItsMakersRulesTakesTheServersDefault();
+  failed |= TheLeaderSetsTheEnemiesStrength();
+  failed |= TheServersDefaultRulesComeFromItsConfig();
   failed |= AMembersRotIsKeptWhileItsTeamLives();
   failed |= TheLeaderPicksTheTeamsDeathMode();
   failed |= PlayersAreSeenByTheirCharactersName();
   failed |= TeamFormsByInvite();
-  failed |= TeamHoldsFour();
+  failed |= TeamHoldsFive();
   failed |= ReadyAndStart();
   failed |= StartedTeamKeepsGoingWhileOnePlays();
   failed |= ALeaderBackAtTheTitleHandsTheTeamOver();
   failed |= TheLastOneBackAtTheTitleKeepsTheTeam();
   failed |= AGoneGameLeavesAStartedTeamInSeconds();
+  failed |= ABlipKeepsAGuestInItsTeamASignOutOrRestartDoesNot();
   failed |= TheLeadFollowsTheSessionsHost();
   failed |= AStartedTeamStaysStartedWhileItsGamesLoad();
   failed |= LeaveAndRemove();
@@ -1427,12 +1655,14 @@ int main() {
   failed |= HostedServersKeepEveryPlayersWorlds();
   failed |= AHostedPlayersWorldsAreCapped();
   failed |= AHostedLobbyListsFewOthers();
+  failed |= EveryHunterOnlineShowsWithItsTeam();
   failed |= TheLeaderAllowsInvaders();
   failed |= AFriendJoinsByTheTeamsCode();
   failed |= TeamCodesAreUnique();
   failed |= WrongLookupsAreLimited();
   failed |= AFriendIsInvitedByName();
   failed |= OpenTeamsAreAskedToJoin();
+  failed |= QuickMatchFindsOrMakesAnOpenTeam();
   if (failed == 0) {
     std::cout << "team lobby: all checks passed\n";
   }

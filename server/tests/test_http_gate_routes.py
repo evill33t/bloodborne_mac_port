@@ -99,7 +99,7 @@ class HostedHttpGate(unittest.TestCase):
             "BackendStore": os.path.join(work, "content.db").replace("\\", "/"),
             "BackendFolder": work.replace("\\", "/"), "BloodborneSeamlessCoop": "true",
             "Hosted": "true", "HostedBuild": BUILD.decode(), "StatsPort": free_port(),
-            "HostedSignupWorkBits": 8,
+            "HostedSignupWorkBits": 8, "SignIn": "open",
         }
         with open(os.path.join(work, "shadnet.cfg"), "w") as f:
             f.write("[General]\n" + "".join(f"{k}={v}\n" for k, v in config.items()))

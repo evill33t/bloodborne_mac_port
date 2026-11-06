@@ -32,7 +32,8 @@ bool TeamCanBegin(const bbcoop::LobbyState& lobby, const std::string& me);
 bool TeamMemberReady(const bbcoop::LobbyState& lobby, const std::string& me);
 
 // Kaniel 2026-10-15: the player slot a guest joins the host's session with (GameMan +0x16F4), its
-// own in the team: 7 for the first guest (the summon sign's), 6 for the second, 5 for the third.
+// own in the team: 7 for the first guest (the summon sign's), 6 for the second, 5 for the third,
+// 4 for the fourth (Amanises 2026-10-29, teams of five).
 // Phase 7: a member with no slot of its own (the leader) joining another member's session (that
 // member hosts it now, host migration) takes the slot the session's host left.
 u32 TeamGuestSign(const bbcoop::LobbyState& lobby, const std::string& me,

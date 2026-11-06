@@ -50,14 +50,14 @@ const char* Vital(int state) {
 void CloseTeam() { Send(BB_COOP_TEAM_MENU,0); }
 void HunterCards(const BbCoopUi& s) {
     const auto& lobby=s.lobby;const float scale=BbCoopStyle::Scale();
-    const int columns=ImGui::GetContentRegionAvail().x>760*scale?4:2;
+    const int columns=std::clamp(int(ImGui::GetContentRegionAvail().x/(180*scale)),1,int(BBCOOP_LOBBY_TEAM));
     if(!ImGui::BeginTable("hunter cards",columns,ImGuiTableFlags_SizingStretchSame)) return;
-    for(int i=0;i<4;++i) {
+    for(int i=0;i<BBCOOP_LOBBY_TEAM;++i) {
         ImGui::TableNextColumn();ImGui::PushID(i);
         auto* draw=ImGui::GetWindowDrawList();const auto at=ImGui::GetCursorScreenPos();
         const float width=ImGui::GetContentRegionAvail().x,height=224*scale;
         const ImVec2 end(at.x+width,at.y+height),center(at.x+width*.5f,at.y+72*scale);
-        const auto* member=i<std::clamp<int>(lobby.member_count,0,4)?&lobby.members[i]:nullptr;
+        const auto* member=i<std::clamp<int>(lobby.member_count,0,BBCOOP_LOBBY_TEAM)?&lobby.members[i]:nullptr;
         const bool mine=member && !std::strcmp(member->id,lobby.me);
         const bool ready=member && (member->ready || member->state==BBCOOP_LOBBY_PLAYING);
         BbCoopStyle::Card(draw,at,end,mine);
@@ -82,7 +82,7 @@ void HunterCards(const BbCoopUi& s) {
     ImGui::EndTable();ImGui::Spacing();
 }
 // Host and online display preferences mirror Kaniel's Display and Team screens.
-void Preferences() {
+void Preferences(bool production) {
     if(!ImGui::CollapsingHeader(T("Online display"))) return;
     auto& v=BbSettings::Get();bool changed=false;
     auto toggle=[&](const char* name,std::atomic<bool>& setting) {bool on=setting;if(ImGui::Checkbox(T(name),&on)) {setting=on;changed=true;}};
@@ -91,7 +91,7 @@ void Preferences() {
     if(ImGui::Combo(T("Compass position"),&position,positions,3)) {v.compass_position=position;changed=true;}
     toggle("Bloodstains on compass and map",v.bloodstains);toggle("Team pings",v.team_pings);
     int key=v.ping_key;if(ImGui::Combo(T("Ping key"),&key,BbSettings::PingKeyNames,BbSettings::PingKeyCount)) {v.ping_key=key;changed=true;}
-    toggle("Free camera hotkey",v.free_camera);
+    if(!production) toggle("Free camera hotkey",v.free_camera);
     int map_view=v.map_view;const char* maps[]={T("Coordinates"),T("Rendered terrain"),T("Live 3D"),T("Prerendered")};
     if(ImGui::Combo(T("Map"),&map_view,maps,4)) {v.map_view=map_view;changed=true;}
     toggle("Map fog of war",v.map_fog);
@@ -129,7 +129,7 @@ void SocialPlayer(const bbcoop_lobby_entry& player, const bbcoop_lobby& lobby) {
     }
     if (player.relation != BBCOOP_FRIEND_SELF && std::strcmp(player.id, lobby.me)) {
         ImGui::SameLine();
-        ImGui::BeginDisabled(!lobby.in_team || player.in_my_team || player.state == BBCOOP_LOBBY_OFFLINE ||
+        ImGui::BeginDisabled(!lobby.in_team || player.team_members>0 || player.in_my_team || player.state == BBCOOP_LOBBY_OFFLINE ||
                              lobby.member_count >= std::clamp<int>(lobby.team_size, 1, BBCOOP_LOBBY_TEAM));
         if (ImGui::SmallButton(T("Invite"))) Lobby(BBCOOP_TEAM_INVITE, player.id);
         ImGui::EndDisabled();
@@ -210,6 +210,81 @@ void WorldPicker(const BbCoopUi& s) {
     if(ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
 }
+void LeaderRules(const bbcoop_lobby& lobby) {
+    static bool rot=false,travel=false,vote=false,scale=false,custom=false;
+    static int tempo=0;static float hp=3,damage=1.5f,poise=3;
+    if(ImGui::IsWindowAppearing()) {
+        rot=lobby.rule_rot;travel=lobby.rule_travel;vote=lobby.rule_vote;scale=lobby.rule_scale;
+        tempo=lobby.rule_tempo;custom=lobby.rule_hp>0 || lobby.rule_damage>0 || lobby.rule_poise>0;
+        hp=lobby.rule_hp>0?lobby.rule_hp:3;damage=lobby.rule_damage>0?lobby.rule_damage:1.5f;
+        poise=lobby.rule_poise>0?lobby.rule_poise:3;
+    }
+    ImGui::SeparatorText(T("Team rules"));
+    ImGui::BeginDisabled(!lobby.in_team || !lobby.leader);
+    ImGui::Checkbox(T("Scale enemies with team size"),&scale);
+    ImGui::Checkbox(T("Custom enemy strength"),&custom);
+    if(custom) {
+        ImGui::SliderFloat(T("Enemy HP"),&hp,1,10,"%.2fx");
+        ImGui::SliderFloat(T("Enemy damage"),&damage,1,10,"%.2fx");
+        ImGui::SliderFloat(T("Enemy poise"),&poise,1,10,"%.2fx");
+    }
+    ImGui::Checkbox(T("Rot penalties after death"),&rot);
+    ImGui::Checkbox(T("Offer to travel together"),&travel);
+    if(!travel) vote=false;
+    ImGui::BeginDisabled(!travel);ImGui::Checkbox(T("Vote before travelling together"),&vote);ImGui::EndDisabled();
+    const char* tempos[]={T("Vanilla"),T("Aggressive"),T("Relentless")};
+    ImGui::Combo(T("Boss tempo"),&tempo,tempos,3);
+    if(BbCoopStyle::Button("Apply team rules")) {
+        char text[128];std::snprintf(text,sizeof(text),"%d,%d,%d,%d,%d,%.3g,%.3g,%.3g",
+            rot,travel,vote,scale,tempo,double(custom?hp:0),double(custom?damage:0),double(custom?poise:0));
+        Lobby(BBCOOP_TEAM_RULES,text);
+    }
+    ImGui::EndDisabled();
+    if(!lobby.leader) ImGui::TextUnformatted(T("Only the team leader can change these rules."));
+}
+const char* DuelTeamName(int team) {
+    static const char* names[]={"Not participating","Yharnamites","Hunters","Great Ones"};
+    return T(names[std::clamp(team,0,3)]);
+}
+void DuelSetup(const BbCoopUi& s) {
+    static int mode=0;static int teams[BBCOOP_DUEL_CANDIDATES]{};
+    static char members[BBCOOP_DUEL_CANDIDATES][96]{};
+    if(!ImGui::BeginPopupModal(Popup("Propose duel"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) return;
+    for(int i=0;i<BBCOOP_DUEL_CANDIDATES;++i) {
+        if(ImGui::IsWindowAppearing() || std::strncmp(members[i],s.duel_candidates[i].member,96)) {
+            teams[i]=i%2+1;std::snprintf(members[i],96,"%s",s.duel_candidates[i].member);
+        }
+    }
+    const char* modes[]={T("Every hunter for themselves"),T("Teams")};
+    ImGui::Combo(T("Duel mode"),&mode,modes,2);
+    const int count=std::clamp<int>(s.duel_candidate_count,0,BBCOOP_DUEL_CANDIDATES);
+    int used=0;bool self=false;
+    for(int i=0;mode==1 && i<count;++i) {
+        ImGui::PushID(i);ImGui::TextUnformatted(s.duel_candidates[i].name);ImGui::SameLine();
+        const char* choices[]={DuelTeamName(0),DuelTeamName(1),DuelTeamName(2),DuelTeamName(3)};
+        ImGui::Combo("##duel team",&teams[i],choices,4);
+        if(teams[i]) used|=1<<teams[i];
+        if(s.duel_candidates[i].self && teams[i]) self=true;
+        ImGui::PopID();
+    }
+    const bool valid=mode==0 || (self && (used&(used-1))!=0);
+    ImGui::BeginDisabled(!valid);
+    if(BbCoopStyle::Button("Propose")) {
+        if(mode==0) Send(BB_COOP_DUEL_PROPOSE);
+        else {
+            BbCoopCommand command{};command.version=BB_COOP_UI_VERSION;command.action=BB_COOP_DUEL_TEAMS;
+            command.duel_count=count;
+            for(int i=0;i<count;++i) {
+                command.duel_teams[i]=teams[i];std::snprintf(command.duel_members[i],96,"%s",s.duel_candidates[i].member);
+            }
+            Send(command);
+        }
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();ImGui::SameLine();
+    if(BbCoopStyle::Button("Cancel")) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
 void Team(const BbCoopUi& s) {
     const auto& lobby=s.lobby;
     const auto display=ImGui::GetIO().DisplaySize;const float scale=BbCoopStyle::Scale();
@@ -228,7 +303,8 @@ void Team(const BbCoopUi& s) {
         ImGui::EndDisabled();
         Friends(lobby);
         if(ImGui::BeginPopupModal(Popup("Team settings"),nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
-            Preferences();
+            LeaderRules(lobby);
+            Preferences(s.production!=0);
             if(BbCoopStyle::Button("Back") || ImGui::IsKeyPressed(ImGuiKey_Escape) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight)) ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
@@ -289,6 +365,7 @@ void Team(const BbCoopUi& s) {
             ImGui::BeginDisabled(!lobby.signed_in);
             if(lobby.signed_in && !lobby.menu) {if(BbCoopStyle::Button("Choose a world")) ImGui::OpenPopup(Popup("Choose a world"));WorldPicker(s);}
             if(BbCoopStyle::Button("Create team")) Lobby(BBCOOP_TEAM_CREATE);
+            if(lobby.quick_match) {ImGui::SameLine();if(BbCoopStyle::Button("Quick match")) Lobby(BBCOOP_TEAM_QUICK_MATCH);}
             ImGui::SetItemDefaultFocus();
             if(!lobby.menu) {ImGui::SameLine();if(BbCoopStyle::Button("Play alone")) Send(BB_COOP_CHOOSE,BBCOOP_TEAM_GO_ALONE);}
             static char code[32]{};ImGui::InputText(T("Team code"),code,sizeof(code));ImGui::SameLine();if(BbCoopStyle::Button("Join")) Lobby(BBCOOP_TEAM_JOIN_CODE,code);
@@ -312,7 +389,8 @@ void Team(const BbCoopUi& s) {
             for(int i=0;i<std::clamp<int>(lobby.player_count,0,BBCOOP_LOBBY_PLAYERS);++i) {
                 const auto& p=lobby.players[i];if(!hunters_filter.PassFilter(p.name)) continue;ImGui::PushID(200+i);ImGui::TextUnformatted(Hunter(p.name));ImGui::SameLine();
                 ImGui::TextDisabled(T("%s"),T(p.state==BBCOOP_LOBBY_PLAYING?"In the hunt":p.state==BBCOOP_LOBBY_OFFLINE?"Away":"Choosing a character"));ImGui::SameLine();
-                ImGui::BeginDisabled(!lobby.in_team || lobby.member_count>=4);
+                if(p.team_members>0) {ImGui::TextDisabled("%s (%d)",p.team_leader,p.team_members);ImGui::SameLine();}
+                ImGui::BeginDisabled(!lobby.in_team || lobby.member_count>=std::clamp(lobby.team_size,1,int(BBCOOP_LOBBY_TEAM)) || p.team_members>0);
                 if(ImGui::SmallButton(T("Invite"))) Lobby(BBCOOP_TEAM_INVITE,p.id);
                 ImGui::EndDisabled();ImGui::PopID();
             } ImGui::TreePop();
@@ -320,7 +398,8 @@ void Team(const BbCoopUi& s) {
         if(lobby.playing) {
             if(BbCoopStyle::Button("Trade items")) trade_open=true;
             ImGui::SameLine();if(BbCoopStyle::Button("World map")) Send(BB_COOP_MAP_MENU,1);
-            if(s.duel.may_propose && BbCoopStyle::Button("Propose team duel")) Send(BB_COOP_DUEL_PROPOSE);
+            if(s.duel.may_propose && BbCoopStyle::Button("Propose duel")) ImGui::OpenPopup(Popup("Propose duel"));
+            DuelSetup(s);
             if(s.duel.may_cancel && BbCoopStyle::Button("End duel")) Send(BB_COOP_DUEL_CANCEL);
         }
         if(lobby.menu && !lobby.playing) ImGui::TextWrapped("%s",T("Close this menu and select Continue or Load Game to choose your character. Your team will be ready when that character's team screen opens."));
@@ -745,7 +824,7 @@ void Loading(const BbCoopUi& s) {
         auto* draw=ImGui::GetWindowDrawList();
         BbCoopStyle::Label(draw,ImVec2(display.x*.5f,display.y*.12f),38*scale,BbCoopStyle::Ink(),"Entering the hunt",.5f);
         BbCoopStyle::Ornament(draw,display.x*.2f,display.x*.8f,display.y*.12f+52*scale);
-        const int count=std::clamp(s.load.count,0,4);const float gap=22*scale;
+        const int count=std::clamp(s.load.count,0,int(BBCOOP_LOBBY_TEAM));const float gap=22*scale;
         const float width=std::min(270*scale,(display.x-80*scale-gap*(std::max(1,count)-1))/std::max(1,count));
         const float height=330*scale,left=(display.x-(width+gap)*count+gap)*.5f,top=(display.y-height)*.52f;
         for(int i=0;i<count;++i) {
@@ -825,7 +904,20 @@ void Questions(const BbCoopUi& s) {
             ImGui::TextWrapped(T("%s"),s.trade_question);if(BbCoopStyle::Button("Accept")) Send(BB_COOP_TRADE_ANSWER,1,"",s.trade_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline")) Send(BB_COOP_TRADE_ANSWER,0,"",s.trade_id);
         } ImGui::End();
     }
-    if(s.duel_id) { if(BbCoopStyle::Begin("Team duel invitation",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {ImGui::Text(T("%s proposes a duel."),Hunter(s.duel_name));if(BbCoopStyle::Button("Accept duel")) Send(BB_COOP_DUEL_ANSWER,1,"",s.duel_id);ImGui::SameLine();if(BbCoopStyle::Button("Decline duel")) Send(BB_COOP_DUEL_ANSWER,0,"",s.duel_id);}ImGui::End(); }
+    if(s.duel_id) {
+        if(BbCoopStyle::Begin("Team duel invitation",nullptr,ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::Text(T("%s proposes a duel."),Hunter(s.duel_name));
+            if(s.duel_ask_teams) {
+                ImGui::Text("%s: %s",T("Your team"),DuelTeamName(s.duel_ask_team));
+                for(int i=0;i<3;++i) if(*s.duel_team_names[i]) {
+                    ImGui::SeparatorText(DuelTeamName(i+1));ImGui::TextWrapped("%s",s.duel_team_names[i]);
+                }
+            } else ImGui::TextUnformatted(T("Every hunter for themselves"));
+            if(BbCoopStyle::Button("Accept duel")) Send(BB_COOP_DUEL_ANSWER,1,"",s.duel_id);
+            ImGui::SameLine();if(BbCoopStyle::Button("Decline duel")) Send(BB_COOP_DUEL_ANSWER,0,"",s.duel_id);
+        }
+        ImGui::End();
+    }
     if(s.has_load) Loading(s);
 }
 }
@@ -860,7 +952,7 @@ bool Shortcut(const SDL_Event& e) {
     switch(e.key.scancode) {
     case SDL_SCANCODE_F6:Send(BB_COOP_TEAM_MENU,!latest.team_screen);return true;
     case SDL_SCANCODE_F8:Send(BB_COOP_MAP_MENU,!latest.map_screen);return true;
-    case SDL_SCANCODE_F7:if(BbSettings::Get().free_camera) Send(BB_COOP_CAMERA);return true;
+    case SDL_SCANCODE_F7:if(!latest.production && BbSettings::Get().free_camera) Send(BB_COOP_CAMERA);return true;
 
     case SDL_SCANCODE_ESCAPE:
         if(ImGui::IsPopupOpen("",ImGuiPopupFlags_AnyPopupId)) return false;

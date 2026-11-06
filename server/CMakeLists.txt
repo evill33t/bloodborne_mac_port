@@ -84,6 +84,11 @@ set(SOURCES
     src/watchdog.cpp
     src/bloodborne_reports.cpp
     src/webapi_routes_reports.cpp
+    src/signed_accounts.h
+    src/password_accounts.h
+    src/password_accounts.cpp
+    src/webapi_routes_password.h
+    src/webapi_routes_password.cpp
     src/config.cpp
     src/config.h
     src/server.cpp
@@ -311,6 +316,10 @@ if(BUILD_TESTING)
     target_include_directories(test_build_fingerprint PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME build_fingerprint COMMAND test_build_fingerprint)
 
+    add_executable(test_cheat_watch EXCLUDE_FROM_ALL tests/test_cheat_watch.cpp)
+    target_include_directories(test_cheat_watch PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME cheat_watch COMMAND test_cheat_watch)
+
     add_executable(test_rpc_tunnel EXCLUDE_FROM_ALL tests/test_rpc_tunnel.cpp)
     target_include_directories(test_rpc_tunnel PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME rpc_tunnel COMMAND test_rpc_tunnel)
@@ -319,6 +328,11 @@ if(BUILD_TESTING)
     target_include_directories(test_watchdog PRIVATE src)
     target_link_libraries(test_watchdog PRIVATE Qt6::Core)
     add_test(NAME watchdog COMMAND test_watchdog)
+
+    add_executable(test_config EXCLUDE_FROM_ALL tests/test_config.cpp src/config.cpp)
+    target_include_directories(test_config PRIVATE src)
+    target_link_libraries(test_config PRIVATE Qt6::Core)
+    add_test(NAME config COMMAND test_config)
 
     add_executable(test_reports EXCLUDE_FROM_ALL tests/test_reports.cpp src/bloodborne_reports.cpp)
     target_include_directories(test_reports PRIVATE src)
@@ -379,6 +393,19 @@ if(BUILD_TESTING)
     target_include_directories(test_admission PRIVATE src)
     target_link_libraries(test_admission PRIVATE Qt6::Core Qt6::Network)
     add_test(NAME admission COMMAND test_admission)
+
+    add_executable(test_signed_accounts EXCLUDE_FROM_ALL tests/test_signed_accounts.cpp)
+    target_include_directories(test_signed_accounts PRIVATE src)
+    target_link_libraries(test_signed_accounts PRIVATE Qt6::Core)
+    add_test(NAME signed_accounts COMMAND test_signed_accounts)
+
+    add_executable(test_password_accounts EXCLUDE_FROM_ALL tests/test_password_accounts.cpp
+        src/password_accounts.cpp coop/link_crypto.cpp)
+    target_include_directories(test_password_accounts PRIVATE src "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(test_password_accounts PRIVATE
+        PASSWORDS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/data/common-passwords.txt")
+    target_link_libraries(test_password_accounts PRIVATE Qt6::Core)
+    add_test(NAME password_accounts COMMAND test_password_accounts)
 
     add_executable(test_admin EXCLUDE_FROM_ALL
         tests/test_admin.cpp
@@ -497,6 +524,11 @@ if(BUILD_TESTING)
             WORKING_DIRECTORY "${BLOODBORNE_SS_INFO_DIR}/tests")
         set_tests_properties(bloodborne_backend_parity PROPERTIES
             ENVIRONMENT "SHADNET_EXE=$<TARGET_FILE:shadnet>")
+        add_test(NAME password_signin
+            COMMAND "${Python3_EXECUTABLE}" -m unittest -v test_password_signin
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        set_tests_properties(password_signin PROPERTIES
+            ENVIRONMENT "SHADNET_EXE=$<TARGET_FILE:shadnet>")
         add_test(NAME http_gate_routes
             COMMAND "${Python3_EXECUTABLE}" -m unittest -v test_http_gate_routes
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
@@ -507,6 +539,13 @@ if(BUILD_TESTING)
         add_test(NAME region_directory
             COMMAND "${Python3_EXECUTABLE}" -m unittest -v test_directory
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/directory")
+        # A region's accounts with a password: two shards, a sign out reaching both (skipped as the
+        # directory's test is).
+        add_test(NAME password_region
+            COMMAND "${Python3_EXECUTABLE}" -m unittest -v test_password_region
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+        set_tests_properties(password_region PROPERTIES
+            ENVIRONMENT "SHADNET_EXE=$<TARGET_FILE:shadnet>")
     endif()
 endif()
 

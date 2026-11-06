@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "admin.h"
 
+#include <algorithm>
+
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QHostAddress>
 #include <QJsonArray>
@@ -81,6 +84,59 @@ Answer Players(Context& context) {
         players.append(row);
     }
     return {QJsonObject{{"ok", true}, {"players", players}}, {}, {}};
+}
+
+// Cheat watch: the players something was found of since the server started (`id`: only that one),
+// the surest first; suspects.jsonl in the worlds' folder has every finding, kept across restarts.
+Answer Suspects(Context& context, const QString& only) {
+    QJsonArray rows;
+    for (const auto& [id, suspect] : context.world.Suspects()) {
+        if (!only.isEmpty() && QString::fromUtf8(id) != only &&
+            QString::fromStdString(suspect.display) != only) {
+            continue;
+        }
+        QJsonArray findings;
+        int worst = 0;
+        for (const auto& [kind, finding] : suspect.findings) {
+            worst = std::max(worst, static_cast<int>(finding.level));
+            findings.append(QJsonObject{
+                {"kind", QString::fromStdString(kind)},
+                {"level", QString::fromUtf8(BloodborneCoop::SuspicionName(finding.level).data())},
+                {"text", QString::fromStdString(finding.text)},
+                {"character", QString::fromStdString(finding.character)},
+                {"times", finding.times},
+                {"last_s_ago", (context.link_ms - finding.last_ms) / 1000},
+            });
+        }
+        rows.append(QJsonObject{
+            {"id", QString::fromUtf8(id)},
+            {"name", QString::fromStdString(suspect.display)},
+            {"worst", QString::fromUtf8(BloodborneCoop::SuspicionName(
+                                            static_cast<BloodborneCoop::Suspicion>(worst))
+                                            .data())},
+            {"findings", findings},
+        });
+    }
+    // The surest first.
+    QList<QJsonValue> sorted{rows.begin(), rows.end()};
+    const auto rank = [](const QJsonValue& row) {
+        const QString worst = row.toObject()["worst"].toString();
+        return worst == QStringLiteral("certain") ? 2 : worst == QStringLiteral("likely") ? 1 : 0;
+    };
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [&](const QJsonValue& a, const QJsonValue& b) { return rank(a) > rank(b); });
+    QJsonArray ordered;
+    for (const QJsonValue& row : sorted) {
+        ordered.append(row);
+    }
+    return {QJsonObject{{"ok", true},
+                        {"suspects", ordered},
+                        {"file", context.world.Folder().isEmpty()
+                                     ? QString{}
+                                     : QDir{context.world.Folder()}.filePath(QString::fromUtf8(
+                                           BloodborneWorld::Service::SuspectsFile))}},
+            {},
+            {}};
 }
 
 Answer Kick(Context& context, const QString& target) {
@@ -322,12 +378,15 @@ Answer Run(const QString& line, Context& context) {
     if (verb == QStringLiteral("stats")) {
         return Stats(context);
     }
+    if (verb == QStringLiteral("suspects") && words.size() <= 2) {
+        return Suspects(context, words.value(1));
+    }
     if (verb == QStringLiteral("key")) {
         return {QJsonObject{{"ok", true}, {"key", Key(context)}}, {}, {}};
     }
     return Fail(QStringLiteral("commands: players, kick <id|address>, ban <id|address> "
                                "[90s|30m|12h|7d] [note], unban <id|address>, bans, worlds, "
-                               "restore <folder>, retire, stats, key"));
+                               "restore <folder>, retire, stats, suspects [id|name], key"));
 }
 
 } // namespace Admin

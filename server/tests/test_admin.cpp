@@ -18,6 +18,8 @@
 #include "admission.h"
 #include "bloodborne_world.h"
 #include "coop.pb.h"
+#include "coop/coop_messages.h"
+#include "coop/coop_stream.h"
 #include "coop/link_auth.h"
 #include "server_link.h"
 
@@ -428,6 +430,56 @@ int ARunningServersAdminSocketIsKept() {
 
 } // namespace
 
+// Cheat watch: `suspects` lists who was found and what, the surest first, and
+// where suspects.jsonl is.
+int SuspectsAreListed() {
+  QTemporaryDir dir;
+  Rig rig{dir.path()};
+  rig.world.Load(Now);
+  auto answer = rig.Run("suspects");
+  CHECK(answer.json["ok"].toBool());
+  CHECK(answer.json["suspects"].toArray().isEmpty());
+  CHECK(answer.json["file"].toString().endsWith("worlds/suspects.jsonl"));
+  // Two games' sheets: one only a dev build (info), one with cheats.
+  const auto send = [&](const Endpoint &from, const QByteArray &id,
+                        const std::string &cheats, bool production) {
+    BloodborneCoop::CoopStream stream{id.toStdString(), 7};
+    bbcoop::Envelope envelope;
+    bbcoop::CharacterSheet &sheet = *envelope.mutable_character_sheet();
+    sheet.set_character("Ada");
+    sheet.set_level(10);
+    for (const s32 value : {11, 10, 12, 10, 9, 8}) {
+      sheet.add_attributes(value);
+    }
+    sheet.set_production(production);
+    sheet.set_cheats(cheats);
+    stream.Send(BloodborneCoop::EncodeEnvelope(envelope), rig.link_ms);
+    for (const std::vector<u8> &body : stream.Flush(rig.link_ms)) {
+      rig.world.Receive(from, id,
+                        QByteArray(reinterpret_cast<const char *>(body.data()),
+                                   static_cast<qsizetype>(body.size())),
+                        rig.link_ms);
+    }
+  };
+  send(Bob, "Bob", "none", false);
+  send(Alice, "Alice", "no death, stealth", true);
+  answer = rig.Run("suspects");
+  const QJsonArray suspects = answer.json["suspects"].toArray();
+  CHECK(suspects.size() == 2);
+  const QJsonObject first = suspects[0].toObject();
+  CHECK(first["id"].toString() == "Alice");
+  CHECK(first["worst"].toString() == "certain");
+  const QJsonObject finding = first["findings"].toArray()[0].toObject();
+  CHECK(finding["kind"].toString() == "cheats");
+  CHECK(finding["character"].toString() == "Ada");
+  CHECK(finding["times"].toInt() == 1);
+  CHECK(suspects[1].toObject()["worst"].toString() == "info");
+  // One player.
+  CHECK(rig.Run("suspects Bob").json["suspects"].toArray().size() == 1);
+  CHECK(ReadFile(answer.json["file"].toString()).count('\n') == 2);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   QCoreApplication app(argc, argv); // the local sockets
   int failed = 0;
@@ -442,6 +494,7 @@ int main(int argc, char **argv) {
   failed |= WorldSizesAreReadOffTheLinkThread();
   failed |= ARateBanDoesNotUnlinkLinkedGames();
   failed |= ARunningServersAdminSocketIsKept();
+  failed |= SuspectsAreListed();
   if (failed == 0) {
     std::cout << "admin: all checks passed\n";
   }

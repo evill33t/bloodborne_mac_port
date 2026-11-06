@@ -217,6 +217,11 @@ bool EnemyOwners::Place(const std::string& member, std::uint32_t map, std::int64
     const std::uint32_t area = AreaOf(map);
     latest_ms = std::max(latest_ms, now_ms);
     if (area == 0) {
+        if (const auto there = members.find(member);
+            there != members.end() && now_ms - wiped_ms < WipeHoldMs) {
+            there->second.heard_ms = now_ms; // the wipe's reload: still there
+            return false;
+        }
         return members.erase(member) > 0 && Settle();
     }
     Presence& presence = members[member];
@@ -227,6 +232,10 @@ bool EnemyOwners::Place(const std::string& member, std::uint32_t map, std::int64
     presence.heard_ms = now_ms;
     presence.host = host;
     return Settle();
+}
+
+void EnemyOwners::Wipe(std::int64_t now_ms) {
+    wiped_ms = now_ms;
 }
 
 bool EnemyOwners::Expire(std::int64_t now_ms) {

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <thread>
 #include <httplib.h>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -222,30 +223,38 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
     LOG_INFO(NpHandler, "Connecting user_id={} npid='{}' to {}:{} (timeout {}s)", user_id, npid,
              host, port, ShadNet::SHAD_CONNECT_TIMEOUT_MS / 1000);
 
-    auto client = std::make_shared<ShadNet::ShadNetClient>();
+    // Made again for a retry (an earlier session still open on the server, below).
+    const auto make_client = [this, user_id] {
+        auto client = std::make_shared<ShadNet::ShadNetClient>();
 
-    // Wire per-user notification callbacks
-    client->onFriendQuery = [this, user_id](const ShadNet::NotifyFriendQuery& n) {
-        OnFriendQuery(user_id, n);
-    };
-    client->onFriendNew = [this, user_id](const ShadNet::NotifyFriendNew& n) {
-        OnFriendNew(user_id, n);
-    };
-    client->onFriendLost = [this, user_id](const ShadNet::NotifyFriendLost& n) {
-        OnFriendLost(user_id, n);
-    };
-    client->onFriendStatus = [this, user_id](const ShadNet::NotifyFriendStatus& n) {
-        OnFriendStatus(user_id, n);
-    };
-    client->onWebApiPushEvent = [this, user_id](const ShadNet::NotifyWebApiPushEvent& n) {
-        OnWebApiPushEvent(user_id, n);
-    };
-    client->onAsyncReply = [this, user_id](ShadNet::CommandType cmd, u64 pkt_id,
-                                           ShadNet::ErrorType err, const std::vector<u8>& body) {
-        OnAsyncReply(user_id, cmd, pkt_id, err, body);
-    };
-    client->onLoginResult = [this, user_id](const ShadNet::LoginResult& res) {
-        OnLoginResult(user_id, res);
+        // Wire per-user notification callbacks
+        client->onFriendQuery = [this, user_id](const ShadNet::NotifyFriendQuery& n) {
+            OnFriendQuery(user_id, n);
+        };
+        client->onFriendNew = [this, user_id](const ShadNet::NotifyFriendNew& n) {
+            OnFriendNew(user_id, n);
+        };
+        client->onFriendLost = [this, user_id](const ShadNet::NotifyFriendLost& n) {
+            OnFriendLost(user_id, n);
+        };
+        client->onFriendStatus = [this, user_id](const ShadNet::NotifyFriendStatus& n) {
+            OnFriendStatus(user_id, n);
+        };
+        client->onWebApiPushEvent = [this, user_id](const ShadNet::NotifyWebApiPushEvent& n) {
+            OnWebApiPushEvent(user_id, n);
+        };
+        client->onAsyncReply = [this, user_id](ShadNet::CommandType cmd, u64 pkt_id,
+                                               ShadNet::ErrorType err,
+                                               const std::vector<u8>& body) {
+            OnAsyncReply(user_id, cmd, pkt_id, err, body);
+        };
+        client->onLoginResult = [this, user_id](const ShadNet::LoginResult& res) {
+            OnLoginResult(user_id, res);
+        };
+        // Seed the current Appear-Offline preference so the login packet carries it (the send
+        // is suppressed pre-auth; it just caches on the client).
+        client->SetAppearOffline(m_appear_offline.load());
+        return client;
     };
 
     // Phase 11, one port (the port): the server's address is its link's UDP port. The link's
@@ -270,9 +279,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
                  port);
     }
 
-    // Seed the current Appear-Offline preference so the login packet carries it (the send
-    // is suppressed pre-auth; it just caches on the client).
-    client->SetAppearOffline(m_appear_offline.load());
+    auto client = make_client();
     client->Start(client_host, client_port, npid, password, token);
 
     // Shared handling for an incompatible-protocol failure (version mismatch or
@@ -313,7 +320,23 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         return false;
     }
 
-    const ShadNet::ShadNetState auth_state = client->WaitForAuthenticated();
+    ShadNet::ShadNetState auth_state = client->WaitForAuthenticated();
+    // The session of the game this one replaces (the in-game restart) can still be open on the
+    // server for a moment; its login is then refused as already logged in. Asked again a few
+    // times before the game plays offline for the whole session (Supermedo's 44ca939).
+    for (int retry = 1; auth_state == ShadNet::ShadNetState::FailureAlreadyIn && retry <= 4;
+         ++retry) {
+        LOG_WARNING(NpHandler, "user_id={} already signed in elsewhere; asking again in 5 s ({}/4)",
+                    user_id, retry);
+        client->Stop();
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        client = make_client();
+        client->Start(client_host, client_port, npid, password, token);
+        auth_state = client->WaitForConnection();
+        if (auth_state == ShadNet::ShadNetState::Ok) {
+            auth_state = client->WaitForAuthenticated();
+        }
+    }
     if (auth_state != ShadNet::ShadNetState::Ok) {
         LOG_ERROR(NpHandler, "user_id={} authentication failed (state={})", user_id,
                   static_cast<int>(auth_state));

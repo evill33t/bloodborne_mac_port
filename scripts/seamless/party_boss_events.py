@@ -152,7 +152,7 @@ def patch_events(emevd: bytes, edits: list | None = None) -> tuple[bytes, int]:
 # m28_00 12800430 is the mummy at the end of Yahar'gul's hall (the action button on its warp
 # object 2801500, then 2003:49 to the Lecture Building, m32's 3202959): only the host could
 # inspect it and only the host travelled (Provi's day 4, v1.3.1). It is each player's own trip
-# (LOCAL_EVENTS).
+# (LOCAL_EVENTS), with a button a guest can press (PLAIN_ACTION_BUTTONS).
 CLIENT_EVENTS = {
     'common.emevd.dcx': {9350, 9400, 9404, 9421, 9422},
     'm21_00_00_00.emevd.dcx': {9401, 12105043, 12107100},
@@ -161,6 +161,14 @@ CLIENT_EVENTS = {
     'm26_00_00_00.emevd.dcx': {12601854},
     'm28_00_00_00.emevd.dcx': {12800430},
 }
+# Action buttons a guest's press never counts on, per file: event -> (the game's row, the row used).
+# m28_00 12800430: the mummy's row 2800020 ("Inspect Mummy") is a 1.8 m, 60 degree sector around
+# dummy poly 200 of the invisible warp object 2801500. A guest's game acts as if the poly were not
+# there (the same miss as the host's game with the row's poly taken out, rig 2026-10-30), and the
+# sector from the object's own facing misses the hall. Row 6031 ("Inspect") is 2 m on any side of
+# the object, facing it, for the host too; no row has both the mummy's text and no poly.
+PLAIN_ACTION_BUTTONS = {'m28_00_00_00.emevd.dcx': {12800430: (2800020, 6031)}}
+IF_ACTION_BUTTON = (3, 24)
 INSIGHT_EVENT = 9350
 INITIALIZE_EVENT = (2000, 0)
 
@@ -207,10 +215,18 @@ def let_guests_earn_insight(emevd: bytes, edits: list | None = None) -> tuple[by
 # blocks (2000:0 per block with object and fog), so the "show" checks never match instead.
 CHALICE_WALL_EVENTS = {'m29.emevd.dcx': 12907600}
 IF_MULTIPLAYER_STATE = (3, 6)
+OR_GROUP_1, OR_GROUP_2 = 0xFF, 0xFE
+# Ludwig's arena wall (Kaniel 2026-11-04: a fog stood in his arena after the fight, even after a
+# rejoin): m34's 13400010 shows wall 3401801 (fog 3403801) while the multiplayer state is 3 or 2
+# or Ludwig (9471) lives, in group -1, and hides it once the state is neither (group -2) and 9471
+# is on. A party is always in multiplayer, so it never went. Both sides' multiplayer checks never
+# match: the wall stands while he lives, as in a lone game, and goes once he is dead.
+ARENA_WALL_EVENTS = {'m34_00_00_00.emevd.dcx': 13400010}
 
 
-def patch_chalice_walls(emevd: bytes, edits: list | None = None,
-                        event_id: int = 12907600) -> tuple[bytes, int]:
+def patch_chalice_walls(emevd: bytes, edits: list | None = None, event_id: int = 12907600,
+                        groups: tuple[int, ...] = (OR_GROUP_1, ),
+                        why: str = 'chalice multiplayer wall never shows') -> tuple[bytes, int]:
     data = bytearray(emevd)
     fields = struct.unpack_from('<16q', data, 16)
     event_count, event_offset, instruction_offset, args_offset = (fields[0], fields[1], fields[3],
@@ -225,9 +241,9 @@ def patch_chalice_walls(emevd: bytes, edits: list | None = None,
             bank, ident, length, offset, _ = struct.unpack_from(
                 '<iiqqq', data, instruction_offset + first + k * 32)
             at = args_offset + offset
-            if (bank, ident) == IF_MULTIPLAYER_STATE and length >= 2 and data[at] == 0xFF:
+            if (bank, ident) == IF_MULTIPLAYER_STATE and length >= 2 and data[at] in groups:
                 data[at + 1] = NEVER
-                note(edits, event, k, bank, ident, 'chalice multiplayer wall never shows')
+                note(edits, event, k, bank, ident, why)
                 patched += 1
     return bytes(data), patched
 
@@ -348,11 +364,12 @@ CHALICE_REWARD_EVENTS = {'m29.emevd.dcx': 12901693}
 GOTO_IF_MULTIPLAYER_STATE = (1003, 105)
 
 
-# The game's banner 15 (TextEffect_YouWin, UNLOCKED) is party death's YOU ARE DOWN in the HUD patch
-# (bbport/scripts/hud_patch.py): every banner is in use and this one has NIGHTMARE SLAIN's timeline
-# and layers. Its only event shows none; the message box after it still says what happened.
-# SetTextEffect takes ids 1 to 17, so id 0 queues nothing.
-DROPPED_BANNER_EVENTS = {'m29.emevd.dcx': {12900192}}
+# Events whose banner (2007:2) shows nothing. 1.3.1 dropped m29 12900192's UNLOCKED (slot 15,
+# TextEffect_YouWin) because party death's YOU ARE DOWN had taken that slot; the HUD patch now
+# gives YOU ARE DOWN a banner of its own (bbport/scripts/hud_patch.py CoopDownedBanner), so the
+# chalice dungeons say UNLOCKED again (Kaniel 2026-11-01). SetTextEffect takes ids 1 to 17, so
+# id 0 queues nothing.
+DROPPED_BANNER_EVENTS: dict[str, set[int]] = {}
 SET_TEXT_EFFECT = (2007, 2)
 DOWNED_BANNER_ID = 15
 
@@ -430,6 +447,34 @@ def patch_client_events(emevd: bytes, wanted: set[int],
                 data[at + 1] = NEVER
                 note(edits, event, k, bank, ident, 'client end never matches')
                 patched += 1
+    return bytes(data), patched
+
+
+def use_plain_action_buttons(emevd: bytes, wanted: dict[int, tuple[int, int]],
+                             edits: list | None = None) -> tuple[bytes, int]:
+    data = bytearray(emevd)
+    fields = struct.unpack_from('<16q', data, 16)
+    event_count, event_offset, instruction_offset, args_offset = (fields[0], fields[1], fields[3],
+                                                                  fields[13])
+    patched = 0
+    for index in range(event_count):
+        event, count, first, _, _, _, _ = struct.unpack_from('<qqqqqii', data,
+                                                             event_offset + index * 48)
+        if event not in wanted:
+            continue
+        game_row, row = wanted[event]
+        for k in range(count):
+            bank, ident, length, offset, _ = struct.unpack_from(
+                '<iiqqq', data, instruction_offset + first + k * INSTRUCTION_SIZE)
+            if (bank, ident) != IF_ACTION_BUTTON or length < 8:
+                continue
+            at = args_offset + offset + 4  # group byte, padding, then the row
+            found = struct.unpack_from('<i', data, at)[0]
+            if found != game_row:
+                raise EventPatchError(f'event {event} uses button {found}, not {game_row}')
+            struct.pack_into('<i', data, at, row)
+            note(edits, event, k, bank, ident, 'plain action button')
+            patched += 1
     return bytes(data), patched
 
 
@@ -696,6 +741,99 @@ def make_events_local(emevd: bytes, wanted: set[int],
             struct.pack_into('<q', out, at, struct.unpack_from('<q', out, at)[0] + 1)
     struct.pack_into('<I', out, 0x0C, struct.unpack_from('<I', out, 0x0C)[0] + delta)
     return bytes(out), len(targets)
+
+
+# Kaniel 2026-11-01: as the host levels up at the Doll, the guests take the same pose. Her
+# blessing flag 72100100 reaches every player (the team world's story, the game's flag sync), and
+# m21_00 12100112 then turns each game's own player (10000) to her and kneels. Its animations on
+# the local player now run only while that player's own level-up flag 6700 is on (her talk sets
+# it as her level-up menu opens, bloodborne_flags.h); the event's flags go on as before, so the
+# levelling player's talk still gets its 72100101.
+OWN_ANIMATION_EVENTS = {'m21_00_00_00.emevd.dcx': {12100112: 6700}}
+PLAYER_ANIMATIONS = {(2004, 14), (2003, 18)}
+SKIP_IF_EVENT_FLAG = (1003, 1)
+OFF = 0
+
+
+def guard_own_animations(emevd: bytes, wanted: dict[int, int],
+                         edits: list | None = None) -> tuple[bytes, int]:
+    """Before each animation of the local player in a `wanted` event, "skip 1 if flag F is off"
+    (F: the event's entry in `wanted`)."""
+    data = bytearray(emevd)
+    fields = list(struct.unpack_from('<16q', data, 16))
+    event_count, event_offset = fields[0], fields[1]
+    instruction_count, instruction_offset = fields[2], fields[3]
+    args_offset, args_size = fields[13], fields[12]
+    events = [list(struct.unpack_from('<qqqqqii', data, event_offset + index * 48))
+              for index in range(event_count)]
+    instructions_end = instruction_offset + instruction_count * INSTRUCTION_SIZE
+    table = bytearray(data[instruction_offset:instructions_end])
+    new_args = bytearray()
+    # (event index, the game's instruction numbers to guard), from the last in the table up.
+    plans = []
+    for index, event in enumerate(events):
+        if event[0] not in wanted:
+            continue
+        flag = wanted[event[0]]
+        guard = struct.pack('<BBBxi', 1, OFF, 0, flag)
+        records = [struct.unpack_from('<iiqqq', table, event[2] + k * INSTRUCTION_SIZE)
+                   for k in range(event[1])]
+        args = [bytes(data[args_offset + offset:args_offset + offset + length])
+                for _, _, length, offset, _ in records]
+        guarded = []
+        for k, (bank, ident, length, *_) in enumerate(records):
+            if (bank, ident) not in PLAYER_ANIMATIONS or length < 4:
+                continue
+            if struct.unpack_from('<i', args[k], 0)[0] != LOCAL_PLAYER:
+                continue
+            if k > 0 and (records[k - 1][0], records[k - 1][1]) == SKIP_IF_EVENT_FLAG and \
+                    args[k - 1] == guard:
+                continue  # patched already
+            guarded.append(k)
+        if guarded:
+            plans.append((index, guarded, guard))
+    if not plans:
+        return emevd, 0
+    inserted_total = 0
+    for index, guarded, guard in sorted(plans, key=lambda plan: events[plan[0]][2], reverse=True):
+        event = events[index]
+        offset = args_size + len(new_args)
+        new_args += guard
+        record = struct.pack('<iiqqq', *SKIP_IF_EVENT_FLAG, len(guard), offset, -1)
+        for k in reversed(guarded):
+            at = event[2] + k * INSTRUCTION_SIZE
+            table[at:at] = record
+        for number, k in enumerate(guarded):
+            note_insert(edits, event[0], k, *SKIP_IF_EVENT_FLAG,
+                        "the local player's animation only with its own flag on")
+        added = len(guarded) * INSTRUCTION_SIZE
+        for other in events:
+            if other is not event and other[2] > event[2]:
+                other[2] += added
+        event[1] += len(guarded)
+        # Parameters copy into instructions by number: one further down per guard above.
+        for j in range(event[3]):
+            at = fields[9] + event[4] + j * PARAMETER_SIZE
+            k = struct.unpack_from('<q', data, at)[0]
+            struct.pack_into('<q', data, at, k + sum(1 for g in guarded if g <= k))
+        inserted_total += len(guarded)
+    delta = inserted_total * INSTRUCTION_SIZE
+    out = data[:instruction_offset] + table + data[instructions_end:]
+    for index, event in enumerate(events):
+        struct.pack_into('<qqqqqii', out, event_offset + index * 48, *event)
+    fields[2] += inserted_total
+    for field in SHIFTED_OFFSET_FIELDS:
+        if fields[field] >= instructions_end:
+            fields[field] += delta
+    struct.pack_into('<16q', out, 16, *fields)
+    struct.pack_into('<I', out, 0x0C, struct.unpack_from('<I', out, 0x0C)[0] + delta)
+    return with_new_arguments(out, fields, new_args), inserted_total
+
+
+def note_insert(edits: list | None, event: int, before: int, bank: int, ident: int, why: str):
+    if edits is not None:
+        edits.append({'event': event, 'action': 'insert', 'before': before, 'bank': bank,
+                      'id': ident, 'why': why})
 
 
 SET_EVENT_FLAG = (2003, 2)
@@ -1065,7 +1203,8 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
               'client event ends': 0, 'local events': 0, 'chalice wall checks': 0,
               'item pickup checks': 0, 'host door effects': 0, 'ambush checks': 0,
               'chalice reward checks': 0, 'one-time enemy checks': 0, 'lake dive checks': 0,
-              'ending checks': 0, 'dropped banners': 0}
+              'ending checks': 0, 'dropped banners': 0, 'own animation checks': 0,
+              'plain action buttons': 0, 'arena wall checks': 0}
     try:
         if name.startswith('m'):
             emevd, counts['boss event checks'] = patch_events(emevd, edits)
@@ -1075,6 +1214,9 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
         if name in CLIENT_EVENTS:
             emevd, counts['client event ends'] = patch_client_events(emevd, CLIENT_EVENTS[name],
                                                                      edits)
+        if name in PLAIN_ACTION_BUTTONS:
+            emevd, counts['plain action buttons'] = use_plain_action_buttons(
+                emevd, PLAIN_ACTION_BUTTONS[name], edits)
         if name in ENDING_EVENTS:
             emevd, counts['ending checks'] = let_guests_see_the_endings(emevd,
                                                                         ENDING_EVENTS[name], edits)
@@ -1087,6 +1229,10 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
         if name in CHALICE_WALL_EVENTS:
             emevd, counts['chalice wall checks'] = patch_chalice_walls(
                 emevd, edits, CHALICE_WALL_EVENTS[name])
+        if name in ARENA_WALL_EVENTS:
+            emevd, counts['arena wall checks'] = patch_chalice_walls(
+                emevd, edits, ARENA_WALL_EVENTS[name], (OR_GROUP_1, OR_GROUP_2),
+                'arena wall goes with its boss in a party')
         if name in HOST_DOOR_EFFECT:
             emevd, counts['host door effects'] = patch_host_door_effect(
                 emevd, edits, HOST_DOOR_EFFECT[name])
@@ -1096,6 +1242,9 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
         if name in CHALICE_REWARD_EVENTS:
             emevd, counts['chalice reward checks'] = patch_chalice_rewards(
                 emevd, edits, CHALICE_REWARD_EVENTS[name])
+        if name in OWN_ANIMATION_EVENTS:
+            emevd, counts['own animation checks'] = guard_own_animations(
+                emevd, OWN_ANIMATION_EVENTS[name], edits)
         if name in DROPPED_BANNER_EVENTS:
             emevd, counts['dropped banners'] = drop_banners(emevd, DROPPED_BANNER_EVENTS[name],
                                                             edits)

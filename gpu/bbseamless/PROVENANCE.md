@@ -1,9 +1,10 @@
 # Reference client sources
 
-Updated to [lKaniel/bloodborne-server v1.3.1 at 5d2305e](https://github.com/lKaniel/bloodborne-server/tree/5d2305ee611ef1e03be39ff925f0da75c9a70393)
-from the original 8d5e54f import. Local Mac adapters and durable invasion rewards are retained.
-The v1.3.1 friends/open-team work also credits **Amanises**; lamp reset credits **Provi**, as
-retained in the original sources. See [the integration record](../../docs/SEAMLESS_V1_3_1.md).
+Updated to [Amanises-Yharnam-Together/BBSC-Yharnam-Together v1.4.0 at efa0ad2](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/tree/efa0ad265d840d9195e55db2e3216f46f7daedd0)
+from v1.3.1 and the original 8d5e54f import. Local Mac adapters, durable invasion rewards
+and the Travel Together lock fix are retained. This release credits Kaniel / lKaniel,
+Amanises and the Yharnam Together contributors, with original per-file notices preserved.
+See [the integration record](../../docs/SEAMLESS_V1_4_0.md).
 Original co-op client author: **Kaniel / lKaniel**
 ([GitHub](https://github.com/lKaniel)). The Mac overlay/Metal foundation and original
 `tests/test_mtl_overlay.mm` harness are by **Mark Hall**, as credited in their retained

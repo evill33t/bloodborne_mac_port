@@ -48,12 +48,13 @@ int main() {
         record->r={BBGPU_REC_COOP_UI,sizeof(*record)};auto& s=record->view;
         s.version=BB_COOP_UI_VERSION;s.enabled=1;s.has_panel=1;s.lobby.signed_in=1;
         s.lobby.in_team=1;s.lobby.in_hunt=1;s.lobby.playing=1;s.lobby.menu=1;s.lobby.leader=1;
-        s.lobby.member_count=4;s.panel.member_count=4;s.panel.revive_target=-1;
+        s.lobby.member_count=5;s.lobby.team_size=5;s.panel.member_count=4;s.panel.revive_target=-1;
         std::snprintf(s.lobby.me,sizeof(s.lobby.me),"hunter-0");
-        const char* names[]={"A very long hunter name","Viktoria","Искатель","Companion elsewhere"};
-        for(int i=0;i<4;++i) {
+        const char* names[]={"A very long hunter name","Viktoria","Искатель","Companion elsewhere","Fifth hunter"};
+        for(int i=0;i<5;++i) {
             auto& member=s.lobby.members[i];std::snprintf(member.name,sizeof(member.name),"%s",names[i]);
             std::snprintf(member.id,sizeof(member.id),"hunter-%d",i);member.state=BBCOOP_LOBBY_PLAYING;member.ready=1;
+            if(i==4) continue;
             auto& p=s.panel.members[i];std::snprintf(p.name,sizeof(p.name),"%s",names[i]);std::snprintf(p.board,sizeof(p.board),"%s",member.id);
             p.vital=i==1?BBCOOP_VITAL_DOWN:i==2?BBCOOP_VITAL_DEAD:BBCOOP_VITAL_UP;
             p.here=i!=3;p.hp=300;p.hp_max=594;p.landed=30;p.needed=100;p.vials=12;p.bullets=9;
@@ -63,8 +64,8 @@ int main() {
             auto* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:width height:height mipmapped:NO];
             desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
             auto texture=[mtl newTextureWithDescriptor:desc];
-            for(int mode=0;mode<9;++mode) {
-                s.map_screen=mode>=5;s.has_map=mode>=5;s.map.map=0x18010000;s.map.has_me=1;s.map.y=10;
+            for(int mode=0;mode<10;++mode) {
+                s.map_screen=mode>=5 && mode<9;s.has_map=s.map_screen;s.map.map=0x18010000;s.map.has_me=1;s.map.y=10;
                 s.area_count=2;s.areas[0].map=0x18010000;s.areas[1].map=0x15000000;
                 std::snprintf(s.areas[0].name,64,"Yharnam");std::snprintf(s.areas[1].name,64,"Hunter's Dream");
                 s.label_count=1;s.labels[0].id=19;std::snprintf(s.labels[0].name,96,"Iosefka's Clinic");
@@ -76,8 +77,11 @@ int main() {
                 s.panel.members[0].landed=0; // a fresh downed companion must not leave a draw path
                 std::snprintf(s.trade_question,sizeof(s.trade_question),"Give 10 Blood Echoes to Viktoria?");
                 s.panel.vital=mode==1?BBCOOP_VITAL_DOWN:BBCOOP_VITAL_UP;s.panel.landed=45;s.panel.needed=100;
-                s.load.count=4;
-                for(int i=0;i<4;++i) {std::snprintf(s.load.rows[i].name,sizeof(s.load.rows[i].name),"%s",names[i]);s.load.rows[i].percent=25*(i+1);s.load.rows[i].stage=i==3?BBCOOP_LOAD_READY:BBCOOP_LOAD_LOADING;}
+                s.duel_id=mode==9?123:0;s.duel_ask_teams=mode==9;s.duel_ask_team=2;
+                std::snprintf(s.duel_name,sizeof(s.duel_name),"Viktoria");
+                for(int i=0;i<3;++i) std::snprintf(s.duel_team_names[i],256,"%s, %s",names[i],names[(i+1)%5]);
+                s.load.count=5;
+                for(int i=0;i<5;++i) {std::snprintf(s.load.rows[i].name,sizeof(s.load.rows[i].name),"%s",names[i]);s.load.rows[i].percent=25*(i+1);s.load.rows[i].stage=i==3?BBCOOP_LOAD_READY:BBCOOP_LOAD_LOADING;}
                 BbCoopOverlay::Dispatch(&record->r);
                 assert(BbCoopOverlay::CapturesInput()==(mode==0 || mode==2 || mode==3 || mode>=5));
                 for(int frame=0;frame<4;++frame) {

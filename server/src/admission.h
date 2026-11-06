@@ -132,9 +132,21 @@ private:
 // The zero bits a new account's work needs (coop/link_auth.h): the base, and 2 more for every
 // doubling of the accounts made in the last minute over a baseline (a botnet of many addresses
 // stays within each address's limit), never more than the cap.
+// New accounts a minute at the base work: a launch rush is real players (60 had 300 joins pay
+// twice the bits); past it the work still rises, up to its maximum.
+constexpr int DefaultSignupsPerMinute = 300;
+
+// The link's socket buffers (link_server.cpp), and whether the system kept them far smaller
+// (net.core.rmem_max): a burst past a small one is lost before the link thread sees it.
+constexpr int LinkSocketBytes = 16 << 20;
+inline bool LinkBufferShort(int got_bytes) {
+    return got_bytes < LinkSocketBytes;
+}
+
 class SignupWork {
 public:
-    SignupWork(int base_bits = 20, int max_bits = 20, int baseline_per_minute = 60)
+    SignupWork(int base_bits = 20, int max_bits = 20,
+               int baseline_per_minute = DefaultSignupsPerMinute)
         : base_bits{base_bits}, max_bits{std::max(base_bits, max_bits)},
           baseline{std::max(1, baseline_per_minute)} {}
 

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string>
 #include "common/types.h"
+#include "core/env_text.h"
 
 struct User {
     s32 user_id = -1;
@@ -30,10 +31,7 @@ public:
     static constexpr s32 RuntimeUserId = 1; // runtime_services.c USER_ID
 
     UserManager() {
-        const auto text = [](const char* name, const char* fallback) {
-            const char* value = std::getenv(name);
-            return std::string{value && value[0] ? value : fallback};
-        };
+        const auto text = BbEnv::Text;
         user.user_id = RuntimeUserId;
         user.user_name = text("BB_USER_NAME", "Hunter");
         user.player_index = 1;

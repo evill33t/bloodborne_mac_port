@@ -17,6 +17,7 @@ static void Exit(void*) {std::_Exit(7);}
 static int Mapped(uintptr_t,uint64_t) {return 0;}
 static void Attach(const char*) {}
 static int Protection(uintptr_t,uintptr_t*,uintptr_t*,uint32_t*) {return 0;}
+static const uint64_t* Generation() {static uint64_t value=2;return &value;}
 static void Publish(const BbCoopUi*) {}
 static int Command(BbCoopCommand*) {return 0;}
 static int Model(uint8_t*,uint32_t) {return 0;}
@@ -35,12 +36,14 @@ int main(int argc,char** argv) {
     host.net.app0="/nonexistent";host.net.serial="CUSA03173";host.net.title="Bloodborne";host.net.app_ver="01.09";
     host.net.thread_spawn=Spawn;host.net.thread_join=Join;host.net.thread_exit=Exit;host.net.memory_is_mapped=Mapped;
     host.thread_attach=Attach;host.memory_protection=Protection;host.publish_ui=Publish;host.next_command=Command;
+    host.memory_generation=Generation;
     host.take_portrait=Model;host.user_dir=user.c_str();
     host.reward_lookup=[](const char*,uint64_t,const void*,size_t,int){return 0;};
     host.reward_begin=host.reward_lookup;
     host.reward_arm=[](uint64_t,int){return 0;};
     host.reward_disarm=[](uint64_t){return 0;};host.reward_cancel=host.reward_disarm;
     assert(init(nullptr)==-1);host.abi=0;assert(init(&host)==-1);host.abi=BBSEAMLESS_ABI_VERSION;
+    host.memory_generation=nullptr;assert(init(&host)==-1);host.memory_generation=Generation;
     assert(init(&host)==0);assert(resolve("Nlev7Lg8k3A#libSceNet#libSceNet")!=0);
     assert(std::strcmp(std::getenv("BB_SHADNET_WEBAPI"),custom?"http://different.example:31315":BBSEAMLESS_DEFAULT_WEBAPI)==0);
     if(custom) assert(!std::getenv("BB_SHADNET_SERVER_KEY"));

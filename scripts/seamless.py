@@ -15,17 +15,25 @@ import re
 import secrets
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 HOST = 'bloodborne.phobos.services'
 PIN = '1562e07491a27d6c7aea2ed37364b8839a4a924886afae1ff6eae5c483ea3424'
+COOP_RELEASE = '1.4.0'
+GLOBAL_HOST = 'seamlesshunt.com'
+GLOBAL_PIN = 'e55f4f13d3845aa4eddeb0e12a9d143cb5f68af0a71e0dba111c688a1014c958'
+GLOBAL_SERVICE = 'bbport-seamless-global'
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def server(value):
     value = value or f'{HOST}:31314'
+    if value.rstrip('/').lower() == 'https://seamlesshunt.com':
+        value = GLOBAL_HOST
     if ':' not in value:
         value += ':31314'
     parsed = urlsplit('//' + value)
@@ -68,13 +76,46 @@ def ini_values(path):
     return values
 
 
+def global_identity(env, settings):
+    account = env.get('BB_SEAMLESS_GLOBAL_ID') or settings.get('seamless_global_account', '')
+    explicit = env.get('BB_SHADNET_NPID')
+    if explicit:
+        if account and account != explicit:
+            raise ValueError('The Global account and supplied game account differ.')
+        account = explicit
+    if not re.fullmatch(r'u[0-9a-f]{14}', account):
+        raise ValueError('Sign in to seamlesshunt.com in the launcher’s Online page first.')
+    secret = env.get('BB_SHADNET_PASSWORD')
+    if not secret:
+        result = subprocess.run([env.get('BB_KEYCHAIN_TOOL', '/usr/bin/security'),
+                                 'find-generic-password', '-s', GLOBAL_SERVICE,
+                                 '-a', f'{GLOBAL_HOST}:{account}', '-w'],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        secret = result.stdout.strip() if result.returncode == 0 else ''
+    if not re.fullmatch(r'[0-9a-f]{32}', secret or ''):
+        raise ValueError('The Global session is missing from Keychain. Sign in again in Online settings.')
+    issued = int(secret[:8], 16)
+    if issued > time.time() + 300 or time.time() - issued >= 29 * 24 * 3600:
+        raise ValueError('The Global session has expired. Sign in again in Online settings.')
+    return account, secret
+
+
 def launch_environment(environ, data):
     env = dict(environ)
-    host, port = server(env.get('BB_SHADNET_SERVER'))
-    endpoint = f'{host}:{port}'
-    namespace = hashlib.sha256(endpoint.encode()).hexdigest()[:20]
-    seed = Path(env.get('BB_SAVE_DIR') or data / 'user' / 'savedata').expanduser().resolve()
     settings = ini_values(Path(env.get('BB_CONFIG', data / 'bbport.ini')))
+    public = env.get('BB_SEAMLESS_HOST', settings.get('seamless_host', 'local')) == 'global'
+    supplied = env.get('BB_SHADNET_SERVER', settings.get('seamless_server'))
+    host, port = server(GLOBAL_HOST if public else supplied)
+    public = public or host == GLOBAL_HOST
+    endpoint = f'{host}:{port}'
+    if public:
+        if port != 31314:
+            raise ValueError('seamlesshunt.com uses UDP port 31314.')
+        account, secret = global_identity(env, settings)
+        env.update(BB_SHADNET_NPID=account, BB_SHADNET_PASSWORD=secret)
+    scope = endpoint + ('\0' + account if public else '')
+    namespace = hashlib.sha256(scope.encode()).hexdigest()[:20]
+    seed = Path(env.get('BB_SAVE_DIR') or data / 'user' / 'savedata').expanduser().resolve()
     if bool(env.get('BB_SHADNET_NPID')) != bool(env.get('BB_SHADNET_PASSWORD')):
         raise ValueError('Set both BB_SHADNET_NPID and BB_SHADNET_PASSWORD, or leave both unset for a persistent automatic identity.')
     if not env.get('BB_SHADNET_NPID'):
@@ -120,18 +161,30 @@ def launch_environment(environ, data):
                BB_FPS_PRESET='60', BB_PARTY_HUD='0', BB_UPNP='0', SHADPS4_BLOODBORNE_SEAMLESS_COOP='1',
                SHADPS4_BLOODBORNE_RE_TRACE='0', SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(override_path),
                BB_SEAMLESS_PREPARED='1', BB_LOG_FILE=str(user / 'log' / 'seamless.log'))
+    # This is the co-op source/protocol release, separate from the Mac app's version and
+    # its actual source revision. Other build/game-file differences remain visible to peers.
+    env['BB_RELEASE_VERSION'] = COOP_RELEASE
+    env.setdefault('SHADPS4_BLOODBORNE_NO_PHANTOM_GLOW',
+                   '1' if settings.get('seamless_phantom_glow') == '0' else '0')
     env.setdefault('BB_GPU_USER_DIR', str(user))
     if host == HOST and port == 31314:
         env.setdefault('BB_SHADNET_SERVER_KEY', PIN)
+    if public:
+        env['BB_SHADNET_SERVER_KEY'] = GLOBAL_PIN
     # The server relay uses an ephemeral local socket. Legacy p2p_port is kept for the other pools.
     for name in ('SHADPS4_BLOODBORNE_PARTY', 'SHADPS4_BLOODBORNE_PARTY_ROLE'):
         env.pop(name, None)
     rules = settings.get('seamless_host_rules', 'off')
-    if not re.fullmatch(r'off|(?:rot|travel|vote|scale|aggressive|relentless)(?:,(?:rot|travel|vote|scale|aggressive|relentless))*', rules):
+    if not public and not re.fullmatch(r'off|(?:rot|travel|vote|scale|aggressive|relentless)(?:,(?:rot|travel|vote|scale|aggressive|relentless))*', rules):
         raise ValueError('Invalid seamless_host_rules setting.')
-    env.setdefault('SHADPS4_BLOODBORNE_HOST_RULES', rules)
+    if public:
+        # The public server supplies defaults; its leader edits the team rules in game.
+        env.pop('SHADPS4_BLOODBORNE_HOST_RULES', None)
+        env.pop('SHADPS4_BLOODBORNE_HARDER_ENEMIES', None)
+    else:
+        env.setdefault('SHADPS4_BLOODBORNE_HOST_RULES', rules)
     harder = settings.get('seamless_harder_enemies', 'off')
-    if harder != 'off':
+    if harder != 'off' and not public:
         try:
             rates = [float(x) for x in harder.split(',')]
         except ValueError as error:

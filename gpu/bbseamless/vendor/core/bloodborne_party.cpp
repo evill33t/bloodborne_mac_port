@@ -268,6 +268,14 @@ bool StartsTripOnWorldReload(u64 caller_offset, bool trip_active, bool in_party_
     return IsWorldReloadStopRequest(caller_offset) && !trip_active && in_party_session;
 }
 
+bool KeepsSessionAfterWipe(u64 caller_offset, bool in_party_session, s64 since_wipe_ms) {
+    constexpr u64 AfterWipeStopRequestReturn = 0x01380A6A;
+    constexpr u64 AfterWipeLeaveSessionReturn = 0x01393323;
+    return (caller_offset == AfterWipeStopRequestReturn ||
+            caller_offset == AfterWipeLeaveSessionReturn) &&
+           in_party_session && since_wipe_ms < KeepAfterWipeMs;
+}
+
 bool IsWorldReloadStopRequest(u64 caller_offset) {
     constexpr u64 WorldLoadStopRequestReturn = 0x0193C65C;
     return caller_offset == WorldLoadStopRequestReturn;
@@ -532,8 +540,8 @@ std::optional<std::string> FindOnlineIdIn(std::span<const u8> bytes,
 }
 
 SessionNameCache::Look SessionNameCache::Lookup(u64 identity,
-                                                std::span<const std::string> online_ids,
-                                                s64 now_ms) const {
+                                                std::span<const std::string> online_ids, s64 now_ms,
+                                                bool fresh) const {
     const auto entry = std::ranges::find(entries, identity, &Entry::identity);
     if (entry == entries.end() || !std::ranges::equal(entry->online_ids, online_ids)) {
         return {};
@@ -542,7 +550,7 @@ SessionNameCache::Look SessionNameCache::Lookup(u64 identity,
         return {Plan::Recheck, *entry->where};
     }
     const s64 wait = std::min(MissRetryMs << std::min(entry->misses - 1, 3), MissRetryMaxMs);
-    return {now_ms - entry->missed_at < wait ? Plan::StillMissing : Plan::Scan};
+    return {!fresh && now_ms - entry->missed_at < wait ? Plan::StillMissing : Plan::Scan};
 }
 
 void SessionNameCache::Found(u64 identity, std::span<const std::string> online_ids, Block where) {
@@ -592,6 +600,25 @@ void LoadedParamSlots::Found(std::string_view type, u64 slot) {
         return;
     }
     slots.emplace_back(std::string{type}, slot);
+}
+
+UnnamedRecreateHold::Act UnnamedRecreateHold::Tick(bool unnamed, s64 now_ms) {
+    if (!unnamed) {
+        since.reset();
+        gone = false;
+        return Act::Go;
+    }
+    if (gone) {
+        return Act::Go;
+    }
+    if (!since) {
+        since = now_ms;
+    }
+    if (now_ms - *since < UnnamedRecreateWaitMs) {
+        return Act::Wait;
+    }
+    gone = true;
+    return Act::GoUnnamed;
 }
 
 RecreatePlan PlanRecreate(std::span<const std::optional<std::string>> found,
@@ -693,6 +720,15 @@ std::optional<size_t> PickSavedJoinTask(std::span<const SavedJoinTask> saved, s3
 
 bool RebuildsFromSave(const SavedJoinTask& saved) {
     return saved.step > CreateCharacterStep;
+}
+
+bool RebuiltTaskWaits(const SavedJoinTask* saved, s32 kind) {
+    return saved && !RebuildsFromSave(*saved) &&
+           (kind == RemoteHostTask || kind == RemoteGuestTask);
+}
+
+bool TakenOverSyncStalled(bool took_over, s32 matching_state, s32 sync_state) {
+    return took_over && matching_state == MatchingStateHosting && sync_state == 0;
 }
 
 bool HasAllMemberData(u8 parts) {
@@ -1190,6 +1226,11 @@ std::vector<s32> LitHeadstoneLamps(const std::function<bool(s32)>& on) {
     return lit;
 }
 
+FlagChanges WithoutRelitLamps(FlagChanges changes, std::set<s32>& relit) {
+    std::erase_if(changes.set, [&](s32 flag) { return relit.erase(flag) != 0; });
+    return changes;
+}
+
 std::vector<s32> LampsToRelight(const std::set<s32>& kept, std::span<const s32> team,
                                 const std::function<bool(s32)>& on) {
     // The shared lamps only: a chalice map's view lamps are the current altar's (FlagTable).
@@ -1512,6 +1553,13 @@ std::optional<LampLight> LampOfLightRequest(s32 flag) {
 
 bool RefusesLampLight(s32 flag, std::optional<bool> lamp_character_off) {
     return LampOfLightRequest(flag).has_value() && lamp_character_off.value_or(false);
+}
+
+bool TakesDollBlessingStep(s32 flag, bool sent_on, bool own_blessing_on) {
+    if (flag != DollBlessingFlag + 1 && flag != DollBlessingFlag + 2) {
+        return false;
+    }
+    return !sent_on || own_blessing_on;
 }
 
 bool ClearsDollLevelUpFlag(bool party_configured, bool flag_on) {
@@ -1983,6 +2031,49 @@ size_t MemberDepartures::Tick(bool in_session, bool steady, size_t others, s64 n
     known = others;
     fewer_since.reset();
     return left;
+}
+
+bool RecreateAfterRejoin::Tick(bool in_session, size_t others, bool left, s64 now_ms) {
+    if (!in_session) {
+        known = 0;
+        peak = 0;
+        left_ms.reset();
+        back_since.reset();
+        return false;
+    }
+    if (left && !left_ms) {
+        left_ms = now_ms;
+        const size_t recent = now_ms - peak_ms <= RejoinWindowMs ? peak : 0;
+        before = std::max({known, others, recent});
+        back_since.reset();
+    }
+    if (others >= peak || now_ms - peak_ms > RejoinWindowMs) {
+        peak = others;
+        peak_ms = now_ms;
+    }
+    if (!left_ms) {
+        known = others;
+        return false;
+    }
+    if (!back_since && now_ms - *left_ms > RejoinWindowMs) {
+        left_ms.reset(); // gone for good: MemberDepartures' leave, a later join the game's own
+        known = others;
+        return false;
+    }
+    if (before == 0 || others < before) {
+        back_since.reset();
+        return false;
+    }
+    if (!back_since) {
+        back_since = now_ms;
+    }
+    if (now_ms - *back_since < RejoinSettleMs) {
+        return false;
+    }
+    left_ms.reset();
+    back_since.reset();
+    known = others;
+    return true;
 }
 
 void LifecycleResets::Register(std::string name, std::initializer_list<Lifecycle> events,
@@ -3164,6 +3255,25 @@ bool IsParamOfType(std::span<const u8> param, std::string_view type) {
            param[0x0C + type.size()] == 0;
 }
 
+std::optional<s32> RemovePhantomGlow(std::span<u8> sp_effect_vfx_param) {
+    if (!IsParamOfType(sp_effect_vfx_param, "SP_EFFECT_VFX_PARAM_ST")) {
+        return std::nullopt;
+    }
+    const auto row = FindParamRow(sp_effect_vfx_param, PhantomGlowVfxRow);
+    if (!row || *row > sp_effect_vfx_param.size() ||
+        sp_effect_vfx_param.size() - *row < SpEffectVfxMidstSfxOffset + sizeof(s32)) {
+        return std::nullopt;
+    }
+    u8* const field = sp_effect_vfx_param.data() + *row + SpEffectVfxMidstSfxOffset;
+    s32 before = 0;
+    std::memcpy(&before, field, sizeof(before));
+    if (before == NoSfx) {
+        return std::nullopt;
+    }
+    std::memcpy(field, &NoSfx, sizeof(NoSfx));
+    return before;
+}
+
 std::optional<u64> FindParamRow(std::span<const u8> param, s32 id) {
     if (param.size() < 0x40) {
         return std::nullopt;
@@ -3648,10 +3758,10 @@ std::size_t PruneSaveBackups(const fs::path& user_dir, std::size_t kept) {
 
 bool CoopTraceEnabled(const char* setting) {
     if (setting == nullptr) {
-        return true;
+        return false;
     }
     const std::string_view value{setting};
-    return value != "0" && value != "off";
+    return value == "1" || value == "on";
 }
 
 std::optional<std::string> TraceRecord::Field(std::string_view key) const {
@@ -4482,6 +4592,70 @@ std::optional<s32> EnemySyncState(EnemyRole role, s32 state) {
     return wanted != state ? std::optional{wanted} : std::nullopt;
 }
 
+std::vector<EnemyPlace> MovedEnemyPlaces(std::span<const EnemyPlace> now,
+                                         const std::map<u32, std::array<float, 3>>& first_seen) {
+    std::vector<std::pair<float, EnemyPlace>> moved;
+    for (const EnemyPlace& place : now) {
+        const auto seen = first_seen.find(place.handle);
+        if (seen == first_seen.end()) {
+            continue;
+        }
+        const float dx = place.at[0] - seen->second[0];
+        const float dy = place.at[1] - seen->second[1];
+        const float dz = place.at[2] - seen->second[2];
+        const float far = dx * dx + dy * dy + dz * dz;
+        if (far > EnemyPlaceMovedMeters * EnemyPlaceMovedMeters || place.fighting) {
+            moved.emplace_back(far, place);
+        }
+    }
+    std::ranges::stable_sort(moved, std::ranges::greater{}, &std::pair<float, EnemyPlace>::first);
+    std::vector<EnemyPlace> out;
+    for (const auto& [far, place] : moved) {
+        if (out.size() == EnemyPlacesMost) {
+            break;
+        }
+        out.push_back(place);
+    }
+    return out;
+}
+
+std::optional<size_t> NearestStandingPlayer(const std::array<float, 3>& enemy,
+                                            std::span<const PlayerSpot> players) {
+    std::optional<size_t> nearest;
+    float best = EnemyTargetRangeMeters * EnemyTargetRangeMeters;
+    for (size_t index = 0; index < players.size(); ++index) {
+        const float dx = players[index].at[0] - enemy[0];
+        const float dy = players[index].at[1] - enemy[1];
+        const float dz = players[index].at[2] - enemy[2];
+        const float far = dx * dx + dy * dy + dz * dz;
+        if (players[index].standing && far < best) {
+            best = far;
+            nearest = index;
+        }
+    }
+    return nearest;
+}
+
+void EnemyPlacesBook::Heard(u32 map, std::vector<EnemyPlace> places, s64 now_ms) {
+    by_map[map] = {std::move(places), now_ms};
+}
+
+std::vector<EnemyPlace> EnemyPlacesBook::Take(u32 map, s64 now_ms) const {
+    const auto heard = by_map.find(map);
+    if (heard == by_map.end() || now_ms - heard->second.at_ms >= EnemyPlacesFreshMs) {
+        return {};
+    }
+    return heard->second.places;
+}
+
+void EnemyPlacesBook::Drop(u32 map) {
+    by_map.erase(map);
+}
+
+void EnemyPlacesBook::Clear() {
+    by_map.clear();
+}
+
 std::optional<s32> EnemyHitState(EnemyRole role, s32 state) {
     if (role == EnemyRole::Follower && state == MatchingStateHosting) {
         return MatchingStateSummonedGuest;
@@ -4504,6 +4678,33 @@ std::optional<s32> HitNewsHp(EnemyRole role, s32 current, s32 copy_max, s32 hp, 
     const s64 scaled = (s64{hp} * copy_max + max - 1) / max;
     const s32 target = static_cast<s32>(std::clamp<s64>(scaled, 0, copy_max));
     return target < current ? std::optional<s32>{target} : std::nullopt;
+}
+
+void OwnerHitCatchUp::Heard(u32 handle, s32 hp, s32 max, s64 now_ms) {
+    constexpr size_t MostWaiting = 256;
+    if (const auto it = waiting.find(handle); it != waiting.end()) {
+        it->second.hp = hp; // the newer HP, on the first hit's clock
+        it->second.max = max;
+    } else if (waiting.size() < MostWaiting) {
+        waiting.emplace(handle, Waiting{hp, max, now_ms});
+    }
+}
+
+std::vector<OwnerHitCatchUp::Hit> OwnerHitCatchUp::Take(s64 now_ms) {
+    std::vector<Hit> due;
+    for (auto it = waiting.begin(); it != waiting.end();) {
+        if (now_ms - it->second.heard_ms < OwnerHitWaitMs) {
+            ++it;
+            continue;
+        }
+        due.push_back({it->first, it->second.hp, it->second.max});
+        it = waiting.erase(it);
+    }
+    return due;
+}
+
+void OwnerHitCatchUp::Clear() {
+    waiting.clear();
 }
 
 bool TakesOverEnemyHp(const EnemyOwnerEntry& owner) {
@@ -4710,8 +4911,8 @@ std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
     }
     std::vector<u32> back;
     for (const DeadCopy& copy : dead_here) {
-        if (alive_at_host.contains(copy.handle) && !party_kills.contains(copy.handle) &&
-            now_ms - copy.dead_since_ms >= BringBackAfterMs) {
+        if (!copy.boss && alive_at_host.contains(copy.handle) &&
+            !party_kills.contains(copy.handle) && now_ms - copy.dead_since_ms >= BringBackAfterMs) {
             back.push_back(copy.handle);
         }
     }
@@ -5149,6 +5350,26 @@ std::string DescribeEffectChanges(std::vector<s32> before, std::vector<s32> afte
         text += fmt::format("{}{}{}", text.empty() ? "" : " ", sign, effect);
     }
     return text;
+}
+
+std::optional<std::vector<u32>> ParseAutoplayPath(std::string_view text) {
+    std::vector<u32> path;
+    while (true) {
+        const size_t end = std::min(text.find('>'), text.size());
+        const std::string_view part = text.substr(0, end);
+        u32 offset = 0;
+        const auto [at, error] =
+            std::from_chars(part.data(), part.data() + part.size(), offset, 16);
+        if (part.empty() || error != std::errc{} || at != part.data() + part.size() ||
+            offset > 0x2000) {
+            return std::nullopt;
+        }
+        path.push_back(offset);
+        if (end == text.size()) {
+            return path;
+        }
+        text.remove_prefix(end + 1);
+    }
 }
 
 std::optional<bool> CompareAutoplay(s64 value, std::string_view op, s64 limit) {
@@ -6738,8 +6959,74 @@ DownEnd EndOfDown(bool wiped, bool gave_up, bool revived, s64 board_age_ms, bool
     return board_age_ms >= BoardLostMs ? DownEnd::BoardLost : DownEnd::None;
 }
 
+bool HoldsLiveTarget(std::span<const TargetNodeView> nodes, std::span<const u32> live,
+                     bool memory_counts) {
+    return std::ranges::any_of(nodes, [&](const TargetNodeView& node) {
+        const u8 slot = node.slot & 0x7F;
+        return (slot == TargetSlotCurrent || (memory_counts && slot == TargetSlotMemory)) &&
+               node.kind == 1 && std::ranges::find(live, node.handle) != live.end();
+    });
+}
+
+std::vector<u32> LivePlayerHandlesOf(std::optional<u32> self,
+                                     std::span<const PlayerCopyView> others) {
+    std::vector<u32> handles;
+    for (const PlayerCopyView& other : others) {
+        if (other.hp > 0 && !other.disabled && other.vouched) {
+            handles.push_back(other.handle);
+        }
+    }
+    if (self) {
+        handles.push_back(*self);
+    }
+    return handles;
+}
+
+void TakeoverFights::Start(std::vector<u32> fights, s64 now_ms) {
+    handles = std::move(fights);
+    started_ms = now_ms;
+    last_ms.reset();
+}
+
+std::vector<u32> TakeoverFights::Due(s64 now_ms) {
+    if (handles.empty() || now_ms - started_ms >= WindowMs ||
+        (last_ms && now_ms - *last_ms < EveryMs)) {
+        return {};
+    }
+    last_ms = now_ms;
+    return handles;
+}
+
+void OwnerGap::Leave(u32 left_map, std::vector<u32> left_fights, s64 now_ms) {
+    fights = std::move(left_fights);
+    map = left_map;
+    left_ms = now_ms;
+}
+
+std::vector<u32> OwnerGap::Back(u32 back_map, s64 now_ms) {
+    std::vector<u32> back = std::move(fights);
+    fights.clear();
+    if (back_map != map || now_ms - left_ms >= GapMs) {
+        return {};
+    }
+    return back;
+}
+
+std::string EnemyHandlesText(std::span<const u32> handles) {
+    std::string text;
+    for (const u32 handle : handles) {
+        text += fmt::format("{}{:#x}", text.empty() ? "" : " ", handle);
+    }
+    return text.empty() ? "none" : text;
+}
+
+bool ForgetsGoneTargetNode(u8 slot, s32 kind, u32 handle, std::span<const u32> gone) {
+    return ForgetsTargetNode(slot, kind, handle, gone);
+}
+
 bool ForgetsTargetNode(u8 slot, s32 kind, u32 handle, std::span<const u32> downed) {
-    return (slot & 0x7F) == 1 && kind == 1 && std::ranges::find(downed, handle) != downed.end();
+    return (slot & 0x7F) == TargetSlotCurrent && kind == 1 &&
+           std::ranges::find(downed, handle) != downed.end();
 }
 
 std::string TargetCandidateBlock(const TargetCandidate& candidate) {
@@ -6856,6 +7143,10 @@ PartyPanel BuildPartyPanel(std::span<const MemberVitals> board, std::string_view
         });
     }
     return panel;
+}
+
+bool ShowsHiddenCopies(bool in_session, bool board_fresh, bool on_map) {
+    return in_session && (!board_fresh || !on_map);
 }
 
 bool PresenceHides(s64 now_ms, s64 first_seen_ms, s64 unmatched_since_ms) {

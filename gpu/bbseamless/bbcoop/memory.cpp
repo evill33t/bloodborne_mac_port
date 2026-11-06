@@ -22,6 +22,7 @@
 #include "mac_memory.h"
 #endif
 
+extern "C" const uint64_t* runtime_memory_generation(void);
 extern "C" int runtime_memory_protection(uintptr_t address, uintptr_t* start, uintptr_t* end,
                                          uint32_t* prot);
 
@@ -139,7 +140,11 @@ bool MemoryManager::IsValidMapping(VAddr virtual_addr, u64 size) {
     return virtual_addr != 0 && size <= End && virtual_addr <= End - size;
 }
 
-s32 MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* prot) {
+u64 MemoryManager::MappingGeneration() const {
+    return __atomic_load_n(runtime_memory_generation(), __ATOMIC_ACQUIRE);
+}
+
+s32 MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* prot, bool* guest) {
     Region found{};
     uintptr_t first{}, last{};
     u32 guest_prot{};
@@ -150,6 +155,9 @@ s32 MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* pr
     } else {
         std::scoped_lock lock{segments_mutex};
         known = FindIn(segments, addr, found);
+    }
+    if (guest) {
+        *guest = known;
     }
     if (!known && !HostRegion(addr, found)) {
         return -1;

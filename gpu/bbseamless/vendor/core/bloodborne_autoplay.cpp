@@ -131,6 +131,12 @@ void LoadAutoplay() {
     if (path == nullptr || *path == '\0') {
         return;
     }
+#if defined(BB_PRODUCTION) && BB_PRODUCTION
+    // Kaniel 2026-11-04 ("remove cheats in production mode"): the rig's scripts (godmode, teleport,
+    // poke, raise-stat, ...) run in dev builds only.
+    LOG_WARNING(Debug, "Bloodborne autoplay: {} not run (a release build has no autoplay)", path);
+    return;
+#endif
     std::ifstream file(path);
     const std::string text{std::istreambuf_iterator<char>{file}, {}};
     std::scoped_lock lock{autoplay_mutex};
@@ -1526,30 +1532,44 @@ bool AutoplayObject(const AutoplayStep& step) {
 
 // peek <target> <offset>, poke <target> <offset> <value> [1] (hex): a character's u32 (or byte)
 // at an offset, logged or written (reverse engineering on the rig: a field's meaning tried in
-// play).
+// play). The offset may follow pointers: "58>2cc" is +0x2CC of what the character's +0x58 points
+// to (ParseAutoplayPath).
 bool AutoplayPeekOrPoke(const AutoplayStep& step) {
     const std::string& verb = step.command.verb;
     const auto target = ParseAutoplayTarget(step.Arg(0));
     const auto found = target ? FindAutoplayCharacter(*target) : std::nullopt;
-    u32 offset = 0;
+    const auto path = ParseAutoplayPath(step.Arg(1));
     u32 value = 0;
-    const std::string_view offset_text = step.Arg(1);
     const std::string_view value_text = step.Arg(2);
-    std::from_chars(offset_text.data(), offset_text.data() + offset_text.size(), offset, 16);
     std::from_chars(value_text.data(), value_text.data() + value_text.size(), value, 16);
-    if (!found || offset > 0x2000 ||
-        !HasMemoryAccess(found->character + offset, 4, MemoryProt::CpuRead)) {
+    if (!found || !path) {
+        step.failure = !found ? "no such character" : "no such offset";
+        return false;
+    }
+    u64 base = found->character;
+    for (size_t index = 0; index + 1 < path->size(); ++index) {
+        base = HasMemoryAccess(base + (*path)[index], 8, MemoryProt::CpuRead)
+                   ? ReadValue<u64>(base, (*path)[index])
+                   : 0;
+        if (base < 0x10000) {
+            step.failure = "no pointer on the way";
+            return false;
+        }
+    }
+    const u32 offset = path->back();
+    if (!HasMemoryAccess(base + offset, 4, MemoryProt::CpuRead)) {
         step.failure = "no such character";
         return false;
     }
-    const u32 before = ReadValue<u32>(found->character, offset);
+    const u32 before = ReadValue<u32>(base, offset);
     if (verb == "poke" && step.Arg(3) == "1") {
-        WriteValue(found->character, offset, static_cast<u8>(value)); // one byte
+        WriteValue(base, offset, static_cast<u8>(value)); // one byte
     } else if (verb == "poke") {
-        WriteValue(found->character, offset, value);
+        WriteValue(base, offset, value);
     }
-    LOG_INFO(Debug, "Bloodborne autoplay {}: {:#x} +{:#x} = {:#x}{}", verb,
-             ReadValue<u32>(found->character, 0x08), offset, before,
+    LOG_INFO(Debug, "Bloodborne autoplay {}: {:#x} +{} = {:#x}{}", verb,
+             ReadValue<u32>(found->character, 0x08),
+             path->size() == 1 ? fmt::format("{:#x}", offset) : std::string{step.Arg(1)}, before,
              verb == "poke" ? fmt::format(" -> {:#x}", value) : "");
     return true;
 }
@@ -2402,11 +2422,26 @@ bool AutoplayExpectGesture(const AutoplayStep& step) {
 }
 
 // Kaniel 2026-10-25, team duels: duel-propose and duel-cancel (the team screen's buttons),
+// duel-propose-teams <member>=<team>... (its Teams page: 1-3, those named only),
 // duel-answer <yes|no> [<timeout>] (the question's box, once it is asked), wait-duel <part>
 // [<timeout>] (this player's part: none, asked, answered, countdown, fighting or out),
 // duel-strike (below).
 bool AutoplayDuelPropose(const AutoplayStep&) {
     ProposeDuel();
+    return true;
+}
+
+bool AutoplayDuelProposeTeams(const AutoplayStep& step) {
+    std::vector<std::pair<std::string, u32>> picks;
+    for (const std::string& pick : step.command.args) {
+        const std::size_t equals = pick.find('=');
+        if (equals == std::string::npos || equals + 1 >= pick.size()) {
+            step.failure = fmt::format("bad pick {}", pick);
+            return false;
+        }
+        picks.emplace_back(pick.substr(0, equals), static_cast<u32>(pick[equals + 1] - '0'));
+    }
+    ProposeDuel(std::move(picks));
     return true;
 }
 
@@ -2501,6 +2536,7 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"talk-gesture", AutoplayTalkGesture},
     {"expect-gesture", AutoplayExpectGesture},
     {"duel-propose", AutoplayDuelPropose},
+    {"duel-propose-teams", AutoplayDuelProposeTeams},
     {"duel-cancel", AutoplayDuelCancel},
     {"duel-answer", AutoplayDuelAnswer},
     {"wait-duel", AutoplayWaitDuel},
@@ -2558,6 +2594,14 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"team-back", AutoplayTeamVerb},
     {"team-wait", AutoplayTeamVerb},
     {"team-leave", AutoplayTeamVerb},
+    {"team-open", AutoplayTeamVerb},
+    {"team-rules", AutoplayTeamVerb},
+    {"team-wait-rules", AutoplayTeamVerb},
+    {"team-join-open", AutoplayTeamVerb},
+    {"team-wait-open", AutoplayTeamVerb},
+    {"team-code-share", AutoplayTeamVerb},
+    {"team-join-code", AutoplayTeamVerb},
+    {"team-quick", AutoplayTeamVerb},
     {"team-screen", AutoplayTeamVerb},
     {"team-ready", AutoplayTeamVerb},
     {"team-start", AutoplayTeamVerb},

@@ -135,15 +135,39 @@ void Command(const BbCoopCommand& c) {
         if(trades.size()<16) trades.push_back(c);break;
     case BB_COOP_TRAVEL_ANSWER: bbcoop_team_travel_answer(c.value!=0);break;
     case BB_COOP_DUEL_PROPOSE: bbcoop_duel_propose();break;
+    case BB_COOP_DUEL_TEAMS: {
+        bbcoop_duel_candidate current[BBCOOP_DUEL_CANDIDATES]{}, selected[BBCOOP_DUEL_CANDIDATES]{};
+        int teams[BBCOOP_DUEL_CANDIDATES]{};
+        const int count=std::clamp(bbcoop_duel_candidates(current,BBCOOP_DUEL_CANDIDATES),0,int(BBCOOP_DUEL_CANDIDATES));
+        if(c.duel_count<2 || c.duel_count>BBCOOP_DUEL_CANDIDATES) break;
+        bool valid=true;
+        for(unsigned i=0;i<c.duel_count;++i) {
+            const auto found=std::find_if(current,current+count,[&](const auto& x) {
+                return !std::strncmp(x.member,c.duel_members[i],sizeof(x.member));
+            });
+            if(found==current+count || c.duel_teams[i]<0 || c.duel_teams[i]>3) {valid=false;break;}
+            selected[i]=*found;teams[i]=c.duel_teams[i];
+        }
+        if(valid) bbcoop_duel_propose_teams(selected,teams,static_cast<int>(c.duel_count));
+        else Notice("The hunters changed. Open the duel setup again.");
+        break;
+    }
     case BB_COOP_DUEL_CANCEL: bbcoop_duel_cancel();break;
     case BB_COOP_DUEL_ANSWER: bbcoop_duel_answer(static_cast<uint32_t>(c.id),c.value!=0);break;
     case BB_COOP_INVASION: bbcoop_invade(c.value!=0);break;
     case BB_COOP_ALLOW_INVADERS: bbcoop_team_allow_invaders(c.value!=0);break;
-    case BB_COOP_CAMERA: bbcoop_free_camera_toggle();break;
+    case BB_COOP_CAMERA:
+#if !BB_PRODUCTION
+        bbcoop_free_camera_toggle();
+#endif
+        break;
     case BB_COOP_PINGS: bbcoop_set_team_pings(c.value!=0);break;
     case BB_COOP_MAP_AREA: explored_map=c.map;break;
     case BB_COOP_PREFERENCES:
-        bbcoop_set_free_camera((c.value&1)!=0);bbcoop_set_team_pings((c.value&2)!=0);
+#if !BB_PRODUCTION
+        bbcoop_set_free_camera((c.value&1)!=0);
+#endif
+        bbcoop_set_team_pings((c.value&2)!=0);
         language=static_cast<BbLanguage::MenuLanguage>(std::clamp<int>(c.kind,0,BbLanguage::MenuLanguageCount-1));break;
     default: break;
     }
@@ -231,9 +255,9 @@ extern "C" void bbseamless_frame(uint32_t* buttons,uint8_t sticks[4],uint8_t* l2
     bbcoop_duel_ask(&view.duel_id,view.duel_name,sizeof(view.duel_name));
     view.skip_want=view.skip_watching=0;
     bbcoop_cutscene_vote(&view.skip_want,&view.skip_watching);
-    view.camera_on=bbcoop_free_camera_on();
+    view.production=BB_PRODUCTION;view.camera_on=bbcoop_free_camera_on();
     view.want_portrait=bbcoop_portrait_offscreen_wanted();view.portrait_count=0;
-    for(int i=0;i<std::clamp(view.lobby.member_count,0,4);++i) {
+    for(int i=0;i<std::clamp<int>(view.lobby.member_count,0,BBCOOP_LOBBY_TEAM) && view.portrait_count<int(std::size(view.portraits));++i) {
         const auto& member=view.lobby.members[i];
         if(!std::strcmp(member.id,view.lobby.me)) continue;
         auto& portrait=view.portraits[view.portrait_count];
@@ -241,10 +265,14 @@ extern "C" void bbseamless_frame(uint32_t* buttons,uint8_t sticks[4],uint8_t* l2
             std::snprintf(portrait.board,sizeof(portrait.board),"%s",member.id);++view.portrait_count;
         }
     }
-    int kind=0;char name[40];
-    if(bbcoop_duel_notice(&kind,name,sizeof(name))) {
-        const char* reasons[]={"busy","nobody nearby","declined","cancelled","left","moved away"};
-        char text[128];std::snprintf(text,sizeof(text),"Duel: %s %s",name,reasons[std::clamp(kind,0,5)]);Notice(text);
+    view.duel_candidate_count=bbcoop_duel_candidates(view.duel_candidates,BBCOOP_DUEL_CANDIDATES);
+    view.duel_ask_team=0;std::memset(view.duel_team_names,0,sizeof(view.duel_team_names));
+    view.duel_ask_teams=view.duel_id && bbcoop_duel_ask_teams(view.duel_id,&view.duel_ask_team,view.duel_team_names);
+    int kind=0,team=0;char name[40];
+    if(bbcoop_duel_notice(&kind,&team,name,sizeof(name))) {
+        const char* reasons[]={"busy","nobody nearby","declined","cancelled","left","moved away","needs two teams","team won"};
+        const char* team_names[]={"","Yharnamites","Hunters","Great Ones"};
+        char text[128];std::snprintf(text,sizeof(text),"Duel: %s %s",kind==BBCOOP_DUEL_NOTICE_TEAM_WON?team_names[std::clamp(team,0,3)]:name,reasons[std::clamp(kind,0,7)]);Notice(text);
     }
     std::snprintf(view.notice,sizeof(view.notice),"%s",now<notice_until?notice.c_str():"");
     view.trade_on=bbcoop_trade_on();

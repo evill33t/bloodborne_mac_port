@@ -1122,7 +1122,7 @@ static void RebuildJoinTask(u64 manager, u64 member_id, s32 kind, const SavedJoi
     using Construct = void PS4_SYSV_ABI (*)(u64 task, u64 member_id, s32 kind);
     reinterpret_cast<Construct>(image_base + JoinTaskConstructOffset)(task, member_id, kind);
     // A member still joining when the trip began: back at its step, waiting for its data.
-    const bool waiting = saved && !RebuildsFromSave(*saved);
+    const bool waiting = RebuiltTaskWaits(saved, kind);
     if (saved) {
         WriteValue(task, 0xEC, saved->slot);
     }
@@ -1270,7 +1270,8 @@ bool HostHasRoomForMore() {
 // object it points to, holds its online id (see FindOnlineIdIn). Where it was found is read again
 // next time, a full scan only when that block lost it (SessionNameCache).
 std::optional<std::string> SessionMemberBoardName(u64 member,
-                                                  const std::vector<std::string>& online_ids) {
+                                                  const std::vector<std::string>& online_ids,
+                                                  bool fresh) {
     std::optional<SessionNameCache::Block> where;
     const auto scan = [&](u64 address, u64 size) -> std::optional<std::string> {
         if (address < 0x10000 || !HasMemoryAccess(address, size, MemoryProt::CpuRead)) {
@@ -1303,7 +1304,7 @@ std::optional<std::string> SessionMemberBoardName(u64 member,
     static SessionNameCache cache;
     std::scoped_lock lock{cache_mutex};
     const s64 now_ms = SteadyMilliseconds();
-    switch (const SessionNameCache::Look look = cache.Lookup(identity, online_ids, now_ms);
+    switch (const SessionNameCache::Look look = cache.Lookup(identity, online_ids, now_ms, fresh);
             look.plan) {
     case SessionNameCache::Plan::StillMissing:
         return std::nullopt;

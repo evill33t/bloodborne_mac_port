@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadNet Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bloodborne_reports.h"
+#include "webapi_routes_password.h"
 #include "webapi_server.h"
 
 #include <QDebug>
@@ -80,6 +81,23 @@ void WebApiServer::RegisterRoutes() {
         RegisterReportRoutes(*m_http, *m_db, QStringLiteral("reports"));
     } else if (hosted.reports) {
         RegisterReportRoutes(*m_http, *m_db, QStringLiteral("reports"), 8ll * 1024 * 1024);
+    }
+
+    // Global servers' accounts (SignIn=password, the default), from launchers, so the gate is not
+    // asked either. A kill reaches the region's other shards by the heartbeat.
+    const SignInConfig sign_in = m_config->GetSignIn();
+    SharedState* shared = m_shared;
+    const auto revoked = [shared](const QString& id, qint64 at) { shared->Revoked(id, at); };
+    if (hosted.enabled && sign_in.passwords && !m_shared->accountsKey.isEmpty()) {
+        WebApiRoutes::PasswordRoutes routes;
+        routes.key = m_shared->accountsKey;
+        routes.config = sign_in;
+        routes.workBits = hosted.signupWorkBits;
+        routes.signupsPerHour = hosted.newAccountsPerHour;
+        routes.revoked = revoked;
+        WebApiRoutes::RegisterPasswordRoutes(*m_http, *m_db, routes, this);
+        qInfo().noquote() << "WebAPI: accounts with a password are on"
+                          << (sign_in.home ? "(their home)" : "(their home is another shard)");
     }
 
     m_http->setMissingHandler(
