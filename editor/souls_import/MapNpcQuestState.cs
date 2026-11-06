@@ -74,7 +74,10 @@ internal static class MapNpcQuestState {
         int[] griggs=[71010035,71010040,71020067];for(int i=0;i<griggs.Length;i++)flags.Add(griggs[i],52411167+i);
         int[] oswald=[11010581,71800057,11016111,71800058];for(int i=0;i<oswald.Length;i++)flags.Add(oswald[i],52411170+i);
         flags.Add(71010000,52411174); // Andre introduction completed.
-        flags.Add(11017140,52411175); // Andre's one-stock Crest of Artorias.
+        // Shop stock is a numeric counter, not a Boolean. The old52411175
+        // overlapped the following gate/Thorolund flags and appeared sold out.
+        // Keep that old bit unused; reserve52411400..431 for the counter.
+        flags.Add(11017140,52411400); // Andre's one-stock Crest of Artorias.
         flags.Add(11200100,52411176); // Garden Crest gate opened.
         flags.Add(11200101,52411177); // Sif approach gate opened.
         int[] thorolund=[11020560,11020692,11020693,11300005,71020080,71310023,71310024,71310025,11026109,71310032,71310033,11026110];

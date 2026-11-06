@@ -62,6 +62,10 @@ for native tests; test-only observer/placement controls are separate artifacts.
   is bounded to 0.87% linear colour error. Native highlight shape and incident
   lighting remain approximations. Catacombs ladders retain ten authored endpoint
   sets; the exit ladder is registered only after Pinwheel's defeat.
+- Andre's finite Crest stock uses a separate persistent counter reservation.
+  The earlier counter overlapped gate and Thorolund Boolean flags, so quest
+  progress could make the shop appear sold out. Existing gate and NPC flag
+  identities stay unchanged; an already-owned Crest remains capped at one.
 - Catacombs environment: separate indoor/outdoor fog, source material gains,
   animated insect overlays through native texture scrolling. Explicit texture
   references between source object archives are resolved with bounded traversal,

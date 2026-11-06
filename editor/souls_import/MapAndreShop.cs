@@ -5,6 +5,7 @@ using SoulsFormats;
 // This does not enable smithing, repair, reinforcement or Ember services.
 internal static class MapAndreShop {
     internal const int Shop=90022000,Good=902002;
+    internal static readonly int[] StockCounterFlags=Enumerable.Range(52411400,32).ToArray();
     internal sealed record Result(int SourceRow,int SourceGood,int NativeRow,int NativeGood,int Price,int Quantity,int SourceStockFlag,int NativeStockFlag,int Locales);
     static string Leaf(string p)=>p.Replace('\\','/').Split('/').Last();
     static void Need(bool b,string why){if(!b)throw new InvalidDataException("Andre Crest shop: "+why);}
@@ -28,7 +29,9 @@ internal static class MapAndreShop {
         var shopDonor=shops.Rows.Single(r=>r.ID==100000);var data=ImportParam.Payload(shopDonor);
         Need(BitConverter.ToInt32(data)==1000&&BitConverter.ToInt32(data,4)==180&&BitConverter.ToInt32(data,8)==-1&&BitConverter.ToInt32(data,12)==-1&&BitConverter.ToInt16(data,20)==-1&&data[22]==0&&data[23]==3&&BitConverter.ToInt16(data,24)==-1,"native Blood Echo goods shop ABI changed");
         var finite=ImportParam.Payload(shops.Rows.Single(r=>r.ID==100607));Need(BitConverter.ToInt16(finite,20)==1&&BitConverter.ToInt32(finite,12)==70009250,"native finite-stock precedent changed");
-        int flag=MapNpcQuestState.Flag(11017140);Need(shops.Rows.All(r=>BitConverter.ToInt32(ImportParam.Payload(r),12)!=flag),"owned stock flag occupied");
+        int flag=MapNpcQuestState.Flag(11017140);Need(flag==StockCounterFlags[0]&&MapNpcQuestState.Flags.Values.Where(f=>f!=flag).All(f=>!StockCounterFlags.Contains(f)),"stock counter overlaps quest flags");
+        MapQuestState.VerifyReservations(nativeRoot,StockCounterFlags);
+        Need(shops.Rows.All(r=>{int other=BitConverter.ToInt32(ImportParam.Payload(r),12);return other<0||(long)other+31<flag||other>StockCounterFlags[^1];}),"owned stock counter range occupied");
         string bbDefs=Path.GetFullPath(Path.Combine(definitions,"../../BB/Defs"));var goodsDef=PARAMDEF.XmlDeserialize(Path.Combine(bbDefs,"EquipParamGoods.xml"));var typed=PARAM.Read(Entry("EquipParamGoods").Bytes);typed.ApplyParamdef(goodsDef);
         var key=new PARAM.Row(typed.Rows.Single(r=>r.ID==4000)){ID=Good,Name="Imported DS1R good 2002"};key["maxNum"].Value=(short)1;key["isConsume"].Value=(byte)0;typed.Rows.RemoveAll(r=>r.ID==Good);typed.Rows.Add(key);
         var encoded=ImportParam.Read(typed.Write(),"EQUIP_PARAM_GOODS_ST",108,1);var expected=ImportParam.Payload(encoded.Rows.Single(r=>r.ID==Good));var existing=goods.Rows.SingleOrDefault(r=>r.ID==Good);
