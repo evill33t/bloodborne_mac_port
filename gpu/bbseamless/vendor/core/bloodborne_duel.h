@@ -88,6 +88,10 @@ private:
     std::optional<s64> fight_since;
 };
 
+// Kaniel 2026-11-01: the team (1-3) that won a teams' duel `state` says is over, for a duelist who
+// fought in it (out or standing); nothing for anyone else or any other end.
+std::optional<u32> DuelTeamWon(const bbcoop::DuelState& state, std::string_view self);
+
 // Kaniel 2026-10-25: the countdown as the screen shows it: the number (3, 2, 1), the bar's fill
 // (0 to 1 as the fight comes), then the fight's start for DuelFightShownMs.
 constexpr s64 DuelFightShownMs = 1'200;
@@ -151,11 +155,29 @@ struct DuelView {
     bool may_cancel = false;   // in the duel (it is under way)
     u32 fighters = 0;          // duelists still standing
     DuelCountdownShown countdown;
+    // Amanises 2026-10-29: a teams' duel, and this player's team in it (1-3; 0 none).
+    bool teams = false;
+    u32 team = 0;
 };
 DuelView ReadDuel();
-// The team screen's buttons (any thread; the game thread sends them).
-void ProposeDuel();
+// The team screen's buttons (any thread; the game thread sends them). Amanises 2026-10-29:
+// `teams` (board name, team 1-3) for a teams' duel; none: free for all.
+void ProposeDuel(std::vector<std::pair<std::string, u32>> teams = {});
 void CancelDuel();
+// The hunters a duel goes to now: this player first, then the party's others on its map.
+struct DuelCandidate {
+    std::string member; // board name (what the server knows it by)
+    std::string name;   // character name
+    bool self = false;
+};
+std::vector<DuelCandidate> DuelCandidates();
+// A teams' question's teams as the asked player reads them: the character names on each team
+// (1-3 at [0]-[2]) and this player's. Nothing for a free for all.
+struct DuelAskTeams {
+    u32 mine = 0;
+    std::array<std::vector<std::string>, 3> names;
+};
+std::optional<DuelAskTeams> DuelAskTeamsOf(u32 duel);
 // The question waiting for this player: the duel and the proposer's character name.
 std::optional<std::pair<u32, std::string>> DuelAsk();
 bool DuelAskOpen(u32 duel);
@@ -168,10 +190,13 @@ enum class DuelNoticeKind {
     Cancelled, // `name` cancelled it
     Left,      // `name`'s game went
     Moved,     // `name` left the duel's map
+    OneTeam,   // a teams' duel: those who said yes are all of one team
+    TeamWon,   // a teams' duel over: `team` won
 };
 struct DuelNotice {
     DuelNoticeKind kind;
     std::string name;
+    u32 team = 0;
 };
 std::optional<DuelNotice> NextDuelNotice();
 // Each game tick.

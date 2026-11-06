@@ -1079,6 +1079,7 @@ void RunServerBoards(std::stop_token stop) {
             SendServerMap(map);
             posted_map = map;
         }
+        SendServerCharacterSheet(); // cheat watch: sent when it changed (or every 30 s)
         const bool active = rest_board_active.load();
         const s32 lamp = active ? rest_board_lamp.load() : NotResting;
         if (active || posted_rest != NotResting) {

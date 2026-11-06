@@ -5,6 +5,7 @@ project(bbseamless LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+option(BB_PRODUCTION "Co-op release: disable autoplay and developer camera" OFF)
 if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
     message(FATAL_ERROR "The seamless client runs in the x86-64 game process")
 endif()
@@ -53,6 +54,7 @@ add_library(bbseamless SHARED ${network} ${game} network_glue.cpp mac_client.cpp
 target_include_directories(bbseamless PRIVATE include . vendor "${proto_out}"
     "${XBYAK_INCLUDE_DIR}" ../shadps4 ../third_party/httplib ../third_party/imgui ../third_party/half/include)
 target_compile_definitions(bbseamless PRIVATE BOOST_ASIO_STANDALONE NDEBUG
+    BB_PRODUCTION=$<BOOL:${BB_PRODUCTION}>
     BLOODBORNE_NATIVE_PORT=1 BLOODBORNE_PARTY_DEATH_ALWAYS=1 BLOODBORNE_PARTY_HUD=1
     CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
 target_compile_options(bbseamless PRIVATE -fvisibility-inlines-hidden

@@ -76,6 +76,7 @@ bool BloodborneBackendServer::Start(ConfigManager* config, HttpGate::Gate* gate)
     options.ghostTtlSeconds = qint64{settings.ghostTtlMinutes} * 60;
     options.lanternTtlSeconds = qint64{settings.lanternTtlMinutes} * 60;
     options.tombCap = settings.tombCap;
+    options.replyBytes = settings.replyBytes;
     options.summonPoll = settings.summonPoll;
     options.noticePath = InFolder(settings.folder, QStringLiteral("notice.txt"));
     options.broadcastPath = InFolder(settings.folder, QStringLiteral("broadcast.txt"));

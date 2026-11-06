@@ -85,7 +85,7 @@ FROM qt-${QT_FROM} AS qt
 # --- shadnet -------------------------------------------------------------------------------------
 FROM qt AS build
 ARG BUILD_JOBS=0
-ARG SOURCE_REVISION=5d2305ee611ef1e03be39ff925f0da75c9a70393
+ARG SOURCE_REVISION=efa0ad265d840d9195e55db2e3216f46f7daedd0
 WORKDIR /src/server
 # What CMakeLists.txt reads; not hosting/, so editing the ops files does not rebuild shadnet.
 COPY server/CMakeLists.txt /src/server/
@@ -94,6 +94,7 @@ COPY server/coop /src/server/coop
 COPY server/src /src/server/src
 COPY server/tests /src/server/tests
 COPY server/loadtest /src/server/loadtest
+COPY server/data /src/server/data
 COPY server/worlds.cfg server/scoreboards.cfg /src/server/
 COPY backend/ss_info_template.xml /src/backend/
 RUN test -f externals/protobuf/CMakeLists.txt \
@@ -103,8 +104,8 @@ RUN --mount=type=cache,id=shadnet-build,target=/src/server/build \
     cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/qt \
     && printf '#pragma once\n#define BB_SCM_REV "%s"\n' "$SOURCE_REVISION" > build/include/bbcoop_revision.h \
     && cmake --build build --target shadnet bbload test_server_link test_build_fingerprint \
-        test_packet_routes test_rpc_tunnel test_admission test_http_gate test_team_lobby test_lobby_friends_db test_bloodborne_trade test_bloodborne_world test_world_writer $( [ "$BUILD_JOBS" -gt 0 ] && echo -j"$BUILD_JOBS" ) \
-    && ctest --test-dir build --output-on-failure -R '^(server_link|build_fingerprint|packet_routes|rpc_tunnel|admission|http_gate|team_lobby|lobby_friends_db|bloodborne_trade|bloodborne_world|world_writer)$' \
+        test_packet_routes test_rpc_tunnel test_admission test_http_gate test_team_lobby test_lobby_friends_db test_bloodborne_trade test_bloodborne_world test_world_writer test_signed_accounts test_password_accounts test_config test_admin test_accounts test_bloodborne_duel test_invasions $( [ "$BUILD_JOBS" -gt 0 ] && echo -j"$BUILD_JOBS" ) \
+    && ctest --test-dir build --output-on-failure -R '^(server_link|build_fingerprint|packet_routes|rpc_tunnel|admission|http_gate|team_lobby|lobby_friends_db|bloodborne_trade|bloodborne_world|world_writer|signed_accounts|password_accounts|config|admin|accounts|bloodborne_duel|invasions|password_signin|password_region)$' \
     && mkdir -p /bin-out && strip -o /bin-out/shadnet build/shadnet \
     && strip -o /bin-out/bbload build/bbload
 COPY server/hosting/collect-runtime.sh /usr/local/bin/
@@ -135,10 +136,10 @@ RUN groupadd --system --gid "${SHADNET_UID}" shadnet \
     && mkdir -p /data && chown shadnet:shadnet /data && chmod 0750 /data
 COPY --from=build /usr/bin/tini /usr/bin/tini
 COPY --from=build /out/ /opt/shadnet/
-COPY server/worlds.cfg server/scoreboards.cfg /opt/shadnet/defaults/
+COPY server/worlds.cfg server/scoreboards.cfg server/data/common-passwords.txt /opt/shadnet/defaults/
 COPY server/hosting/entrypoint.sh server/hosting/healthcheck.sh /opt/shadnet/
 ENV LD_LIBRARY_PATH=/opt/shadnet/lib QT_PLUGIN_PATH=/opt/shadnet/plugins SHADNET_HOME=/data \
-    LANG=C.UTF-8 \
+    LANG=C.UTF-8 BB_RELEASE_VERSION=1.4.0 \
     PATH=/opt/shadnet:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 VOLUME /data
 WORKDIR /data

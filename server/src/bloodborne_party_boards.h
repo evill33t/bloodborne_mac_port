@@ -103,6 +103,11 @@ public:
     // test 2026-10-18: a guest's hurt enemy went back to its spawn as the host came, the host's
     // fresh copy stood there). A host stepping over a border and back starts again.
     static constexpr std::int64_t HostTakeBackMs = 3'000;
+    // Kaniel's play test 2026-11-01: after a party wipe every member reloads in place, and the
+    // host's load handed its map to the guest back first, then took it back HostTakeBackMs
+    // later: two changes of hands, every enemy lagging. For this long after a wipe a load (map 0)
+    // keeps a member's place; a new map still moves it at once.
+    static constexpr std::int64_t WipeHoldMs = 10'000;
     // What an owner runs: one map (a block). The blocks of an area are loaded together, but the
     // game wakes a block's enemies only near a player in that world (rig 2026-10-14: a guest in
     // Cathedral Ward following the host in Central Yharnam saw them stand still).
@@ -114,6 +119,8 @@ public:
     // when an owner changed.
     bool Place(const std::string& member, std::uint32_t map, std::int64_t now_ms,
                bool host = false);
+    // The party wiped: its reloads keep their places for WipeHoldMs.
+    void Wipe(std::int64_t now_ms);
     // Members gone silent leave their areas.
     bool Expire(std::int64_t now_ms);
     // A member's own events took it out (its leave).
@@ -139,6 +146,7 @@ private:
     std::map<std::uint32_t, Owner> owners;
     std::uint64_t epoch = 0;
     std::int64_t latest_ms = 0; // the latest Place or Expire
+    std::int64_t wiped_ms = -WipeHoldMs - 1;
 };
 
 } // namespace BloodborneWorld

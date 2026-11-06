@@ -1,18 +1,18 @@
 {
-  "repository": "https://github.com/lKaniel/bloodborne-server",
-  "commit": "5d2305ee611ef1e03be39ff925f0da75c9a70393",
+  "repository": "https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together",
+  "commit": "efa0ad265d840d9195e55db2e3216f46f7daedd0",
   "files": [
     {
       "path": "../../scripts/seamless/party_boss_events.py",
       "source": "tools/re/party_boss_events.py",
-      "sha256": "02321d47f7d03ad9674850e0f8a54073ac914f772a3f4a991a5a5f79f21b9be3",
-      "adapted_sha256": "6ebcf0462393f1153acf2c7cf88c1d651ee02fabc804572d3a6b18d9b6617d39"
+      "sha256": "a152e438c246b24d122945213a7aeca635079c93da9b19add9633ba4dabe3256",
+      "adapted_sha256": "f926d415789611ae85ad2ba3bd0a7f243a8d591bc93b0c2c6760010fcedaa3ed"
     },
     {
       "path": "bbcoop.h",
       "source": "bbport/gpu/bbcoop.h",
-      "sha256": "1f0a6dbead93c64b9ab218060a4e08f8f73565a8048584e35201740208ca91b2",
-      "adapted_sha256": "c09d05d5a5ae2263d4916b83c44c4943418882856af609fa8f3a4980a070c988"
+      "sha256": "24e16b5ce23eb52441b8aa570146a5c3335f3027b63823b7cfd9663fb245d770",
+      "adapted_sha256": "02442461aa92e8e5ee6ed9b78d6413579422ab14d8959bc1ac90c0609709b678"
     },
     {
       "path": "bbcoop/bbcoop_internal.h",
@@ -22,13 +22,13 @@
     {
       "path": "bbcoop/coop.cpp",
       "source": "bbport/gpu/bbcoop/coop.cpp",
-      "sha256": "0a9306bc259b9d0d264e8b8df4943168a8d18cc28cc7c90f6927ffba2b23656d",
-      "adapted_sha256": "348bd9d10ceb6b69ff47f7ba87452d84a9ece60d91adb5d8ad77ecb1346aa7f0"
+      "sha256": "303be2f65ab2a2fe4cfda43ff83d240bb5ec73c2dca1660a1d6df337affe40f3",
+      "adapted_sha256": "a0526d7cf5dd2d4420b177db3db89098a2b8bcdce1ea54c5972a2ca5590a645f"
     },
     {
       "path": "bbcoop/duel.cpp",
       "source": "bbport/gpu/bbcoop/duel.cpp",
-      "sha256": "b48013dee95f3a16e933756d413df031ad386f41b0d4490c0c7160ff3a50d5fc"
+      "sha256": "de9f59c694f005e6e65dd05c28ca6e536d3291bf114e937a3e08bf08a7980644"
     },
     {
       "path": "bbcoop/guest_hooks.cpp",
@@ -39,8 +39,8 @@
     {
       "path": "bbcoop/memory.cpp",
       "source": "bbport/gpu/bbcoop/memory.cpp",
-      "sha256": "e4908e4dff18df5270f04e373ca04f8ee2cff8fdc5876e9a21ec81b58cb24a5e",
-      "adapted_sha256": "070dc6f8cc8ab5545c891689a1f966d407eb5ef11d765c757bfc8638701de502"
+      "sha256": "9a47e612d1201c364cdeb1634075120214bb25e819ef452bcb2d84d8bfb0bd5c",
+      "adapted_sha256": "c9ff272762264f4b6170e353a8a8f2012d08efe641873c1c30e731b900a6c684"
     },
     {
       "path": "bbcoop/revision.cmake",
@@ -66,12 +66,12 @@
     {
       "path": "include/common/logging/log.cpp",
       "source": "bbport/gpu/shim/common/logging/log.cpp",
-      "sha256": "087d8b5afc5f9295829a29a27fe60832dece0ac72b399d98fd9642d29f974893"
+      "sha256": "5ffa7a6790c75e58b9fb95c8786f4105eb32eab25e14192a00ae23ad4bd0ff4d"
     },
     {
       "path": "include/common/logging/log.h",
       "source": "bbport/gpu/shim/common/logging/log.h",
-      "sha256": "a2ce6667c37f2f70ee8501af0428d0272918c70c41b9c96f261646ba07f00b84"
+      "sha256": "6ca9a770cbd77efadc11038489540395569c7c848ec2232d2e64d4267ac5c818"
     },
     {
       "path": "include/core/address_space.h",
@@ -147,7 +147,7 @@
     {
       "path": "include/core/memory.h",
       "source": "bbport/gpu/shim/core/memory.h",
-      "sha256": "87afe7b819c214082f91ebcb0ae92ed66bf142394af7575de3b77d339a53160d"
+      "sha256": "5a0fe16e38401447e6275c4da8d956d5ade0097f319f98030b16a5732ca24e44"
     },
     {
       "path": "include/core/signals.h",
@@ -162,7 +162,7 @@
     {
       "path": "include/core/user_manager.h",
       "source": "bbport/gpu/shim/core/user_manager.h",
-      "sha256": "dfb1dc3d252b4bc88159c83c371c1f555584129cba2b066f3225bd174018ee05"
+      "sha256": "ed52b0f6b4b90c6a613e00384649707affbec0d543c048b8a8d876aab7777f17"
     },
     {
       "path": "include/core/user_settings.h",
@@ -370,7 +370,7 @@
     {
       "path": "vendor/common/logging/log.h",
       "source": "emulator/src/common/logging/log.h",
-      "sha256": "50e42407d4a39a7b176f98155aba462ad01e48eb0a68bb9921c19782506b28c8"
+      "sha256": "59d46e543815a7a512dcafa2fd19f8ad135903d60650e86b57b4736ad88e5031"
     },
     {
       "path": "vendor/common/logging/log_file_sink.h",
@@ -561,8 +561,8 @@
     {
       "path": "vendor/coop/coop.proto",
       "source": "server/coop/coop.proto",
-      "sha256": "f857ddf7e4d13dc4d498a519de582bddf3cca2d0ca2096d365a3b173f367646c",
-      "adapted_sha256": "6acbe8760012067abd7adfdbfb483aba5879a1fe2cfe93b64002f96567a1937e"
+      "sha256": "c4776271d559f0cf66eb8ba2888fdfa598cdb27f5b94dfd8080d66a45b6b3471",
+      "adapted_sha256": "431543637aab68e703c9e06a77c11e00cdf8af75d8fb1983c28af10240cc5634"
     },
     {
       "path": "vendor/coop/coop_messages.cpp",
@@ -587,12 +587,12 @@
     {
       "path": "vendor/coop/duel.cpp",
       "source": "server/coop/duel.cpp",
-      "sha256": "1a65492dde31d5ac3383e47440df8b7180715ae4f25e7e4a8ae4c88eab6bc7a4"
+      "sha256": "b12643eab5f54331e444595d93c4183daa5669297ce4275766654adf00ab5a34"
     },
     {
       "path": "vendor/coop/duel.h",
       "source": "server/coop/duel.h",
-      "sha256": "66f6c1a1edf5c7c4c0e51a5ccebca3e6e93306d3b7dcb0f94e7a3082f4f29f84"
+      "sha256": "7f23d0238eb50abd6473103d7c16c3aac3cdc7330be0f10bbb697ed67386e01f"
     },
     {
       "path": "vendor/coop/game_link.h",
@@ -602,7 +602,7 @@
     {
       "path": "vendor/coop/invasions.h",
       "source": "server/coop/invasions.h",
-      "sha256": "09d4f4d7d3125a550c4d9f53daf8292ea53cd68b399053dd344574ca5687f7e8"
+      "sha256": "431dda0163ed0d241f57e04ad73d3d014050f650160a71e18b4ab220e3d5931d"
     },
     {
       "path": "vendor/coop/link_auth.h",
@@ -684,13 +684,13 @@
     {
       "path": "vendor/core/bloodborne_autoplay.cpp",
       "source": "emulator/src/core/bloodborne_autoplay.cpp",
-      "sha256": "a0e4d0218501becb979db280fed904be52c69a297f06ebb6564ccfccfc9f89cd",
-      "adapted_sha256": "3a4da468d09cb22f79071794851677a789d0bb2cf3cbbc42f789f49ddc58a33c"
+      "sha256": "408e5dcfa15b2a4e8239dce3fc8f30d1f9a825de67c52aed3627e061591f1609",
+      "adapted_sha256": "ce7d33daf09c62c60fd63280ce7dbee0eee3592f34628ce2bc12d552caef7a99"
     },
     {
       "path": "vendor/core/bloodborne_boards.cpp",
       "source": "emulator/src/core/bloodborne_boards.cpp",
-      "sha256": "f3b25751d1f7aa98f36f971a2f3f1f0045320792d9b762604526962eaded05bb"
+      "sha256": "b00be6abfb4900fa9ea256f0b7c4d2faca24fa7606b4d06aefacc0870aa7d71d"
     },
     {
       "path": "vendor/core/bloodborne_camera.cpp",
@@ -710,37 +710,37 @@
     {
       "path": "vendor/core/bloodborne_crash_dump.cpp",
       "source": "emulator/src/core/bloodborne_crash_dump.cpp",
-      "sha256": "feecded9ce2b5854b1b943dbb906464b85086a22f7c0bcac27a3fe155dff7755"
+      "sha256": "258e1a51201ba6d2cd151571e6d46d24d8a2b68ddb286ab8dd74db3433def1ef"
     },
     {
       "path": "vendor/core/bloodborne_crash_dump.h",
       "source": "emulator/src/core/bloodborne_crash_dump.h",
-      "sha256": "70081a68eba195339c30585ad1f2cc5086a7931d27428d4b06778fc789762407"
+      "sha256": "179dd73f04f021b0b2a37ced11f1343891c1c883fa010edba4f645e178d537ff"
     },
     {
       "path": "vendor/core/bloodborne_duel.cpp",
       "source": "emulator/src/core/bloodborne_duel.cpp",
-      "sha256": "e9c0955d6298f305ffdbb8f480302ffff660d5633e6341e661b477d91ebdcc53"
+      "sha256": "7f2451a0f1f574c7dfa43cae207cc50e24dd682c0e40c41685a4bb102192ac6e"
     },
     {
       "path": "vendor/core/bloodborne_duel.h",
       "source": "emulator/src/core/bloodborne_duel.h",
-      "sha256": "53e79d491d3096f7ba67704b07495eb1c2fed102b2a49975eb4abc6ea2aa2346"
+      "sha256": "be623419aaee22f427716bc55310b8276c022264f29a305c56bf60aa36a108d9"
     },
     {
       "path": "vendor/core/bloodborne_duel_game.cpp",
       "source": "emulator/src/core/bloodborne_duel_game.cpp",
-      "sha256": "91818ff85d5c0b4908e627ffa056b82b79248bfc2451977cfe7d6e64ea08d6a8"
+      "sha256": "4b26a90d4e823ea897c3ea510159f0115ad1214d4f21b93216953995b07b2009"
     },
     {
       "path": "vendor/core/bloodborne_flags.h",
       "source": "emulator/src/core/bloodborne_flags.h",
-      "sha256": "c4e5ecafa71b6e4f8308d6f6d044b3f21d4af0287ba15a8bf870cafc2177734b"
+      "sha256": "3a8af8b8e0db8df462fedfc59edde69085b0330fed869a480014b18fc88c8f0a"
     },
     {
       "path": "vendor/core/bloodborne_flags_store.cpp",
       "source": "emulator/src/core/bloodborne_flags_store.cpp",
-      "sha256": "c9bf1313d9b66c9476a6bf1a91828d67e2f675ea121584687d9e68eddb20bff0"
+      "sha256": "80d738217ceb4e45b361954faa6ac0eb9d3c2d2b562034a32b91a3d84e71877c"
     },
     {
       "path": "vendor/core/bloodborne_game_link.h",
@@ -750,13 +750,13 @@
     {
       "path": "vendor/core/bloodborne_host_rules.cpp",
       "source": "emulator/src/core/bloodborne_host_rules.cpp",
-      "sha256": "bc3a1bbcf14e9948f48b3df98719969b776ed27f6f30bbfb5b572a904a2f5fd0",
-      "adapted_sha256": "ba809f2ef677ab25aac8193023d4aba0a3a6ad6b6b0b6032c96f9c70090013bf"
+      "sha256": "fdfe315df97e179c7789c2ee59c19250498154f2d4528d779fa574dc7539ac4a",
+      "adapted_sha256": "f47bdbec9609384ac55ea71738c089211bb2f810ad15992accc10853a295cc39"
     },
     {
       "path": "vendor/core/bloodborne_host_rules.h",
       "source": "emulator/src/core/bloodborne_host_rules.h",
-      "sha256": "9653bb7c426a6d0efc5f0be5968af6db98e7b27d243de7dfd52dd313c7031f4a"
+      "sha256": "12b54550433b2f86e971fff896405550675983d4ae7a495b44872f89e43ad8be"
     },
     {
       "path": "vendor/core/bloodborne_host_rules_game.cpp",
@@ -767,23 +767,23 @@
     {
       "path": "vendor/core/bloodborne_invasion.cpp",
       "source": "emulator/src/core/bloodborne_invasion.cpp",
-      "sha256": "0d8dd43acbb2df91826ae3b7a0d5e1cccf5478042fcdcfd2daf1d35b62eab010"
+      "sha256": "b4d79ddfd31868bcda9aacab9beff8ae6e89ad61646aff34ba2e989a4618074b"
     },
     {
       "path": "vendor/core/bloodborne_invasion.h",
       "source": "emulator/src/core/bloodborne_invasion.h",
-      "sha256": "0de2dd5f043238119988763d0add764fc00c875d8ca0f7c82781d762f84d55a1",
-      "adapted_sha256": "301ccefcace609e086467154d68de9a0b27f411b2eaf19c574086eec495a3205"
+      "sha256": "cd33bd0b9cbe22fc58efdda7f488d6632946d7f7ab5d9e0582ec9c24062a9bf1",
+      "adapted_sha256": "e13cb33b95333f55c8a7e8bea5c1a1880138b77ad1497accff4c75ccc5b0ef30"
     },
     {
       "path": "vendor/core/bloodborne_join.cpp",
       "source": "emulator/src/core/bloodborne_join.cpp",
-      "sha256": "c346bbd139de7b5fe1aa425107b9cf88b4f93bc62aa4d014b5a1384d3daebc35"
+      "sha256": "ea89fb122ec8191955933093d484018cdd85cbc8c5b358afea50ed64acff621f"
     },
     {
       "path": "vendor/core/bloodborne_kills_hp.cpp",
       "source": "emulator/src/core/bloodborne_kills_hp.cpp",
-      "sha256": "3fd8e65448410cff0e9d86e6eb8194031206d2fe8d9f9d812b83620321e05a7f"
+      "sha256": "f9072dad73b7210ea3e31ce0a2f5d732a6461fdba4e4213736761076270f5c4d"
     },
     {
       "path": "vendor/core/bloodborne_lamp_points.h",
@@ -808,25 +808,25 @@
     {
       "path": "vendor/core/bloodborne_party.cpp",
       "source": "emulator/src/core/bloodborne_party.cpp",
-      "sha256": "0fa79932c507df90e68a34cc5a0159fe68427d3c0a85d1632bbeb12139854bc9",
-      "adapted_sha256": "8a26f00682b86bc9343691d4dd9979b36d6db5d61926308a425bf91ff105231b"
+      "sha256": "99b29c6edc68977ca59aae88a5e58c38f17e889e5b3e28004b2c8e68776c3a09",
+      "adapted_sha256": "6e0c29dcd3fe8d8cb82235577b356a5f3243b67356b3623c0c0b81917f0a2690"
     },
     {
       "path": "vendor/core/bloodborne_party.h",
       "source": "emulator/src/core/bloodborne_party.h",
-      "sha256": "32f539f8f66ca4473e21e74a6c775498f22f50592ab238d2278d983ad9202eca"
+      "sha256": "d028269a731dc5bdea668d6a9848cf3bf02f2ac45693b41de00a0915c703f32a"
     },
     {
       "path": "vendor/core/bloodborne_party_death.cpp",
       "source": "emulator/src/core/bloodborne_party_death.cpp",
-      "sha256": "83f13e6f377449c75230890e9b568316032d7652716951be9824bed29b695870",
-      "adapted_sha256": "bab2def35d75041a13ac17879e9438d119466d9ab238c15562bce4388d7a64fa"
+      "sha256": "b71d4c6b2fa89c3545b594237ffd9be85aa9e90a80b3e9311147cbebcf4d594d",
+      "adapted_sha256": "a1255d9e4024a394d849cac26c2daa6a78bc775c1582716af0971c51eab7ac4e"
     },
     {
       "path": "vendor/core/bloodborne_party_rules.cpp",
       "source": "emulator/src/core/bloodborne_party_rules.cpp",
-      "sha256": "5fe86585ee4fe39639254c6ed0f90d1458184e30a33a411d3d12ecf900f3e606",
-      "adapted_sha256": "d087f8e42345382b56eaf7b20cc91034c97ac9001f2b3c814ccecbeeca89caf6"
+      "sha256": "e6c7b57efaf632552b7e1ec50b70ec11c07ce7f43c0384757742757dd2f8ea5d",
+      "adapted_sha256": "74e01136db9a90d5f91d9ff0bc3e0e0f512346dae5513c1c1b7a2d3c8e027b2f"
     },
     {
       "path": "vendor/core/bloodborne_patch_sites.h",
@@ -863,24 +863,24 @@
     {
       "path": "vendor/core/bloodborne_portrait.h",
       "source": "emulator/src/core/bloodborne_portrait.h",
-      "sha256": "c236bf162dbf58c7233ba385df0c841989e880709d9dd8e1063cdab0a03bca35"
+      "sha256": "c2f65dee0c90945beee91394cc1a4e2b3ef1c1fb8a896a341a4503a1e5e5b5a2"
     },
     {
       "path": "vendor/core/bloodborne_re.cpp",
       "source": "emulator/src/core/bloodborne_re.cpp",
-      "sha256": "1084f5005218c1175b95a45828168adcd9cdd93afd0f77b7a79cf10c0bbe71a1",
-      "adapted_sha256": "2fa4ee06bcb18f8e8bb00111bef8cb4a873c0f33a94f4ff1ccbe9354e89e7c1d"
+      "sha256": "a01a515bdfc401c7a2197bc4ad996b5841f6c4784f2d3139be3065d680627a82",
+      "adapted_sha256": "2390db407779a393dd05dcf241ebc73232e768a6ad1d3f5d23a49a9fd1c02e0a"
     },
     {
       "path": "vendor/core/bloodborne_re.h",
       "source": "emulator/src/core/bloodborne_re.h",
-      "sha256": "74f15df1c6212a1a02868f617904ff47fb77b6658eb4451750d755566e357f84"
+      "sha256": "ac0c54b776e6fd95220c8a662a6961444e903e643ab976b6dd08b4bc201c3751"
     },
     {
       "path": "vendor/core/bloodborne_re_internal.h",
       "source": "emulator/src/core/bloodborne_re_internal.h",
-      "sha256": "3ae725895df6ba7a6661cbc5e69a5719d30576eb69295e27ea72e608fc4d2f27",
-      "adapted_sha256": "cbed46b2590e810981c68164473ace726142a05dfb6493d835d79f148cdc3d8b"
+      "sha256": "55e3e401a45c4ad22ff921868abae4389c832a085148ccc638fd922773b732aa",
+      "adapted_sha256": "e34b0643852d901cfa9046199f0fcd2732f48c46f2c8f729beb3cd961a1ca060"
     },
     {
       "path": "vendor/core/bloodborne_re_sites.h",
@@ -906,18 +906,18 @@
     {
       "path": "vendor/core/bloodborne_server_world.cpp",
       "source": "emulator/src/core/bloodborne_server_world.cpp",
-      "sha256": "7ff6e0f44b754bf7a8bc35e0afe7d892978e658cd3dfdecf402405d1934f625c",
-      "adapted_sha256": "99da1ecfd4e76ccf4bff96d27c80a76c2b2ca76758e6b0d1be6fcb103e9720d1"
+      "sha256": "32e8af38dee2517b47711ffb29e62355b3a532120637411aa1a5aa87f64fb405",
+      "adapted_sha256": "a6539f2cf95fa8f093d2f4726c25a33f2fac33b36cc1a0c242ded02f4aeb1c51"
     },
     {
       "path": "vendor/core/bloodborne_spectate.cpp",
       "source": "emulator/src/core/bloodborne_spectate.cpp",
-      "sha256": "81b3c2ec2e3d49ff37d808495b02b178d5e1719b341c918aede76d2f7fa11434"
+      "sha256": "eaf4ba4651529100cfb8d542bfaece1c00cdc62f2af94aeeced96cf2091d0830"
     },
     {
       "path": "vendor/core/bloodborne_spectate.h",
       "source": "emulator/src/core/bloodborne_spectate.h",
-      "sha256": "f772cc8b7cc58055082970cbf3a0e8131b1e557543c9e87eb00cc2e3f0a1ce5b"
+      "sha256": "87d6dde1301f445daafcc178ea9888eee1801eee84268692c5f7ccbc9703bdf3"
     },
     {
       "path": "vendor/core/bloodborne_team.cpp",
@@ -927,12 +927,12 @@
     {
       "path": "vendor/core/bloodborne_team.h",
       "source": "emulator/src/core/bloodborne_team.h",
-      "sha256": "cf3cf46f6614027b724f98d23c5f5202769b79995366a3c0ee9da1de8fc11332"
+      "sha256": "74b19ef5e0a3be3745abd4be864e233f7b4866ca583454ca9223c8f27acab05f"
     },
     {
       "path": "vendor/core/bloodborne_trace_diag.cpp",
       "source": "emulator/src/core/bloodborne_trace_diag.cpp",
-      "sha256": "b9417479b4e9c67dd9f749eeb588956d6b2aef25ac0c69e282d7f4920eedf473"
+      "sha256": "0aa5b48880044a696f6ac32c5098981424db9b16093904bc1f0274ee1b74caa9"
     },
     {
       "path": "vendor/core/bloodborne_trade.cpp",
@@ -949,7 +949,7 @@
     {
       "path": "vendor/core/bloodborne_travel.cpp",
       "source": "emulator/src/core/bloodborne_travel.cpp",
-      "sha256": "ad4a6e0f2aa761a9d6b90fc41afb01b7d7c87ee6f6e82603c87f7ad5111624a6"
+      "sha256": "f5ecd1bebb2e8bdfa1ac6e757902dc75225f157cff038540fe34510f2c5fb8bf"
     },
     {
       "path": "vendor/core/bloodborne_world_log.cpp",
@@ -1009,7 +1009,7 @@
     {
       "path": "vendor/core/libraries/network/http.cpp",
       "source": "emulator/src/core/libraries/network/http.cpp",
-      "sha256": "e145e663306f83b5468faa532344b53bd85aff17b647b2ad0c82ca5271c8c5b7"
+      "sha256": "f30580a705cf18fe2e4ac2f2e8c871efab44e12bec6241402b45d0b127d059c4"
     },
     {
       "path": "vendor/core/libraries/network/http.h",
@@ -1257,7 +1257,7 @@
     {
       "path": "vendor/core/libraries/np/np_handler.cpp",
       "source": "emulator/src/core/libraries/np/np_handler.cpp",
-      "sha256": "a1de9d8b96506f29ef7777ae20dbc3bc0ad31b1c16f56aff69e6016768f6da97"
+      "sha256": "65b27053af6fe4dd94fce3820616b6cf79d45dbb6643b96814ad50c21a6100b6"
     },
     {
       "path": "vendor/core/libraries/np/np_handler.h",
@@ -1538,7 +1538,7 @@
     {
       "path": "vendor/shadnet/client.cpp",
       "source": "emulator/src/shadnet/client.cpp",
-      "sha256": "05b095c7b65aebaf7472510655247b74254f7275f647211489f021aa5717fa20"
+      "sha256": "233ba9b53151850813b3822c17a87aa953ea00a3c95b5bad77a08eb8ea249bb6"
     },
     {
       "path": "vendor/shadnet/client.h",
@@ -1603,7 +1603,7 @@
     {
       "path": "../../gpu/shim/bbport_party_layout.h",
       "source": "bbport/gpu/shim/bbport_party_layout.h",
-      "sha256": "d0463fa5c10f67568d2e268df85eb7e27204b28c15d20a68efe08c1baeb11241"
+      "sha256": "7f6a2df49e8a55faaf2abe296e07b3ef99fbb212860dd3e7237039766f0ede22"
     },
     {
       "path": "../../gpu/art/coop_art.bin",
@@ -1733,7 +1733,7 @@
     {
       "path": "../shim/bbport_menu_texts.inc",
       "source": "bbport/gpu/shim/bbport_menu_texts.inc",
-      "sha256": "23f5128ed32e96b939f4326a82ac80422a17c3327316a3dd56bcb536cc2c49a6"
+      "sha256": "436ba962d1bb646622cd26d4c4c54d849a42f28436b1bb0307d1a073e1466b69"
     },
     {
       "path": "../shim/bbport_key_guide.h",
@@ -1743,27 +1743,62 @@
     {
       "path": "../shim/bbport_coop_russian.inc",
       "source": "bbport/gpu/shim/bbport_overlay.cpp",
-      "sha256": "96d1546d2e630552df832eb0f0a9816875acdd2a4ebc24351596934e59423f98",
-      "adapted_sha256": "9455cdfe85b0be6d5e737a997df0b425feaed641658586ba297a0fad2aaf0107"
+      "sha256": "20eea6e09b12cc15e3374728870a337668db998179cc38e03f241529ce75340a",
+      "adapted_sha256": "488d60c243a79e8557ae7c428994ffa87bd03372ef5b666fa8e41c38a5b27bcf"
     },
     {
       "path": "../shim/bbport_map_atlas.h",
       "source": "bbport/gpu/shim/bbport_overlay.cpp",
-      "sha256": "96d1546d2e630552df832eb0f0a9816875acdd2a4ebc24351596934e59423f98",
+      "sha256": "20eea6e09b12cc15e3374728870a337668db998179cc38e03f241529ce75340a",
       "adapted_sha256": "56bfd8f06bf6dd88ba3c382313b649511ca5605a3e604707d192cfc17a034313"
     },
     {
       "path": "../shim/bbport_language.h",
       "source": "bbport/gpu/shim/bbport_settings.cpp",
-      "sha256": "b99341f0023200d76c83ef3a033933de4ff472cdd668ed065b39408444b62be6",
+      "sha256": "dd2e29769eab8b1c3a01c038a56603204c8af03ebe3f37b51ec6a3c93ebacd23",
       "adapted_sha256": "e84ca431177800964221be835da656ddc52acc3b7f3209b64ced2aa410ef8f08"
     },
     {
       "path": "vendor/core/bloodborne_boss_tempo.cpp",
       "source": "emulator/src/core/bloodborne_boss_tempo.cpp",
       "sha256": "d72c1317585a09d3c9f12dfbeda55b930d363cfb17e56f94e0c328579c3f10ba"
+    },
+    {
+      "path": "vendor/core/bloodborne_coop_worker.h",
+      "source": "emulator/src/core/bloodborne_coop_worker.h",
+      "sha256": "94ae0580ae2d802ab8b8c6a0bddae77ec5c4dc31e4057461305951003864b73b"
+    },
+    {
+      "path": "vendor/core/bloodborne_memory_window.h",
+      "source": "emulator/src/core/bloodborne_memory_window.h",
+      "sha256": "6f2eb117f080fd56f1bc78eacae8b487a8baa86228c63114f271cf3fad96f34a"
+    },
+    {
+      "path": "include/core/env_text.h",
+      "source": "bbport/gpu/shim/core/env_text.h",
+      "sha256": "7e8f9fcc41c3d07f3490a31d75c714657611b3f93b15e8ea8131ba1c9c9a438b"
+    },
+    {
+      "path": "bbcoop/lobby_rows.h",
+      "source": "bbport/gpu/bbcoop/lobby_rows.h",
+      "sha256": "17198404a543a38f609c25d9ca53f632d8f562dd4e01e1f0c9532633a33c9bdb"
+    },
+    {
+      "path": "bbcoop/discord_activity.h",
+      "source": "bbport/gpu/bbcoop/discord_activity.h",
+      "sha256": "c9875b50ff6ec84bfb4ae57d2de8b3ffe1aa4b9315277c6713df5293d0fcb546"
+    },
+    {
+      "path": "bbcoop/discord_status.h",
+      "source": "bbport/gpu/bbcoop/discord_status.h",
+      "sha256": "341013effea7d6f28be2ba96e67774508fe3364d1f90793bb4fed84eb38c986a"
+    },
+    {
+      "path": "bbcoop/discord_status.cpp",
+      "source": "bbport/gpu/bbcoop/discord_status.cpp",
+      "sha256": "e83898d8d9d2328e7b885d6d8f76cecd2c242b408f0a50ba68c3a174b9c58345"
     }
   ],
   "path_base": "gpu/bbseamless; ../../ paths refer to repository scripts",
-  "previous_commit": "8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1"
+  "previous_commit": "5d2305ee611ef1e03be39ff925f0da75c9a70393"
 }

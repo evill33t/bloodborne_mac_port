@@ -47,6 +47,16 @@ final class LauncherModel: ObservableObject {
     @Published private(set) var signIn = SignInState.idle
     @Published private(set) var onlineProblem: String?
     private var signInTask: Task<Void, Never>?
+    @Published var globalAuthAction = SeamlessGlobal.Action.signIn
+    @Published var globalName = ""
+    @Published var globalPassword = ""
+    @Published var globalNewPassword = ""
+    @Published var globalRecoveryInput = ""
+    @Published var globalRecoveryCode: String?
+    @Published private(set) var globalAuthBusy = false
+    @Published private(set) var globalAuthProblem: String?
+    @Published private(set) var globalSignedIn = false
+    private var globalAuthTask: Task<Void, Never>?
     @Published private(set) var dataDir: URL
     @Published private(set) var gameProblem: String?
     @Published private(set) var checkingGame = false
@@ -203,6 +213,56 @@ final class LauncherModel: ObservableObject {
     func refreshSecretState() {
         shadnetPasswordStored = online.shadnetPasswordStored(secrets: secrets)
         signedIn = online.signedIn(secrets: secrets)
+        globalSignedIn = !online.seamlessGlobalID.isEmpty &&
+            online.seamlessGlobalExpiry > Date().timeIntervalSince1970 &&
+            secrets.has(service: SeamlessGlobal.keychainService,
+                        account: SeamlessGlobal.keychainAccount(online.seamlessGlobalID))
+    }
+
+    func authenticateGlobal() {
+        guard !globalAuthBusy else { return }
+        let action=globalAuthAction, name=globalName.trimmingCharacters(in: .whitespaces)
+        let password=globalPassword, newPassword=globalNewPassword, recovery=globalRecoveryInput
+        globalPassword="";globalNewPassword="";globalRecoveryInput=""
+        globalAuthBusy=true;globalAuthProblem=nil;globalRecoveryCode=nil
+        globalAuthTask=Task { [weak self] in
+            guard let self else { return }
+            defer { globalAuthBusy=false }
+            do {
+                let account=try await SeamlessGlobalClient.authenticate(action: action, name: name,
+                    password: password, newPassword: newPassword, recoveryCode: recovery)
+                try secrets.store(service: SeamlessGlobal.keychainService,
+                                  account: SeamlessGlobal.keychainAccount(account.id), secret: account.secret)
+                online.seamlessGlobalID=account.id;online.seamlessGlobalName=account.name
+                online.seamlessGlobalExpiry=account.expires
+                globalRecoveryCode=account.recovery_code;globalName=account.name
+                globalAuthAction = .signIn
+                save()
+            } catch {
+                globalAuthProblem=error.localizedDescription
+            }
+        }
+    }
+
+    func signOutGlobal() {
+        guard !globalAuthBusy else { return }
+        let id=online.seamlessGlobalID
+        let secret=secrets.load(service: SeamlessGlobal.keychainService,
+                                account: SeamlessGlobal.keychainAccount(id))
+        globalAuthBusy=true;globalAuthProblem=nil;globalRecoveryCode=nil
+        globalAuthTask=Task { [weak self] in
+            guard let self else { return }
+            defer { globalAuthBusy=false }
+            do {
+                if let secret { try await SeamlessGlobalClient.signOut(id: id, secret: secret) }
+            } catch {
+                globalAuthProblem="Signed out on this Mac. The server could not revoke the session: \(error.localizedDescription)"
+            }
+            secrets.remove(service: SeamlessGlobal.keychainService,
+                           account: SeamlessGlobal.keychainAccount(id))
+            online.seamlessGlobalID="";online.seamlessGlobalName="";online.seamlessGlobalExpiry=0
+            globalPassword="";globalNewPassword="";globalRecoveryInput="";save()
+        }
     }
 
     /// The community game server (also the account service): BB_COMMUNITY_SERVER from the
@@ -394,6 +454,11 @@ final class LauncherModel: ObservableObject {
     func play() {
         guard !running, let game = config.gameDir else { return }
         save()
+        if online.playMode == .seamless && online.seamlessHost == .global && !globalSignedIn {
+            page = .online
+            globalAuthProblem="Sign in to seamlesshunt.com before starting the game."
+            return
+        }
         if GameRunner.isGameRunning {
             exitMessage = "Bloodborne is already running. Only one copy of the game can run at a time."
             onExit?(-1)

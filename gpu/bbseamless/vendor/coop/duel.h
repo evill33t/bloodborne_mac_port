@@ -11,7 +11,10 @@
 //     standing wins;
 //   - a duelist cancelling, its game going or it leaving the duel's map ends it for everyone.
 // Every change goes to every member as the whole DuelState; the games give back what a duel took
-// once it is over. Sides: free for all now (each duelist its own); teams of two later share one.
+// once it is over. Sides: free for all (each duelist its own), or teams (Amanises 2026-10-29): the
+// proposer puts the members on The Yharnamites, The Hunters or The Great Ones (1-3), only those are
+// asked, and a team's duelists share its side; the last team standing wins, each of its duelists
+// a win.
 #pragma once
 
 #include <map>
@@ -26,6 +29,7 @@ namespace BloodborneCoop {
 
 constexpr s64 DuelAskMs = 30'000;
 constexpr s64 DuelCountdownMs = 3'000;
+constexpr u32 DuelTeams = 3; // The Yharnamites, The Hunters, The Great Ones
 
 // A party member whose game is linked now, and the map it last said (0: loading).
 struct DuelMember {
@@ -57,6 +61,7 @@ private:
         u32 side = 0;
         u32 answer = 0;
         bool out = false;
+        u32 team = 0; // a teams' duel: the proposer's pick
     };
     void Start(Result& result, s64 now_ms);
     void End(Result& result, bbcoop::DuelState::End end, const std::string& by = {});
@@ -64,6 +69,7 @@ private:
     bool In(const Seat& seat) const;
 
     u32 duel = 0;
+    bool teams = false;
     bbcoop::DuelState::Stage stage = bbcoop::DuelState::STAGE_NONE;
     std::string proposer;
     u32 map = 0;

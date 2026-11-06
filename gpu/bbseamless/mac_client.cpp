@@ -43,7 +43,7 @@ extern "C" __attribute__((visibility("default"))) int bbseamless_init(const BbSe
     if (!supplied || supplied->abi != BBSEAMLESS_ABI_VERSION ||
         supplied->net.abi != BBNET_ABI_VERSION || !supplied->net.thread_spawn ||
         !supplied->net.thread_join || !supplied->thread_attach || !supplied->memory_protection ||
-        !supplied->publish_ui || !supplied->next_command || !supplied->take_portrait ||
+        !supplied->memory_generation || !supplied->publish_ui || !supplied->next_command || !supplied->take_portrait ||
         !supplied->reward_lookup || !supplied->reward_begin || !supplied->reward_arm ||
         !supplied->reward_disarm || !supplied->reward_cancel)
         return -1;
@@ -78,6 +78,9 @@ extern "C" void runtime_thread_attach_host(const char* name) { host.thread_attac
 extern "C" int runtime_memory_protection(uintptr_t address, uintptr_t* start,
                                          uintptr_t* end, uint32_t* protection) {
     return host.memory_protection(address, start, end, protection);
+}
+extern "C" const uint64_t* runtime_memory_generation(void) {
+    return host.memory_generation();
 }
 extern "C" int32_t runtime_trophy_unlock_from_party(int32_t trophy) {
     return host.trophy_unlock ? host.trophy_unlock(trophy) : -1;

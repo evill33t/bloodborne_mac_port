@@ -658,6 +658,9 @@ void PS4_SYSV_ABI CountPositionTaken(u64, const GuestRegisterSnapshot* registers
 
 // A hand-out's ids on a change (which enemies, by the packets' ids).
 void LogHandOut(const std::string& who, const std::vector<u32>& ids) {
+    if (!LOG_INFO_ON()) {
+        return; // a production game's default: the line would go nowhere
+    }
     static std::map<std::string, std::vector<u32>> last;
     static u32 logged = 0;
     std::string text;
@@ -1342,9 +1345,229 @@ void SetSyncPeriods(EnemyRole role) {
     }
 }
 
+// This world's enemies where they stand now (no player, nor the Doll, nor the dead).
+// An enemy's targeting system ([[[enemy +0x3B8] +0xB0] +0x560]), or 0.
+u64 EnemyTargeting(u64 character) {
+    const u64 manager = ReadValue<u64>(character, 0x3B8);
+    const u64 ai = manager >= 0x10000 && HasMemoryAccess(manager, 0xB8, MemoryProt::CpuRead)
+                       ? ReadValue<u64>(manager, 0xB0)
+                       : 0;
+    const u64 targeting = ai >= 0x10000 && HasMemoryAccess(ai, 0x568, MemoryProt::CpuRead)
+                              ? ReadValue<u64>(ai, 0x560)
+                              : 0;
+    if (targeting < 0x10000 || !HasMemoryAccess(targeting, 0x20, MemoryProt::CpuRead)) {
+        return 0;
+    }
+    const u64 vtable = ReadValue<u64>(targeting, 0);
+    return vtable == image_base + EnemyTargetingVtableOffset ||
+                   vtable == image_base + BaseTargetingVtableOffset
+               ? targeting
+               : 0;
+}
+
+// Its target nodes (see ForgetsTargetNode).
+std::vector<TargetNodeView> TargetNodesOf(u64 targeting) {
+    std::vector<TargetNodeView> nodes;
+    u64 node = ReadValue<u64>(targeting, 0x18);
+    for (int count = 0;
+         count < 64 && node >= 0x10000 && HasMemoryAccess(node, 0x54, MemoryProt::CpuRead);
+         ++count, node = ReadValue<u64>(node, 0x08)) {
+        nodes.push_back(
+            {ReadValue<u8>(node, 0x02), ReadValue<s32>(node, 0x28), ReadValue<u32>(node, 0x50)});
+    }
+    return nodes;
+}
+
+// The players here a fight can be with: this one and the others shown, alive.
+std::vector<u32> LivePlayerHandles() {
+    const u64 local = GetLocalPlayer();
+    std::vector<PlayerCopyView> others;
+    for (const OtherPlayer& other : OtherPlayers()) {
+        others.push_back({ReadValue<u32>(other.character, 0x08), other.hp,
+                          IsCharacterDisabled(other.character), CopyVouchedFor(other.character)});
+    }
+    return LivePlayerHandlesOf(local >= 0x10000 && CharacterHp(local) > 0
+                                   ? std::optional{ReadValue<u32>(local, 0x08)}
+                                   : std::nullopt,
+                               others);
+}
+
+// The take-over's fights, looked at again (see TakeoverFights).
+TakeoverFights takeover_fights;
+// The fights over this game's own gap in running a map (see OwnerGap).
+OwnerGap owner_gap;
+
+// Whether it holds or remembers a live player here (a crashed member's copy is none).
+bool HasCharacterTarget(u64 targeting, bool memory_counts = true) {
+    return HoldsLiveTarget(TargetNodesOf(targeting), LivePlayerHandles(), memory_counts);
+}
+
+// The player an enemy this game runs may be given: this game's own. Another member's copy can be
+// a crashed game's leftover (rig owner-crash-fight probe 2026-11-03: the dead host's copy was
+// picked); the game's own senses add the others.
+std::pair<std::vector<PlayerSpot>, std::vector<u64>> PlayersToFight() {
+    std::vector<PlayerSpot> spots;
+    std::vector<u64> characters;
+    const u64 local = GetLocalPlayer();
+    if (const auto at = local >= 0x10000 ? CharacterPosition(local) : std::nullopt) {
+        spots.push_back({*at, party_death_run.downed.Current() == Vital::Up ||
+                                  party_death_run.downed.Current() == Vital::Off});
+        characters.push_back(local);
+    }
+    return {std::move(spots), std::move(characters)};
+}
+
+// An enemy here with no target goes for the nearest standing player (AddEnemyTargetOffset): true
+// when it took one. Without `memory_counts` one that only remembers a player gets one too.
+bool GiveFightOn(u64 character, const std::array<float, 3>& at, bool memory_counts = true) {
+    const u64 targeting = EnemyTargeting(character);
+    if (targeting == 0 || HasCharacterTarget(targeting, memory_counts)) {
+        return false;
+    }
+    const auto [spots, characters] = PlayersToFight();
+    const auto pick = NearestStandingPlayer(at, spots);
+    if (!pick) {
+        // Rig owner-crash-fight node probe 2026-11-03: once "0 of its 1 fights" with no player
+        // picked; why is logged (a boss in its fight asks every second: the first few).
+        static u32 logged = 0;
+        if (++logged > 20) {
+            return false;
+        }
+        LOG_INFO(Debug,
+                 "Bloodborne party: enemy {:x} gets no fight here: this player {} ({:.1f} m from "
+                 "({:.1f}, {:.1f}, {:.1f}))",
+                 ReadValue<u32>(character, 0x08),
+                 spots.empty()             ? "has no place"
+                 : !spots.front().standing ? "is not standing"
+                                           : "is out of range",
+                 spots.empty()
+                     ? 0.0f
+                     : std::hypot(spots.front().at[0] - at[0], spots.front().at[1] - at[1],
+                                  spots.front().at[2] - at[2]),
+                 at[0], at[1], at[2]);
+        return false;
+    }
+    using AddTarget = bool PS4_SYSV_ABI (*)(u64 list, u32 id, u64 target, u32 type, u64 owner);
+    reinterpret_cast<AddTarget>(image_base + AddEnemyTargetOffset)(
+        targeting + 0x10, 0, characters[*pick], 0, ReadValue<u64>(targeting, 0x08));
+    return HasCharacterTarget(targeting);
+}
+
+std::vector<std::pair<u64, EnemyPlace>> EnemyPlacesNow() {
+    std::vector<std::pair<u64, EnemyPlace>> places;
+    const u64 world = ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0);
+    if (world < 0x10000) {
+        return places;
+    }
+    std::unordered_set<u64> players{GetLocalPlayer()};
+    for (const OtherPlayer& other : OtherPlayers()) {
+        players.insert(other.character);
+    }
+    const u64 doll = DollCharacter();
+    ForEachWorldCharacter(world, [&](u64 character) {
+        if (players.contains(character) || character == doll || CharacterHp(character) <= 0) {
+            return;
+        }
+        const auto at = CharacterPosition(character);
+        const u64 modules = ReadValue<u64>(character, 0x3B0);
+        const u64 physics = modules >= 0x10000 ? ReadValue<u64>(modules, 0x68) : 0;
+        if (!at || physics < 0x10000) {
+            return;
+        }
+        const u64 targeting = EnemyTargeting(character);
+        places.push_back({character,
+                          {ReadValue<u32>(character, 0x08), *at, ReadValue<float>(physics, 0x1D4),
+                           targeting != 0 && HasCharacterTarget(targeting)}});
+    });
+    return places;
+}
+
+// How long a new owner waits for the last owner's places.
+constexpr s64 EnemyPutBackMs = 3'000;
+
+// About once a second, where this member first saw each enemy on this map (at its load, in any
+// role: a follower's copies stand at their spawn), and, as the owner (`send`), those that moved
+// from there (see EnemyPlace).
+void SendMovedEnemyPlaces(u32 map, s64 now_ms, bool send) {
+    static u32 seen_map = 0;
+    static std::map<u32, std::array<float, 3>> first_seen;
+    static s64 sent_ms = 0;
+    if (map != seen_map) {
+        seen_map = map;
+        first_seen.clear();
+    }
+    if (now_ms - sent_ms < EnemyPlacesEveryMs) {
+        return;
+    }
+    sent_ms = now_ms;
+    std::vector<EnemyPlace> now;
+    const u64 world = ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0);
+    constexpr s32 BossFightFlag = 4000; // the game's own, while a boss fight is on
+    const bool boss_fight = EventFlagOn(BossFightFlag);
+    for (const auto& [character, place] : EnemyPlacesNow()) {
+        first_seen.try_emplace(place.handle, place.at);
+        now.push_back(place);
+        // The passive-bosses item (2026-10-28): a boss taken over by this game in its fight had
+        // no target until hit.
+        const u64 hand_word = boss_fight && !place.fighting && IsBossSized(character)
+                                  ? OwnershipWordAddress(world, character)
+                                  : 0;
+        if (hand_word != 0 && static_cast<s16>(ReadValue<u16>(hand_word, 0)) >= 0 &&
+            GiveFightOn(character, place.at)) {
+            LOG_INFO(Debug,
+                     "Bloodborne party: boss {:x} runs here in its fight with no target: it "
+                     "goes for the nearest standing player",
+                     place.handle);
+        }
+    }
+    if (send) {
+        SendEnemyPlaces(map, MovedEnemyPlaces(now, first_seen));
+    }
+}
+
+// A member that takes the map over: the owner's moved enemies where the owner had them, before
+// this game runs them (see EnemyPlace).
+bool PutBackOwnersEnemyPlaces(u32 map) {
+    const std::vector<EnemyPlace> heard = HeardEnemyPlaces(map);
+    if (heard.empty()) {
+        return false;
+    }
+    DropEnemyPlaces(map);
+    size_t placed = 0;
+    size_t fights = 0;
+    size_t fights_on = 0;
+    std::vector<u32> fighting;
+    for (const auto& [character, mine] : EnemyPlacesNow()) {
+        const auto place = std::ranges::find(heard, mine.handle, &EnemyPlace::handle);
+        if (place == heard.end()) {
+            continue;
+        }
+        const float dx = place->at[0] - mine.at[0];
+        const float dy = place->at[1] - mine.at[1];
+        const float dz = place->at[2] - mine.at[2];
+        if (dx * dx + dy * dy + dz * dz > EnemyPlaceMovedMeters * EnemyPlaceMovedMeters) {
+            placed += PlaceCharacterAt(character, {place->at[0], place->at[1], place->at[2], 1.0f},
+                                       {0.0f, place->heading, 0.0f, 0.0f}, "EnemyPlace", false);
+        }
+        if (place->fighting) {
+            ++fights;
+            fights_on += GiveFightOn(character, place->at);
+            fighting.push_back(place->handle);
+        }
+    }
+    LOG_INFO(Debug,
+             "Bloodborne party: enemy owner: took the map over with {} of the last owner's {} "
+             "moved enemies put back where it had them; {} of its {} fights go on here",
+             placed, heard.size(), fights_on, fights);
+    takeover_fights.Start(std::move(fighting), SteadyMilliseconds());
+    return true;
+}
+
 void TickEnemyOwner(bool in_session, u32 map) {
     HoldOwnHits();
-    LogWakeGroups();
+    if (CoopTraceOn()) {
+        LogWakeGroups();
+    }
     const s64 now_ms = SteadyMilliseconds();
     std::string self;
     {
@@ -1368,6 +1591,7 @@ void TickEnemyOwner(bool in_session, u32 map) {
     // Taking the area over (or arriving on one this member runs) settles its world: deaths now
     // are no kills, and its copies take the log's HP.
     static u32 owned_area = 0;
+    static s64 put_back_until_ms = 0;
     const u32 area = role == EnemyRole::Owner ? EnemyOwnerArea(map) : 0;
     if (area != owned_area) {
         owned_area = area;
@@ -1375,6 +1599,60 @@ void TickEnemyOwner(bool in_session, u32 map) {
         // HP from its own world before it joined killed the dog: Kaniel 2026-10-15).
         if (area != 0 && owner != nullptr && TakesOverEnemyHp(*owner)) {
             became_owner_ms.store(now_ms);
+            put_back_until_ms = now_ms + EnemyPutBackMs;
+        }
+    }
+    // The places may come with the take-over or just after it (the server hands the last owner's
+    // to the new one): put back once, while the take-over is new.
+    if (role == EnemyRole::Owner && now_ms < put_back_until_ms && PutBackOwnersEnemyPlaces(map)) {
+        put_back_until_ms = 0;
+    }
+    if (in_session) {
+        SendMovedEnemyPlaces(map, now_ms, role == EnemyRole::Owner);
+    }
+    // A gap in this game's run of the map (its own session re-host): the fights it had go on.
+    static u32 owned_map = 0;
+    if (before == EnemyRole::Owner && role != EnemyRole::Owner) {
+        std::vector<u32> fights;
+        for (const auto& [character, place] : EnemyPlacesNow()) {
+            if (place.fighting) {
+                fights.push_back(place.handle);
+            }
+        }
+        owner_gap.Leave(owned_map, std::move(fights), now_ms);
+    } else if (role == EnemyRole::Owner && before != EnemyRole::Owner) {
+        if (std::vector<u32> fights = owner_gap.Back(map, now_ms); !fights.empty()) {
+            LOG_INFO(Debug,
+                     "Bloodborne party: enemy owner: runs map {:#x} again: its {} fights go "
+                     "on (t={:.1f})",
+                     map, fights.size(), now_ms / 1000.0);
+            takeover_fights.Start(std::move(fights), now_ms);
+        }
+    }
+    if (role == EnemyRole::Owner) {
+        owned_map = map;
+    }
+    // The take-over's fights left with no live target get this game's player (TakeoverFights);
+    // within its window one that only remembers a live player gets it again too (rig
+    // owner-crash-fight 2026-11-03: after the re-host the enemy kept a memory and stood still).
+    if (const std::vector<u32> due =
+            role == EnemyRole::Owner ? takeover_fights.Due(now_ms) : std::vector<u32>{};
+        !due.empty()) {
+        for (const auto& [character, place] : EnemyPlacesNow()) {
+            if (!std::ranges::contains(due, place.handle)) {
+                continue;
+            }
+            const u64 targeting = EnemyTargeting(character);
+            const bool remembered = targeting != 0 && HasCharacterTarget(targeting);
+            if (GiveFightOn(character, place.at, false)) {
+                LOG_INFO(Debug,
+                         "Bloodborne party: enemy {:x} of the take-over held {}: it goes for "
+                         "this player (t={:.1f})",
+                         place.handle,
+                         remembered ? "only its memory of a live player (re-given over a memory)"
+                                    : "no live target",
+                         now_ms / 1000.0);
+            }
         }
     }
     if (role != before) {
@@ -1821,6 +2099,9 @@ const u32 enemy_hp_source = [] {
 // session each world is its member's own, and in one world the game sends the HP itself.
 // A death respawn reset the map: the damage the others reported on the world before it is left
 // behind (SharedDamage::ForgetDamageBefore).
+// A wipe starts the map over: the enemies are back where they began.
+[[maybe_unused]] const bool enemy_places_reset_registered =
+    RegisterLifecycleReset("enemy places", {Lifecycle::Wipe}, [] { ForgetEnemyPlaces(); });
 std::atomic<bool> party_hp_reset{};
 [[maybe_unused]] const bool party_hp_reset_registered =
     RegisterLifecycleReset("enemy hp", {Lifecycle::Wipe}, [] { party_hp_reset.store(true); });
@@ -1871,9 +2152,14 @@ void ShareEnemyHpByOwner(EnemyRole role, u32 map, u64 source, std::span<const En
     }
     // Phase 8 (one HP path): the others' hits, at once on a follower's copies; each holds against
     // the owner's older HP as this game's own hit does (HoldOwnHits).
+    static OwnerHitCatchUp owner_hits;
     for (const EnemyHitNews& hit : TakeEnemyHits()) {
         const auto it = data.find(hit.handle);
         if (hit.map != map || it == data.end()) {
+            continue;
+        }
+        if (role == EnemyRole::Owner) {
+            owner_hits.Heard(hit.handle, hit.hp, hit.max, now_ms);
             continue;
         }
         const auto copy = std::ranges::find(standing, hit.handle, &EnemyCopy::handle);
@@ -1895,6 +2181,28 @@ void ShareEnemyHpByOwner(EnemyRole role, u32 map, u64 source, std::span<const En
         if (*hp == 0) {
             LOG_INFO(Debug, "Bloodborne party: enemy death seen: {:#x} (t={:.1f})", hit.handle,
                      now_ms / 1000.0);
+        }
+    }
+    if (wipe_held || role != EnemyRole::Owner) {
+        owner_hits.Clear(); // the wipe's HP, or nothing this game runs
+    }
+    for (const OwnerHitCatchUp::Hit& hit : owner_hits.Take(now_ms)) {
+        const auto it = data.find(hit.handle);
+        const auto copy = std::ranges::find(standing, hit.handle, &EnemyCopy::handle);
+        if (it == data.end() || copy == standing.end()) {
+            continue;
+        }
+        const auto hp = HitNewsHp(EnemyRole::Follower, copy->hp, copy->max, hit.hp, hit.max);
+        if (!hp || !HasMemoryAccess(it->second.first, 0xFC, MemoryProt::CpuWrite)) {
+            continue; // the game's own hit landed: the usual case
+        }
+        WriteValue(it->second.first, 0xF8, *hp);
+        static u32 logged_missed = 0;
+        if (++logged_missed <= 100) {
+            LOG_INFO(Debug,
+                     "Bloodborne party: the owner's game dropped a hit on map {:#x}: {:#x} "
+                     "{}->{} from the news (t={:.1f})",
+                     map, hit.handle, copy->hp, *hp, now_ms / 1000.0);
         }
     }
     // The log's HP (the owner's reports): a new owner's copies take it, and a follower's always.
@@ -2538,7 +2846,8 @@ void KeepEnemyDeathsInStep(bool sharing) {
     for (size_t index = 0; index < pointers.size(); ++index) {
         const u32 handle = characters[index].handle;
         if (characters[index].hp <= 0 && IsRealDeath(ReadValue<u8>(pointers[index], 0x1E3))) {
-            dead_here.push_back({handle, dead_since.try_emplace(handle, now_ms).first->second});
+            dead_here.push_back({handle, dead_since.try_emplace(handle, now_ms).first->second,
+                                 IsBossSized(pointers[index])});
         } else {
             dead_since.erase(handle);
         }

@@ -13,6 +13,8 @@ cd "${SHADNET_HOME:-/data}"
 for f in worlds.cfg scoreboards.cfg; do
     [ -f "$f" ] || cp "/opt/shadnet/defaults/$f" "$f"
 done
+# The common passwords the accounts refuse (CommonPasswordsFile): the image's, at every start.
+cp /opt/shadnet/defaults/common-passwords.txt common-passwords.txt
 if [ -n "${SHADNET_CONFIG:-}" ]; then
     cp "$SHADNET_CONFIG" shadnet.cfg
     chmod 0600 shadnet.cfg
@@ -50,6 +52,11 @@ fi
 if [ -n "${SHARD_INDEX:-}" ]; then
     if [ -z "${SHARD_NAME:-}" ] && [ -n "${SHARD_NAME_PREFIX:-}" ]; then
         SHARD_NAME=$SHARD_NAME_PREFIX-$SHARD_INDEX
+    fi
+    # The region's accounts (SignIn=password) live on shard 0; the others tell their secrets.
+    if [ -z "${PASSWORD_HOME:-}" ]; then
+        if [ "$SHARD_INDEX" = "0" ]; then PASSWORD_HOME=true; else PASSWORD_HOME=false; fi
+        export PASSWORD_HOME
     fi
     if [ -z "${SHARD_PUBLIC_ADDRESS:-}" ] && [ -n "${SHARD_PUBLIC_ADDRESSES:-}" ]; then
         SHARD_PUBLIC_ADDRESS=$(printf '%s' "$SHARD_PUBLIC_ADDRESSES" | cut -d, -f$((SHARD_INDEX + 1)))

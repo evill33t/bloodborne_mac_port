@@ -271,7 +271,7 @@ void bbcoop_trophy_unlocked(int32_t trophy_id);
 /* Phase 5, the team lobby (always on with co-op), for the game's own menu
  * (the team screen, bbport_overlay.cpp). Names are UTF-8; `id` is what a request names (a
  * player's lobby member, a team's id). */
-enum { BBCOOP_LOBBY_TEAM = 4, BBCOOP_LOBBY_PLAYERS = 16, BBCOOP_LOBBY_INVITES = 8,
+enum { BBCOOP_LOBBY_TEAM = 5, /* Amanises 2026-10-29: teams of five (was 4) */ BBCOOP_LOBBY_PLAYERS = 16, BBCOOP_LOBBY_INVITES = 8,
        BBCOOP_LOBBY_WORLDS = 16, BBCOOP_LOBBY_FRIENDS = 32, BBCOOP_LOBBY_REQUESTS = 8,
        BBCOOP_LOBBY_SEARCH = 20, BBCOOP_LOBBY_OPEN = 12, BBCOOP_LOBBY_ASKS = 8 };
 enum { BBCOOP_LOBBY_OFFLINE, BBCOOP_LOBBY_TITLE, BBCOOP_LOBBY_PLAYING };
@@ -284,7 +284,13 @@ typedef struct bbcoop_lobby_entry {
     int state;    /* BBCOOP_LOBBY_*: a player's or a member's */
     int ready;    /* a member's */
     int relation; /* BBCOOP_FRIEND_*: a player's, a friend's, a search result's */
-    int in_my_team; /* a friend's or a search result's: in this player's team already */
+    int in_my_team; /* a player's, a friend's or a search result's: in this player's team already */
+    /* Amanises 2026-10-26: a player's, a friend's or a search result's team (empty name, 0 in
+     * none): its leader's name, its size, open to anyone, its hunt begun. */
+    char team_leader[40];
+    int team_members;
+    int team_open;
+    int team_started;
 } bbcoop_lobby_entry;
 /* Amanises 2026-10-25: an open team as a player in no team sees it (`id` its team, `name` its
  * leader's). */
@@ -337,6 +343,9 @@ typedef struct bbcoop_lobby {
     int rule_rot, rule_travel, rule_vote, rule_scale;
     /* Kaniel 2026-10-28: the boss tempo (0 Vanilla, 1 Aggressive, 2 Relentless). */
     int rule_tempo;
+    /* Kaniel 2026-11-05: the enemies' strength, the team's: HP, damage and poise multipliers (a
+     * full team's with rule_scale, Auto; everyone's without, Fixed). */
+    float rule_hp, rule_damage, rule_poise;
     /* Kaniel 2026-10-25: the team's death mode, the leader's pick (BBCOOP_DEATH_*). */
     int death_mode;
     /* Amanises 2026-10-25: friends (online first), the friend requests waiting for an answer, the
@@ -351,9 +360,13 @@ typedef struct bbcoop_lobby {
      * listed to all, the open teams (to a player in no team), who asked to join (to a leader). */
     int team_size;
     int join; /* BBCOOP_JOIN_*: how the team is joined (its leader says) */
+    /* Kaniel 2026-11-01: a public server (quick match is offered), and this player's team came
+     * from quick match and waits for hunters. */
+    int quick_match, quick_waiting;
     int open_count, ask_count;
     bbcoop_lobby_open open_teams[BBCOOP_LOBBY_OPEN];
     bbcoop_lobby_entry asks[BBCOOP_LOBBY_ASKS];
+    char team[40]; /* Amanises 2026-10-25: the team's id ("" in no team), its Discord party */
 } bbcoop_lobby;
 enum { BBCOOP_DEATH_DOWN = 0, BBCOOP_DEATH_SPECTATE = 1 };
 /* Fills `lobby`; 0 when the team lobby is off. */
@@ -411,10 +424,20 @@ enum { BBCOOP_TEAM_CREATE = 1, BBCOOP_TEAM_INVITE = 2, BBCOOP_TEAM_ACCEPT = 3,
         * ASK_ACCEPT and ASK_DECLINE the one who asked. */
        BBCOOP_TEAM_OPEN = 23, BBCOOP_TEAM_ASK_JOIN = 24, BBCOOP_TEAM_ASK_CANCEL = 25,
        BBCOOP_TEAM_ASK_ACCEPT = 26, BBCOOP_TEAM_ASK_DECLINE = 27,
+       /* Amanises 2026-10-25: join the open team nearest this character's level, or make one */
+       BBCOOP_TEAM_QUICK_MATCH = 29,
        /* Provi 2026-10-29: the leader puts out every lamp of a world (`id`) not played now. */
-       BBCOOP_TEAM_RESET_LAMPS = 28 };
+       BBCOOP_TEAM_RESET_LAMPS = 28,
+       /* Kaniel 2026-11-05: the leader sets the team's rules on the team screen; `id` is
+        * "rot,travel,vote,scale,tempo,hp,damage,poise" (ScreenRulesText). */
+       BBCOOP_TEAM_RULES = 16 };
 enum { BBCOOP_JOIN_INVITE_ONLY = 0, BBCOOP_JOIN_ASK = 1, BBCOOP_JOIN_OPEN = 2 };
 void bbcoop_lobby_request(int action, const char *id);
+/* Amanises 2026-10-25, Discord parties: friends who pressed Ask to Join on this player's Discord
+ * status (`name`, `id` their Discord user), at most `most`; the answer sends them Discord's
+ * invite (accept 1) or closes the request. */
+int bbcoop_discord_asks(bbcoop_lobby_entry *out, int most);
+void bbcoop_discord_answer(const char *id, int accept);
 /* The title holds a save's load for the team: the team screen is up (bbport_overlay.cpp). */
 int bbcoop_team_screen(void);
 /* Invasions (docs/INVASIONS.md; the server's Invasions setting, off by default): a player in no
@@ -460,7 +483,7 @@ typedef struct bbcoop_team_load_row {
 } bbcoop_team_load_row;
 typedef struct bbcoop_team_load {
     int count;
-    bbcoop_team_load_row rows[4];
+    bbcoop_team_load_row rows[BBCOOP_LOBBY_TEAM];
 } bbcoop_team_load;
 int bbcoop_team_load_view(bbcoop_team_load *view);
 /* Kaniel 2026-10-15: while that screen is up the game's sound is held (runtime_audio.c reads this
@@ -495,9 +518,26 @@ typedef struct bbcoop_duel {
      * and the fight's start once it is over. */
     int countdown_shown, countdown_number, countdown_fight;
     float countdown_fill;
+    /* Amanises 2026-10-29: a teams' duel, and this player's team in it (BBCOOP_DUEL_TEAM_*; 0 none). */
+    int teams, team;
 } bbcoop_duel;
 void bbcoop_duel_view(bbcoop_duel *duel);
 void bbcoop_duel_propose(void);
+/* Amanises 2026-10-29: teams' duels. The teams, the hunters a duel goes to now (this player first,
+ * then the party's others on its map), a duel proposed with each one's team (0: left out), and a
+ * teams' question as the asked player reads it. */
+enum { BBCOOP_DUEL_TEAM_YHARNAMITES = 1, BBCOOP_DUEL_TEAM_HUNTERS = 2, BBCOOP_DUEL_TEAM_GREAT_ONES = 3 };
+#define BBCOOP_DUEL_CANDIDATES 8
+typedef struct bbcoop_duel_candidate {
+    char member[96]; /* board name */
+    char name[64];   /* character name */
+    int self;
+} bbcoop_duel_candidate;
+int bbcoop_duel_candidates(bbcoop_duel_candidate *out, int max);
+void bbcoop_duel_propose_teams(const bbcoop_duel_candidate *hunters, const int *teams, int count);
+/* The names on each team (1-3 at [0]-[2], comma-separated) and this player's team; 0 when the
+ * question is not a teams' duel. */
+int bbcoop_duel_ask_teams(uint32_t id, int *mine, char names[3][256]);
 void bbcoop_duel_cancel(void);
 /* The duel waiting for this player's answer and who proposed it (a character name); 0 when none. */
 int bbcoop_duel_ask(uint32_t *id, char *name, size_t size);
@@ -505,8 +545,9 @@ int bbcoop_duel_ask_open(uint32_t id);
 void bbcoop_duel_answer(uint32_t id, int accept);
 /* The next thing to say once: its kind and whose name goes in; 0 when none. */
 enum { BBCOOP_DUEL_NOTICE_BUSY, BBCOOP_DUEL_NOTICE_ALONE, BBCOOP_DUEL_NOTICE_DECLINED,
-       BBCOOP_DUEL_NOTICE_CANCELLED, BBCOOP_DUEL_NOTICE_LEFT, BBCOOP_DUEL_NOTICE_MOVED };
-int bbcoop_duel_notice(int *kind, char *name, size_t size);
+       BBCOOP_DUEL_NOTICE_CANCELLED, BBCOOP_DUEL_NOTICE_LEFT, BBCOOP_DUEL_NOTICE_MOVED,
+       BBCOOP_DUEL_NOTICE_ONE_TEAM, BBCOOP_DUEL_NOTICE_TEAM_WON };
+int bbcoop_duel_notice(int *kind, int *team, char *name, size_t size);
 
 /* Trading between party members (the co-op code's bloodborne_trade.h, with
  * always on in the port with the server world): what the port's trade menus (shim/bbport_trade_menu.cpp) need. An
@@ -550,6 +591,9 @@ int bbcoop_trade_notice(char *text, size_t size);
 int bbcoop_give_own_item(uint32_t item_id, uint32_t count);
 /* The menus' tick: the co-op code runs it on the game's thread with its trades. */
 void bbcoop_trade_set_ui_tick(void (*tick)(void));
+/* Kaniel 2026-11-04 (cheat watch): the save editor changed the character (a dev build's); the
+ * co-op server hears how many times this run in the character sheet. */
+void bbcoop_note_save_edit(void);
 /* Items' names for the boxes (the save editor's, from the game's text): by full item id (goods
  * 0x40000000 | id), 1 when it knows the item. */
 void bbcoop_trade_set_namer(int (*namer)(uint32_t item_id, char *text, size_t size));

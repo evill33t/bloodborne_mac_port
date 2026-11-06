@@ -8,6 +8,13 @@
 // first line of each burst, and the crash and freeze reports, the in-game restart and every exit
 // path of the loader call Flush (bbgpu_log_flush), so a crash keeps its last lines.
 // BB_LOG_APPEND=1 (run.py's in-game restart) keeps what the run before the restart wrote.
+//
+// Production builds (BB_PRODUCTION=1, make-release; Kaniel 2026-11-04: "remove or optimise hard
+// all logging for prod"): the file keeps warnings and worse, whatever BB_LOG_LEVEL says, so the
+// co-op's thousands of info lines a session (flags sent, HTTP calls, packets) cost the game thread
+// one compare each. A bug report turns them back on with the co-op trace's switch (bbport.ini
+// coop_trace=1, BB_COOP_TRACE=1): then BB_LOG_LEVEL counts, from info on (log.h has no trace or
+// debug lines in such a build). Dev and rig builds keep BB_LOG_LEVEL as given (default info).
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -32,6 +39,17 @@ static Level threshold() {
     static const Level level = ParseLevel(std::getenv("BB_GPU_LOG"), Level::warn);
     return level;
 }
+// The bug-report switch (bloodborne_party.cpp CoopTraceEnabled's values).
+static bool DetailedLog() {
+    const char* v = std::getenv("BB_COOP_TRACE");
+    return v && (!std::strcmp(v, "1") || !std::strcmp(v, "on"));
+}
+static Level FileThreshold() {
+    const Level asked = ParseLevel(std::getenv("BB_LOG_LEVEL"), Level::info);
+    if (!BB_PRODUCTION) return asked;
+    if (!DetailedLog()) return std::max(asked, Level::warn);
+    return std::max(asked, Level::info);
+}
 struct FileSink {
     std::FILE* file{};
     Level threshold{Level::off};
@@ -46,7 +64,7 @@ static const FileSink& file_sink() {
         const char* append = std::getenv("BB_LOG_APPEND");
         const bool restarted = append && !std::strcmp(append, "1");
         opened.file = std::fopen(path, restarted ? "a" : "w");
-        if (opened.file) opened.threshold = ParseLevel(std::getenv("BB_LOG_LEVEL"), Level::info);
+        if (opened.file) opened.threshold = FileThreshold();
         // At the end first: Windows' C runtime opens "a" at position 0 until the first write.
         if (opened.file && restarted && std::fseek(opened.file, 0, SEEK_END) == 0 &&
             std::ftell(opened.file) > 0) {
@@ -136,8 +154,11 @@ void StartWriter() {
 }
 } // namespace
 
-bool ShouldLog(Level level) {
-    return level >= threshold() || (file_sink().file && level >= file_sink().threshold);
+int ComputeLowestLevel() {
+    Level lowest = threshold();
+    if (file_sink().file) lowest = std::min(lowest, file_sink().threshold);
+    if (BB_PRODUCTION) lowest = std::max(lowest, Level::info); // log.h: no trace or debug lines
+    return static_cast<int>(lowest);
 }
 void Write(std::string_view log_class, Level level, const char* file, int line, const char* function,
            std::string&& message) {

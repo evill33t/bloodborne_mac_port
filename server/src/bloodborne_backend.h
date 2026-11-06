@@ -41,6 +41,9 @@ struct BackendOptions {
     qint64 ghostTtlSeconds = 30 * 60;
     qint64 lanternTtlSeconds = 10 * 60;
     int tombCap = 100;
+    // Amanises 2026-10-26: the largest message, bloodstain and ghost list sent, in bytes (0: no
+    // cap). A 155 KB bloodstain list crashed the game ("Dantelion2 Panic 265").
+    int replyBytes = 64 * 1024;
     // Text files read on each request (missing: empty).
     QString noticePath;       // the sign-in notice: first line the title, the rest the body
     QString broadcastPath;    // a popup each player gets once per distinct text

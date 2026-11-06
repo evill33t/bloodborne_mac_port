@@ -54,6 +54,9 @@ void FilterPartyDeathPad(std::uint32_t& buttons, std::array<std::uint8_t, 4>& st
 // own: true, and the game gets nothing.
 bool CoopCameraMouse(float dx, float dy);
 void SetFreeCameraAllowed(bool allowed);
+// Cheat watch (server/coop/cheat_watch.h): the port's save editor changed the character (a dev
+// build's); the character sheet tells the co-op server how often this run.
+void NoteSaveEdit();
 void ToggleFreeCamera();
 bool FreeCameraPad(std::uint32_t& buttons, std::array<std::uint8_t, 4>& sticks, std::uint8_t& l2,
                    std::uint8_t& r2);

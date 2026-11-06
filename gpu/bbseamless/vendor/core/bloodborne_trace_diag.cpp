@@ -153,7 +153,7 @@ void LogActionBlockingState() {
 namespace {
 
 // The co-op trace (see CoopTraceVersion): records from any thread go to a queue that a thread of
-// its own writes out, so the game never waits for the disk. Off with SHADPS4_BLOODBORNE_TRACE=0.
+// its own writes out, so the game never waits for the disk. On with BB_COOP_TRACE=1.
 // The queue is never destroyed: at exit() the writer (detached) still waits on it and any
 // file's thread may still trace, while the files' statics go in no defined order.
 std::atomic<bool> coop_trace_on{false};
@@ -253,8 +253,8 @@ std::chrono::sys_seconds LocalTimeNow() {
 // The trace's writer: a new file at the start and whenever one reaches TraceFileCap, the newest
 // TraceFilesKept kept. Lines are flushed every quarter second, so a crash loses little.
 void StartCoopTrace() {
-    if (!CoopTraceEnabled(std::getenv("SHADPS4_BLOODBORNE_TRACE"))) {
-        LOG_INFO(Debug, "Bloodborne co-op trace is off");
+    if (!CoopTraceEnabled(std::getenv("BB_COOP_TRACE"))) {
+        LOG_INFO(Debug, "Bloodborne co-op trace is off (BB_COOP_TRACE=1 turns it on)");
         return;
     }
     const std::filesystem::path dir = Common::FS::GetUserPath(Common::FS::PathType::LogDir);

@@ -27,7 +27,10 @@ public:
     // bbport co-op (gpu/bbcoop/memory.cpp): whether an address can be a guest one, and the
     // guest's protection of the mapping holding it (0, or -1 when nothing is mapped there).
     bool IsValidMapping(VAddr virtual_addr, u64 size = 0);
-    s32 QueryProtection(VAddr addr, void** start, void** end, u32* prot);
+    // guest: found in the guest's table or the game's image, which MappingGeneration covers.
+    s32 QueryProtection(VAddr addr, void** start, void** end, u32* prot, bool* guest = nullptr);
+    // The mapping table's generation, odd while it changes.
+    u64 MappingGeneration() const;
 
     void SetRasterizer(Vulkan::Rasterizer* rasterizer_);
     AddressSpace& GetAddressSpace() { return impl; }

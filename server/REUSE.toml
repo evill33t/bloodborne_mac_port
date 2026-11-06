@@ -40,8 +40,16 @@ path = [
     "directory/Dockerfile",
     "directory/requirements.txt",
     "tests/fuzz/regressions/**",
+    "data/README.md",
 ]
 
 precedence = "aggregate"
 SPDX-FileCopyrightText = "shadNet Project"
 SPDX-License-Identifier = "GPL-2.0-or-later"
+
+# The common passwords the accounts refuse (data/README.md): SecLists, MIT.
+[[annotations]]
+path = "data/common-passwords.txt"
+precedence = "override"
+SPDX-FileCopyrightText = "2018 Daniel Miessler"
+SPDX-License-Identifier = "MIT"

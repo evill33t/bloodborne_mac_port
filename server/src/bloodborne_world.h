@@ -30,6 +30,7 @@
 
 #include "bloodborne_party_boards.h"
 #include "coop.pb.h"
+#include "coop/cheat_watch.h"
 #include "coop/coop_stream.h"
 #include "coop/duel.h"
 #include "coop/invasions.h"
@@ -143,7 +144,7 @@ struct HostedRules {
 struct InvasionRules {
     bool enabled = false;
     quint32 kind = 0xFFFFFFFF; // InvasionKind: the co-operator's kind until the capture
-    quint32 sign = 4;          // InvasionSign: the slot after the guests' 7, 6, 5 (a guess)
+    quint32 sign = 3;          // InvasionSign: the slot after the guests' 7, 6, 5, 4 (a guess)
 };
 
 // What one game can make the service hold (docs/HOSTED_SERVER.md, "Caps"), for every server: far
@@ -219,6 +220,10 @@ public:
     };
 
     void SetHosted(const HostedRules& rules);
+    // Kaniel 2026-11-05: the rules of a team whose maker's game sent none (shadnet.cfg).
+    void SetDefaultRules(const bbcoop::TeamRules& rules) {
+        lobby.SetDefaultRules(rules);
+    }
     // A region: the directory's view for the lobby's lookups, and this shard's name.
     void SetRegion(BloodborneCoop::TeamLobby::Region region, std::string shard);
     // Invites from other shards' teams for players here (the heartbeat's inbox).
@@ -324,6 +329,29 @@ public:
         return static_cast<int>(kept.size());
     }
 
+    // Cheat watch (coop/cheat_watch.h): the players something was found of since the server
+    // started, each with its findings (the admin's `suspects`). Every finding is also a log line
+    // and a line of <folder>/suspects.jsonl, kept across restarts.
+    struct SuspectFinding {
+        std::string kind;
+        BloodborneCoop::Suspicion level = BloodborneCoop::Suspicion::Info;
+        std::string text;
+        std::string character;
+        int times = 0; // runs it was found in
+        qint64 first_ms = 0;
+        qint64 last_ms = 0;
+    };
+    struct Suspect {
+        QByteArray online_id;
+        std::string member;                             // its board name
+        std::string display;                            // its lobby name
+        std::map<std::string, SuspectFinding> findings; // by kind
+    };
+    const std::map<QByteArray, Suspect>& Suspects() const {
+        return suspects;
+    }
+    static constexpr const char* SuspectsFile = "suspects.jsonl";
+
 private:
     struct PartyWorld {
         QString name; // PartyFolderName
@@ -359,6 +387,14 @@ private:
         // Phase 4: who runs each area's enemies, and what was logged of it.
         EnemyOwners owners;
         QString owners_logged;
+        // Rig host-arrives-hurt-enemy: each map's owner's last enemy places (bbcoop::EnemyPlaces),
+        // for whoever takes the map over next, even when the owner left, crashed or is loading;
+        // `handed_to`: the member that has them already. A map that starts over drops them.
+        struct HeldPlaces {
+            bbcoop::EnemyPlaces places;
+            std::string handed_to;
+        };
+        std::map<std::uint32_t, HeldPlaces> enemy_places;
         QString vitals_logged; // the members' states and the wipes, as last logged
         // Its trades (coop/trade.h): the offers held and the grants owed.
         BloodborneCoop::TradeDesk trades;
@@ -426,6 +462,8 @@ private:
         bool covenant_rewards = false; // can consume the extra Blood Dreg reward item
         qint64 reward_retry_ms = 0; // disk failure backoff; never spin on dead Vitals
         std::uint32_t covenant_effect = 0; // normalized native oath marker, last vitals
+        // Cheat watch: its game's character and build as its sheets, vitals and trades say.
+        BloodborneCoop::CheatWatch cheat_watch;
     };
     // Invasions: one invader on its way to (or in) a team world.
     struct Invasion {
@@ -466,6 +504,11 @@ private:
     static std::optional<QString> Oversized(const bbcoop::Envelope& envelope);
     void Take(Member& member, const bbcoop::Envelope& envelope, qint64 now_ms, Result& result);
     void OnHello(Member& member, const bbcoop::Hello& hello, qint64 now_ms, Result& result);
+    // Cheat watch: a member's character sheet, and what was found of it (logged, kept).
+    void OnCharacterSheet(Member& member, const bbcoop::CharacterSheet& sheet, qint64 now_ms,
+                          Result& result);
+    void NoteSuspicion(const Member& member, std::vector<BloodborneCoop::CheatFinding> found,
+                       qint64 now_ms, Result& result);
     void OnLifecycle(Member& member, const bbcoop::Lifecycle& lifecycle, qint64 now_ms,
                      Result& result);
     void StartLog(PartyWorld& world, bool after_wipe, qint64 now_ms, Result& result);
@@ -492,6 +535,8 @@ private:
     std::string CharacterOf(const std::string& member) const;
     void CloseSession(PartyWorld& world, qint64 now_ms, Result& result);
     void SendOwners(PartyWorld& world, qint64 now_ms, Result& result, Member* only = nullptr);
+    // A map's new owner gets the last owner's places (PartyWorld::enemy_places).
+    void HandOverEnemyPlaces(PartyWorld& world, qint64 now_ms);
     // Whether `member` may decide the enemies of `map` (phase 4): a game without the owners, or
     // on an area nobody or itself runs.
     bool Decides(const PartyWorld& world, const Member& member, u32 map) const;
@@ -575,8 +620,9 @@ private:
     int compact_records;
     qint64 compact_ms;
     std::map<QString, PartyWorld> worlds;
-    std::map<QString, Kept> kept;      // by world (Collect)
-    std::map<quint64, Member> members; // by link (Endpoint::Key)
+    std::map<QString, Kept> kept;           // by world (Collect)
+    std::map<quint64, Member> members;      // by link (Endpoint::Key)
+    std::map<QByteArray, Suspect> suspects; // cheat watch: by online id
     std::map<quint64, ServerLink::Endpoint> endpoints;
     std::vector<Member*> flush_now; // the members FlushSome flushes
     // Invasions (docs/INVASIONS.md).

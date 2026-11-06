@@ -43,6 +43,7 @@ void runtime_memory_report(void);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 int runtime_memory_vma_info(uintptr_t address, int *prot, int *type, uintptr_t *end);
 int runtime_memory_protection(uintptr_t address, uintptr_t *start, uintptr_t *end, uint32_t *prot);
+const uint64_t *runtime_memory_generation(void);
 void runtime_memory_dump_recent_ops(void *file_handle);
 const char *runtime_import_name(const char *name);
 uintptr_t runtime_rwlock_resolve(const char *name);

@@ -609,6 +609,16 @@ public:
         return id;
     }
 
+    // Amanises 2026-10-26: a player takes its own bloodstains back (TombMessRemove).
+    void DeleteTombs(qint64 userId, const std::vector<qint64>& ids) {
+        Transaction tx(Db());
+        for (const qint64 id : ids) {
+            Exec(QStringLiteral("DELETE FROM tombstones WHERE id=? AND user_id=?"),
+                 {BindInt(id), BindInt(userId)});
+        }
+        tx.Commit();
+    }
+
     Json ListTombs(qint64 userId, const Json& areas, const Json& getMax) {
         Json list = Json::Array();
         for (const Row& row : ListByAreas(QStringLiteral("tombstones"), areas, userId,
@@ -1293,6 +1303,15 @@ const std::map<QString, StoreHandler>& StoreHandlers() {
                      c.store.ListTombs(c.uid, AreasOf(c.req, QStringLiteral("AreaInfoList")),
                                        c.req.Get(QStringLiteral("GetMaxCount"))));
          }},
+        {QStringLiteral("TombMessRemove"),
+         [](Context& c, Json&) {
+             std::vector<qint64> ids =
+                 IdList(c.req.Get(QStringLiteral("TombMessIdList")), QStringLiteral("TombMessId"));
+             if (c.req.Find(QStringLiteral("TombMessId"))) {
+                 ids.push_back(AsInt(c.req.Get(QStringLiteral("TombMessId")), -1));
+             }
+             c.store.DeleteTombs(c.uid, ids);
+         }},
         {QStringLiteral("DeathVisionGet"),
          [](Context& c, Json& out) {
              const auto vision =
@@ -1375,7 +1394,14 @@ Json EmptyResponseFields(const QString& responseId) {
     const auto list = [] { return Json::Array(); };
     Json fields = Json::Object();
     if (responseId == QStringLiteral("UserPropertiesMoveCountCheckResponse") ||
-        responseId == QStringLiteral("MessengerShellUploadResponse")) {
+        responseId == QStringLiteral("MessengerShellUploadResponse") ||
+        // Amanises 2026-10-26: services the game calls, no longer "unmapped".
+        responseId == QStringLiteral("TombMessRemoveResponse") ||
+        responseId == QStringLiteral("MultiPlayNetErrorResponse") ||
+        responseId == QStringLiteral("UserPropertiesMoveCountResponse") ||
+        responseId == QStringLiteral("ChannelRandomJoinResponse") ||
+        responseId == QStringLiteral("ChannelAddMaterialResponse") ||
+        responseId == QStringLiteral("ChannelAddMaterialCompleteNotifyResponse")) {
         return fields;
     }
     if (responseId == QStringLiteral("ChannelGetInfoResponse")) {
@@ -1396,6 +1422,10 @@ Json EmptyResponseFields(const QString& responseId) {
         fields.Set(QStringLiteral("ChairMessList"), list());
     } else if (responseId == QStringLiteral("WanderingGhostGetResponse")) {
         fields.Set(QStringLiteral("WanderingGhostList"), list());
+    } else if (responseId == QStringLiteral("UserAgreementGetResponse")) {
+        fields.Set(QStringLiteral("Agreements"), list());
+    } else if (responseId == QStringLiteral("EmergencyNoticeGetResponse")) {
+        fields.Set(QStringLiteral("NoticeList"), list());
     } else {
         return Json(); // not one of these
     }
@@ -1668,6 +1698,36 @@ Json BloodborneBackend::Service(const QString& path, const Json& request) {
         }
     } else {
         qInfo().noquote() << "backend: POST" << path << "with no MessageId; answering ResKind 0";
+    }
+
+    // Amanises 2026-10-26: a list longer than the size cap is cut (newest first, so the newest
+    // stay): the game crashed on a 155 KB bloodstain list, never on 97-106 KB.
+    const QString capped =
+        name == QStringLiteral("BloodMessGetList")    ? QStringLiteral("BloodMessList")
+        : name == QStringLiteral("TombMessGetList")   ? QStringLiteral("TombMessList")
+        : name == QStringLiteral("WanderingGhostGet") ? QStringLiteral("WanderingGhostList")
+                                                      : QString();
+    if (const Json* list =
+            capped.isEmpty() || m_options.replyBytes <= 0 ? nullptr : payload.Find(capped);
+        list && list->IsArray()) {
+        const std::vector<Json> entries = Iterate(*list);
+        Json kept = Json::Array();
+        qint64 used = -1;
+        size_t count = 0;
+        for (const Json& entry : entries) {
+            const qint64 size = DumpJson(entry).size() + 1; // a comma between entries
+            if (used + size > m_options.replyBytes) {
+                break;
+            }
+            kept.Append(entry);
+            used += size;
+            ++count;
+        }
+        if (count < entries.size()) {
+            qInfo().noquote() << "backend:" << name << "reply cut to" << count << "of"
+                              << entries.size() << "(size cap" << m_options.replyBytes << "bytes)";
+            payload.Set(capped, std::move(kept));
+        }
     }
 
     if (name == QStringLiteral("ChannelGetDetailsInfo")) {

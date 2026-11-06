@@ -225,6 +225,9 @@ BackendShowOwn=
 BackendGhostTtlMinutes=30
 BackendLanternTtlMinutes=10
 BackendTombCap=100
+; the largest message, bloodstain and ghost list sent, in bytes (0: no cap); a longer list
+; (about 155 KB of bloodstains) crashed the game
+BackendReplyBytes=65536
 ; seconds between summon sign posts and searches, and the co-op guard timers (retail 30-60)
 BackendSummonPoll=5
 ```

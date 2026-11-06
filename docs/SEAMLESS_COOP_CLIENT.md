@@ -1,11 +1,11 @@
 # Seamless co-op on macOS
 
 This branch integrates the online client from
-[lKaniel/bloodborne-server](https://github.com/lKaniel/bloodborne-server/tree/5d2305ee611ef1e03be39ff925f0da75c9a70393),
-pinned at **v1.3.1**, `5d2305ee611ef1e03be39ff925f0da75c9a70393`. The default server is
+[Amanises-Yharnam-Together/BBSC-Yharnam-Together](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/tree/efa0ad265d840d9195e55db2e3216f46f7daedd0),
+pinned at **v1.4.0**, `efa0ad265d840d9195e55db2e3216f46f7daedd0`. The default server is
 `bloodborne.phobos.services`. This repository builds the client and includes the separately hosted [server component](../server/LOCAL_FORK.md).
 
-See [the v1.3.1 integration record](SEAMLESS_V1_3_1.md) for the update scope and validation.
+See [the v1.4.0 integration record](SEAMLESS_V1_4_0.md) for the update scope and validation.
 
 ## Start playing
 
@@ -15,6 +15,22 @@ in the **Game mode** selector at the top of the launcher, then press **Play**. T
 co-op on `bloodborne.phobos.services`; its server and host rules are in the **Online** tab.
 Select Continue or Load Game to choose your character; its team screen opens before entering
 the world.
+
+In **Online → Co-op host**, select **seamlesshunt.com (Global)** to use the public service.
+Create an account or sign in there; passwords go only to its verified HTTPS endpoint and are
+not saved. The returned session is kept in macOS Keychain. Save the one-time recovery code
+shown when creating an account. Password change, recovery and sign-out are available here.
+Sessions expire after 29 days in the launcher; sign in again when prompted. Each public account
+gets its own co-op save folder, seeded once from the selected regular saves. Switching back to
+**Private / local server** restores the private server address and existing server-scoped saves.
+Both known hosts pin their published transport identity. Global uses the server's default
+rules; the team leader can change rules from the in-game team settings menu.
+
+v1.4.0 supports five hunters per team, quick match, spectator following, named team duels,
+leader rule editing and a phantom-glow setting. Production releases disable co-op autoplay
+and the developer free camera. Windows Discord IPC is retained upstream source, but is not
+implemented on macOS. Public acceptance and gameplay coverage are recorded in the integration
+record linked above.
 
 Choose **Regular** to return to normal gameplay and your normal save folder. Switching modes
 keeps your co-op saves, server settings and accounts. The choice is remembered for the next

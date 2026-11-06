@@ -19,6 +19,7 @@
 #include "config.h"
 #include "coop/build_fingerprint.h"
 #include "link_server.h"
+#include "signed_accounts.h"
 
 namespace {
 
@@ -26,6 +27,9 @@ namespace {
 const QByteArray DirectoryDown = "the region's directory does not answer: try again in a minute";
 
 // What a refused hello's game hears when its id got no account for a reason the player can act on.
+// A new id on a Global server, or an old or signed-out secret (bbport_coop.py SIGN_IN_FIRST).
+const QByteArray AccountFirst = "account: sign in in the launcher first";
+
 QByteArray RefusalOf(DbError why) {
     if (why == DbError::ExistingAddress)
         return "address taken: another account's game has this id's virtual address; the launcher "
@@ -76,6 +80,8 @@ LinkServer::LinkServer(SharedState* shared, const QString& db_path, quint16 tcp_
         bool made = false;
         if (const auto key = ServerLink::KeyFromFile(path, &made, &m_keyError)) {
             m_link.SetStaticKey(*key);
+            if (shared)
+                shared->accountsKey = SignedAccounts::KeyFrom(*key);
             if (made)
                 qInfo().noquote() << "Link: a new key made in" << path
                                   << "(only this user reads it)";
@@ -123,15 +129,26 @@ LinkServer::LinkServer(SharedState* shared, const QString& db_path, quint16 tcp_
     m_clock.start();
     // Hosted (docs/HOSTED_SERVER.md): limits on who comes in, a fixed build, passwords checked on
     // their own thread (a flood of new ids must not stop the games' relay).
-    if (shared && shared->config)
+    if (shared && shared->config) {
         m_hosted = shared->config->GetHosted();
-    std::vector<std::string> compatible_versions;
-    for (const QString& version : m_hosted.compatibleVersions)
-        compatible_versions.push_back(version.toStdString());
-    m_link.SetCompatibleVersions(std::move(compatible_versions));
-    if (!m_hosted.compatibleVersions.isEmpty())
-        qInfo().noquote() << "Link: compatible release labels (co-op protocol still checked):"
-                          << m_hosted.compatibleVersions.join(", ");
+        std::vector<std::string> compatible_versions;
+        for (const QString& version : m_hosted.compatibleVersions)
+            compatible_versions.push_back(version.toStdString());
+        m_link.SetCompatibleVersions(std::move(compatible_versions));
+        if (!m_hosted.compatibleVersions.isEmpty())
+            qInfo().noquote() << "Link: compatible release labels (co-op protocol still checked):"
+                              << m_hosted.compatibleVersions.join(", ");
+        const SignInConfig sign_in = shared->config->GetSignIn();
+        m_signedSignIn = m_hosted.enabled && sign_in.passwords;
+        // Kaniel 2026-11-05: the team rules a team starts with when its maker set none.
+        const QString rules_setting = shared->config->GetTeamDefaultRules();
+        if (const auto rules = BloodborneCoop::ParseTeamRules(rules_setting.toStdString())) {
+            m_world.SetDefaultRules(*rules);
+        } else {
+            qWarning().noquote() << "TeamDefaultRules" << rules_setting
+                                 << "is not understood: Auto enemies of the standard strength";
+        }
+    }
     if (m_hosted.enabled) {
         Admission::Limits limits;
         limits.links_per_address = m_hosted.linksPerAddress;
@@ -322,8 +339,19 @@ bool LinkServer::Start(const QHostAddress& addr, uint16_t port) {
     }
     // Every game's datagrams come to this one socket: room for a burst while the thread is busy
     // (the system's cap, net.core.rmem_max, may hold it lower).
-    m_socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, 16 << 20);
-    m_socket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, 16 << 20);
+    m_socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption,
+                              Admission::LinkSocketBytes);
+    m_socket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption,
+                              Admission::LinkSocketBytes);
+    if (const int got =
+            m_socket->socketOption(QAbstractSocket::ReceiveBufferSizeSocketOption).toInt();
+        m_hosted.enabled && Admission::LinkBufferShort(got)) {
+        qWarning().noquote() << QStringLiteral(
+                                    "Link: the system holds the receive buffer to %1 bytes: "
+                                    "set net.core.rmem_max and wmem_max to 33554432 "
+                                    "(server/hosting/README.md)")
+                                    .arg(got);
+    }
     qInfo().nospace().noquote() << "Link UDP listener on: " << addr.toString() << ":" << port;
     return true;
 }
@@ -441,6 +469,21 @@ std::optional<ServerLink::SignInVerdict> LinkServer::SignIn(const QByteArray& on
                            {ticket->requests().begin(), ticket->requests().end()});
         }
     }
+    // Global servers: a sign-in's secret, told by its signature with no store shared between
+    // shards (signed_accounts.h); an old or signed-out one is sent back to the launcher.
+    const bool signed_on = m_signedSignIn && !m_shared->accountsKey.isEmpty();
+    const bool signed_account = signed_on && SignedAccounts::IsSignedId(online_id);
+    if (signed_account) {
+        const auto verdict = SignedAccounts::Check(
+            m_shared->accountsKey, online_id, secret, QDateTime::currentSecsSinceEpoch(),
+            m_db.SignInNotBefore(QString::fromUtf8(online_id)));
+        if (verdict != SignedAccounts::Verdict::Good)
+            return ServerLink::SignInVerdict{false, AccountFirst};
+        // A newer sign-in's secret replaces the one remembered here.
+        if (const auto held = m_signedIn.constFind(online_id);
+            held != m_signedIn.constEnd() && *held != hash)
+            m_signedIn.remove(online_id);
+    }
     const auto known = m_signedIn.constFind(online_id);
     if (known != m_signedIn.constEnd()) {
         if (*known != hash)
@@ -474,10 +517,16 @@ std::optional<ServerLink::SignInVerdict> LinkServer::SignIn(const QByteArray& on
     }
     if (m_signInPending.contains(online_id))
         return std::nullopt;
+    // Global servers: a new account comes from the launcher's sign-in (signed_accounts.h), which
+    // any shard can tell from its secret; no other new id, and the work and an address's accounts
+    // are for ids anyone can make.
+    if (signed_on && !signed_account && make && !ticketed &&
+        !m_db.GetUserId(QString::fromUtf8(online_id)))
+        return ServerLink::SignInVerdict{false, AccountFirst};
     // A hello without the work (hub.SetSignupWork) makes no account: one for an id that has one
     // goes on, the others hear how much work, before any password is hashed. A ticket's account is
     // made here as it is elsewhere.
-    if (!paid && make && !ticketed) {
+    if (!paid && make && !ticketed && !signed_account) {
         if (!m_db.GetUserId(QString::fromUtf8(online_id)))
             return ServerLink::SignInVerdict{false, {}, true};
         make = false;
@@ -487,8 +536,9 @@ std::optional<ServerLink::SignInVerdict> LinkServer::SignIn(const QByteArray& on
     if (m_signInPending.size() >= 512 && !ticketed)
         return std::nullopt;
     const quint32 address = m_helloAddress;
-    const bool counted = make && !ticketed && m_guard.MayMakeAccount(address, now);
-    make = ticketed ? make : counted;
+    const bool counted =
+        make && !ticketed && !signed_account && m_guard.MayMakeAccount(address, now);
+    make = ticketed || signed_account ? make : counted;
     if (counted)
         m_guard.Made(address, now); // counted now (checks run at once), given back if none is
     m_signInPending.insert(online_id);
@@ -502,7 +552,7 @@ std::optional<ServerLink::SignInVerdict> LinkServer::SignIn(const QByteArray& on
     // is waiting for it.
     m_signInPool.start(
         [this, online_id, secret, hash, make, address, counted, db_path, claim, directory, token,
-         shard] {
+         shard, signed_account] {
             // Each sign-in thread's own connection to the accounts.
             static thread_local std::unique_ptr<Database> db;
             if (!db) {
@@ -527,6 +577,10 @@ std::optional<ServerLink::SignInVerdict> LinkServer::SignIn(const QByteArray& on
                     elsewhere = *holder;
                 }
             }
+            // Its signature was good: a newer sign-in's secret takes the old one's place here.
+            if (signed_account && existed &&
+                !db->CheckUser(id, QString::fromUtf8(secret), {}, false))
+                db->SetPassword(id, QString::fromUtf8(secret));
             DbError why = DbError::None;
             const bool accepted =
                 (existed || may_make) &&
@@ -633,6 +687,11 @@ void LinkServer::Heartbeat() {
     QJsonArray started;
     for (const QByteArray& id : std::exchange(m_started, {}))
         started.append(QString::fromUtf8(id));
+    // Sign-ins killed here, for the others; the ones killed elsewhere since the last heard.
+    const auto revoked_here = m_shared->TakeRevoked();
+    QJsonArray revoked;
+    for (const auto& [id, at] : revoked_here)
+        revoked.append(QJsonObject{{"id", id}, {"at", at}});
     const QJsonObject beat{
         {"shard", m_shardConfig.name},
         {"address", m_shardConfig.publicAddress},
@@ -645,16 +704,24 @@ void LinkServer::Heartbeat() {
         {"codes", codes},
         {"worlds", worlds},
         {"started", started},
+        {"revoked", revoked},
+        {"revoked_after", m_revokedHeard},
     };
-    m_directory->Post("/v1/heartbeat", beat, [this](std::optional<QJsonObject> answer) {
-        m_beating = false;
-        if (answer) {
-            TakeView(*answer);
-        } else if (m_beatsLost++ % 30 == 0) {
-            qWarning() << "Region: the directory did not answer a heartbeat (" << m_beatsLost
-                       << "so far); the last view stays";
-        }
-    });
+    m_directory->Post("/v1/heartbeat", beat,
+                      [this, revoked_here](std::optional<QJsonObject> answer) {
+                          m_beating = false;
+                          if (answer) {
+                              TakeView(*answer);
+                          } else {
+                              // Sent again with the next one.
+                              for (const auto& [id, at] : revoked_here)
+                                  m_shared->Revoked(id, at);
+                          }
+                          if (!answer && m_beatsLost++ % 30 == 0) {
+                              qWarning() << "Region: the directory did not answer a heartbeat ("
+                                         << m_beatsLost << "so far); the last view stays";
+                          }
+                      });
 }
 
 void LinkServer::TakeView(const QJsonObject& answer) {
@@ -662,6 +729,14 @@ void LinkServer::TakeView(const QJsonObject& answer) {
     busy.start();
     std::vector<Region::Invite> inbox;
     m_region = Region::ViewOf(answer, &inbox);
+    // Sign-ins killed on the region's other shards: dead here too (signed_accounts.h).
+    for (const QJsonValue item : answer.value("revocations").toArray()) {
+        const QJsonObject revocation = item.toObject();
+        const QString id = revocation.value("id").toString();
+        if (SignedAccounts::IsSignedId(id.toUtf8()))
+            m_db.SetSignInNotBefore(id, revocation.value("at").toInteger());
+        m_revokedHeard = std::max(m_revokedHeard, revocation.value("seq").toInteger());
+    }
     if (!inbox.empty()) {
         std::vector<std::pair<std::string, bbcoop::TeamInvite>> invites;
         for (Region::Invite& invite : inbox)

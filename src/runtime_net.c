@@ -117,6 +117,7 @@ static BbNetResolveFn module_resolve(void) {
         const BbSeamlessInitFn seamless_init=(BbSeamlessInitFn)dlsym(module,"bbseamless_init");
         const BbSeamlessHost seamless_host={.abi=BBSEAMLESS_ABI_VERSION,.net=host,
             .thread_attach=runtime_thread_attach_host,.memory_protection=runtime_memory_protection,
+            .memory_generation=runtime_memory_generation,
             .trophy_unlock=party_trophy,.publish_ui=bbgpu_coop_publish,
             .next_command=bbgpu_coop_next_command,.take_portrait=bbgpu_coop_take_portrait,.user_dir=game_user,
             .reward_lookup=runtime_reward_lookup,.reward_begin=runtime_reward_begin,

@@ -146,7 +146,7 @@ its lease. Not automated yet.
 | `ShardPublicAddress` | `SHARD_PUBLIC_ADDRESS` | `ip:port` the games reach this shard's link at |
 | `DirectoryToken` | `DIRECTORY_TOKEN` | the shards' and the directory's shared secret |
 | `RegionSecret` | `REGION_SECRET` | the tickets' key; default derived from the token |
-| `ShardCapacity` | `SHARD_CAPACITY` | default 800 |
+| `ShardCapacity` | `SHARD_CAPACITY` | default 350 (a 4-vCPU box stayed comfortable up to 300-400 with big socket buffers: `net.core.rmem_max`, server/hosting/README.md) |
 | `ShardDraining` | `SHARD_DRAINING` | |
 | `ShardHeartbeatMs` | | default 2000 |
 

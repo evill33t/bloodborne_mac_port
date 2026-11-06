@@ -32,6 +32,10 @@ void AddFriendsToLobby(bbcoop::LobbyState& state, const std::string& member,
             out.set_name(found->second->name());
             out.set_state(found->second->state());
             out.set_team(found->second->team());
+            out.set_team_leader(found->second->team_leader());
+            out.set_team_members(found->second->team_members());
+            out.set_team_join(found->second->team_join());
+            out.set_team_started(found->second->team_started());
         }
         if (entry.member == member) {
             out.set_relation(bbcoop::LobbyPlayer::SELF);

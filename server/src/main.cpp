@@ -100,8 +100,10 @@ int main(int argc, char* argv[]) {
                            arguments << QStringLiteral("--beat"));
     }
     if (const qsizetype at = arguments.indexOf(QStringLiteral("--admin")); at >= 0) {
+        // Read only: run before the entrypoint wrote its shadnet.cfg, a writing load made one with
+        // every default (Hosted=false), which the entrypoint then kept.
         ConfigManager config;
-        config.Load();
+        config.LoadReadOnly();
         return RunAdminCommand(config.GetHosted().adminSocket,
                                arguments.mid(at + 1).join(QLatin1Char(' ')));
     }

@@ -531,6 +531,9 @@ static const char* HttpMethodName(s32 method) {
 // Dump every effective setting and the merged header list when a request is
 // about to be sent.
 static void LogSendRequestSettings(const HttpRequest& req, int reqId, u64 body_size) {
+    if (!LOG_INFO_ON()) {
+        return;
+    }
     const HttpSettings& s = req.settings;
     LOG_INFO(Lib_Http, "--- SendRequest dump reqId={} ---", reqId);
     const char* method_name = "(unset)";

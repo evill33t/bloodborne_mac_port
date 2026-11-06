@@ -406,6 +406,18 @@ struct LauncherView: View {
     }
 
     @ViewBuilder private var seamlessRows: some View {
+        Picker("Server host", selection: $model.online.seamlessHost) {
+            ForEach(SeamlessHost.allCases) { Text($0.label).tag($0) }
+        }
+        .onChange(of: model.online.seamlessHost) { _, _ in model.refreshSecretState() }
+        Toggle("Phantom glow on teammates", isOn: $model.online.seamlessPhantomGlow)
+        if model.online.seamlessHost == .global {
+            globalAccountRows
+            Text("The public server uses its own accounts. Passwords are sent only over HTTPS and are never saved. The session secret is stored in your login Keychain. Each account has separate co-op saves.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Team leaders choose enemy strength, Travel Together and other rules in the in-game team settings.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
         TextField("Server", text: $model.online.seamlessServer, prompt: Text(OnlineSettings.defaultSeamlessServer))
         Text("A persistent identity is created automatically for this server. Co-op saves use a separate folder, seeded from your existing saves on first launch. Co-op runs at 60 FPS.")
             .font(.caption).foregroundStyle(.secondary)
@@ -431,6 +443,50 @@ struct LauncherView: View {
         TextField("Enemy HP, damage, poise multipliers", text: $model.online.seamlessHarderEnemies, prompt: Text("off or 3,1.5,3"))
         Text("Host rules apply when you lead a team. Set each enemy multiplier from 1 to 10, or use off for the original difficulty.")
             .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var globalAccountRows: some View {
+        if model.globalSignedIn {
+            HStack {
+                Text("Signed in as \(model.online.seamlessGlobalName)")
+                Spacer()
+                Button("Change Password") {
+                    model.globalName=model.online.seamlessGlobalName;model.globalAuthAction = .change
+                }
+                Button("Sign Out", action: model.signOutGlobal)
+            }
+        }
+        if !model.globalSignedIn || model.globalAuthAction == .change {
+            Picker("Account action", selection: $model.globalAuthAction) {
+                ForEach(SeamlessGlobal.Action.allCases.filter { $0 != .change || model.globalSignedIn }) {
+                    Text($0.label).tag($0)
+                }
+            }
+            TextField("Account name", text: $model.globalName)
+                .onAppear { if model.globalName.isEmpty { model.globalName=model.online.seamlessGlobalName } }
+            if model.globalAuthAction != .recover {
+                SecureField(model.globalAuthAction == .change ? "Current password" : "Password", text: $model.globalPassword)
+            }
+            if model.globalAuthAction == .recover {
+                TextField("Recovery code", text: $model.globalRecoveryInput)
+            }
+            if model.globalAuthAction == .recover || model.globalAuthAction == .change {
+                SecureField("New password", text: $model.globalNewPassword)
+            }
+            Button(model.globalAuthBusy ? "Connecting…" : model.globalAuthAction.label,
+                   action: model.authenticateGlobal)
+                .disabled(model.globalAuthBusy || model.globalName.isEmpty)
+        }
+        if let code=model.globalRecoveryCode {
+            Text("Recovery code — keep a copy; it is shown only once:").font(.caption)
+            HStack {
+                Text(code).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                Button("Copy") { NSPasteboard.general.clearContents();NSPasteboard.general.setString(code, forType: .string) }
+                Button("Hide") { model.globalRecoveryCode=nil }
+            }
+        }
+        if let problem=model.globalAuthProblem { Text(problem).foregroundStyle(.red).font(.caption) }
     }
 
     @ViewBuilder private var huntersDreamRows: some View {

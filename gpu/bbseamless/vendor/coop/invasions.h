@@ -21,9 +21,9 @@ constexpr u32 HuntersDreamMap = 0x15000000;
 // The chalice dungeons (m29_xx): not in phase 1.
 constexpr u32 ChaliceArea = 0x1D;
 
-// The game's player slots (the host and three): an invader needs a free one, so a session of
-// this many is never invaded.
-constexpr size_t InvasionMaxPlayers = 4;
+// The game's session members (the host and four, Amanises 2026-10-29; was 4): an invader needs a
+// free one, so a session of this many is never invaded.
+constexpr size_t InvasionMaxPlayers = 5;
 // "An invader approaches": the team's notice before the invader joins.
 constexpr s64 InvasionNoticeMs = 10'000;
 // An invasion longer than this ends (the invader goes home).

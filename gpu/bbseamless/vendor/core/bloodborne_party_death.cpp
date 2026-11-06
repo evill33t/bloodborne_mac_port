@@ -65,6 +65,8 @@
 #include "core/memory.h"
 
 namespace Core::Bloodborne {
+
+static std::atomic<s64> last_party_wipe_ms{0};
 namespace {
 
 // Invasions (bloodborne_invasion.h): the invader's bodies here as of the last presence tick (the
@@ -137,6 +139,10 @@ bool LooksLikeBloodstain(u64 stain) {
 } // namespace
 
 namespace Coop {
+
+s64 LastPartyWipeMs() {
+    return last_party_wipe_ms.load(std::memory_order_relaxed);
+}
 
 // The stain's marker (+0x88) and effect (+0x98) are what 0x01868A50 makes when it shows the
 // stain (and frees when it hides it): a stain recorded but never shown has neither (Kaniel
@@ -444,6 +450,7 @@ void MoveToRespawnPoint(bool arriving_from_trip) {
             TellServerMapWipe(map);
         }
     } else if (call == DeathReset::PartyWipe) {
+        last_party_wipe_ms.store(SteadyMilliseconds(), std::memory_order_relaxed);
         OnLifecycle(Lifecycle::Wipe); // kills and enemy HP, see their RegisterLifecycleReset
     }
     const u64 global = GetGlobalState();
@@ -751,13 +758,11 @@ constexpr u8 DownedNoDamageFlags = 0x2 | 0x8;
 constexpr u64 PlayerHideFlagOffset = 0x0553E88E;
 constexpr u64 PlayerSilenceFlagOffset = 0x0553E88F;
 
-// The enemies' targeting systems (see ForgetsTargetNode): the enemy one's vtable and its base's.
-constexpr u64 EnemyTargetingVtableOffset = 0x0531B9F0;
-constexpr u64 BaseTargetingVtableOffset = 0x05366280;
-
-// Every enemy in this world forgets the characters with these handles (see ForgetsTargetNode);
-// returns how many target nodes it changed.
-u32 ForgetDownedTargets(std::span<const u32> handles) {
+// Every enemy in this world forgets the characters with these handles (see ForgetsTargetNode,
+// or ForgetsGoneTargetNode for `gone` members' copies); returns how many target nodes it changed,
+// and puts the enemies it changed them on in `by` (if given).
+u32 ForgetDownedTargets(std::span<const u32> handles, bool gone = false,
+                        std::vector<u32>* by = nullptr) {
     const u64 world = ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0);
     if (handles.empty() || world < 0x10000) {
         return 0;
@@ -783,11 +788,18 @@ u32 ForgetDownedTargets(std::span<const u32> handles) {
         for (int count = 0;
              count < 64 && node >= 0x10000 && HasMemoryAccess(node, 0x54, MemoryProt::CpuWrite);
              ++count, node = ReadValue<u64>(node, 0x08)) {
-            if (ForgetsTargetNode(ReadValue<u8>(node, 0x02), ReadValue<s32>(node, 0x28),
-                                  ReadValue<u32>(node, 0x50), handles) &&
+            const u8 slot = ReadValue<u8>(node, 0x02);
+            const s32 kind = ReadValue<s32>(node, 0x28);
+            const u32 handle = ReadValue<u32>(node, 0x50);
+            if ((gone ? ForgetsGoneTargetNode(slot, kind, handle, handles)
+                      : ForgetsTargetNode(slot, kind, handle, handles)) &&
                 ReadValue<float>(node, 0x2C) != ForgottenTargetTimer) {
                 WriteValue(node, 0x2C, ForgottenTargetTimer);
                 ++forgotten;
+                if (const u32 enemy = ReadValue<u32>(character, 0x08);
+                    by != nullptr && !std::ranges::contains(*by, enemy)) {
+                    by->push_back(enemy);
+                }
             }
         }
     });
@@ -1151,6 +1163,10 @@ const s32 downed_animation = DownedAnimation(std::getenv("SHADPS4_BLOODBORNE_DOW
 
 namespace Coop {
 
+u32 ForgetCharacterTargets(std::span<const u32> handles) {
+    return ForgetDownedTargets(handles, true);
+}
+
 bool KillCharacterCallable() {
     return kill_hook_installed ||
            std::ranges::equal(
@@ -1310,28 +1326,13 @@ void SetPlayerFlag(u64 offset, u8 value) {
     WriteValue(image_base + offset, 0, value);
 }
 
-// The yellow YOU ARE DOWN banner (the party HUD's, in place of the game's UNLOCKED banner): queued
-// by the game's own SetTextEffect, as YOU DIED is. Without the party HUD it would say UNLOCKED, so
-// it is left out where the HUD is not the port's (the emulator) or is off (BB_PARTY_HUD=0).
+// When the player last went down: the party HUD shows its yellow YOU ARE DOWN banner
+// (CoopDownedBanner, DownedBannerFrame) from then, in the HUD tick (UpdateDownedBanner). Kaniel
+// 2026-11-01: it is the HUD's own sprite, so the game's UNLOCKED banner (slot 15) is its own again.
+std::atomic<s64> downed_banner_ms{-1'000'000};
+
 void ShowDownedBanner() {
-#ifdef BLOODBORNE_PARTY_HUD
-    static const bool party_hud = [] {
-        const char* setting = std::getenv("BB_PARTY_HUD"); // run.py's switch for the patched HUD
-        return setting == nullptr || std::string_view{setting} != "0";
-    }();
-    if (!party_hud) {
-        return;
-    }
-    const auto* start = reinterpret_cast<const u8*>(image_base + SetTextEffectOffset);
-    if (!std::ranges::equal(std::span<const u8>{start, SetTextEffectStart.size()},
-                            SetTextEffectStart)) {
-        LOG_ERROR(Debug, "Bloodborne party death: SetTextEffect is not where it should be; no "
-                         "downed banner");
-        return;
-    }
-    reinterpret_cast<void PS4_SYSV_ABI (*)(u64, s32)>(image_base + SetTextEffectOffset)(
-        0, DownedBannerTextEffect);
-#endif
+    downed_banner_ms.store(SteadyMilliseconds(), std::memory_order_relaxed);
 }
 
 void GoDown(PartyDeathRun& run, u64 data, s64 now_ms) {
@@ -1711,6 +1712,7 @@ void WatchTeammate(PartyDeathRun& run, const DeathTick& tick, int step) {
     if (next != run.watched || handle != run.watched_handle) {
         run.watched = next;
         run.watched_handle = handle;
+        run.follow.Reset();
         Coop::SetSpectateCamera(handle, next ? Coop::CharacterNameOf(*next) : std::string{});
     }
 }
@@ -1744,6 +1746,10 @@ void StartSpectating(PartyDeathRun& run, const DeathTick& tick, bool boss_fight)
     run.fade_before = fade > 0.0f ? fade : 1.0f;
     run.watched.reset();
     run.watched_handle = 0;
+    run.follow.Reset();
+    run.spectating_boss_fight = boss_fight;
+    run.follow_held_by_boss = false;
+    run.follow_moves = 0;
     run.alone_since.reset();
     run.down_out_of_session_since.reset();
     run.boss_watch.Restart();
@@ -1769,8 +1775,60 @@ void EndSpectating(PartyDeathRun& run, u64 player, u64 data) {
     }
     run.watched.reset();
     run.watched_handle = 0;
+    run.follow.Reset();
     Coop::SetSpectateCamera(0, {});
 }
+
+namespace {
+
+// Kaniel 2026-11-03, from an idea of Amanises's: the unseen body trails the watched teammate
+// (SpectateFollow), so that the game streams the map and draws the teammate around it. Only on
+// the spectator's own map with the world loaded, and never into a boss fight it was not in (its
+// arena's fog wall stays between them: its game may run the arena's events for a body inside).
+void FollowWatched(PartyDeathRun& run, const DeathTick& tick) {
+    if (!run.watched || run.watched_handle == 0 || !tick.in_session || tick.map == 0) {
+        return;
+    }
+    const auto entry = std::ranges::find(tick.board, *run.watched, &MemberVitals::member);
+    if (entry == tick.board.end() || entry->map != tick.map) {
+        run.follow.Reset();
+        return;
+    }
+    if (entry->boss && !run.spectating_boss_fight) {
+        if (!run.follow_held_by_boss) {
+            run.follow_held_by_boss = true;
+            LOG_INFO(Debug, "Bloodborne spectate: {} is in a boss fight: the body stays out of it",
+                     Coop::CharacterNameOf(*run.watched));
+        }
+        run.follow.Reset();
+        return;
+    }
+    run.follow_held_by_boss = false;
+    const std::vector<OtherPlayer> players = OtherPlayers();
+    const auto mate = std::ranges::find_if(players, [&](const OtherPlayer& player) {
+        return ReadValue<u32>(player.character, 0x08) == run.watched_handle;
+    });
+    const std::optional<LampPosition> me = CharacterPosition(tick.player);
+    if (mate == players.end() || !mate->at || !me) {
+        return;
+    }
+    // Its copy's floor here (a collision part, [character +0x288]): none in mid-air.
+    const bool on_ground = ReadValue<u64>(mate->character, 0x288) >= 0x10000;
+    if (const auto to = run.follow.Tick(tick.now, *mate->at, *me, on_ground)) {
+        TeleportLocalPlayer(*to, LocalPlayerHeading().value_or(0.0f));
+        if (++run.follow_moves <= 5 || run.follow_moves % 50 == 0) {
+            LOG_INFO(Debug,
+                     "Bloodborne spectate: the body follows {} (move {}): to ({:.1f}, {:.1f}, "
+                     "{:.1f}), {:.1f} m from it",
+                     Coop::CharacterNameOf(*run.watched), run.follow_moves, (*to)[0], (*to)[1],
+                     (*to)[2],
+                     std::hypot((*to)[0] - (*mate->at)[0], (*to)[1] - (*mate->at)[1],
+                                (*to)[2] - (*mate->at)[2]));
+        }
+    }
+}
+
+} // namespace
 
 // Kaniel 2026-10-25: a spectator wakes at its own last lamp (the one it last rested at, GlobalState
 // +0x1528, not the host's), with its full HP and without a reload: moved there while the lamp is
@@ -1825,6 +1883,7 @@ void TickSpectating(PartyDeathRun& run, const DeathTick& tick, bool lamp_used) {
     }
     KeepSpectating(run, tick.player, tick.data);
     WatchTeammate(run, tick, spectate_steps.exchange(0));
+    FollowWatched(run, tick);
     SpectateCheck check;
     const auto wipe = tick.view.Fresh() ? WipeFor(tick.view.board, tick.view.member) : std::nullopt;
     check.wiped = wipe && *wipe != run.handled_wipe;
@@ -1947,12 +2006,15 @@ void ForgetTargetsOnDowned(PartyDeathRun& run, const DeathTick& tick) {
     for (const u32 handle : HideSpectatorCopies(tick)) {
         downed_handles.push_back(handle);
     }
-    if (const u32 forgotten = ForgetDownedTargets(downed_handles); forgotten > 0) {
+    std::vector<u32> forgetting;
+    if (const u32 forgotten = ForgetDownedTargets(downed_handles, false, &forgetting);
+        forgotten > 0) {
         if (run.targets_forgotten == 0) {
             LOG_INFO(Debug,
                      "Bloodborne party death: enemies forgot {} target(s) on downed players "
-                     "(self down={}, others down={})",
-                     forgotten, run.downed.Current() == Vital::Down, others_down.size());
+                     "(self down={}, others down={}) on {} by {}",
+                     forgotten, run.downed.Current() == Vital::Down, others_down.size(),
+                     EnemyHandlesText(downed_handles), EnemyHandlesText(forgetting));
         }
         run.targets_forgotten += forgotten;
     } else if (downed_handles.empty()) {
@@ -2277,6 +2339,10 @@ struct NativePartyList {
     std::array<u32, PartyListSize> supply_frames{};
     std::array<std::array<u8*, 2>, PartyListSize> supply_texts{};
     std::array<std::array<std::string, 2>, PartyListSize> supply_said{};
+    // CoopDownedBanner's value (object interface, data) and the frame it was stopped at; none in a
+    // HUD without it (a mod's, or one patched before it).
+    std::pair<u64, u64> downed_banner{};
+    u32 downed_banner_frame = 0;
     // CoopPrompt: the game's interact prompt widget made for it; null without it.
     u8* prompt = nullptr;
     std::array<u8, HudPromptDataSize> prompt_data{};
@@ -2368,6 +2434,25 @@ void FindListSprites(u64 hud, const char* format, NativePartyList::Sprites& spri
             return;
         }
     }
+}
+
+// The HUD's sprite `name` (a top-level one): its value, kept for the HUD's life as the list's
+// sprites are; none without it.
+std::pair<u64, u64> FindHudSprite(u64 hud, const char* name) {
+    auto* path = new (std::align_val_t{16}) u8[HudPathRefSize]{};
+    reinterpret_cast<HudLookup>(image_base + HudChildLookupOffset)(path, hud, name);
+    u32 type = 0;
+    std::memcpy(&type, path + HudPathRefTypeAt, sizeof(type));
+    const bool found = (type & 0x8F) != 0;
+    std::pair<u64, u64> sprite{};
+    if (found) {
+        std::memcpy(&sprite.first, path + HudPathRefInterfaceAt, 8);
+        std::memcpy(&sprite.second, path + HudPathRefObjectAt, 8);
+    }
+    if (HudValueFate(type, found) == HudValueKeep::Drop) {
+        ::operator delete[](path, std::align_val_t{16});
+    }
+    return sprite;
 }
 
 // The text fields under `format` (a slash path from the HUD, one per list slot): their PathRefs,
@@ -2510,6 +2595,24 @@ void ShowListSprite(const NativePartyList::Sprites& sprites, std::array<u32, Par
                                                                              true);
 }
 
+// The yellow YOU ARE DOWN banner (CoopDownedBanner): its banner while the player is newly down,
+// nothing otherwise (the sprite would play through its two frames on its own).
+void UpdateDownedBanner() {
+    const auto [object, value] = native_list.downed_banner;
+    if (object < 0x10000) {
+        return;
+    }
+    const u32 frame =
+        DownedBannerFrame(downed_banner_ms.load(std::memory_order_relaxed), SteadyMilliseconds());
+    if (frame == native_list.downed_banner_frame) {
+        return;
+    }
+    native_list.downed_banner_frame = frame;
+    const u64 goto_frame = ReadValue<u64>(ReadValue<u64>(object, 0), HudGotoFrameSlot);
+    reinterpret_cast<void PS4_SYSV_ABI (*)(u64, u64, u32, bool)>(goto_frame)(object, value, frame,
+                                                                             true);
+}
+
 // The list slot's icon, portrait and badge (PartyListArtFor).
 void ShowListArt(int index, const PartyListArt& art) {
     ShowListSprite(native_list.icons, native_list.icon_frames, index, art.icon);
@@ -2529,7 +2632,11 @@ void PS4_SYSV_ABI UpdatePartyList(u64, const GuestRegisterSnapshot* registers) {
     if (PartyListOutdated(hud, generation, native_list.hud, native_list.generation)) {
         native_list = NativePartyList{.hud = hud, .generation = generation};
         native_list.ready = MakePartyListTags(hud);
+        native_list.downed_banner = FindHudSprite(hud, "CoopDownedBanner");
+        LOG_INFO(Debug, "Bloodborne party HUD: YOU ARE DOWN is the HUD's own banner: {}",
+                 native_list.downed_banner.first != 0 ? "yes" : "no (no CoopDownedBanner)");
     }
+    UpdateDownedBanner();
     if (!native_list.ready) {
         return;
     }
@@ -2937,13 +3044,27 @@ void LogEnemyTargets() {
             return;
         }
         std::vector<u32> targets;
+        std::string memories;
         u64 node = ReadValue<u64>(targeting, 0x18);
         for (int count = 0;
              count < 64 && node >= 0x10000 && HasMemoryAccess(node, 0x54, MemoryProt::CpuRead);
              ++count, node = ReadValue<u64>(node, 0x08)) {
-            if ((ReadValue<u8>(node, 0x02) & 0x7F) == 1 && ReadValue<s32>(node, 0x28) == 1) {
-                targets.push_back(ReadValue<u32>(node, 0x50));
+            const u8 slot = ReadValue<u8>(node, 0x02) & 0x7F;
+            if (ReadValue<s32>(node, 0x28) != 1) {
+                continue;
             }
+            if (slot == TargetSlotCurrent) {
+                targets.push_back(ReadValue<u32>(node, 0x50));
+            } else if (slot == TargetSlotMemory) {
+                // No timer here: it counts down every frame, and the line is logged on a change.
+                memories += fmt::format(" {:#x}", ReadValue<u32>(node, 0x50));
+            }
+        }
+        // Its memories of characters in a bracket of their own ("[enemy X memory: ...]"): the
+        // current targets' line stays as the rig reads it.
+        if (!memories.empty()) {
+            enemies.emplace_back(distance, fmt::format(" [enemy {:#x} memory:{}]",
+                                                       ReadValue<u32>(character, 0x08), memories));
         }
         if (targets.empty()) {
             return;

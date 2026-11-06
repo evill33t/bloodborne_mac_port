@@ -11,6 +11,8 @@ namespace Core::Bloodborne {
 // std::terminate or SIGABRT writes crash-<time>.txt (see FormatCrashLine) and a minidump
 // crash-<time>.dmp into the log folder, without the (asynchronous) logger. Windows only.
 void InstallCrashCatcher(u64 image_base, u64 image_size);
+// The calling thread gives way to the game's (the co-op worker).
+void LowerThisThreadPriority();
 
 // Writes the report for an exception (EXCEPTION_POINTERS*, or nullptr outside one). Only the
 // first call writes; later ones return at once.

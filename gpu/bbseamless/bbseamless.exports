@@ -84,3 +84,6 @@ _bbseamless_install
 _bbseamless_frame
 
 _bbnet_start
+_bbcoop_duel_candidates
+_bbcoop_duel_propose_teams
+_bbcoop_duel_ask_teams

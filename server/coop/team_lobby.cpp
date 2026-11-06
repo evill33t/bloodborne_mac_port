@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <map>
 #include <random>
 #include <set>
@@ -97,6 +98,63 @@ bool LampResetClears(s32 flag) {
     return lamp_of(request) && request % 10000 < 20;
 }
 
+std::optional<bbcoop::TeamRules> ParseTeamRules(std::string_view setting) {
+    bbcoop::TeamRules rules;
+    rules.set_enemy_scaling(true);
+    const auto trimmed = [](std::string_view text) {
+        while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) {
+            text.remove_prefix(1);
+        }
+        while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) {
+            text.remove_suffix(1);
+        }
+        return text;
+    };
+    // A strength multiplier: 1 to 10 as the game takes them (ParseHarderEnemies), 0 the standard.
+    const auto rate = [](std::string_view text) -> std::optional<float> {
+        float value = 0.0f;
+        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (error != std::errc{} || end != text.data() + text.size() ||
+            !(value == 0.0f || (value >= 1.0f && value <= 10.0f))) {
+            return std::nullopt;
+        }
+        return value;
+    };
+    while (!setting.empty()) {
+        const size_t cut = setting.find(';');
+        const std::string_view part = trimmed(setting.substr(0, cut));
+        setting = cut == std::string_view::npos ? std::string_view{} : setting.substr(cut + 1);
+        if (part.empty()) {
+            continue;
+        }
+        const size_t equals = part.find('=');
+        const std::string_view key = trimmed(part.substr(0, equals));
+        const std::string_view value = equals == std::string_view::npos
+                                           ? std::string_view{}
+                                           : trimmed(part.substr(equals + 1));
+        if (key == "enemies" && (value == "auto" || value == "fixed")) {
+            rules.set_enemy_scaling(value == "auto");
+        } else if (key == "hp" || key == "damage" || key == "poise") {
+            const auto parsed = rate(value);
+            if (!parsed) {
+                return std::nullopt;
+            }
+            key == "hp"       ? rules.set_enemy_hp(*parsed)
+            : key == "damage" ? rules.set_enemy_damage(*parsed)
+                              : rules.set_enemy_poise(*parsed);
+        } else if ((key == "rot" || key == "travel" || key == "vote") && value.empty()) {
+            key == "rot"      ? rules.set_rot(true)
+            : key == "travel" ? rules.set_travel_together(true)
+                              : rules.set_travel_vote(true);
+        } else if (key == "tempo" && value.size() == 1 && value[0] >= '0' && value[0] <= '2') {
+            rules.set_boss_tempo(static_cast<bbcoop::BossTempo>(value[0] - '0'));
+        } else {
+            return std::nullopt;
+        }
+    }
+    return rules;
+}
+
 TeamLobby::TeamLobby(std::function<std::string()> make_id_)
     : make_id{std::move(make_id_)}, make_code{RandomCode} {}
 
@@ -126,6 +184,54 @@ bool TeamLobby::MayLookUp(const std::string& member, s64 now_ms) {
 
 void TeamLobby::WrongLookup(const std::string& member, s64 now_ms) {
     wrong_lookups[member].push_back(now_ms);
+}
+
+bool LevelsMatch(u32 a, u32 b) {
+    if (a == 0 || b == 0) {
+        return true;
+    }
+    const u32 high = std::max(a, b);
+    return high - std::min(a, b) <= 10 + high / 10;
+}
+
+// Amanises 2026-10-25: the open teams with room whose level (its members' known levels, averaged)
+// matches the player's: the fullest (a team fills before a new one gets players), then the
+// nearest level, then the one listed first. A team out of range is still listed to join by hand.
+bbcoop::Team* TeamLobby::QuickMatchTeam(const std::string& member) {
+    const auto level_of = [&](const std::string& who) {
+        const auto found = players.find(who);
+        return found == players.end() ? 0u : found->second.level;
+    };
+    const u32 mine = level_of(member);
+    bbcoop::Team* best = nullptr;
+    std::tuple<int, u32> best_key{};
+    for (bbcoop::Team& team : teams) {
+        if (team.join() != bbcoop::Team::OPEN ||
+            static_cast<size_t>(team.members_size()) >= TeamSize) {
+            continue;
+        }
+        u32 sum = 0;
+        u32 known = 0;
+        for (const bbcoop::TeamMember& m : team.members()) {
+            if (const u32 level = level_of(m.member()); level != 0) {
+                sum += level;
+                ++known;
+            }
+        }
+        const u32 level = known == 0 ? 0 : sum / known;
+        if (!LevelsMatch(mine, level)) {
+            continue;
+        }
+        const u32 apart =
+            mine == 0 || level == 0 ? 0 : std::max(mine, level) - std::min(mine, level);
+        // Smaller is better: fewer members, farther.
+        const std::tuple<int, u32> key{-team.members_size(), apart};
+        if (!best || key < best_key) {
+            best = &team;
+            best_key = key;
+        }
+    }
+    return best;
 }
 
 void TeamLobby::DropAsksBy(const std::string& member) {
@@ -200,6 +306,33 @@ bbcoop::LobbyPlayer::State TeamLobby::StateOf(const std::string& member) const {
         return bbcoop::LobbyPlayer::OFFLINE;
     }
     return player->second.playing ? bbcoop::LobbyPlayer::PLAYING : bbcoop::LobbyPlayer::TITLE;
+}
+
+void TeamLobby::Describe(const std::string& member, bbcoop::LobbyPlayer& out) const {
+    out.set_state(StateOf(member));
+    out.clear_team();
+    out.clear_team_leader();
+    out.clear_team_members();
+    out.clear_team_join();
+    out.clear_team_started();
+    const bbcoop::Team* team = TeamOf(member);
+    if (!team) {
+        return;
+    }
+    out.set_team(team->id());
+    std::string leader = team->leader();
+    for (const bbcoop::TeamMember& m : team->members()) {
+        if (m.member() == team->leader() && !m.name().empty()) {
+            leader = m.name();
+        }
+    }
+    if (const auto player = players.find(team->leader()); player != players.end()) {
+        leader = player->second.name;
+    }
+    out.set_team_leader(leader);
+    out.set_team_members(static_cast<u32>(team->members_size()));
+    out.set_team_join(team->join());
+    out.set_team_started(team->started());
 }
 
 bbcoop::TeamWorldInfo* TeamLobby::FindWorld(const std::string& id) {
@@ -375,9 +508,16 @@ TeamLobby::Outcome TeamLobby::Lead(const std::string& member) {
     return {.changed = true};
 }
 
+void TeamLobby::Restarted(const std::string& member) {
+    if (quiet_since.contains(member)) {
+        restarted.insert(member);
+    }
+}
+
 void TeamLobby::Quiet(const std::string& member, bool quiet, s64 now_ms) {
     if (!quiet) {
         quiet_since.erase(member);
+        restarted.erase(member);
     } else if (players.contains(member)) {
         quiet_since.try_emplace(member, now_ms);
     }
@@ -389,6 +529,7 @@ void TeamLobby::DropTeam(const std::string& team_id) {
         for (const bbcoop::TeamMember& m : team->members()) {
             gone_since.erase(m.member());
             quiet_since.erase(m.member());
+            restarted.erase(m.member());
         }
     }
     std::erase_if(teams, [&](const bbcoop::Team& t) { return t.id() == id; });
@@ -400,7 +541,8 @@ void TeamLobby::DropTeam(const std::string& team_id) {
 }
 
 void TeamLobby::GiveSigns(bbcoop::Team& team) {
-    constexpr std::array<u32, 3> GuestSigns{7, 6, 5};
+    constexpr std::array<u32, 4> GuestSigns{7, 6, 5,
+                                            4}; // 4: the fifth hunter's (Amanises 2026-10-29)
     std::vector<u32> taken;
     for (bbcoop::TeamMember& m : *team.mutable_members()) {
         const bool guest_sign = std::ranges::find(GuestSigns, m.sign()) != GuestSigns.end();
@@ -543,7 +685,12 @@ TeamLobby::Outcome TeamLobby::Expire(s64 now_ms) {
             const s64 gone =
                 signed_in ? 0 : gone_since.try_emplace(m.member(), now_ms).first->second;
             const s64 since = quiet != quiet_since.end() ? quiet->second : gone;
-            if (team.started() && OthersPlay(team, m.member()) && now_ms - since >= LeftGraceMs) {
+            // A guest's quiet may be a blip; the leader's, a signed-out or a restarted game's is
+            // not.
+            const bool blip =
+                signed_in && !restarted.contains(m.member()) && team.leader() != m.member();
+            const s64 grace = blip ? QuietGraceMs : LeftGraceMs;
+            if (team.started() && OthersPlay(team, m.member()) && now_ms - since >= grace) {
                 left.push_back(m.member());
             } else if (!signed_in && now_ms - gone >= OfflineGraceMs) {
                 expired.push_back(m.member());
@@ -552,6 +699,7 @@ TeamLobby::Outcome TeamLobby::Expire(s64 now_ms) {
     }
     Outcome outcome;
     for (const std::string& member : left) {
+        restarted.erase(member);
         if (bbcoop::Team* team = const_cast<bbcoop::Team*>(TeamOf(member))) {
             outcome.departed.push_back(Depart(*team, member));
         }
@@ -612,7 +760,8 @@ TeamLobby::Outcome TeamLobby::Request(const std::string& member, const bbcoop::T
             !pick.empty() && FindWorld(pick) && !PlayedBy(pick, nullptr)) {
             PickWorld(team, pick);
         }
-        *team.mutable_rules() = players[member].rules; // Kaniel 2026-10-25: its host rules
+        // Kaniel 2026-10-25: its host rules; Kaniel 2026-11-05: the server's when it sent none.
+        *team.mutable_rules() = players[member].rules.value_or(default_rules);
         return {.changed = true};
     }
     case Action::INVITE: {
@@ -990,6 +1139,32 @@ TeamLobby::Outcome TeamLobby::Request(const std::string& member, const bbcoop::T
         DropAsksBy(member);
         return {.changed = true};
     }
+    case Action::QUICK_MATCH: {
+        // Kaniel 2026-11-01: for strangers on a public server; on a friend's server nobody is
+        // looking for a team.
+        if (!hosted) {
+            return refuse("quick match is for public servers");
+        }
+        if (mine) {
+            return refuse("you are in a team already: leave it first");
+        }
+        if (request.level() != 0) {
+            players[member].level = request.level();
+        }
+        if (bbcoop::Team* team = QuickMatchTeam(member)) {
+            AddMember(*team, member);
+            return {.changed = true};
+        }
+        // None to join: a team of its own, open to all, that the next quick match finds.
+        bbcoop::TeamRequest create;
+        create.set_action(Action::CREATE);
+        Outcome made = Request(member, create, now_ms);
+        if (bbcoop::Team* team = TeamOf(member) ? FindTeam(TeamOf(member)->id()) : nullptr) {
+            team->set_join(bbcoop::Team::OPEN);
+            team->set_quick(true);
+        }
+        return made;
+    }
     case Action::ASK_ACCEPT:
     case Action::ASK_DECLINE: {
         if (!mine || mine->leader() != member) {
@@ -1155,10 +1330,7 @@ bbcoop::LobbyState TeamLobby::StateFor(const std::string& member) const {
         bbcoop::LobbyPlayer& out = *state.add_players();
         out.set_member(other);
         out.set_name(player.name);
-        out.set_state(StateOf(other));
-        if (const bbcoop::Team* team = TeamOf(other)) {
-            out.set_team(team->id());
-        }
+        Describe(other, out);
     };
     if (!hosted) {
         for (const auto& [other, player] : players) {
@@ -1167,8 +1339,9 @@ bbcoop::LobbyState TeamLobby::StateFor(const std::string& member) const {
             }
         }
     } else {
-        // Its teammates, those who invited it and those its team invited, then players in no team
-        // (to invite) up to lobby_players.
+        // Its teammates, those who invited it and those its team invited, then up to lobby_players
+        // others: those in no team (to invite) first, then those in teams (Amanises 2026-10-26:
+        // every hunter online shows, with its team).
         std::set<std::string> listed{member};
         const auto list = [&](const std::string& other) {
             if (const auto player = players.find(other);
@@ -1194,13 +1367,15 @@ bbcoop::LobbyState TeamLobby::StateFor(const std::string& member) const {
             }
         }
         size_t others = 0;
-        for (const auto& [other, player] : players) {
-            if (others >= lobby_players) {
-                break;
-            }
-            if (!listed.contains(other) && !TeamOf(other)) {
-                list(other);
-                ++others;
+        for (const bool in_team : {false, true}) {
+            for (const auto& [other, player] : players) {
+                if (others >= lobby_players) {
+                    break;
+                }
+                if (!listed.contains(other) && (TeamOf(other) != nullptr) == in_team) {
+                    list(other);
+                    ++others;
+                }
             }
         }
     }
@@ -1226,6 +1401,7 @@ bbcoop::LobbyState TeamLobby::StateFor(const std::string& member) const {
     }
     // Amanises 2026-10-25, open teams: the leader sees who asked; a player in no team the open
     // teams with room, the hunts not begun first.
+    state.set_quick_match(hosted);
     state.set_team_size(static_cast<u32>(TeamSize));
     if (mine && mine->leader() == member) {
         if (const auto found = asks.find(mine->id()); found != asks.end()) {

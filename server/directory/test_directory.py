@@ -5,6 +5,7 @@
     python3 -m unittest -v test_directory     (pip install redis 'fakeredis[lua]')
 """
 import json
+import socket
 import threading
 import unittest
 import urllib.error
@@ -124,6 +125,27 @@ class DirectoryTests(unittest.TestCase):
         with self.assertRaises(d.Refused):
             self.directory.invite(dict(invite, team='t1'))
 
+    def test_a_sign_out_reaches_every_shard(self):
+        self.directory.heartbeat(beat('a', 1))
+        self.directory.heartbeat(beat('b', 2))
+        killed = dict(beat('a', 1), revoked=[{'id': 'u0123456789abcd', 'at': 1001},
+                                             {'id': 'p0123456789abcd', 'at': 1001},
+                                             {'id': 'not an id', 'at': 1}])
+        own = self.directory.heartbeat(killed)['revocations']
+        self.assertEqual([r['id'] for r in own], ['u0123456789abcd'])  # only signed ids
+        heard = self.directory.heartbeat(dict(beat('b', 2), revoked_after=0))['revocations']
+        self.assertEqual(heard, [{'seq': 1, 'id': 'u0123456789abcd', 'at': 1001}])
+        # Once: the next beat says where it is.
+        self.assertEqual(self.directory.heartbeat(dict(beat('b', 2), revoked_after=1))['revocations'], [])
+        self.directory.heartbeat(dict(beat('b', 2), revoked=[{'id': 'd0123456789abcd', 'at': 1002}],
+                                      revoked_after=1))
+        later = self.directory.heartbeat(dict(beat('a', 1), revoked_after=1))['revocations']
+        self.assertEqual(later, [{'seq': 2, 'id': 'd0123456789abcd', 'at': 1002}])
+        # A new shard hears all of them still alive.
+        self.assertEqual(len(self.directory.heartbeat(beat('c', 3))['revocations']), 2)
+        self.clock.at += d.REVOKED_S + 10
+        self.assertEqual(self.directory.heartbeat(beat('c', 3))['revocations'], [])
+
     def test_a_bad_heartbeat_is_refused(self):
         for bad in (dict(beat('eu-1', 1), shard='a b'), dict(beat('eu-1', 1), address='nowhere'),
                     dict(beat('eu-1', 1), key='12'), dict(beat('eu-1', 1), address='10.0.0.1:0')):
@@ -160,6 +182,23 @@ class HttpTests(unittest.TestCase):
         status, answer = self.call('/v1/heartbeat', beat('eu-1', 1, players=['Ada']))
         self.assertEqual(status, 200)
         self.assertEqual(answer['shards'][0]['name'], 'eu-1')
+
+    def test_a_refused_call_is_answered_once_its_body_is_read(self):
+        # A socket closed with unread data sends a reset, and on Windows the caller's read
+        # then aborts (WinError 10053) instead of getting the 401.
+        body = json.dumps(beat('eu-1', 1)).encode()
+        with socket.create_connection(self.server.server_address, timeout=5) as caller:
+            caller.sendall(b'POST /v1/heartbeat HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer wrong\r\n'
+                           b'Content-Length: %d\r\n\r\n' % len(body))
+            caller.settimeout(0.3)
+            with self.assertRaises(socket.timeout, msg='answered before the body was read'):
+                caller.recv(1)
+            caller.settimeout(5)
+            caller.sendall(body)
+            answer = b''
+            while chunk := caller.recv(65536):
+                answer += chunk
+        self.assertTrue(answer.startswith(b'HTTP/1.0 401'), answer[:40])
 
     def test_a_launcher_reads_the_shards_and_where_its_player_is(self):
         self.call('/v1/heartbeat', beat('eu-1', 1, players=['Ada']))

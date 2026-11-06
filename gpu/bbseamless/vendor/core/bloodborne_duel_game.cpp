@@ -36,6 +36,9 @@ std::vector<std::pair<u32, bool>> answers;
 std::optional<std::pair<u32, std::string>> ask_now;
 std::deque<Coop::DuelNotice> notices;
 Coop::DuelView view_now;
+std::vector<std::pair<std::string, u32>> propose_teams; // the last proposal's (under `mutex`)
+std::vector<Coop::DuelCandidate> candidates_now;
+std::optional<std::pair<u32, Coop::DuelAskTeams>> ask_teams_now;
 
 // The party death hook's: whether a lethal hit now is a duel's, and its catches.
 std::atomic<bool> catches_lethal{false};
@@ -77,16 +80,18 @@ void Banner(s32 effect) {
     reinterpret_cast<void PS4_SYSV_ABI (*)(u64, s32)>(image_base + SetTextEffectOffset)(0, effect);
 }
 
-void Notice(Coop::DuelNoticeKind kind, const std::string& member = {}) {
+void Notice(Coop::DuelNoticeKind kind, const std::string& member = {}, u32 team = 0) {
     std::scoped_lock lock{mutex};
     if (notices.size() < 8) {
-        notices.push_back({kind, member.empty() ? std::string{} : CharacterNameOf(member)});
+        notices.push_back({kind, member.empty() ? std::string{} : CharacterNameOf(member), team});
     }
 }
 
-void Send(bbcoop::DuelRequest::Action action, u32 duel) {
-    Coop::SendDuelRequest(action, duel, PlayingMap());
-    LOG_INFO(Debug, "Co-op duel: {} for duel {}", bbcoop::DuelRequest::Action_Name(action), duel);
+void Send(bbcoop::DuelRequest::Action action, u32 duel,
+          const std::vector<std::pair<std::string, u32>>& teams = {}) {
+    Coop::SendDuelRequest(action, duel, PlayingMap(), teams);
+    LOG_INFO(Debug, "Co-op duel: {} for duel {}{}", bbcoop::DuelRequest::Action_Name(action), duel,
+             teams.empty() ? std::string{} : fmt::format(" ({} on teams)", teams.size()));
 }
 
 // The board name of another player's body: its network identity holds the member's online id.
@@ -247,6 +252,12 @@ void TakeNews(const DuelNews& news, DuelPart before, std::string_view self, u64 
         if (news.won) {
             Banner(DuelWonTextEffect);
         }
+        // Kaniel 2026-11-01: the game's own banners stay; a teams' duel names its winners in a
+        // notice, for every duelist.
+        if (const auto team = DuelTeamWon(state, self)) {
+            LOG_INFO(Debug, "Co-op duel: team {} won duel {}", *team, state.duel());
+            Notice(Coop::DuelNoticeKind::TeamWon, {}, *team);
+        }
         switch (state.end()) {
         case bbcoop::DuelState::CANCELLED:
             Notice(Coop::DuelNoticeKind::Cancelled, state.ended_by());
@@ -269,6 +280,11 @@ void TakeNews(const DuelNews& news, DuelPart before, std::string_view self, u64 
          state.end() == bbcoop::DuelState::NO_ANSWER)) {
         Notice(Coop::DuelNoticeKind::Declined);
     }
+    // Amanises 2026-10-29: a teams' duel left with one team: everyone who said yes hears.
+    if (before == DuelPart::Answered && state.stage() == bbcoop::DuelState::OVER &&
+        state.end() == bbcoop::DuelState::ONE_TEAM) {
+        Notice(Coop::DuelNoticeKind::OneTeam);
+    }
 }
 
 } // namespace
@@ -288,8 +304,25 @@ DuelView ReadDuel() {
     return view_now;
 }
 
-void ProposeDuel() {
+void ProposeDuel(std::vector<std::pair<std::string, u32>> teams) {
+    {
+        std::scoped_lock lock{mutex};
+        propose_teams = std::move(teams);
+    }
     propose_asks.fetch_add(1);
+}
+
+std::vector<DuelCandidate> DuelCandidates() {
+    std::scoped_lock lock{mutex};
+    return candidates_now;
+}
+
+std::optional<DuelAskTeams> DuelAskTeamsOf(u32 duel) {
+    std::scoped_lock lock{mutex};
+    if (!ask_teams_now || ask_teams_now->first != duel) {
+        return std::nullopt;
+    }
+    return ask_teams_now->second;
 }
 
 void CancelDuel() {
@@ -348,7 +381,12 @@ void TickDuel() {
         Send(accept ? bbcoop::DuelRequest::ACCEPT : bbcoop::DuelRequest::DECLINE, duel);
     }
     if (propose_asks.exchange(0) > 0) {
-        Send(bbcoop::DuelRequest::PROPOSE, 0);
+        std::vector<std::pair<std::string, u32>> teams;
+        {
+            std::scoped_lock lock{mutex};
+            teams.swap(propose_teams);
+        }
+        Send(bbcoop::DuelRequest::PROPOSE, 0, teams);
     }
     if (cancel_asks.exchange(0) > 0 && follower.InDuel()) {
         Send(bbcoop::DuelRequest::CANCEL, state.duel());
@@ -418,9 +456,39 @@ void TickDuel() {
                         });
     for (const bbcoop::Duelist& duelist : state.duelists()) {
         shown.fighters += duelist.answer() == 1 && !duelist.out() ? 1 : 0;
+        if (duelist.member() == self && state.teams() && follower.Part() != DuelPart::None) {
+            shown.team = duelist.side();
+        }
+    }
+    shown.teams = state.teams() && follower.Part() != DuelPart::None;
+    // Who a duel may go to: this player, then the others on its map (Amanises 2026-10-29).
+    std::vector<Coop::DuelCandidate> candidates;
+    if (InPartySession() && map != 0) {
+        candidates.push_back({self, CharacterNameOf(self), true});
+        for (const MemberVitals& member : view.board.members) {
+            if (member.member != self && member.map == map) {
+                candidates.push_back({member.member, CharacterNameOf(member.member), false});
+            }
+        }
+    }
+    std::optional<std::pair<u32, Coop::DuelAskTeams>> ask_teams;
+    if (const auto asked = follower.AskedDuel(); asked && state.teams()) {
+        Coop::DuelAskTeams teams;
+        for (const bbcoop::Duelist& duelist : state.duelists()) {
+            if (duelist.side() < 1 || duelist.side() > 3) {
+                continue;
+            }
+            if (duelist.member() == self) {
+                teams.mine = duelist.side();
+            }
+            teams.names[duelist.side() - 1].push_back(CharacterNameOf(duelist.member()));
+        }
+        ask_teams = std::pair{*asked, std::move(teams)};
     }
     std::scoped_lock lock{mutex};
     view_now = shown;
+    candidates_now = std::move(candidates);
+    ask_teams_now = std::move(ask_teams);
     if (const auto asked = follower.AskedDuel()) {
         if (!ask_now || ask_now->first != *asked) {
             ask_now = std::pair{*asked, CharacterNameOf(state.proposer())};

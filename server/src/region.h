@@ -23,6 +23,9 @@ namespace Region {
 constexpr qint64 TicketMs = 2 * 60 * 1000;
 // A shard past this share of its capacity takes no hello another shard sends on.
 constexpr double RoomShare = 0.9;
+// A shard's players by default: one 4-vCPU box stayed comfortable up to 300-400 with big socket
+// buffers (the link thread is the limit, docs/SCALING.md); past it new players go to another shard.
+constexpr int DefaultShardCapacity = 350;
 constexpr qsizetype MaxTicketBytes = 4096;
 
 struct Shard {

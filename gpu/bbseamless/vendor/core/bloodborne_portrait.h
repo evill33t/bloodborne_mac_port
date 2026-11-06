@@ -118,7 +118,7 @@ private:
 
 // The members' portraits and what the party list's slots show (CoopPartyFace0-2): a slot's version
 // changes whenever its picture does, so the port refreshes its texture then only.
-constexpr int PortraitSlotCount = 3;
+constexpr int PortraitSlotCount = 4; // teams of five, the party list's slots (was 3)
 class PartyPortraits {
 public:
     void Take(std::string member, PortraitPixels pixels);

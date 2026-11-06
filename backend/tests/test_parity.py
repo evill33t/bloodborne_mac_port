@@ -57,7 +57,7 @@ class Server:
     """One backend: the Python script or shadnet, with the same options."""
 
     def __init__(self, kind, workdir, store=None, show_own="", tomb_cap=100, summon_poll=5,
-                 address=None, flag="true"):
+                 address=None, flag="true", reply_bytes=65536):
         self.kind = kind
         self.port = free_port()
         self.workdir = workdir
@@ -72,7 +72,7 @@ class Server:
             self.webapi_port = 31315
             args = [sys.executable, "-u", PYTHON_SERVER, "--address", address or "127.0.0.1",
                     "--port", str(self.port), "--summon-poll", str(summon_poll),
-                    "--tomb-cap", str(tomb_cap),
+                    "--tomb-cap", str(tomb_cap), "--reply-bytes", str(reply_bytes),
                     "--notice", os.path.join(files, "notice.txt"),
                     "--broadcast", os.path.join(files, "broadcast.txt"),
                     "--login-message", os.path.join(files, "login_message.txt")]
@@ -97,6 +97,7 @@ class Server:
                 "BackendStore": store or "",
                 "BackendShowOwn": show_own,
                 "BackendTombCap": tomb_cap,
+                "BackendReplyBytes": reply_bytes,
                 "BackendSummonPoll": summon_poll,
             }
             with open(os.path.join(workdir, "shadnet.cfg"), "w", encoding="utf-8") as f:
@@ -248,6 +249,14 @@ def script():
         ("POST", "/tomb", svc("DeathVisionGet", UserId=12, TombMessId=2)),
         ("POST", "/tomb", svc("DeathVisionGet", UserId=12, TombMessId=999)),
         ("POST", "/tomb", svc("DeathVisionGet", UserId=12, TombMessId=999, DeathVisionDataVersion=None)),
+        # Amanises 2026-10-26: a player takes its own bloodstains back; another's stay.
+        ("POST", "/tomb", svc("TombMessRemove", UserId=12, TombMessIdList=[{"TombMessId": 3}, 4])),
+        ("POST", "/tomb", svc("TombMessRemove", UserId=11, TombMessId=2)),
+        ("POST", "/tomb", svc("TombMessGetList", UserId=11, AreaInfoList=[AREA, OTHER_AREA])),
+        ("POST", "/penalty", svc("MultiPlayNetError", UserId=11)),
+        ("POST", "/basic", svc("UserAgreementGet", UserId=11)),
+        ("POST", "/basic", svc("EmergencyNoticeGet", UserId=11)),
+        ("POST", "/basic", svc("UserPropertiesMoveCount", UserId=11)),
         ("POST", "/ghost", svc("WanderingGhostCreate", UserId=11, CharaId=77, MatchingLevel=40,
                                WanderingGhostData="G1", WanderingGhostDataVersion=2, **AREA)),
         ("POST", "/ghost", svc("WanderingGhostCreate", UserId=11, WanderingGhostData="G1b", **AREA)),
@@ -362,6 +371,30 @@ class ParityTest(unittest.TestCase):
         python = self.start("python", "py", store=os.path.join(self.tmp, "py.db"), tomb_cap=3)
         shadnet = self.start("shadnet", "sn", store=os.path.join(self.tmp, "sn.db"), tomb_cap=3)
         self.compare(python, shadnet)
+
+    def test_a_long_list_is_cut_to_the_size_cap(self):
+        # Amanises 2026-10-26: the newest that fit in the cap, the same on both servers.
+        stains = [svc("TombMessCreate", UserId=12, TombData="B" * 300 + str(i), **AREA) for i in range(8)]
+        read = svc("TombMessGetList", UserId=11, AreaInfoList=[AREA])
+        answers = []
+        for kind in ("python", "shadnet"):
+            server = self.start(kind, kind, store=os.path.join(self.tmp, kind + ".db"), reply_bytes=1000)
+            for stain in stains:
+                server.send("POST", "/tomb", stain)
+            reply = server.send("POST", "/tomb", read)
+            self.assertEqual(reply[3].count(b'"TombMessId"'), 2, kind)
+            self.assertIn(b"B" * 300 + b"7", reply[3])
+            answers.append(normalise(server, mask_ports(server, reply)))
+        self.assertEqual(answers[0], answers[1])
+
+    def test_a_cap_of_nothing_cuts_nothing(self):
+        stains = [svc("TombMessCreate", UserId=12, TombData="B" * 300 + str(i), **AREA) for i in range(4)]
+        read = svc("TombMessGetList", UserId=11, AreaInfoList=[AREA])
+        for kind in ("python", "shadnet"):
+            server = self.start(kind, kind + "0", store=os.path.join(self.tmp, kind + "0.db"), reply_bytes=0)
+            for stain in stains:
+                server.send("POST", "/tomb", stain)
+            self.assertEqual(server.send("POST", "/tomb", read)[3].count(b'"TombMessId"'), 4, kind)
 
     def test_with_own_content_shown(self):
         python = self.start("python", "py", store=os.path.join(self.tmp, "py.db"), show_own="all",

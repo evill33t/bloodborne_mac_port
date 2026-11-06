@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "admission.h"
+#include "config.h"
 
 using Admission::Guard;
 using Admission::Limits;
@@ -162,6 +163,32 @@ int HomeHellosAreBudgeted() {
   return 0;
 }
 
+// A launch rush: 300 joins a minute stay at the base work, past them it rises
+// (the work is kept).
+int TheLaunchRateKeepsTheWork() {
+  CHECK(Admission::DefaultSignupsPerMinute == 300);
+  CHECK(HostedConfig{}.signupsPerMinute == Admission::DefaultSignupsPerMinute);
+  Admission::SignupWork work{20, 26, Admission::DefaultSignupsPerMinute};
+  for (int n = 0; n < 300; ++n) {
+    work.Made(1000 + n);
+  }
+  CHECK(work.Bits(2000) == 20);
+  for (int n = 0; n < 600; ++n) {
+    work.Made(2000 + n);
+  }
+  CHECK(work.Bits(3000) > 20);
+  return 0;
+}
+
+// What the system's cap left of the link's socket buffers (a Linux getsockopt
+// says twice the value it took): a public server says so at its start.
+int ASmallSocketBufferIsNoticed() {
+  CHECK(Admission::LinkBufferShort(425984));
+  CHECK(!Admission::LinkBufferShort(Admission::LinkSocketBytes));
+  CHECK(!Admission::LinkBufferShort(2 * Admission::LinkSocketBytes));
+  return 0;
+}
+
 int main() {
   int failed = 0;
   failed |= HellosFromOneAddressAreLimited();
@@ -170,6 +197,8 @@ int main() {
   failed |= ABigLinkWithinItsRateIsFine();
   failed |= TheOperatorsBanList();
   failed |= SignupWorkRisesWithTheRate();
+  failed |= TheLaunchRateKeepsTheWork();
+  failed |= ASmallSocketBufferIsNoticed();
   failed |= HomeHellosAreBudgeted();
   if (failed == 0) {
     std::cout << "admission: all checks passed\n";

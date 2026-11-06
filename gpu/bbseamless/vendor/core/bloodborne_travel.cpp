@@ -554,7 +554,8 @@ void PS4_SYSV_ABI NoteEsdDialogAnswer(u64, GuestRegisterSnapshot* registers) {
 
 void LogEsdAnswers(bool party_guest) {
     static std::chrono::steady_clock::time_point last{};
-    esd_answers_wanted.store(party_guest, std::memory_order_relaxed);
+    // Only for their line: the talk hooks keep no answers when it goes nowhere.
+    esd_answers_wanted.store(party_guest && LOG_INFO_ON(), std::memory_order_relaxed);
     const auto now = std::chrono::steady_clock::now();
     if (!party_guest || now - last < std::chrono::seconds{5}) {
         return;
@@ -1244,6 +1245,13 @@ bool PS4_SYSV_ABI KeepSessionAfterTrip(u64, const GuestRegisterSnapshot* registe
         StartPartyTrip(registers, true);
         LOG_INFO(Debug, "Bloodborne party: a world reload's leave is a trip once it loads");
     }
+    if (!PartyTripActive() && return_address >= image_base &&
+        KeepsSessionAfterWipe(return_address - image_base, InPartySession(),
+                              SteadyMilliseconds() - LastPartyWipeMs())) {
+        LOG_INFO(Debug, "Bloodborne party: kept the session through the game's LeaveSession "
+                        "after the wipe");
+        return true;
+    }
     if (!PartyTripActive()) {
         // Diagnostics: a session that broke right after a boss kill (host to the title screen,
         // a lone guest dropped after lighting the lamp): who leaves. Every world load calls it,
@@ -1262,6 +1270,8 @@ bool PS4_SYSV_ABI KeepSessionAfterTrip(u64, const GuestRegisterSnapshot* registe
 // After this member's trip the other players are re-created as they come to this map (creating a
 // player into a map it is not on makes its game leave the session), each once (see PlanRecreate).
 bool recreate_players_pending{};
+// Another member's leave the game's own handler saw (LogMemberLeave), for RecreateAfterRejoin.
+std::atomic<u32> member_leaves_seen{0};
 // Pending for RecreateAfterJoin, not a trip: members with no task are left to the game's join.
 bool recreate_pending_after_join{};
 std::set<std::string> recreated_since_trip;
@@ -1314,7 +1324,7 @@ void SnapCamera() {
 }
 
 bool PlaceCharacterAt(u64 character, const std::array<float, 4>& position,
-                      const std::array<float, 4>& rotation, const char* what) {
+                      const std::array<float, 4>& rotation, const char* what, bool snap_camera) {
     const u64 vtable = IsCharacter(character, what) ? ReadValue<u64>(character, 0) : 0;
     const u64 teleport = vtable >= 0x10000 ? ReadValue<u64>(vtable, 0x5F8) : 0;
     if (teleport < 0x10000) {
@@ -1328,7 +1338,7 @@ bool PlaceCharacterAt(u64 character, const std::array<float, 4>& position,
         .snap_position = reinterpret_cast<SnapPosition>(image_base + SnapCharacterPositionOffset),
         .set_rotation = SetCharacterRotation,
         .reset_follow = reinterpret_cast<ResetFollow>(image_base + ResetCharacterFollowOffset),
-        .snap_camera = SnapCamera,
+        .snap_camera = snap_camera ? SnapCamera : +[] {},
     };
     alignas(16) const std::array<float, 4> at = position;
     alignas(16) const std::array<float, 4> turn = rotation;
@@ -1664,8 +1674,28 @@ void GiveBackPhantomKeyItems() {
 // save slot), and in a session a guest's lamps, its own and the team's world's, lit again when
 // they read off (its join's reload gives its game a new flag store with none lit).
 std::atomic<bool> kept_lamps_reset{false};
+std::mutex relit_lamps_mutex;
+std::set<s32> relit_lamps; // lit again here, not yet seen by the flag watcher
 [[maybe_unused]] const bool kept_lamps_registered = RegisterLifecycleReset(
     "kept lamps", {Lifecycle::NewCharacter}, [] { kept_lamps_reset.store(true); });
+
+} // namespace
+
+namespace Coop {
+
+FlagChanges LeaveOutRelitLamps(FlagChanges changes) {
+    std::scoped_lock lock{relit_lamps_mutex};
+    return WithoutRelitLamps(std::move(changes), relit_lamps);
+}
+
+void ForgetRelitLamps() {
+    std::scoped_lock lock{relit_lamps_mutex};
+    relit_lamps.clear();
+}
+
+} // namespace Coop
+
+namespace {
 
 void KeepGuestLampsLit() {
     static std::set<s32> kept;
@@ -1688,6 +1718,10 @@ void KeepGuestLampsLit() {
         std::vector<s32> lamps;
         std::string named;
         for (const s32 flag : relight) {
+            {
+                std::scoped_lock lock{relit_lamps_mutex};
+                relit_lamps.insert(flag);
+            }
             reinterpret_cast<SetFlag>(image_base + PartyGhostSetEventFlagOffset)(0, flag, true);
             lamps.push_back(*LampOfActiveFlag(flag));
             named += fmt::format(" {}", flag);
@@ -1722,6 +1756,21 @@ void KeepHeadstoneFlagsOwn() {
         LOG_INFO(Debug, "Bloodborne party: headstone flag {} {}: this player's lamps",
                  headstone.flag, lit ? "set" : "cleared");
     }
+}
+
+// See DollLevelUpClear: each frame in the co-op mode, the Doll's level-up flag off once her
+// blessing is over, so her next "Level Up" opens the menu again.
+void ClearDollLevelUpFlagAfterHerBlessing() {
+    static DollLevelUpClear clear;
+    const bool playing = party_controller && GetLocalPlayer() >= 0x10000;
+    if (!clear.Tick(playing, playing && EventFlagOn(DollLevelUpFlag),
+                    playing && EventFlagOn(DollBlessingFlag))) {
+        return;
+    }
+    reinterpret_cast<bool PS4_SYSV_ABI (*)(u64, s32, bool)>(
+        image_base + PartyGhostSetEventFlagOffset)(0, DollLevelUpFlag, false);
+    LOG_INFO(Debug, "Bloodborne party: the Doll's level-up flag {} cleared, her blessing over",
+             DollLevelUpFlag);
 }
 
 // See ImpurityBonusChange: every second, the Impurity rune's HP bonus put on (through the
@@ -1892,9 +1941,12 @@ void KeepOwnedWeaponFlagsOwn() {
 namespace Coop {
 
 void TickPlayersOnThisMap() {
-    TimeTickStep("LogItemModuleChecks", LogItemModuleChecks);
-    TimeTickStep("LogItemButtonAndMapItems", LogItemButtonAndMapItems);
+    if (CoopTraceOn()) {
+        TimeTickStep("LogItemModuleChecks", LogItemModuleChecks);
+        TimeTickStep("LogItemButtonAndMapItems", LogItemButtonAndMapItems);
+    }
     TimeTickStep("KeepGuestFullHp", KeepGuestFullHp);
+    TimeTickStep("HidePhantomGlow", HidePhantomGlow);
     TimeTickStep("PolishMultiplayerUi", PolishMultiplayerUi);
     const bool in_session = InPartySession();
     // The boards go both ways in and out of a session (a guest on its own trip is out of one).
@@ -1939,7 +1991,9 @@ void TickPlayersOnThisMap() {
     TimeTickStep("TickTrades", TickTrades);
     TimeTickStep("FinishWaitingJoins", [&] { FinishWaitingJoins(in_session); });
     TimeTickStep("ResendOwnDataOnChange", [&] { ResendOwnDataOnChange(in_session); });
-    TimeTickStep("LogMemberDataChanges", [&] { LogMemberDataChanges(in_session); });
+    if (CoopTraceOn()) {
+        TimeTickStep("LogMemberDataChanges", [&] { LogMemberDataChanges(in_session); });
+    }
     TimeTickStep("GiveEncounterInsight", [&] { GiveEncounterInsight(in_session); });
     TimeTickStep("KeepImpurityBonus", [&] { KeepImpurityBonus(in_session); });
     // Whether this character has been to the Hunter's Dream: its own world has the first visit's
@@ -1973,6 +2027,7 @@ void TickPlayersOnThisMap() {
     KeepGiftTalkFlagsOwn();
     KeepOwnedWeaponFlagsOwn();
     KeepHeadstoneFlagsOwn();
+    ClearDollLevelUpFlagAfterHerBlessing();
     static RecreateAfterJoin recreate_after_join;
     if (recreate_after_join.Tick(IsPartyGuestRole(), in_session,
                                  in_session ? OtherSessionMembers().size() : 0,
@@ -1981,6 +2036,14 @@ void TickPlayersOnThisMap() {
         recreate_pending_after_join =
             RecreateIsForAJoin(recreate_players_pending, recreate_pending_after_join);
         recreate_players_pending = true;
+        recreated_since_trip.clear();
+    }
+    static RecreateAfterRejoin recreate_after_rejoin;
+    if (recreate_after_rejoin.Tick(in_session, in_session ? OtherSessionMembers().size() : 0,
+                                   member_leaves_seen.exchange(0) > 0, SteadyMilliseconds())) {
+        LOG_INFO(Debug, "Bloodborne party: a member left and joined again; re-creating the others");
+        recreate_players_pending = true;
+        recreate_pending_after_join = false;
         recreated_since_trip.clear();
     }
     if (!in_session) {
@@ -2021,7 +2084,30 @@ void TickPlayersOnThisMap() {
     for (const u64 member : members) {
         names.push_back(SessionMemberBoardName(member, online_ids));
     }
-    const RecreatePlan plan = PlanRecreate(names, board, self, map, recreated_since_trip);
+    RecreatePlan plan = PlanRecreate(names, board, self, map, recreated_since_trip);
+    // A member about to be re-created with no name yet is looked for once more past its miss's
+    // wait: one miss just after the trip had it listed as "?" (rig team-join3 2026-11-02).
+    if (std::ranges::any_of(plan.now, [&](size_t index) { return !names[index]; })) {
+        for (const size_t index : plan.now) {
+            if (!names[index]) {
+                names[index] = SessionMemberBoardName(members[index], online_ids, true);
+            }
+        }
+        plan = PlanRecreate(names, board, self, map, recreated_since_trip);
+    }
+    static UnnamedRecreateHold unnamed_hold;
+    const auto act = unnamed_hold.Tick(
+        std::ranges::any_of(plan.now, [&](size_t index) { return !names[index]; }),
+        SteadyMilliseconds());
+    if (act == UnnamedRecreateHold::Act::Wait) {
+        return; // its name may come next tick
+    }
+    if (act == UnnamedRecreateHold::Act::GoUnnamed) {
+        LOG_WARNING(Debug,
+                    "Bloodborne party trip: a member still has no name {} ms after the "
+                    "trip's re-create was due: re-created as unknown",
+                    UnnamedRecreateWaitMs);
+    }
     if (!plan.now.empty()) {
         std::vector<u64> now;
         std::string who;
@@ -2124,6 +2210,9 @@ bool PS4_SYSV_ABI LogMemberLeave(u64, const GuestRegisterSnapshot* registers) {
     LOG_INFO(Debug, "Bloodborne member leave from {:#x} self={} trip={} map={:#x}",
              caller >= image_base ? caller - image_base : caller, self, PartyTripActive(),
              CurrentPlace().map);
+    if (!self && !PartyTripActive()) {
+        member_leaves_seen.fetch_add(1);
+    }
     return false;
 }
 
@@ -2149,6 +2238,13 @@ bool PS4_SYSV_ABI KeepMatchingDuringTrip(u64, const GuestRegisterSnapshot* regis
         if (return_address == image_base + IrregularLeaveStopReturn && TeamHostTookOver()) {
             LOG_INFO(Debug, "Bloodborne party: kept the team's session this game hosts now (a "
                             "member's irregular leave would end it)");
+            return true;
+        }
+        if (return_address >= image_base &&
+            KeepsSessionAfterWipe(return_address - image_base, InPartySession(),
+                                  SteadyMilliseconds() - LastPartyWipeMs())) {
+            LOG_INFO(Debug, "Bloodborne party: kept the session through the game's StopRequest "
+                            "after the wipe");
             return true;
         }
         if (party_controller && InPartySession()) {

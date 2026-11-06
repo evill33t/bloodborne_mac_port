@@ -90,6 +90,14 @@ size_t TeamSessionMembers(size_t session_members, bool invader_in_session) {
     return invader_in_session && session_members > 1 ? session_members - 1 : session_members;
 }
 
+bool InvaderInSession(std::span<const std::optional<std::string>> session_names,
+                      std::string_view invader) {
+    return !invader.empty() &&
+           std::ranges::any_of(session_names, [invader](const std::optional<std::string>& name) {
+               return name == invader;
+           });
+}
+
 InvasionJoin InvasionJoinOf(const bbcoop::TeamSession& session, bool fallback, u32 coop_kind) {
     if (fallback) {
         return {coop_kind, session.sign(), true};

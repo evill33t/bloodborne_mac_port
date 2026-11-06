@@ -169,6 +169,9 @@ public:
         : cap{cap}, threshold_ns{threshold_ns} {}
     std::optional<std::string> Note(std::string_view part, s64 ns, s64 now_ms,
                                     std::string_view role, u64 memory_checks);
+    s64 ThresholdNs() const {
+        return threshold_ns;
+    }
 
 private:
     std::mutex mutex;
@@ -270,6 +273,12 @@ const std::vector<CodePatch>& JoinAnywherePatches();
 // warps the player, e.g. Gascoigne's 24000020) calls StopRequest (returning to 0x0193C65C) and
 // LeaveSession for a member of a session. In a party it is a trip like a lamp's.
 bool IsWorldReloadStopRequest(u64 caller_offset);
+// A StopRequest and LeaveSession the game makes on its own about 15 s after a party wipe, past the
+// wipe's trip, on a host that had joined the team's new host (rig party-death 2026-11-02): it left
+// and joined again and both players' copies went with it. Kept for KeepAfterWipeMs after a wipe in
+// a party session; the game's own leaving at any other time still goes.
+constexpr s64 KeepAfterWipeMs = 45'000;
+bool KeepsSessionAfterWipe(u64 caller_offset, bool in_party_session, s64 since_wipe_ms);
 // The same load's LeaveSession (0x0193C689, returning to 0x0193C68E): a guest's game calls only
 // this one at the Cathedral Ward border (rig 2026-10-13).
 bool IsWorldReloadLeaveSession(u64 caller_offset);
@@ -517,9 +526,13 @@ bool RespawnsInWorldRespawn(WorldRespawnKind kind, const RespawnCandidate& chara
 // playtest 2026-10-25, v1.2.2). Of this guest's copies dead here (`dead_here`: since when), the
 // ones the host's board has alive near the host, no member's kill standing (`party_kills`), dead
 // here for BringBackAfterMs at least (a kill made here reaches the host first). Sorted.
+// A boss-sized copy (`boss`) is never brought back: no generator brings a boss back, and the host
+// never posts a boss dead (rig shadows-look 2026-11-04: a Shadow killed in both games at once
+// stood again on the guest at full HP).
 struct DeadCopy {
     u32 handle = 0;
     s64 dead_since_ms = 0;
+    bool boss = false;
 };
 constexpr s64 BringBackAfterMs = 3'000;
 std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
@@ -663,6 +676,17 @@ struct SavedJoinTask {
 // step (its data was there before the trip), or runs the game's own join from the start (it was
 // still joining: its data never came, and a character made without it is a body-less phantom).
 bool RebuildsFromSave(const SavedJoinTask& saved);
+// Whether a task rebuilt as `kind` from `saved` waits at its saved step for a member's data. A
+// remote member's does; this game's own task (kind 2 or 3) has nobody to wait for, and it is
+// what creates the host's character on a guest (rig party-death 2026-11-02: a host that had
+// joined the team's new host was saved at step 3, its wipe's rebuild waited for its own data
+// and the players never saw each other).
+bool RebuiltTaskWaits(const SavedJoinTask* saved, s32 kind);
+// A guest that took the team's host role and opened its session can stand hosting with NetSync
+// at 0 (+0x84, 4 on any host), where the game sends none of ch 6 and drops it on receive: both
+// players' copies then stood at (0, 0, 0) for good (rig party-death 2026-11-02). Only 0: the join
+// runs through 1 to 3 by itself.
+bool TakenOverSyncStalled(bool took_over, s32 matching_state, s32 sync_state);
 // The saved task a rebuilt one of `kind` takes: its member's own, else the only one of that kind.
 std::optional<size_t> PickSavedJoinTask(std::span<const SavedJoinTask> saved, s32 kind,
                                         u64 identity);
@@ -811,7 +835,10 @@ public:
         Plan plan = Plan::Scan;
         Block block;
     };
-    Look Lookup(u64 identity, std::span<const std::string> online_ids, s64 now_ms) const;
+    // `fresh`: a miss is scanned again at once (a re-create about to run, rig team-join3
+    // 2026-11-02: one miss 8.9 s before it listed the host as "?").
+    Look Lookup(u64 identity, std::span<const std::string> online_ids, s64 now_ms,
+                bool fresh = false) const;
     void Found(u64 identity, std::span<const std::string> online_ids, Block where);
     void Missed(u64 identity, std::span<const std::string> online_ids, s64 now_ms);
     void Forget(u64 identity);
@@ -842,6 +869,21 @@ struct RecreatePlan {
 RecreatePlan PlanRecreate(std::span<const std::optional<std::string>> members,
                           std::span<const MemberMap> board, std::string_view self, u32 map,
                           const std::set<std::string>& handled);
+// Rig yahargul-mummy-host and party-death down-alone (2026-11-03): just after a trip a member was
+// still re-created as "?" (its board name not found yet, even past the second look). A re-create
+// with a member unknown waits for its name up to UnnamedRecreateWaitMs, the names looked for again
+// each tick; past it, once, the member goes as unknown (GoUnnamed, logged), and later ticks go on.
+constexpr s64 UnnamedRecreateWaitMs = 3'000;
+class UnnamedRecreateHold {
+public:
+    enum class Act { Go, Wait, GoUnnamed };
+    // `unnamed`: the plan would re-create a member with no name now.
+    Act Tick(bool unnamed, s64 now_ms);
+
+private:
+    std::optional<s64> since;
+    bool gone = false;
+};
 // Whether the host (its map from its map state post) is on `map` and still on the map board.
 bool HostIsHere(std::optional<u32> host_map, std::span<const MemberMap> board,
                 std::string_view self, u32 map);
@@ -908,6 +950,27 @@ struct FlagChanges {
 };
 FlagChanges ChangedFlags(u32 block, u32 flags_per_block, std::span<const u8> before,
                          std::span<const u8> after);
+// What differs between two copies of the flag store: both hold their blocks by rising id, and a
+// block only one of them has is no change.
+template <typename Block>
+FlagChanges ChangedFlagsBetween(const std::vector<Block>& before, const std::vector<Block>& now,
+                                u32 flags_per_block) {
+    FlagChanges all;
+    size_t old_index = 0;
+    for (const Block& block : now) {
+        while (old_index < before.size() && before[old_index].id < block.id) {
+            ++old_index;
+        }
+        if (old_index >= before.size() || before[old_index].id != block.id) {
+            continue;
+        }
+        const FlagChanges changes =
+            ChangedFlags(block.id, flags_per_block, before[old_index].bytes, block.bytes);
+        all.set.insert(all.set.end(), changes.set.begin(), changes.set.end());
+        all.cleared.insert(all.cleared.end(), changes.cleared.begin(), changes.cleared.end());
+    }
+    return all;
+}
 // Ritual altars (see FlagTable, bloodborne_altar.h): a ritual or a join writes "the current
 // altar", flags 92900000-92905999, a view of the altar k the player talks to (94k00000-94k05999).
 bool IsCurrentAltarFlag(s32 flag);
@@ -1000,6 +1063,10 @@ std::vector<s32> LitHeadstoneLamps(const std::function<bool(s32)>& on);
 // (`team`, any of its flags), each a lamp's active flag that is off now. Kaniel's play test
 // 2026-10-21: a guest's join reload (it comes back as the host's phantom) gives its game a new
 // flag store with no lamp lit, and its headstones said "no place to awaken".
+// A lamp this game lit again itself (LampsToRelight) is no progress of the team's: without the
+// flags `relit` holds, each taken out of it. The flag watcher compares every 3 s, so a relight
+// after a team change read as a lamp lit, and a guest's own lamp reached its new team's world.
+FlagChanges WithoutRelitLamps(FlagChanges changes, std::set<s32>& relit);
 std::vector<s32> LampsToRelight(const std::set<s32>& kept, std::span<const s32> team,
                                 const std::function<bool(s32)>& on);
 // Whether a load of the guest's world gets the kept world changes before its map items and
@@ -1054,6 +1121,28 @@ std::vector<s32> LightRequestsToClear(u32 packed_map, const std::function<bool(s
 // open while a map loads, so a 6700 on then is stuck: cleared as the map loads (in a party).
 constexpr s32 DollLevelUpFlag = 6700;
 bool ClearsDollLevelUpFlag(bool party_configured, bool flag_on);
+// Her blessing (72100100, each game's own): in a session a game's own kneel and turn (m21_00
+// 12100112's 72100101, 12100113's 72100102) come back as the other player's set message, which
+// keeps each game's own flags (KeepLocalFlagsFromOthers). Such a step goes through while this
+// game's own blessing is on, and an "off" always; another player's "on" with this game's blessing
+// off does not (it made every player kneel, Kaniel 2026-11-03).
+constexpr s32 DollBlessingFlag = 72100100;
+bool TakesDollBlessingStep(s32 flag, bool sent_on, bool own_blessing_on);
+// Kaniel 2026-11-03: a second "Level Up" in the same Dream visit opened no menu: her talk sets
+// 6700 as her level-up menu opens and skips the menu while it is on, and in the co-op mode nothing
+// cleared it before the next map load (rig: a lone player too). Tick (each frame) says when to
+// clear it: her blessing over, this game's own 72100100 off again after it was on, 6700 still on.
+class DollLevelUpClear {
+public:
+    bool Tick(bool coop_mode, bool level_up_on, bool blessing_on) {
+        const bool was_on = blessing_was_on;
+        blessing_was_on = coop_mode && blessing_on;
+        return coop_mode && level_up_on && was_on && !blessing_on;
+    }
+
+private:
+    bool blessing_was_on = false;
+};
 // The other player's "set this event flag" (0x017C0570) and "event ended" (0x017C0901) messages
 // leave these flags and events alone in a party: what one player received is not given to the
 // other (the Hunter's Dream messengers' gift events and flags, 12101020-12101029, and the
@@ -1927,6 +2016,29 @@ private:
     std::optional<s64> joined_ms;
     bool done = false;
 };
+// Kaniel 2026-11-03: Lisara's game dropped out of the room and joined again within a second. The
+// member count never stayed down for MemberDepartures, so nothing re-created her and the host saw
+// her old body hidden until a trip. Tick says when to re-create: `left` is a member's leave the
+// game's own handler saw this tick; the members back to as many as before it within
+// RejoinWindowMs is a rejoin, re-created once the count held RejoinSettleMs. A real join takes
+// longer than that window, and a re-create in the middle of one kept the joining game from ever
+// syncing (rig party3 leader-returns3, 2026-11-04). "Before" is the most members seen within
+// RejoinWindowMs of the leave: a crashed game's count can drop ahead of the game's own leave
+// (rig party3 crash3, 2026-11-04), and that lower count back is no rejoin.
+class RecreateAfterRejoin {
+public:
+    static constexpr s64 RejoinWindowMs = 3'000;
+    static constexpr s64 RejoinSettleMs = 2'000;
+    bool Tick(bool in_session, size_t others, bool left, s64 now_ms);
+
+private:
+    size_t known = 0;
+    size_t peak = 0;
+    s64 peak_ms = 0;
+    std::optional<s64> left_ms;
+    size_t before = 0;
+    std::optional<s64> back_since;
+};
 // What the host's world had for each character the last time it was near the host (Kaniel
 // 2026-10-11: a character by a window in Central Yharnam is removed in the host's world even with
 // the host beside it, its story; once the host was far, a guest went by its own world and showed
@@ -2162,6 +2274,17 @@ std::vector<MultiplayerWall> MultiplayerWalls();
 // 0.7 at +0x10). A party guest keeps its full HP.
 constexpr s32 PhantomHpEffect = 9006;
 constexpr u64 SpEffectMaxHpRateOffset = 0x10;
+// Kaniel 2026-10-25: the phantom's glow, off on request (one player's own look). SpEffect 9006 has
+// stateInfo 272 and useSpEffectEffect, so the game plays SpEffectVfxParam row 272: its midstSfxId
+// (+0x00, effect 211) looped on dummy poly 203. Nothing but that look reads the row, so the
+// guest's type, team, hits and HP stay as they are. Row 272 only: 9026 and the others are other
+// roles' looks.
+constexpr s32 PhantomGlowVfxRow = 272;
+constexpr u64 SpEffectVfxMidstSfxOffset = 0x00;
+constexpr s32 NoSfx = -1;
+// Takes the glow's effect out of a loaded SpEffectVfxParam; the id that was there, or nothing when
+// this is another table, the row is missing or the glow is already out.
+std::optional<s32> RemovePhantomGlow(std::span<u8> sp_effect_vfx_param);
 // Level sync: a player whose level is above the host's band (host level * (1 + rate) + add,
 // from the online settings) gets special effect 9200 (0x01507DDC), and every character whose
 // effects include it has its max HP, stamina and attack scaled to the host's level through the
@@ -2342,6 +2465,10 @@ inline constexpr std::array NpcDeathDrops{
     NpcDeathDrop{1712, 43200, 0x23000000},
     NpcDeathDrop{1713, 43220, 0x24000000},
     NpcDeathDrop{1790, 43110, 0x1B000000},
+    // Kaniel's playtest 2026-10-30: the Moon rune where the Brain of Mensis fell. m26_00 12600028
+    // ends for a client and awards lot 2605000 (flag 52605000) once 12600027 is on (the Brain has
+    // fallen) and the player stands there: only the host got it.
+    NpcDeathDrop{12600027, 2605000, 0x1A000000},
 };
 // Whether this game gives `drop` now: a party guest in a session on its map, the death flag on,
 // not given yet (`given`: this character, this session), and the lot not the guest's already
@@ -2419,6 +2546,7 @@ struct HarderEnemies {
     float hp = 1.0f;
     float damage = 1.0f;
     float poise = 1.0f;
+    bool operator==(const HarderEnemies&) const = default;
 };
 std::optional<HarderEnemies> ParseHarderEnemies(std::string_view setting);
 // NpcParam (NPC_PARAM_ST, 0x184-byte rows): hp (u32) and superArmorDurability (s16, poise).
@@ -2734,7 +2862,8 @@ constexpr const char* LauncherBackupNote = "launcher.txt";
 // Deletes all but the newest `kept` of the game's backups; returns how many went.
 std::size_t PruneSaveBackups(const std::filesystem::path& user_dir, std::size_t kept);
 
-// The co-op trace (docs/WORLD_SYNC.md, Stage B): every co-op game writes
+// The co-op trace (docs/WORLD_SYNC.md, Stage B), for bug reports: with BB_COOP_TRACE=1 (bbport.ini
+// coop_trace=1) a co-op game writes, and its tick runs the parts that only log:
 // user/log/coop-trace-<local time>-<process>.txt, one record per line, "<UTC ms> <kind>
 // <key>=<value> ...", each value escaped (TraceEscape) so a line has no spaces or line ends of
 // its own. The kinds:
@@ -2761,7 +2890,7 @@ std::size_t PruneSaveBackups(const std::filesystem::path& user_dir, std::size_t 
 //                        rtt)
 //                        and detail
 // An "-in" record leaves out what did not change since its kind's last record, and its lists
-// only name what came, changed or went (TraceListDelta). SHADPS4_BLOODBORNE_TRACE=0 turns it off.
+// only name what came, changed or went (TraceListDelta).
 // 2: the world log's records. 3: the game's packets.
 constexpr int CoopTraceVersion = 3;
 constexpr std::size_t TraceBodyCap = 8 * 1024;
@@ -3006,6 +3135,64 @@ EnemyRole EnemyRoleOn(std::span<const EnemyOwnerEntry> owners, std::string_view 
 std::optional<s32> EnemySyncState(EnemyRole role, s32 state);
 // The state the hit on an enemy (0x01A29E40) sees instead: a host that follows sends its hits.
 std::optional<s32> EnemyHitState(EnemyRole role, s32 state);
+// Rig host-arrives-hurt-enemy (failing since 1.3.1 at least): a host that followed a guest
+// owning the map took the map over with its own copies, and an enemy the guest had moved went
+// back to its spawn (the host's game never took the owner's places, ch 4). The owner sends the
+// places of its enemies that moved (bbcoop::EnemyPlaces, about once a second); a member that
+// takes the map over puts them there first.
+// Rig owner-crash-fight (Kaniel picked the fix 2026-11-03): an enemy fighting in the owner's
+// game came to the new owner without a target (a follower's hits go to the owner: its own AI
+// never had the fight) and stood idle; `fighting` carries the fight, and the new owner gives it
+// the nearest standing player.
+struct EnemyPlace {
+    u32 handle = 0;
+    std::array<float, 3> at{};
+    float heading = 0.0f;
+    bool fighting = false;
+    bool operator==(const EnemyPlace&) const = default;
+};
+constexpr float EnemyPlaceMovedMeters = 1.0f;
+constexpr size_t EnemyPlacesMost = 64;
+constexpr s64 EnemyPlacesEveryMs = 1000;
+constexpr s64 EnemyPlacesFreshMs = 10'000;
+// The enemies of `now` more than EnemyPlaceMovedMeters from where the owner first saw them
+// (`first_seen`, by handle), and those fighting though they did not move; the farthest moved
+// first, at most EnemyPlacesMost.
+std::vector<EnemyPlace> MovedEnemyPlaces(std::span<const EnemyPlace> now,
+                                         const std::map<u32, std::array<float, 3>>& first_seen);
+// A player an enemy may take as its target: where it stands, and whether it stands (not down).
+struct PlayerSpot {
+    std::array<float, 3> at{};
+    bool standing = false;
+};
+constexpr float EnemyTargetRangeMeters = 30.0f;
+// The standing player nearest `enemy` within EnemyTargetRangeMeters, if any.
+std::optional<size_t> NearestStandingPlayer(const std::array<float, 3>& enemy,
+                                            std::span<const PlayerSpot> players);
+// The game's own way an enemy's senses take a character as a target (0x012B2960, called by the
+// sight and sound paths 0x012ABDB0, 0x012AEA2E): (targeting + 0x10, 0, character, 0,
+// [targeting + 8]) adds or refreshes a character target node (slot 0x81; its target built by
+// 0x012A7260: kind 1, the handle at +0x50). targeting = [[[enemy +0x3B8] +0xB0] +0x560].
+constexpr u64 AddEnemyTargetOffset = 0x012B2960;
+constexpr u64 CharacterTargetInitOffset = 0x012A7260;
+// The enemies' targeting systems (see ForgetsTargetNode): the enemy one's vtable and its base's.
+constexpr u64 EnemyTargetingVtableOffset = 0x0531B9F0;
+constexpr u64 BaseTargetingVtableOffset = 0x05366280;
+// The owners' latest places, by map; a map's are only taken while fresh (EnemyPlacesFreshMs).
+class EnemyPlacesBook {
+public:
+    void Heard(u32 map, std::vector<EnemyPlace> places, s64 now_ms);
+    std::vector<EnemyPlace> Take(u32 map, s64 now_ms) const;
+    void Drop(u32 map); // put back: not again
+    void Clear();
+
+private:
+    struct Heard_ {
+        std::vector<EnemyPlace> places;
+        s64 at_ms = 0;
+    };
+    std::map<u32, Heard_> by_map;
+};
 std::optional<u16> EnemyOwnershipWord(EnemyRole role);
 // The Doll (m21_00 entity 2100700, 0x10000001 in the Dream) stays in each player's own game
 // whatever its role on the map (Kaniel 2026-10-18: the Doll only): handed over in the middle of a
@@ -3029,6 +3216,30 @@ std::optional<s32> HeldOwnHitHp(s32 current, s32 after_own_hit, s64 age_ms);
 // down to it (scaled by each copy's max, to 0 for a killing hit: it dies on every screen at
 // once); the owner applies the hit itself (the game's 0x15), and without an owner nothing.
 std::optional<s32> HitNewsHp(EnemyRole role, s32 current, s32 copy_max, s32 hp, s32 max);
+// Rig party-death 2026-11-02: the owner's game can drop a follower's hit (ch 0x15, on a guest
+// that came back and took the map over), and then the two copies' HP split for good. The hit's
+// news (bbcoop::EnemyHit) reaches the owner too: it waits OwnerHitWaitMs for the game, which
+// normally lands the hit first (a kill stays the game's), then HitNewsHp lowers what is left.
+constexpr s64 OwnerHitWaitMs = 500;
+class OwnerHitCatchUp {
+public:
+    struct Hit {
+        u32 handle;
+        s32 hp;
+        s32 max;
+    };
+    void Heard(u32 handle, s32 hp, s32 max, s64 now_ms);
+    std::vector<Hit> Take(s64 now_ms);
+    void Clear();
+
+private:
+    struct Waiting {
+        s32 hp;
+        s32 max;
+        s64 heard_ms;
+    };
+    std::map<u32, Waiting> waiting;
+};
 // What the game sends at all (shadNet routes what it sends, coop/packet_routes.h): a follower's
 // hit (0x15) and near list (0x16) go to the area's owner, not the session's host the game sends
 // them to; what only the owner sends, a follower does not send (the game sees "not sent").
@@ -3288,6 +3499,9 @@ std::optional<u32> ParseAutoplayTarget(std::string_view text);
 // watch-effects: the SpEffects a character gained ("+id") and lost ("-id") between two looks, in
 // id order, space separated; "" when nothing changed. Each copy of an effect counts.
 std::string DescribeEffectChanges(std::vector<s32> before, std::vector<s32> after);
+// A peek/poke offset: hex offsets joined by '>', each '>' reading a pointer at the offset before
+// it ("58>2cc": the u32 at +0x2CC of what +0x58 points to); each at most 0x2000.
+std::optional<std::vector<u32>> ParseAutoplayPath(std::string_view text);
 // `value <op> limit` for op <, <=, ==, !=, >=, >; nothing for another op.
 std::optional<bool> CompareAutoplay(s64 value, std::string_view op, s64 limit);
 // attack <target>: a real hit, so the kill reward and the death run as in play (the game's own
@@ -3423,12 +3637,21 @@ s32 DownedHp(s32 max, u32 landed, u32 needed);
 // TextEffect_KillDemon), 2 YOU DIED, 4 BLOOD ECHOES RETRIEVED, 5 PREY SLAUGHTERED again
 // (TextEffect_KillTarget), 7 ADVERSARY EXPUNGED, 15 UNLOCKED, 16 a wordless one, 17 NIGHTMARE SLAIN
 // (TE_Draw's slot: TextEffect_Draw, text 522007; Mergo's Wet Nurse, Gehrman, the Orphan of Kos).
-// Every banner the HUD has is in use. Party death takes 15 (fe.gfx TextEffect_YouWin, the same
-// timeline and layers as NIGHTMARE SLAIN's): the party HUD (bbport/scripts/hud_patch.py) makes it
-// the yellow YOU ARE DOWN, and the event patch drops its one game event (m29 12900192).
+// Every banner the HUD has is in use. 1.3.1 gave 15 (UNLOCKED, the chalice dungeons' m29 12900192)
+// to party death's YOU ARE DOWN; Kaniel 2026-11-01 missed UNLOCKED, so it is the game's again and
+// YOU ARE DOWN is the party HUD's own sprite (DownedBannerFrame).
 constexpr u64 SetTextEffectOffset = 0x013360B0;
 constexpr std::array<u8, 6> SetTextEffectStart{0x8D, 0x46, 0xFF, 0x83, 0xF8, 0x10};
-constexpr s32 DownedBannerTextEffect = 15;
+constexpr s32 UnlockedTextEffect = 15;
+
+// Party death's yellow YOU ARE DOWN: the party HUD's CoopDownedBanner
+// (bbport/scripts/hud_patch.py), a sprite of two frames: nothing, then a copy of the game's
+// TextEffect_YouWin (its fade-in and blur trail, 125 frames at 30 fps) with our words. It shows
+// frame 2 for DownedBannerShowMs from when the player went down, frame 1 otherwise.
+constexpr s64 DownedBannerShowMs = 4'100;
+constexpr u32 DownedBannerFrame(s64 downed_ms, s64 now_ms) {
+    return now_ms >= downed_ms && now_ms - downed_ms < DownedBannerShowMs ? 2 : 1;
+}
 
 // The party HUD's nameplates: the game's tag over each remote player (fe.gfx RemotePCTag0-6). The
 // HUD tick updates each tag from a TagData (0x01B59E20: rdi the tag, rsi its data), and its one
@@ -3527,7 +3750,7 @@ bool PartyListOutdated(u64 hud, u64 generation, u64 list_hud, u64 list_generatio
 constexpr u64 HudTicksTagsDoneOffset = 0x01BF8A50;
 constexpr std::array<u8, 7> HudTicksTagsDone{0x49, 0x8B, 0xBF, 0xF8, 0x00, 0x00, 0x00};
 constexpr s64 HudFrameTimeFrameOffset = -0x6C8;
-constexpr int PartyListSize = 3;
+constexpr int PartyListSize = 4; // Amanises 2026-10-29: teams of five (was 3)
 struct PartyListEntry {
     bool visible = false;
     s32 hp = 0;
@@ -3787,6 +4010,12 @@ constexpr s64 PresenceNewCharacterMs = 15'000;
 // Whether a character by no member (since `unmatched_since_ms`), first seen at `first_seen_ms`,
 // is hidden now.
 bool PresenceHides(s64 now_ms, s64 first_seen_ms, s64 unmatched_since_ms);
+// Rig owner-crash-fight 2026-11-03: the crashed host's leftover copy, hidden for no member by
+// it, was shown again when this game left its session alone and opened its own, and the enemy
+// fighting the guest went for it. The hidden copies are shown again (as the game has them) only
+// in a session whose board is not to be trusted (stale) or while loading (no map), never on a
+// session's end.
+bool ShowsHiddenCopies(bool in_session, bool board_fresh, bool on_map);
 std::vector<bool> ShownOtherPlayers(std::span<const std::optional<LampPosition>> characters,
                                     std::span<const MemberVitals> board, std::string_view self,
                                     u32 map);
@@ -4247,8 +4476,81 @@ private:
 // of swings at the downed player. A node of a live character target (+0x02: slot type 1, bit 7
 // alive; +0x28 kind 1) on a downed player's handle (+0x50) gets ForgottenTargetTimer, and the
 // game's own update drops it the next frame (0x012A6AD0). Enemies after anyone else are left be.
+// The enemy's memory of a downed player (slot type 7) stays: dropped, the enemy no longer took a
+// guest at 1 HP beside it (rig down-by-enemy 2/4 against 2/2 without it, 2026-11-03).
 bool ForgetsTargetNode(u8 slot, s32 kind, u32 handle, std::span<const u32> downed);
+// A gone member's copy (crashed or left, see ReconcileMemberPresence): its current target node
+// goes; the enemy's memory of it (slot type 7) stays, as a downed player's. Dropped, a guest
+// whose game restarted (its new copy has the old one's handle) was no longer taken by the enemy
+// fighting the host (rig down-by-enemy 2/5 on #506 against 2/2 without, 2026-11-03); the
+// take-over fight is the vouched-only live rule's and TakeoverFights' (a memory of a gone copy
+// is no fight).
+bool ForgetsGoneTargetNode(u8 slot, s32 kind, u32 handle, std::span<const u32> gone);
+constexpr u8 TargetSlotCurrent = 1;
+constexpr u8 TargetSlotMemory = 7;
+// A node of an enemy's targeting system as read (see ForgetsTargetNode).
+struct TargetNodeView {
+    u8 slot = 0;
+    s32 kind = 0;
+    u32 handle = 0;
+};
+// Whether the enemy holds or remembers one of the `live` characters (their handles) as its target:
+// a target on a crashed member's leftover copy is no fight (see GiveFightOn). Without
+// `memory_counts` only a current target is (the take-over's rechecks: rig owner-crash-fight
+// 2026-11-03, after the re-host the enemy kept only its memory of the guest and stood still).
+bool HoldsLiveTarget(std::span<const TargetNodeView> nodes, std::span<const u32> live,
+                     bool memory_counts = true);
+// Another player's copy here as a fight sees it: `vouched`, a member on this map stands by it
+// (ReconcileMemberPresence; out of a session or with no fresh board every shown copy is).
+struct PlayerCopyView {
+    u32 handle = 0;
+    s32 hp = 0;
+    bool disabled = false;
+    bool vouched = false;
+};
+// The players here a fight can be with: this game's own (`self`, while alive) and the copies
+// shown, alive and vouched for. Rig owner-crash-fight 2026-11-03: at the take-over the crashed
+// host's copy was still shown (its 3 s grace), so the enemy "had a target" and was given none.
+std::vector<u32> LivePlayerHandlesOf(std::optional<u32> self,
+                                     std::span<const PlayerCopyView> others);
+// The take-over's fights (the old owner's EnemyPlace.fighting), looked at again once a second
+// for WindowMs: one left with no live target (the old owner's copy hidden, its nodes forgotten)
+// gets this game's player then.
+class TakeoverFights {
+public:
+    static constexpr s64 WindowMs = 15'000;
+    static constexpr s64 EveryMs = 1'000;
+    void Start(std::vector<u32> handles, s64 now_ms);
+    // The fights to look at now (none between the seconds, nor past the window).
+    std::vector<u32> Due(s64 now_ms);
+
+private:
+    std::vector<u32> handles;
+    s64 started_ms = 0;
+    std::optional<s64> last_ms;
+};
+// This game's run of a map that stops and comes back within GapMs on the same map (rig
+// owner-crash-fight 2026-11-03: alone in the session, the guest re-hosts the team's, its
+// character goes from type 1 team 20 to type 0 team 19 and the enemy dropped it as a target, past
+// the take-over's window): the fights it had then are the take-over's again (TakeoverFights).
+class OwnerGap {
+public:
+    static constexpr s64 GapMs = 5'000;
+    // This game stops running `map`, its enemies with these fights.
+    void Leave(u32 map, std::vector<u32> fights, s64 now_ms);
+    // This game runs `map` again: the fights it left with, if it is back in time (once).
+    std::vector<u32> Back(u32 map, s64 now_ms);
+
+private:
+    std::vector<u32> fights;
+    u32 map = 0;
+    s64 left_ms = 0;
+};
 constexpr float ForgottenTargetTimer = 1.0e-4f;
+// Enemy handles for a log line, "0x1001400b 0x1001402e" ("none" for none): which enemies a
+// down's forget took the target from (rig down-by-enemy 2026-11-03: the hit came within a
+// second of the enemy's hand-over and no targets line named it).
+std::string EnemyHandlesText(std::span<const u32> handles);
 // Kaniel's play test 2026-10-19: the Blood-starved Beast never went for Lisara. What the enemies'
 // AI reads to take a character as a target: every ~5 s 0x012A43B0 lists WorldChrMan's players
 // (and the current block's characters) whose vtable +0x78 says so (players 0x018F4D70:

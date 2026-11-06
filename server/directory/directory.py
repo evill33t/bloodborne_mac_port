@@ -24,6 +24,11 @@ LEASE_S = 30              # a world's lease, renewed by every heartbeat of its s
 HOME_S = 90 * 24 * 3600   # where a player last started a world
 INBOX_S = 60
 INBOX_MAX = 10000
+# Sign-ins killed on a shard (signed_accounts.h: a sign out, a password change, a recovery), for the
+# others: kept as long as a secret lives, at most this many.
+REVOKED_S = 31 * 24 * 3600
+REVOKED_MAX = 50000
+SIGNED_ID = re.compile(r'[du][0-9a-f]{14}')
 BODY_MAX = 8 << 20
 NAME = re.compile(r'[A-Za-z0-9_.-]{1,64}')
 KEY = re.compile(r'[0-9a-f]{64}')
@@ -94,6 +99,13 @@ class Directory:
         codes = [text(code, 16) for code in beat.get('codes') or []]
         worlds = [text(world, 128) for world in beat.get('worlds') or []]
         started = [text(player, 64) for player in beat.get('started') or []]
+        revoked = [{'id': text(item.get('id'), 64), 'at': int(item.get('at', 0))}
+                   for item in beat.get('revoked') or [] if isinstance(item, dict)]
+        revoked = [item for item in revoked if SIGNED_ID.fullmatch(item['id'])]
+        try:
+            revoked_after = int(beat.get('revoked_after') or 0)
+        except (TypeError, ValueError):
+            revoked_after = 0
         row['players'] = max(row['players'], len(players))
 
         pipe = self.redis.pipeline(transaction=False)
@@ -130,7 +142,33 @@ class Directory:
                 for code in json.loads(blob or '[]'):
                     region_codes[code] = name
         return {'shards': shards, 'players': region_players, 'codes': region_codes, 'held': held,
-                'inbox': invites}
+                'inbox': invites, 'revocations': self.revocations(shard, revoked, revoked_after)}
+
+    def revocations(self, shard, revoked, after):
+        """The sign-ins `shard` killed, numbered and kept; the others' since its `after`."""
+        if revoked:
+            first = self.redis.incrby('revoked:seq', len(revoked)) - len(revoked) + 1
+            pipe = self.redis.pipeline(transaction=True)
+            for seq, item in enumerate(revoked, first):
+                pipe.rpush('revoked', json.dumps(dict(item, seq=seq, shard=shard)))
+            pipe.ltrim('revoked', -REVOKED_MAX, -1)
+            pipe.execute()
+        # The list holds the newest seqs in a row: the ones after `after` are its tail.
+        pipe = self.redis.pipeline(transaction=True)
+        pipe.get('revoked:seq')
+        pipe.llen('revoked')
+        last, length = pipe.execute()
+        last = int(last or 0)
+        if after >= last or not length:
+            return []
+        start = max(0, length - (last - max(after, 0)))
+        oldest = self.now() - REVOKED_S
+        heard = []
+        for blob in self.redis.lrange('revoked', start, -1):
+            item = json.loads(blob)
+            if item['seq'] > after and item['at'] >= oldest:  # its own too: its count moves on
+                heard.append({'seq': item['seq'], 'id': item['id'], 'at': item['at']})
+        return heard
 
     def claim_account(self, body):
         """A new id's account: the first shard to claim it holds it for good."""
@@ -249,14 +287,17 @@ def make_handler(directory, token):
             call = routes.get(urlparse(self.path).path)
             if call is None:
                 return self.answer(404, {'error': 'no such call'})
-            said = self.headers.get('Authorization', '')
-            if not token or not hmac.compare_digest(said.encode(), f'Bearer {token}'.encode()):
-                return self.answer(401, {'error': 'token'})
             size = int(self.headers.get('Content-Length') or 0)
             if size > BODY_MAX:
                 return self.answer(413, {'error': 'too large'})
+            # Read the body before any answer: closing with unread data sends a reset,
+            # and the caller then loses the answer (WinError 10053 on Windows).
+            data = self.rfile.read(size)
+            said = self.headers.get('Authorization', '')
+            if not token or not hmac.compare_digest(said.encode(), f'Bearer {token}'.encode()):
+                return self.answer(401, {'error': 'token'})
             try:
-                body = json.loads(self.rfile.read(size) or b'{}')
+                body = json.loads(data or b'{}')
             except ValueError:
                 return self.answer(400, {'error': 'not JSON'})
             if not isinstance(body, dict):

@@ -238,4 +238,10 @@ void ReportFreezeOnClose() {
     }
 }
 
+void LowerThisThreadPriority() {
+#ifdef _WIN32
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
+}
+
 } // namespace Core::Bloodborne

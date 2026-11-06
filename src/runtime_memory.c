@@ -66,6 +66,8 @@ _Static_assert(sizeof(BatchEntry)==32,"PS4 batch map entry layout");
 static HostRwlock lock=HOST_RWLOCK_INIT;
 static __thread unsigned exclusive_depth, shared_depth;
 static uint64_t table_generation;
+/* Same generation as the runtime's own mapping cache; odd during a table write. */
+const uint64_t *runtime_memory_generation(void) { return &table_generation; }
 static void write_lock(void) {
     if (!exclusive_depth++) { host_write_lock(&lock); __atomic_add_fetch(&table_generation,1,__ATOMIC_ACQ_REL); }
 }

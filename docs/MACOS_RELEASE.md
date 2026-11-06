@@ -9,14 +9,15 @@ Development releases are published as GitHub prereleases, with a source tag and 
 After bootstrapping both dependency architectures as described in the README:
 
 ```sh
-BB_BUILD_TYPE=Release BB_LTO=ON bash build_macos.sh --test
+BB_BUILD_TYPE=Release BB_LTO=ON BB_PRODUCTION=ON bash build_macos.sh --test
 ```
 
 This builds the C/C++ runtime and native hosts with `-O3` and LTO, both renderer architectures
 with CMake Release optimization and ThinLTO, and the Swift launcher with `-O`. Timing code
 retains `-ffp-contract=off -fno-fast-math`; test assertions remain enabled. CMake caches created
 with Makefiles can be reused by setting `CMAKE_GENERATOR='Unix Makefiles'`. Set `BB_BUILD_JOBS`
-to limit parallel compilation (default 6). PGO is not supported by the current macOS build.
+to limit parallel compilation (default 6). PGO is not supported by the current macOS build. `BB_PRODUCTION=ON` disables imported
+co-op autoplay and the developer free camera and reports production status in character sheets.
 
 Resource-binding caching, pipeline/shader caches, fullscreen load avoidance and lossless texture
 compression retain their enabled defaults. Fresh launcher configurations use MetalFX Temporal

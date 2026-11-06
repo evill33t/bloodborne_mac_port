@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include "config.h"
 #include "coop/link_auth.h"
 #include "coop/team_lobby.h"
 #include "region.h"
@@ -264,6 +265,23 @@ int AFullShardSendsHellosToTheLeastLoaded() {
   return 0;
 }
 
+// A public shard's default cap, from the 4-vCPU load test: new players go to
+// the next shard past it.
+int TheDefaultCapSendsNewPlayersOn() {
+  CHECK(Region::DefaultShardCapacity == 350);
+  CHECK(ShardConfig{}.capacity == Region::DefaultShardCapacity);
+  Region::View view;
+  view.shards = {ShardOf("eu-1", 350, Region::DefaultShardCapacity),
+                 ShardOf("eu-2", 100, Region::DefaultShardCapacity)};
+  CHECK(!Region::PlaceHello(view, "eu-1", 349, Region::DefaultShardCapacity,
+                            false));
+  const Region::Shard *to = Region::PlaceHello(
+      view, "eu-1", 350, Region::DefaultShardCapacity, false);
+  CHECK(to && to->name == "eu-2");
+  std::cout << "region default cap: ok\n";
+  return 0;
+}
+
 TeamLobby NewLobby() {
   TeamLobby lobby{[n = 0]() mutable { return "t" + std::to_string(++n); }};
   lobby.SetCodeSource([n = 0]() mutable {
@@ -504,6 +522,7 @@ int main() {
   failed |= ALinkedGameIsRedirectedOnItsSession();
   failed |= TicketsHoldForTheirPlayerAndShard();
   failed |= AFullShardSendsHellosToTheLeastLoaded();
+  failed |= TheDefaultCapSendsNewPlayersOn();
   failed |= AFriendOnAnotherShardIsJoined();
   failed |= AnInviteFromAnotherShardIsAccepted();
   failed |= AWorldHeldElsewhereMovesItsTeam();

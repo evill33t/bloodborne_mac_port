@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <deque>
 #include <optional>
 #include <span>
 #include <string>
@@ -164,5 +165,46 @@ std::optional<u32> BossBarHandle(std::span<const u8> gauges);
 enum class DeathCatch { None, Down, BossFight };
 DeathCatch CatchOf(NoDeadCheck check, bool armed, bool down, bool answer, bool boss_fight,
                    bool spectating);
+
+// Kaniel 2026-11-03, from an idea of Amanises's: a spectator's unseen body follows the teammate
+// it watches. The game streams the map and draws the other players around the local body, not the
+// camera: watching a teammate 40 m away showed half a map and no teammate. The body goes to where
+// the teammate stood SpectateFollowLagMs ago (sampled every SpectateFollowSampleMs) once the
+// teammate is SpectateFollowMetres away, at most every SpectateFollowMoveMs, never within
+// SpectateFollowGapMetres of the teammate. Its copy in the teammate's world still collides, so the
+// body also steps back down the trail when the teammate comes within SpectateFollowDodgeMetres.
+// Only spots where the teammate stood on the ground are kept: one in mid-air or in a wall (a jump,
+// a ladder, a fall) put the body inside the ground, and it fell through into another map's block
+// (rig 2026-11-03: a crash on that block's dropped floor).
+constexpr s64 SpectateFollowSampleMs = 250;
+constexpr s64 SpectateFollowLagMs = 2'000;
+constexpr s64 SpectateFollowMoveMs = 1'000;
+constexpr s64 SpectateFollowDodgeMs = 500;
+constexpr float SpectateFollowMetres = 12.0f;
+constexpr float SpectateFollowGapMetres = 3.0f;
+constexpr float SpectateFollowDodgeMetres = 4.0f;
+constexpr float SpectateFollowDodgeToMetres = 6.0f;
+constexpr size_t SpectateFollowSamples = 40; // 10 s of trail
+
+class SpectateFollow {
+public:
+    void Reset() {
+        trail.clear();
+        sampled_at.reset();
+        moved_at.reset();
+    }
+    // Where the body goes now, if anywhere: `teammate` where the watched teammate stands, `me`
+    // where the body is.
+    std::optional<LampPosition> Tick(s64 now_ms, const LampPosition& teammate,
+                                     const LampPosition& me, bool teammate_on_ground = true);
+    size_t Samples() const {
+        return trail.size();
+    }
+
+private:
+    std::deque<std::pair<s64, LampPosition>> trail; // the oldest first
+    std::optional<s64> sampled_at;
+    std::optional<s64> moved_at;
+};
 
 } // namespace Core::Bloodborne

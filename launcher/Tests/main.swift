@@ -1320,6 +1320,30 @@ do {
     try? fm.removeItem(at: dir)
 }
 
+// Public co-op uses server-issued sessions and keeps local host preferences separate.
+do {
+    var online=OnlineSettings()
+    online.online=true;online.pool = .seamless;online.seamlessHost = .global
+    online.seamlessServer="private.example:31314";online.seamlessGlobalID="u0123456789abcd"
+    online.seamlessGlobalName="TestHunter";online.seamlessGlobalExpiry=floor(Date().timeIntervalSince1970)+3600
+    var ini=IniFile();online.apply(to: &ini)
+    check(OnlineSettings(ini: ini)==online,"Global account metadata survives settings round trip")
+    let global=online.launchEnvironment(adding: ["BB_SHADNET_NPID":"old-local","BB_SHADNET_PASSWORD":"old-secret"])
+    check(global["BB_SHADNET_SERVER"]==SeamlessGlobal.endpoint,"Global routes to seamlesshunt.com")
+    check(global["BB_SHADNET_NPID"]==nil && global["BB_SHADNET_PASSWORD"]==nil,"Global never inherits local credentials")
+    online.seamlessHost = .local
+    check(online.launchEnvironment(adding: global)["BB_SHADNET_SERVER"]=="private.example:31314","switching back restores the local host")
+    check(OnlineSettings(ini: IniFile(text: "seamless_server=evilseamlesshunt.com:31314\n")).seamlessHost == .local,"lookalike hosts stay private")
+    check(OnlineSettings(ini: IniFile(text: "seamless_server=https://seamlesshunt.com\n")).seamlessHost == .global,"exact public URL selects Global")
+    let request=try SeamlessGlobal.request(path: "sign-in",body: ["name":"TestHunter","password":"ephemeral"])
+    check(request.url?.absoluteString=="https://seamlesshunt.com/bb/auth/sign-in","account passwords use the fixed HTTPS endpoint")
+    check(request.url?.query==nil && request.httpMethod=="POST","passwords are confined to the request body")
+    do {try SeamlessGlobal.validate(name: "bad/name",password: nil);check(false,"invalid account name rejected")}
+    catch {}
+    do {try SeamlessGlobal.validate(name: "TestHunter",password: "short");check(false,"short password rejected")}
+    catch {}
+}
+
 if failures > 0 {
     print("FAIL: launcher model, \(failures) failed")
     exit(1)

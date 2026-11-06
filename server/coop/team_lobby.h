@@ -14,6 +14,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -25,8 +26,9 @@
 
 namespace BloodborneCoop {
 
-// The game's remote player slots: the host and three more.
-constexpr size_t TeamSize = 4;
+// The host and four more (Amanises 2026-10-29: the game's session holds 5 members, BBSC's
+// "five hunters"; was 4). A fourth guest takes player slot 4.
+constexpr size_t TeamSize = 5;
 
 // Kaniel 2026-10-16: how long a member's game may stay gone (a crash and a restart) before the
 // member leaves its team; a team with nobody left is gone. Kaniel 2026-10-25: only while nobody
@@ -37,10 +39,20 @@ constexpr s64 OfflineGraceMs = 10 * 60 * 1000;
 // one back at the title is at once: the others play on, led by whoever hosts their session now,
 // and it has a standing invite back as a guest.
 constexpr s64 LeftGraceMs = 2000;
+// Kaniel 2026-11-02 (rig late-quiet3 and link-cut): a guest's link that is only quiet may be a
+// Wi-Fi blip, so its game stays in its team this long ("it could be a few min"). The leader's
+// still goes after LeftGraceMs: its session must move before the others' games give up on it
+// (about 10 s, rig host-crash3), as does a game signed out (closed, back at the title) or one
+// that came back from another link (restarted). Under the link's own forget (60 s).
+constexpr s64 QuietGraceMs = 60'000;
 
 // Kaniel 2026-10-17: the server lists this many worlds (the last played); a new one past them puts
 // the least lately played aside.
 constexpr size_t MaxWorlds = 16;
+
+// Amanises 2026-10-25, quick match: two characters' levels match within 10 levels and a tenth of
+// the higher (the game's own co-op range is about that); a level not known (0) matches any.
+bool LevelsMatch(u32 a, u32 b);
 
 // Kaniel 2026-10-25 (the Rot rule): a player's rot stacks up to this many penalties.
 constexpr size_t MaxRot = 5;
@@ -55,6 +67,11 @@ u32 LampsLit(std::span<const s32> on);
 // one after it, and its light request (70000000 + map * 10000 + 200 + lamp), on maps 211-399 (the
 // Hunter's Dream's lamp is always there).
 bool LampResetClears(s32 flag);
+
+// Kaniel 2026-11-05: the server's default team rules (shadnet.cfg TeamDefaultRules), ";
+// "-separated: enemies=auto|fixed, hp=, damage=, poise= (1 to 10; 0 or absent: the standard 3, 1.5,
+// 3), rot, travel, vote, tempo=0|1|2. Empty: Auto and nothing else. Anything else: nullopt.
+std::optional<bbcoop::TeamRules> ParseTeamRules(std::string_view setting);
 
 class TeamLobby {
 public:
@@ -73,6 +90,13 @@ public:
     }
     bool Hosted() const {
         return hosted;
+    }
+
+    // Kaniel 2026-11-05: the rules of a team whose maker's game sent none (the public server's
+    // launcher has no rule steps; its leader sets them in the game's team screen). Auto enemies of
+    // the standard strength unless the server's config says otherwise.
+    void SetDefaultRules(const bbcoop::TeamRules& rules) {
+        default_rules = rules;
     }
 
     // A friend the lobby does not list joins by its team's code or is invited by its name. Wrong
@@ -156,6 +180,8 @@ public:
     Outcome Leave(const std::string& member);
     // Its game's link went quiet (or was heard again): gone, unless heard again in time.
     void Quiet(const std::string& member, bool quiet, s64 now_ms);
+    // The member's game came back from another link (it restarted): its quiet is no blip.
+    void Restarted(const std::string& member);
     // Members gone for LeftGraceMs while another member of their started team plays leave it
     // (Depart); others gone (not signed in) for OfflineGraceMs leave their teams. The clock of a
     // member not signed in starts at the first call that finds it gone.
@@ -172,6 +198,8 @@ public:
     bbcoop::TeamStart StartFor(const std::string& member) const;
     // The team `member` is in, or none.
     const bbcoop::Team* TeamOf(const std::string& member) const;
+    // Amanises 2026-10-26: `member`'s state and team as the lists show it (offline when gone).
+    void Describe(const std::string& member, bbcoop::LobbyPlayer& out) const;
     std::vector<std::string> SignedIn() const;
     // Amanises 2026-10-25: the open teams listed to one player at most.
     static constexpr size_t OpenTeamsListed = 12; // the game keeps as many (BBCOOP_LOBBY_OPEN)
@@ -203,8 +231,11 @@ private:
         bool playing = false;
         // Kaniel 2026-10-17: the world it picked while in no team (the team it makes takes it).
         std::string world;
-        // Kaniel 2026-10-25: its launcher's host rules (the team it makes takes them).
-        bbcoop::TeamRules rules;
+        // Amanises 2026-10-25: its character's level, as its last quick match said (0: unknown).
+        u32 level = 0;
+        // Kaniel 2026-10-25: its launcher's host rules (the team it makes takes them); none sent
+        // (Kaniel 2026-11-05: the public server's launcher has no rule steps), the server's.
+        std::optional<bbcoop::TeamRules> rules;
     };
 
     bbcoop::Team* FindTeam(const std::string& id);
@@ -231,7 +262,7 @@ private:
     void KeepLastWorlds(const bbcoop::Team& started, std::vector<std::string>& forgotten,
                         std::vector<bbcoop::TeamWorldInfo>& forgotten_lines);
     // Phase 7: the leader's sign is 0 (it hosts); a guest keeps its own, one without takes the
-    // first free of 7, 6, 5.
+    // first free of 7, 6, 5, 4.
     static void GiveSigns(bbcoop::Team& team);
     // A started team nobody plays in any more is not started.
     void Settle();
@@ -249,6 +280,11 @@ private:
     }
 
     bool hosted = false;
+    bbcoop::TeamRules default_rules = [] {
+        bbcoop::TeamRules rules;
+        rules.set_enemy_scaling(true); // Kaniel 2026-11-05: Auto by default
+        return rules;
+    }();
     Region region;
     std::string shard_name;
     size_t lobby_players = 0;
@@ -266,9 +302,12 @@ private:
     std::map<std::string, std::string> names; // every member's last known name
     std::map<std::string, s64> gone_since;    // team members not signed in, since when
     std::map<std::string, s64> quiet_since;   // signed in, their games' links quiet since when
+    std::set<std::string> restarted;          // quiet, but back from another link (Restarted)
     // Amanises 2026-10-25: who asked to join each open team (by team id), in the order asked.
     std::map<std::string, std::vector<std::string>> asks;
     void DropAsksBy(const std::string& member);
+    // Amanises 2026-10-25: the open team `member` joins by quick match, if any (see QUICK_MATCH).
+    bbcoop::Team* QuickMatchTeam(const std::string& member);
     // Kaniel 2026-10-16: the started teams one of whose games played since the Start (a team
     // whose games still load is not over: a member invited in game joins it with its Ready).
     std::set<std::string> played;

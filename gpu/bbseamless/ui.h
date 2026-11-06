@@ -2,7 +2,7 @@
 /* Fixed-width copies only. The arm64 renderer never calls into the x86 game module. */
 #pragma once
 #include "bbcoop.h"
-#define BB_COOP_UI_VERSION 6u
+#define BB_COOP_UI_VERSION 7u
 #define BB_COOP_INVENTORY_MAX 512
 #define BB_COOP_MODEL_WIDTH 560u
 #define BB_COOP_MODEL_HEIGHT 768u
@@ -13,6 +13,7 @@ enum BbCoopAction {
     BB_COOP_TRADE_OFFER, BB_COOP_TRADE_ANSWER, BB_COOP_TRAVEL_ANSWER,
     BB_COOP_DUEL_PROPOSE, BB_COOP_DUEL_CANCEL, BB_COOP_DUEL_ANSWER,
     BB_COOP_INVASION, BB_COOP_ALLOW_INVADERS, BB_COOP_CAMERA, BB_COOP_PINGS, BB_COOP_MAP_AREA, BB_COOP_PREFERENCES,
+    BB_COOP_DUEL_TEAMS,
 };
 typedef struct BbCoopCommand {
     uint32_t version, action;
@@ -21,13 +22,16 @@ typedef struct BbCoopCommand {
     uint32_t kind, item, count, handle, map;
     float x, y, z;
     char text[128];
+    uint32_t duel_count;
+    int32_t duel_teams[BBCOOP_DUEL_CANDIDATES];
+    char duel_members[BBCOOP_DUEL_CANDIDATES][96];
 } BbCoopCommand;
 typedef struct BbCoopInventoryItem {
     uint32_t kind, id, count, handle;
     char name[96];
 } BbCoopInventoryItem;
 typedef struct BbCoopUi {
-    uint32_t version, enabled;
+    uint32_t version, enabled, production;
     uint64_t sequence;
     int32_t team_screen, map_screen, has_panel, has_compass, has_map, has_pings;
     int32_t has_load, has_rot, has_travel, has_invasion, skip_want, skip_watching;
@@ -53,6 +57,9 @@ typedef struct BbCoopUi {
     char travel_lamp_name[96];
     bbcoop_invasion invasion;
     bbcoop_duel duel;
+    int32_t duel_candidate_count, duel_ask_teams, duel_ask_team;
+    bbcoop_duel_candidate duel_candidates[BBCOOP_DUEL_CANDIDATES];
+    char duel_team_names[3][256];
     uint64_t trade_id;
     uint32_t duel_id;
     char trade_question[512], duel_name[40], notice[256];
