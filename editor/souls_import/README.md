@@ -55,8 +55,13 @@ for native tests; test-only observer/placement controls are separate artifacts.
   defeat, 15,000 Blood Echoes and the Rite of Kindling. Separate saved reward
   phases preserve the immediate quest item and five-second consumable delay.
   Native target socket220 follows the source marker instead of the giant
-  carrier's head. Catacombs ladders retain ten authored endpoint sets; the exit
-  ladder is registered only after Pinwheel's defeat.
+  carrier's head. The seven body/cape meshes retain source specular colour,
+  roughness and alpha-tested edges. Six mask meshes convert packed metallic,
+  reflectance and roughness channels, with the source tint applied before gamma.
+  Uniform inner-face vertex tint is preserved; near-white outer-face variation
+  is bounded to 0.87% linear colour error. Native highlight shape and incident
+  lighting remain approximations. Catacombs ladders retain ten authored endpoint
+  sets; the exit ladder is registered only after Pinwheel's defeat.
 - Catacombs environment: separate indoor/outdoor fog, source material gains,
   animated insect overlays through native texture scrolling. Explicit texture
   references between source object archives are resolved with bounded traversal,

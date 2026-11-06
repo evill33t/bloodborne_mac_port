@@ -26,6 +26,7 @@ internal static class PinwheelCharacters {
         var overrides=plan.Added.ToDictionary(b=>b.Name[4..],b=>b.Name,StringComparer.Ordinal);
         var skin=SkinRetarget.Bake(source.Model,render.Write(),source.Textures,overrides:overrides,textureOwner:Model,sourceProfile:"DS1R",preserveBoneLengths:true);
         Need(skin.DirectWeightShare>.999999&&skin.Model.Meshes.Count==sourceModel.Meshes.Count&&skin.Model.Meshes.All(m=>SkinRetarget.MaximumBoneIndex(skin.Model,m)==ushort.MaxValue),"source geometry/UShort4 render contract changed");
+        PinwheelMaterials.Apply(sourceRead,source.Model,source.Textures,skin,Model);
         // Preserve original material/mask identities while using native shaders.
         for(int i=0;i<sourceModel.Meshes.Count;i++)skin.Model.Materials[skin.Model.Meshes[i].MaterialIndex].Name=sourceModel.Materials[sourceModel.Meshes[i].MaterialIndex].Name;
         var sockets=sourceModel.Dummies.Select(d=>(int)d.ReferenceID).ToHashSet();Need(sockets.All(id=>id is >=0 and <500),"out-of-range source sockets");
@@ -71,6 +72,7 @@ internal static class PinwheelCharacters {
             ["action/script/c8880.hks"]=nativeRead("action/script/c2730.hks"),["param/gameparam/gameparam.parambnd.dcx"]=parameters.Game};
         return new(files,physics.Report,animationReport,parameters.Report,parameters.Ids,PinwheelParameters.RequiredNativeSfx,[
             "Original Pinwheel geometry, all113source bones,25capsule hurtboxes,24hinges, source attacks, visibility and event requests are retained. Native graph and shader response are compatibility carriers.",
-            "The source encounter controller owns boss admission, summons, warps, phase changes and defeat. Native fire visuals replace incompatible source FXR1; ballistics and damage are authored."],skin);
+            "The source encounter controller owns boss admission, summons, warps, phase changes and defeat. Native fire visuals replace incompatible source FXR1; ballistics and damage are authored.",
+            "Torso/cape legacy RGB specular and alpha roughness and the six ordinary opaque packed masks use verified source shader/material defaults. Uniform inner-mask vertex tint is retained before gamma; outer 254..255 near-white variation is approximated at at most0.861% linear energy. Native BRDF/interpolation, incident diffuse-light/GI response and room lightmaps remain separate limitations."],skin);
     }
 }

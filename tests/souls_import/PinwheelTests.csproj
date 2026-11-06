@@ -93,7 +93,7 @@
     <Compile Include="../../editor/souls_import/GoldenGolemAi.cs" Link="GoldenGolemAi.cs" />
     <Compile Include="../../editor/souls_import/MapGoldenGolem.cs" Link="MapGoldenGolem.cs" />
     <Compile Include="../../editor/souls_import/HydraEffects.cs" Link="HydraEffects.cs" />
-    <Compile Include="../../editor/souls_import/Pinwheel*.cs" />
+    <Compile Include="../../editor/souls_import/Pinwheel*.cs" Exclude="../../editor/souls_import/PinwheelEnvironment.cs" />
     <Compile Include="../../editor/souls_import/BossFogWalls.cs" />
     <Compile Include="../../editor/souls_import/MapQuestState.cs" />
     <Compile Include="../../editor/souls_import/MapNpcQuestState.cs" />
