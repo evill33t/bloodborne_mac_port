@@ -8,7 +8,7 @@ This is an experimental development build. Included features and draft integrati
 
 Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
 
-Recent mainline sync: upstream **0.5.13** (`a4ff205`) includes native Mac Settings and Exit Game integration, current runtime fixes and the updated setup guide. [Upstream release notes](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/a4ff205/README.md).
+Recent mainline sync: upstream **0.5.14** (`ee35a51`) fixes occlusion-query dump ordering behind the long-session hang and keeps compute pipelines out of the binary archive on M5 with macOS 27.2. Native Mac Settings, Exit Game and the integrated client features are retained. [Upstream release notes](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/ee35a51/README.md).
 
 **Video guide:** Andrew Tsai’s [guide to this port](https://www.youtube.com/watch?v=_QgmfFyZbYo).
 
