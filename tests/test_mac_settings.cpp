@@ -223,6 +223,16 @@ int main() {
     assert(Get(BBMAC_FULLSCREEN) == 0 && Get(BBMAC_METAL_HUD) == 0);
     assert(Get(BBMAC_TEXTURE_COMPRESSION) == 1 && Get(BBMAC_RESTART_NEEDED) == 0);
 
+    // A former provider-name value is invalid for the owned scalar framegen switch.
+    // Keep unknown future options while saving the supported disabled value.
+    Write(config, "framegen=fsr3\nframegen_multiplier=3\n");
+    BbSettings::Load();
+    assert(!BbSettings::Get().framegen && !BbSettings::Get().startup_framegen);
+    assert(Set(BBMAC_SHARPNESS, 23));
+    text = Read(config);
+    assert(Count(text, "framegen=0") == 1 && Count(text, "framegen=fsr3") == 0);
+    assert(Count(text, "framegen_multiplier=3") == 1);
+
     std::remove(config);
     std::remove(launch);
     std::puts("PASS: native Mac settings share persistence, providers and restart state");
