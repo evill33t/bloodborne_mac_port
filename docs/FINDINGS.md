@@ -2924,3 +2924,35 @@ frame pool peak 8 of 256 KiB (3%), last new peak at frame 212k; 60 FPS and 6-11 
 frame from start to end (no #55-style drift). The owner checked glare and lens flares (no visible
 change) and played 36 min on their own save at 1440p (frame pool peak 7 KiB, normal exit).
 Shipped in 0.5.14.
+
+## 2026-11-07 — Frame-generation recovery and conflicting settings
+
+The owner reported generation appearing briefly in a cutscene, then staying off during
+gameplay in the dev build. The session log confirms admission followed by a GPU-budget pause.
+The old budget takes the last interpolation submission's duration as its permanent resume
+cost. A single cold/stalled submission followed by a scene transition can therefore lock out
+otherwise eligible gameplay: paused generation produces no fresh timings to replace it.
+The cold-submission regression fails with the original policy and passes with the fix.
+
+Use the median of distinct completed interpolation submissions after five warmup samples,
+retaining the initial conservative estimate during warmup. Repeated reads of one completion
+do not count as new samples. Sustained pressure and genuinely expensive interpolation still
+prevent admission; no periodic probes are added to saturated scenes. Publish the pause state
+to the FPS overlay and report scene, measurement, GPU-pressure and display/configuration
+reasons instead of silently reverting to an unexplained single-rate counter.
+
+The launcher rejects HDR, Spatial and display/cap conflicts when changing dependent settings
+and before Play, including launch.conf/environment overrides. Existing preferences remain
+recoverable by disabling generation. The in-game controls block conflicting HDR/Spatial
+selections and check requested HDR even before restart. Controller/model and Metal-overlay
+checks exercise rejected changes, warning visibility, pending restart and recovery.
+
+Both GPU architectures, the native launcher and model tests build. The framegen and overlay
+fixtures pass normally and with Metal validation. A bounded stationary Central Yharnam check
+on M4 Max/macOS 27 with 1080p output, MetalFX Quality, adaptive 60 cap, HDR off and low extra
+lighting encoded more than 8,400 intermediate frames; a captured point reads 57 real / 114
+displayed FPS. Later GPU-pressure pauses resumed with a measured ~1.5–1.8 ms optional cost.
+This is functional generation/recovery evidence, not a matched performance benchmark or a
+reproduction of the owner's exact cutscene. It uses disposable save/cache/config copies and
+the existing private DLC-provider diagnostic adapter; all 61 protected save/settings hashes
+remain unchanged. No DLC-provider change, release publication or version change is included.

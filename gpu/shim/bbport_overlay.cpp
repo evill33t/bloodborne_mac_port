@@ -657,7 +657,11 @@ std::atomic<bool> gamepad_in_use{false}; // last menu input came from a pad: sho
 
 void DisplayTab(BbSettings::Values& s) {
     BeginCard("HDR", int(s.hdr != s.startup_hdr));
+    ImGui::BeginDisabled(s.framegen && !s.hdr);
     Toggle("HDR (experimental)", s.hdr, int(s.hdr != s.startup_hdr));
+    ImGui::EndDisabled();
+    if (s.framegen && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Turn off frame generation before enabling HDR.");
     SliderRow("Paper white", s.hdr_paper_white, 0.5f, 2.0f,
               "Scene reference brightness relative to desktop white. UI stays at desktop white.");
     bool automatic_peak = s.hdr_peak == 0.0f;
@@ -704,6 +708,9 @@ void DisplayTab(BbSettings::Values& s) {
         available[i] = BbSettings::UpscalerAvailable(choices[i]);
         if (!available[i]) {
             tips[i] = "Not supported by this GPU";
+        } else if (choices[i] == BbSettings::UpscalerSpatial && s.framegen) {
+            available[i] = false;
+            tips[i] = "Turn off frame generation before selecting Spatial";
         }
     }
     const int upscaler = s.upscaler;
@@ -731,7 +738,7 @@ void DisplayTab(BbSettings::Values& s) {
     }
     HintBelow(about[current]);
     for (int i = 0; i < choice_count; ++i) {
-        if (!available[i]) {
+        if (!BbSettings::UpscalerAvailable(choices[i])) {
             char line[96];
             std::snprintf(line, sizeof(line), "Not available on this GPU: %s", labels[i]);
             Note(line);
@@ -755,13 +762,15 @@ void DisplayTab(BbSettings::Values& s) {
     EndCard();
 
     BeginCard("Frame generation", int(BbSettings::FrameGenerationNeedsRestart()));
-    const bool framegen_available = !s.startup_hdr && upscaler != BbSettings::UpscalerSpatial && s.framegen_supported && BbFrameGen::DisplaySupported();
-    ImGui::BeginDisabled(!framegen_available || s.framegen_forced);
+    const bool framegen_available = !s.hdr && upscaler != BbSettings::UpscalerSpatial && s.framegen_supported && BbFrameGen::DisplaySupported();
+    ImGui::BeginDisabled((!framegen_available && !s.framegen) || s.framegen_forced);
     Toggle("MetalFX 2x (experimental)", s.framegen);
     ImGui::EndDisabled();
     HintBelow("Adds an intermediate image between real frames, including at native resolution. "
               "The FPS cap still controls real frames. Adds GPU work; takes effect after restart.");
-    if (s.startup_hdr) {
+    if (s.framegen)
+        Note("Turn off frame generation before enabling HDR or Spatial upscaling.", kOrange);
+    if (s.hdr) {
         Note("Frame generation is unavailable with HDR presentation.");
     } else if (upscaler == BbSettings::UpscalerSpatial) {
         Note("Select MetalFX, FSR 3.1, TAA, or native output to use frame generation.");
@@ -785,8 +794,19 @@ void DisplayTab(BbSettings::Values& s) {
     } else if (s.framegen_forced) {
         Note("Set by BB_METAL_FRAMEGEN at launch. Remove that override to change it here.");
     } else if (BbFrameGen::Requested() && BbFrameGen::GpuBudgetLimited()) {
-        Note("Waiting for spare GPU time to preserve real FPS. Frame generation resumes "
-             "automatically when there is enough headroom.");
+        switch (BbFrameGen::GpuBudgetState()) {
+        case BbFrameGen::BudgetState::Scene:
+            Note("Waiting for a 3D scene. Logos, menus and loading screens use real frames only.");
+            break;
+        case BbFrameGen::BudgetState::Measuring:
+            Note("Measuring available GPU time before starting frame generation.");
+            break;
+        default:
+            Note("Frame generation is paused because the GPU is busy. Lower the output "
+                 "resolution or quality preset, or reduce graphics effects. It resumes "
+                 "automatically when there is enough spare GPU time.", kOrange);
+            break;
+        }
     }
     EndCard();
 
@@ -1298,6 +1318,18 @@ void FpsCounter() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const auto& s = BbSettings::Get();
     const bool framegen_active = BbFrameGen::Active();
+    const char* framegen_status = nullptr;
+    if (BbFrameGen::Requested() && !framegen_active) {
+        if (s.startup_hdr) framegen_status = "Frame gen: HDR conflict";
+        else if (s.upscaler == BbSettings::UpscalerSpatial) framegen_status = "Frame gen: Spatial conflict";
+        else if (!s.framegen_supported) framegen_status = "Frame gen: unavailable";
+        else if (!BbFrameGen::DisplaySupported()) framegen_status = "Frame gen: display/cap conflict";
+        else if (BbFrameGen::GpuBudgetState() == BbFrameGen::BudgetState::Scene)
+            framegen_status = "Frame gen: waiting for scene";
+        else if (BbFrameGen::GpuBudgetState() == BbFrameGen::BudgetState::Measuring)
+            framegen_status = "Frame gen: measuring GPU time";
+        else framegen_status = "Frame gen: GPU busy";
+    }
     const float pad = 14.0f * base_scale;
     const float gap = 8.0f * base_scale;
     const float fps_width = ImGui::CalcTextSize("9999 FPS").x;
@@ -1352,6 +1384,7 @@ void FpsCounter() {
         ImGui::TextColored(kSecondary, "%.1f ms",
                           frame_rates.real_fps > 0 ? 1000.0 / frame_rates.real_fps : 0.0);
     }
+    if (framegen_status) ImGui::TextColored(kOrange, "%s", framegen_status);
     // Scene size from the upscaler or native G-buffer, and the output in effect: a
     // startup-patched session keeps its launch output until restart.
     const char* upscaler = s.upscaler == BbSettings::UpscalerFsr3      ? "FSR 3.1"

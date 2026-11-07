@@ -282,11 +282,14 @@ int main() {
         Expect(counter() == framegen_counter, "disabling framegen keeps both rates until restart");
         s.framegen_supported = false;
         for (int i = 0; i < 4; ++i) Present(t, true);
-        Expect(counter() == counter_before, "unsupported framegen uses the single FPS display");
+        Expect(counter() != counter_before, "unsupported requested framegen adds a visible warning");
+        Snapshot(t, "framegen-unavailable-counter.png");
+        const auto unsupported_counter = counter();
         s.framegen_supported = true;
         s.display_timing = {60, 0};
         for (int i = 0; i < 4; ++i) Present(t, true);
-        Expect(counter() == counter_before, "refresh-limited generation uses the single FPS display");
+        Expect(counter() != counter_before && counter() != unsupported_counter,
+               "refresh-limited generation identifies the display/cap conflict");
         s.display_timing = {120, 0};
         const std::array<BbFrameRates::Sample, 6> changing_rates{{
             {9, 18}, {99, 198}, {100, 200}, {999, 1998}, {0, 0}, {60, 120}}};
@@ -462,6 +465,13 @@ int main() {
         Click(t, fx, fy);
         Expect(s.framegen && BbSettings::FrameGenerationNeedsRestart() && !s.startup_framegen,
                "framegen toggle requests a restart without changing the running mode");
+        Click(t, 1300.0f, 315.0f);
+        Expect(!s.hdr, "enabled frame generation blocks the conflicting HDR toggle");
+        Click(t, spatial_x, upscaler_y);
+        Expect(s.upscaler == BbSettings::UpscalerMetalFx &&
+                   s.requested_upscaler == BbSettings::UpscalerMetalFx,
+               "enabled frame generation blocks selecting Spatial");
+        Snapshot(t, "framegen-conflict-guards.png");
         StickChord();
         Expect(!BbOverlay::CapturesInput(), "L3+R3 closes the settings menu");
         {
@@ -516,6 +526,15 @@ int main() {
         Expect(s.framegen, "moving back to 120 Hz re-enables the switch for a 60 FPS cap");
         Click(t, fx, fy);
         Expect(!s.framegen, "re-enabled switch can be reverted");
+        s.hdr = true;
+        for (int i = 0; i < 3; ++i) Present(t, true);
+        Click(t, fx, fy);
+        Expect(!s.framegen, "pending HDR blocks enabling frame generation before restart");
+        s.framegen = true; // a conflicting preference loaded from an older build
+        for (int i = 0; i < 3; ++i) Present(t, true);
+        Click(t, fx, fy);
+        Expect(!s.framegen, "an unavailable saved frame-generation choice can always be disabled");
+        s.hdr = false;
         StickChord();
 
         // Restored history is visible in the catalog but never announced on launch.
