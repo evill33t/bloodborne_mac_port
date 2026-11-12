@@ -87,10 +87,10 @@ every world nobody started for N days that no team has picked and no game is in:
 a forgotten world's (on the worlds' writer thread, logged, never deleted). `restore` brings one
 back.
 
-The team rules (enemy strength, Rot, travel together, boss tempo) are the team's: its leader sets
+The team rules (enemy strength, Rot, travel together, boss tempo, friendly fire) are the team's: its leader sets
 them on the game's team screen. A team starts with `TeamDefaultRules` (any server), `;`-separated:
 `enemies=auto|fixed`, `hp=`, `damage=`, `poise=` (1 to 10; absent: the standard 3, 1.5, 3), `rot`,
-`travel`, `vote`, `tempo=0|1|2`. Empty (the default) is Auto enemies and nothing else; a setting it
+`travel`, `vote`, `tempo=0|1|2`, `friendlyfire`. Empty (the default) is Auto enemies and nothing else; a setting it
 does not understand is logged and the default kept. Example: `TeamDefaultRules=enemies=auto; hp=2.5`.
 A leader whose launcher has its own rules (a local server's Co-op steps) starts with those instead.
 

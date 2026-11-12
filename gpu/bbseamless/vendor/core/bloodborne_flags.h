@@ -74,6 +74,8 @@ struct FlagRange {
     s32 width = 0;
     FlagRule rule{};
     std::string_view why;
+    // With a period: only these offsets within it (sorted), if any are given.
+    std::span<const s32> only{};
     constexpr bool Contains(s32 flag) const {
         if (flag < first || flag > last) {
             return false;
@@ -84,6 +86,9 @@ struct FlagRange {
         const s32 within = flag % period;
         if (within < low || within > high) {
             return false;
+        }
+        if (!only.empty()) {
+            return std::ranges::binary_search(only, within);
         }
         return stride == 0 || (within - low) % stride < width;
     }
@@ -153,6 +158,68 @@ inline constexpr std::array<s32, 390> DoorFlags{
     13504274, 13504275, 13504276, 13504280, 13601102, 13601103, 13601200, 13601201, 13604101,
     13604102, 13604200, 13604201,
 };
+
+// A chalice dungeon's doors (Discord audit A6, 1.3.1-1.4.0: a door one teammate opened stayed shut
+// for the other): the same kind of flags (DoorFlags) of the chalice map's view, as offsets into
+// it (1290xxxx), from m29.emevd's door events and each layout's starts (tools/re/door_flags.py
+// --chalice, the 01.09 patch's m29): the object acts and "done" flags of the doors and gates
+// (12900089, 12900163 with its "locked" message 12900174, 12900185-12900238, 12900323-12900356:
+// 126-411), the flags lever doors set (660-661, 750), lever doors' and a passage's object acts
+// (12900089, 12904374: 1001-1051), the doors that join the navmesh (12901447, 12901525,
+// 12901550: 1447-1568) and the barriers' (12901697, 12901713, 12901717: 1697-1720). Never a
+// chest's or coffin's (treasure, an item lot), a trap's or an ambush's flag, in any layout: loot is
+// each player's own, nor another event's own id (the bell-ringing woman, a boss's reward). The view
+// is each game's own (LastRows: it went over a teammate's other dungeon); altar k keeps them at
+// 14k0xxxx, the copy the view points at while altar k's dungeon is played: the party shares that
+// copy, so only the teammates in the same altar's dungeon (team altars: the same dungeon) get them,
+// and one who comes in later has them.
+inline constexpr std::array<s32, 351> ChaliceDoorFlags{
+    126,  127,  128,  130,  131,  132,  133,  134,  135,  136,  137,  138,  139,  140,  141,  142,
+    143,  144,  145,  146,  147,  148,  149,  151,  152,  153,  154,  155,  156,  157,  158,  159,
+    163,  164,  165,  168,  169,  170,  171,  172,  173,  174,  175,  176,  177,  178,  179,  181,
+    182,  183,  184,  185,  188,  189,  192,  193,  194,  195,  196,  197,  198,  199,  200,  201,
+    203,  204,  205,  206,  208,  209,  210,  211,  212,  213,  214,  215,  216,  217,  218,  219,
+    220,  221,  222,  223,  224,  225,  226,  227,  228,  230,  231,  234,  235,  237,  238,  241,
+    242,  243,  244,  246,  247,  248,  249,  251,  252,  253,  254,  256,  257,  258,  259,  261,
+    262,  263,  264,  265,  266,  267,  268,  269,  270,  271,  272,  273,  300,  301,  302,  303,
+    305,  306,  307,  308,  309,  310,  311,  312,  313,  314,  316,  317,  320,  321,  322,  323,
+    324,  325,  326,  327,  328,  329,  331,  332,  333,  334,  335,  336,  337,  338,  340,  341,
+    342,  343,  344,  345,  346,  348,  349,  350,  351,  352,  353,  354,  355,  356,  358,  364,
+    370,  372,  374,  376,  380,  381,  382,  383,  384,  385,  386,  387,  388,  389,  390,  391,
+    392,  393,  394,  396,  402,  403,  404,  405,  406,  407,  408,  409,  410,  411,  660,  661,
+    750,  1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1051, 1447,
+    1448, 1449, 1450, 1451, 1452, 1453, 1454, 1455, 1456, 1457, 1458, 1459, 1460, 1461, 1462, 1463,
+    1464, 1465, 1466, 1467, 1468, 1469, 1470, 1471, 1472, 1473, 1474, 1475, 1476, 1477, 1478, 1479,
+    1480, 1481, 1482, 1483, 1484, 1485, 1486, 1487, 1488, 1489, 1490, 1491, 1492, 1493, 1494, 1495,
+    1496, 1497, 1498, 1499, 1500, 1501, 1502, 1503, 1504, 1505, 1506, 1507, 1508, 1509, 1510, 1511,
+    1512, 1513, 1514, 1515, 1516, 1517, 1518, 1519, 1520, 1521, 1522, 1523, 1524, 1525, 1526, 1527,
+    1528, 1529, 1530, 1531, 1533, 1534, 1535, 1536, 1537, 1538, 1539, 1540, 1541, 1542, 1543, 1544,
+    1545, 1546, 1547, 1548, 1549, 1550, 1551, 1552, 1553, 1557, 1558, 1559, 1560, 1561, 1562, 1563,
+    1564, 1565, 1566, 1567, 1568, 1697, 1698, 1699, 1713, 1714, 1715, 1716, 1717, 1719, 1720,
+};
+
+// A chalice dungeon's layers' bosses beaten (12901800 + layer, event 12901693's param 0, the same
+// ids in the story and root layouts), as the doors: shared as altar k keeps them (Discord audit
+// A6, 10-29: back from the Dream, a layer a teammate beat was not beaten; a guest's own was put
+// back off by the team world at its next load). No reward goes with them: 12901693 ends at once
+// on a flag already on (a load), and gives its rewards only to the fight's own players as the
+// flag comes on while it runs (the game syncs a boss's death to the players at the fight).
+inline constexpr std::array<s32, 10> ChaliceLayerBossFlags{1800, 1801, 1802, 1803, 1804,
+                                                           1805, 1806, 1807, 1808, 1809};
+
+namespace FlagTableDetail {
+template <size_t A, size_t B>
+constexpr std::array<s32, A + B> SortedUnion(const std::array<s32, A>& a,
+                                             const std::array<s32, B>& b) {
+    std::array<s32, A + B> both{};
+    std::ranges::merge(a, b, both.begin());
+    return both;
+}
+} // namespace FlagTableDetail
+
+// What a chalice dungeon shares as its altar keeps it: its doors and its layers' bosses.
+inline constexpr auto ChaliceSharedFlags =
+    FlagTableDetail::SortedUnion(ChaliceDoorFlags, ChaliceLayerBossFlags);
 
 // The Dream's m21_00 event 12100450 sets each of these flags once the player holds its goods (the
 // workshop's tools, the hunter badges). The badges' givers read them: a boss event gives its badge
@@ -327,6 +394,15 @@ inline constexpr std::array FirstRows{
     Range(5500, 5521, FlagOwner::PerPlayer, FlagCarriesHome,
           "had an Uncanny or Lost DLC weapon (OwnedWeaponFlags, common event 5500 + slot): the "
           "Bath shop sells it to this player only"),
+    Range(6011, 6025, FlagOwner::PerPlayer, FlagCarriesHome,
+          "the Bath messengers' attire they wear (Messenger Top Hat, Head Bandage, Urn "
+          "Dance...: m21_00 12105060/12105070, each game's own events, put it to the Dream "
+          "stump talk's pick): this player's own, as the host's a teammate's pick dressed "
+          "this player's messengers and the team's world put it in every guest's save "
+          "(Supermedo's 1.9.8.3: \"Bath Messengers' hat flags are per player\")"),
+    Range(6071, 6085, FlagOwner::PerPlayer, FlagCarriesHome,
+          "the Bath messengers' attire this player received (m21_00 12100020 from its goods "
+          "4900-4914, 12105064's gifts): the stump's talk lists it, each player's own"),
     Range(6630, 6633, FlagOwner::PerPlayer, FlagCarriesHome,
           "holds a workshop tool (HeldItemFlags, the Dream's 12100450): what this player holds"),
     Range(6640, 6649, FlagOwner::PerPlayer, FlagCarriesHome,
@@ -430,6 +506,18 @@ inline constexpr std::array LastRows{
               .why = "a chalice dungeon's lamp's active flag and the one after, as altar k keeps "
                      "them (14k07810 + lamp * 20, the view's 12907810 + lamp * 20): the game "
                      "does not sync them"},
+    FlagRange{.first = 14000000,
+              .last = 14609999,
+              .period = 100000,
+              .low = 0,
+              .high = 3999,
+              .rule = {FlagOwner::Shared, FlagCarriesHome | FlagSharesClears},
+              .why =
+                  "a chalice dungeon's door or layer boss as altar k keeps it (ChaliceSharedFlags, "
+                  "14k0xxxx): the game does not sync a door opened or a layer beaten while the "
+                  "teammate was elsewhere; its "
+                  "clears too (a chalice taken off ends the dungeon, ClearAltarDungeon)",
+              .only = ChaliceSharedFlags},
     FlagRange{.first = 12107810,
               .last = 13998191,
               .period = 10000,
@@ -467,6 +555,10 @@ inline constexpr std::array LastRows{
           "12100113 turns her to the player and sets 72100102): this game's own. As the host's "
           "story steps and the game's own flag messages, the host's level up made every guest "
           "in the Dream kneel (Kaniel 2026-10-30, again 2026-11-03)"),
+    Range(72100140, 72100155, FlagOwner::PerPlayer, 0,
+          "the Dream stump's attire pick (its talk sets 72100141 + attire, 72100140 \"take "
+          "it off\"; m21_00 12105070/12105060 clear it as they dress the messengers): this "
+          "player's request, as the host's it changed the other player's attire"),
     Range(72100300, 72100309, FlagOwner::Session, 0,
           "a ritual altar's layer pick (72100300 + layer, for the Dream's warp event "
           "12107100): a request, not progress; as the host's, a guest's game took it and "

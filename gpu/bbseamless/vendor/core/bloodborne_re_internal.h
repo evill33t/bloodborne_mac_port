@@ -311,7 +311,12 @@ void ApplyPreMatchCrossMapGuestWarp();
 bool WarpGuestToLampPoint(const LampPoint& point);
 // A trip to a warp point (a guest's own, the rig's): at the lamp's own point when it is known
 // (returned), else the lamp lookup's trip.
-const LampPoint* StartTripToLamp(s32 warp_point);
+// The lamp the trip is placed at (a copy: the trip's own), if any.
+std::optional<LampPoint> StartTripToLamp(s32 warp_point);
+// The lamp a death respawn's trip within a chalice dungeon is placed at (ChaliceTripLamp), set
+// by MoveToRespawnPoint for that trip's StartTripToLamp: the next trip takes it, whatever its
+// point (TakeChaliceTripLamp); game thread.
+extern std::optional<LampPoint> chalice_trip_lamp;
 bool StartPlayerSummonSearch(u64 player, s32 effect_id);
 void ResumePreMatchCrossMapResponder();
 extern std::optional<PartyController> party_controller;
@@ -350,6 +355,8 @@ size_t SessionMembers();
 // In the session and in its world (see SessionArrival): a summoned guest only once it arrived.
 // Party death counts and posts this member as in the party only then.
 bool InSessionWorld();
+// Whether a joined guest's trip in place is still to come (TripAfterJoin::Due, the last tick's).
+bool TripAfterJoinDue();
 void ShowGuestBloodstain();
 void KeepGuestBloodstainMark();
 
@@ -405,6 +412,8 @@ std::optional<LampPosition> LocalPlayerPosition();
 std::optional<float> CameraHeadingNow();
 
 s32 CharacterHp(u64 character);
+// The Hunter's Dream Doll's HP in this game (HuntersDreamDoll), nothing while she is not here.
+std::optional<s32> DollHp();
 
 // The other players' characters in this world (WorldChrMan +0x30 count, +0x38 entries of 0x38
 // bytes; the local player is one of them), with HP (+0x128 of their data) and position.
@@ -429,7 +438,9 @@ bool BringBackWhatTheHostBroughtBack(std::span<const u32> handles);
 // When the session host last moved to another game (SteadyMilliseconds, 0: never): see
 // HoldsBringBacks.
 extern std::atomic<s64> session_host_moved_ms;
-void MoveToRespawnPoint(bool arriving_from_trip);
+// False when a trip's arrival found its lamp in no loaded block yet (TickGuestLampTrip tries
+// again).
+bool MoveToRespawnPoint(bool arriving_from_trip);
 // The respawn load's restock of vials and bullets from the storage box, for the deaths and trips
 // that skip it. The game's thread only.
 bool RestockFromStorage(std::string_view why);
@@ -680,9 +691,12 @@ u64 FindLoadedParam(std::string_view type);
 void KeepGuestFullHp();
 void HidePhantomGlow();
 void MakeEnemiesHarder();
-// Kaniel 2026-10-25, the host rules (bloodborne_host_rules.h): this launcher's own, and the ones
+// Kaniel 2026-10-25, the host rules (bloodborne_host_rules.h): this player's own (the ones it set
+// on the team screen, kept over starts; Kaniel 2026-11-11: the launcher has none), and the ones
 // this game plays by (its team's while in one, else its own).
-const HostRules& OwnHostRules();
+HostRules OwnHostRules();
+// Whether it has any of its own (none: the team it makes takes the server's default).
+bool HasOwnHostRules();
 HostRules ActiveHostRules();
 // Whether this game plays in a team (its rules the team's).
 bool InTeamNow();
@@ -790,6 +804,9 @@ struct MapItemSpot {
 std::vector<std::pair<float, MapItemSpot>> UsableMapItemsNear(const std::array<float, 3>& from);
 void LogItemButtonAndMapItems();
 extern std::atomic<int> character_slot;
+// Set when a slot's kept lists are dropped for a new character (ForgetSlotIfNewCharacter): the
+// key items owed to the old one (PhantomKeyItemLedger) are read again from the slot's file.
+extern std::atomic<bool> phantom_keys_forgotten;
 
 // Sets the kept world changes in the guest's world: how many took. The ones that took are done
 // unless `keep` (a trip's load: the game puts its own saved world back after it, so the trip's
@@ -1029,6 +1046,9 @@ void ApplyTeamWorldOnLoad(bool trip = false);
 std::vector<s32> TeamWorldFlagsOnForGuest();
 // The blocks the team's world covers, for a team guest (none otherwise).
 std::vector<u32> TeamWorldBlocksForGuest();
+// Whether the save loaded now plays in a team (its Start's party, until it loads alone from the
+// title or leaves its team in play).
+bool SavePlaysInTeam();
 // Puts lamps (entities, LampOfActiveFlag) on this character's lamp list, so they stay lit for it.
 void ListLamps(std::span<const s32> lamps);
 // The lamps KeepGuestLampsLit lit again are no world changes (WithoutRelitLamps).
@@ -1056,6 +1076,10 @@ void EndTeamResume();
 // The team's host as its Start named it ("" playing alone).
 std::string TeamStartHost();
 std::string TeamLobbyMember();
+// Who hosts the team's session as the server last said (its lobby name), "" when none is known.
+std::string TeamSessionHost();
+// The nameplate role line's html in the game's own words (see NameplateRoleText).
+std::optional<std::string> PartyNameplateRoleText(NameplateRole role);
 // Phase 11: a member's character name (its board name), as the server's lobby last said it; ""
 // when the lobby does not know it.
 std::string CharacterNameOf(std::string_view member);
@@ -1065,6 +1089,10 @@ void TeamLobbyRequest(bbcoop::TeamRequest::Action action, const std::string& id)
 // notice shows; whether the team allows invaders now.
 void InvasionRequest(bool cancel);
 void TeamAllowInvaders(bool allow);
+// Kaniel 2026-11-11: the leader's own press on the team screen's joining (OPEN, 0-2), invaders
+// (INVADERS, 0/1) or death mode (DEATH_MODE, 0/1) row: kept in the user folder, and the next team
+// this player makes takes it (a script's requests are not kept).
+void KeepTeamChoice(bbcoop::TeamRequest::Action action, u32 value);
 InvasionView InvasionViewNow();
 bool TeamAllowsInvaders();
 // This game is in a world it invades, or on its way in or home: that world is not its own (its
@@ -1081,6 +1109,9 @@ void RestoreInvasionHomeOnLoad();
 // finds them, InvaderBodies), its hits on the local player (the hit hook), whether a lethal check
 // lets the death through, and the invader's own death in the target's world (revived in place,
 // InvaderGoHome takes it home).
+// Kaniel 2026-11-11: whether another player's body (`handle`, on `team`) is a downed member's
+// (OnDownedTeam): the friendly fire rule's bodies are on the invaders' team standing up.
+bool BodyOnDownedTeam(u32 handle, s32 team);
 void SetInvaderHandles(std::vector<u32> handles);
 void SetInvasionTint(u64 character, bool on);
 void QueueInvasionRewardAck(bbcoop::Envelope envelope);

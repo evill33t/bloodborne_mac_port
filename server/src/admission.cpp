@@ -68,28 +68,27 @@ bool Guard::AllowDatagram(quint64 link, quint32 address, int bytes, qint64 now_m
     }
     ++counters.datagrams_dropped;
     // One strike a second at most: a link past its rate for strikes_to_ban seconds within the
-    // window is banned.
+    // window is reported (never banned).
+    if (now_ms - state.strikes_from_ms > limits.strike_window_ms) {
+        state.strikes_from_ms = now_ms;
+        state.strikes = 0;
+        state.dropped = 0;
+    }
+    ++state.dropped;
     if (now_ms - state.last_strike_ms >= 1000) {
         state.last_strike_ms = now_ms;
-        if (now_ms - state.strikes_from_ms > limits.strike_window_ms) {
-            state.strikes_from_ms = now_ms;
-            state.strikes = 0;
-        }
         if (++state.strikes >= limits.strikes_to_ban) {
-            Ban(address, now_ms + limits.ban_ms);
-            ++counters.bans;
+            floods.append(Flood{address, link, state.dropped});
+            ++counters.floods;
             state.strikes = 0;
+            state.dropped = 0;
         }
     }
     return false;
 }
 
-bool Guard::Banned(quint32 address, qint64 now_ms) const {
-    if (banned_addresses.contains(address)) {
-        return true;
-    }
-    const auto ban = bans.constFind(address);
-    return ban != bans.constEnd() && *ban > now_ms;
+bool Guard::Banned(quint32 address) const {
+    return banned_addresses.contains(address);
 }
 
 void Guard::SetBanned(const QSet<quint32>& addresses, const QSet<QByteArray>& ids) {

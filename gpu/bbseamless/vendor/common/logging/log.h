@@ -80,6 +80,10 @@ static constexpr std::array level_string_views{"Trace", "Debug",    "Info", "War
 #define LOG_CRITICAL(log_class, ...)                                                               \
     LOG_GENERIC(Common::Log::Class::log_class, spdlog::level::critical, __VA_ARGS__)
 
+// A line a production port log still keeps (bbport/gpu/shim/common/logging/log.h: a warning
+// there); this emulator writes every info line, so it is one.
+#define LOG_NOTICE(log_class, ...) LOG_INFO(log_class, __VA_ARGS__)
+
 // Whether info lines go anywhere, for work done only to write one (shared with the port, whose log
 // can leave them out: bbport/gpu/shim/common/logging/log.h). This emulator always writes them.
 #define LOG_INFO_ON() true

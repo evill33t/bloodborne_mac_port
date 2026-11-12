@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 
 HOST = 'bloodborne.phobos.services'
 PIN = '1562e07491a27d6c7aea2ed37364b8839a4a924886afae1ff6eae5c483ea3424'
-COOP_RELEASE = '1.4.0'
+COOP_RELEASE = '1.5.0'
 GLOBAL_HOST = 'seamlesshunt.com'
 GLOBAL_PIN = 'e55f4f13d3845aa4eddeb0e12a9d143cb5f68af0a71e0dba111c688a1014c958'
 GLOBAL_SERVICE = 'bbport-seamless-global'
@@ -156,9 +156,10 @@ def launch_environment(environ, data):
     override_path = custom if custom.is_file() else user / 'seamless-host-overrides.json'
     if override_path != custom:
         override_path.write_text(json.dumps(overrides, indent=2) + '\n')
+    fps = '30' if env.get('BB_FPS') == '30' or (settings.get('fps_cap') == '30' and env.get('BB_FPS') in (None, 'adaptive')) else '60'
     env.update(BB_ONLINE='1', BB_NET_BACKEND='seamless', BB_SHADNET_SERVER=endpoint,
-               BB_SHADNET_WEBAPI=webapi, BB_FPS='60', BB_FPS_LIMIT='60', BB_VBLANK_HZ='60',
-               BB_FPS_PRESET='60', BB_PARTY_HUD='0', BB_UPNP='0', SHADPS4_BLOODBORNE_SEAMLESS_COOP='1',
+               BB_SHADNET_WEBAPI=webapi, BB_FPS=fps, BB_FPS_LIMIT=fps, BB_VBLANK_HZ='60',
+               BB_FPS_PRESET=fps, BB_PARTY_HUD='0', BB_UPNP='0', SHADPS4_BLOODBORNE_SEAMLESS_COOP='1',
                SHADPS4_BLOODBORNE_RE_TRACE='0', SHADPS4_HTTP_HOST_OVERRIDES_JSON=str(override_path),
                BB_SEAMLESS_PREPARED='1', BB_LOG_FILE=str(user / 'log' / 'seamless.log'))
     # This is the co-op source/protocol release, separate from the Mac app's version and
@@ -174,24 +175,10 @@ def launch_environment(environ, data):
     # The server relay uses an ephemeral local socket. Legacy p2p_port is kept for the other pools.
     for name in ('SHADPS4_BLOODBORNE_PARTY', 'SHADPS4_BLOODBORNE_PARTY_ROLE'):
         env.pop(name, None)
-    rules = settings.get('seamless_host_rules', 'off')
-    if not public and not re.fullmatch(r'off|(?:rot|travel|vote|scale|aggressive|relentless)(?:,(?:rot|travel|vote|scale|aggressive|relentless))*', rules):
-        raise ValueError('Invalid seamless_host_rules setting.')
-    if public:
-        # The public server supplies defaults; its leader edits the team rules in game.
-        env.pop('SHADPS4_BLOODBORNE_HOST_RULES', None)
-        env.pop('SHADPS4_BLOODBORNE_HARDER_ENEMIES', None)
-    else:
-        env.setdefault('SHADPS4_BLOODBORNE_HOST_RULES', rules)
-    harder = settings.get('seamless_harder_enemies', 'off')
-    if harder != 'off' and not public:
-        try:
-            rates = [float(x) for x in harder.split(',')]
-        except ValueError as error:
-            raise ValueError('Invalid seamless_harder_enemies setting.') from error
-        if len(rates) != 3 or not all(1 <= x <= 10 for x in rates):
-            raise ValueError('Enemy HP, damage and poise multipliers must each be from 1 to 10.')
-        env.setdefault('SHADPS4_BLOODBORNE_HARDER_ENEMIES', harder)
+    # v1.5: the leader's in-game settings are the only authority, on every host.
+    # Keep legacy INI values for older builds, but never overwrite the persisted team rules.
+    env.pop('SHADPS4_BLOODBORNE_HOST_RULES', None)
+    env.pop('SHADPS4_BLOODBORNE_HARDER_ENEMIES', None)
     return env
 
 
@@ -262,7 +249,7 @@ def main():
     else:
         if not args.data: parser.error('launch needs --data')
         env = launch_environment(os.environ, args.data.resolve())
-        print(f'Co-op: {env["BB_SHADNET_SERVER"]}; fixed 60 FPS; F6 Team, F8 Map', file=sys.stderr)
+        print(f'Co-op: {env["BB_SHADNET_SERVER"]}; fixed {env["BB_FPS"]} FPS; F6 Team, F8 Map', file=sys.stderr)
         if extra[:1] == ['--']: extra = extra[1:]
         os.execve('/bin/bash', ['bash', str(ROOT / 'run.sh'), *extra], env)
 

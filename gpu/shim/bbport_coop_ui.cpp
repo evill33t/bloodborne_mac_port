@@ -211,10 +211,10 @@ void WorldPicker(const BbCoopUi& s) {
     ImGui::EndPopup();
 }
 void LeaderRules(const bbcoop_lobby& lobby) {
-    static bool rot=false,travel=false,vote=false,scale=false,custom=false;
+    static bool rot=false,travel=false,vote=false,scale=false,custom=false,friendly=false;
     static int tempo=0;static float hp=3,damage=1.5f,poise=3;
     if(ImGui::IsWindowAppearing()) {
-        rot=lobby.rule_rot;travel=lobby.rule_travel;vote=lobby.rule_vote;scale=lobby.rule_scale;
+        rot=lobby.rule_rot;travel=lobby.rule_travel;vote=lobby.rule_vote;scale=lobby.rule_scale;friendly=lobby.rule_friendly_fire;
         tempo=lobby.rule_tempo;custom=lobby.rule_hp>0 || lobby.rule_damage>0 || lobby.rule_poise>0;
         hp=lobby.rule_hp>0?lobby.rule_hp:3;damage=lobby.rule_damage>0?lobby.rule_damage:1.5f;
         poise=lobby.rule_poise>0?lobby.rule_poise:3;
@@ -232,11 +232,12 @@ void LeaderRules(const bbcoop_lobby& lobby) {
     ImGui::Checkbox(T("Offer to travel together"),&travel);
     if(!travel) vote=false;
     ImGui::BeginDisabled(!travel);ImGui::Checkbox(T("Vote before travelling together"),&vote);ImGui::EndDisabled();
+    ImGui::Checkbox(T("Friendly fire"),&friendly);
     const char* tempos[]={T("Vanilla"),T("Aggressive"),T("Relentless")};
     ImGui::Combo(T("Boss tempo"),&tempo,tempos,3);
     if(BbCoopStyle::Button("Apply team rules")) {
-        char text[128];std::snprintf(text,sizeof(text),"%d,%d,%d,%d,%d,%.3g,%.3g,%.3g",
-            rot,travel,vote,scale,tempo,double(custom?hp:0),double(custom?damage:0),double(custom?poise:0));
+        char text[128];std::snprintf(text,sizeof(text),"%d,%d,%d,%d,%d,%.3g,%.3g,%.3g,%d",
+            rot,travel,vote,scale,tempo,double(custom?hp:0),double(custom?damage:0),double(custom?poise:0),int(friendly));
         Lobby(BBCOOP_TEAM_RULES,text);
     }
     ImGui::EndDisabled();
@@ -309,7 +310,10 @@ void Team(const BbCoopUi& s) {
             ImGui::EndPopup();
         }
         if(*lobby.notice) ImGui::TextWrapped(T("%s"),lobby.notice);
-        if(!lobby.signed_in) ImGui::TextWrapped("%s",T("Check the server address and connection if this persists. You can return to offline play from the launcher."));
+        if(!lobby.signed_in) {
+            if(s.sign_in_problem && *s.sign_in_reason) ImGui::TextWrapped("%s: %s",s.sign_in_server,s.sign_in_reason);
+            else ImGui::TextWrapped("%s",T("Check the server address and connection if this persists. You can return to offline play from the launcher."));
+        }
         if(lobby.in_team) {
             HunterCards(s);
             if(*lobby.code) { ImGui::Text("%s: %s",T("Team code"),lobby.code);ImGui::SameLine();if(ImGui::SmallButton(T("Copy"))) ImGui::SetClipboardText(lobby.code); }
@@ -340,7 +344,7 @@ void Team(const BbCoopUi& s) {
             std::string rules;
             auto rule=[&](bool on,const char* text) {if(on) {if(!rules.empty()) rules+=" · ";rules+=T(text);}};
             rule(lobby.rule_tempo==1,"Boss tempo: Aggressive");rule(lobby.rule_tempo==2,"Boss tempo: Relentless");
-            rule(lobby.rule_rot,"Rot");rule(lobby.rule_travel,lobby.rule_vote?"Travel together (vote)":"Travel together");rule(lobby.rule_scale,"Enemies scale with the team");
+            rule(lobby.rule_friendly_fire,"Friendly fire");rule(lobby.rule_rot,"Rot");rule(lobby.rule_travel,lobby.rule_vote?"Travel together (vote)":"Travel together");rule(lobby.rule_scale,"Enemies scale with the team");
             ImGui::TextWrapped("%s%s",T("Host rules: "),rules.empty()?T("none"):rules.c_str());
             if(!lobby.menu && lobby.leader && !lobby.started) {
                 if(BbCoopStyle::Button("Start hunt")) Send(BB_COOP_CHOOSE,BBCOOP_TEAM_GO_START);
@@ -804,7 +808,10 @@ void Hud(const BbCoopUi& s) {
         ImGui::SetNextWindowPos(ImVec2(left,top+(count*72+18)*scale),ImGuiCond_Always);
         ImGui::SetNextWindowBgAlpha(.25f);ImGui::SetNextWindowSize(ImVec2(400*scale,0));
         if(ImGui::Begin("##hunt notices",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_AlwaysAutoResize|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoNav)) {
-            if(!s.lobby.signed_in) ImGui::TextUnformatted(T("Connecting to the hunt..."));
+            if(!s.lobby.signed_in) {
+                if(s.sign_in_problem && *s.sign_in_reason) ImGui::TextWrapped("%s: %s",s.sign_in_server,s.sign_in_reason);
+                else ImGui::TextUnformatted(T("Connecting to the hunt..."));
+            }
             if(s.has_rot) ImGui::Text(T("Rot %d/%d"),s.rot.count,BBCOOP_ROT_MAX);
             if(s.camera_on) ImGui::TextUnformatted(T("Free camera  -  F7 to return"));
             if(s.skip_want) ImGui::Text(T("Skip cutscene: %d / %d votes"),s.skip_want,s.skip_watching);

@@ -70,7 +70,8 @@ bool LampResetClears(s32 flag);
 
 // Kaniel 2026-11-05: the server's default team rules (shadnet.cfg TeamDefaultRules), ";
 // "-separated: enemies=auto|fixed, hp=, damage=, poise= (1 to 10; 0 or absent: the standard 3, 1.5,
-// 3), rot, travel, vote, tempo=0|1|2. Empty: Auto and nothing else. Anything else: nullopt.
+// 3), rot, travel, vote, tempo=0|1|2, friendlyfire. Empty: Auto and nothing else. Anything else:
+// nullopt.
 std::optional<bbcoop::TeamRules> ParseTeamRules(std::string_view setting);
 
 class TeamLobby {

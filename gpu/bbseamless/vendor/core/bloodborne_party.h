@@ -27,6 +27,7 @@
 #include "coop/build_fingerprint.h"
 #include "coop/packet_routes.h"
 #include "coop/world_log.h"
+#include "core/bloodborne_lamp_points.h"
 #include "core/bloodborne_patch_sites.h"
 
 namespace Core::Bloodborne {
@@ -422,6 +423,23 @@ const LampPoint* FindLampPoint(s32 warp_point);
 // is moved to the lamp after arrival (MoveToRespawnPoint), and the textures there load late.
 bool ArrivalNeedsMove(const LampPoint* planned, const std::optional<LampPosition>& at);
 constexpr float ArrivedAtLampMeters = 3.0f;
+// Discord audit A6 (1.3.1-1.4.0: a team's wipe in a chalice dungeon woke it in a grey void or
+// falling through the map): a chalice dungeon's lamps are in no map file (the layout builds the
+// dungeon), so the trip of a death respawn (WarpNextStageBonfire) put the player at the map's
+// origin, in the air, and only the arrival's move (MoveToRespawnPoint) took it to the lamp, if
+// the lamp resolved a second after the load. A trip that stays on this chalice map (area 0x1D)
+// knows where the lamp is, as it resolved before the trip: that spot is the trip's placement
+// (WarpGuestToLampPoint), as a known lamp's is. None for any other trip or an unresolved lamp.
+std::optional<LampPoint> ChaliceTripLamp(s32 point, u32 current_map, bool resolved,
+                                         const std::array<float, 4>& position,
+                                         const std::array<float, 4>& rotation);
+// The chalice lamp a trip to `warp_point` is placed at: `pending` (ChaliceTripLamp, for the trip
+// just scheduled) if it names that point; `pending` is spent by any trip, so a later trip to the
+// same lamp id (another dungeon's, another layout's) is never placed at an old spot.
+std::optional<LampPoint> TakeChaliceTripLamp(std::optional<LampPoint>& pending, s32 warp_point);
+// How many times the arrival's move to the lamp is tried, a second apart, while the player still
+// stands away from it (the dungeon's blocks can load after the first look).
+constexpr int ArrivalMoveTries = 8;
 
 struct LampRest;
 
@@ -535,9 +553,17 @@ struct DeadCopy {
     bool boss = false;
 };
 constexpr s64 BringBackAfterMs = 3'000;
+// Bug audit 24 (rig host-death-kills 2026-11-10): the host's "alive" alone is no bring-back. A
+// guest's own kill of an enemy the host's game runs reaches the host and comes back over the
+// server seconds later; until then the host's board has it alive, and the guest brought back its
+// own kill (the respawn woke more of the map, party kills stood again and paid echoes). Only one
+// the host's board had dead (`host_dead`: when the guest last saw it so this visit), no earlier
+// than HostDeadBeforeCopyMs before this copy died, is the host's generator's.
+constexpr s64 HostDeadBeforeCopyMs = 15'000;
 std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
                                       std::span<const DeadCopy> dead_here,
-                                      const std::unordered_set<u32>& party_kills, s64 now_ms);
+                                      const std::unordered_set<u32>& party_kills,
+                                      const std::unordered_map<u32, s64>& host_dead, s64 now_ms);
 // Kaniel's DLC playtest 2026-10-28 (1.3.1): the host left, the session went to Lisara (#403), and
 // her copy had krolebord's dead enemies alive. His game brought them back every BringBackEvery,
 // and each time they died again at once by the game's own kill (and other enemies the respawn
@@ -924,8 +950,9 @@ std::string SlotFileName(std::string_view list, int slot);
 // in the slot (ForgetsSlotLists): its pickups, world changes, confirmed pickups and where it
 // resumes (Ada 2026-10-12: a new character resumed at the old one's spot).
 // Kaniel 2026-10-16: and the team world it last played ("team_world": its id in its team).
-inline constexpr std::array<std::string_view, 5> CharacterSlotFiles{
-    "progress", "world", "confirmed", "resume", "team_world"};
+// And the key items it gained as a phantom and is still owed ("phantom_keys", OwedKeyItem).
+inline constexpr std::array<std::string_view, 6> CharacterSlotFiles{
+    "progress", "world", "confirmed", "resume", "team_world", "phantom_keys"};
 // Whether the character loaded now is another one than the one a slot's lists were kept for
 // (`progress_kept`, its own world's set event flags then; 0 not known): far fewer set now.
 bool IsOtherCharacter(s32 progress_now, s32 progress_kept);
@@ -1132,17 +1159,59 @@ bool TakesDollBlessingStep(s32 flag, bool sent_on, bool own_blessing_on);
 // 6700 as her level-up menu opens and skips the menu while it is on, and in the co-op mode nothing
 // cleared it before the next map load (rig: a lone player too). Tick (each frame) says when to
 // clear it: her blessing over, this game's own 72100100 off again after it was on, 6700 still on.
+// Not before her blessing's steps are off too (`steps_on`: 72100101 or 72100102). m21_00 12100112
+// stands the player up only once 72100100 is off, up to 54 frames after the kneel, and plays the
+// player's animations only while 6700 is on (OWN_ANIMATION_EVENTS in party_boss_events.py); it
+// clears 72100101 after the stand-up. 6700 cleared with 72100100 skipped the stand-up and left
+// the player kneeling for good (Discord 2026-11-06, 1.4.0: her level up closed with Circle).
 class DollLevelUpClear {
 public:
-    bool Tick(bool coop_mode, bool level_up_on, bool blessing_on) {
-        const bool was_on = blessing_was_on;
-        blessing_was_on = coop_mode && blessing_on;
-        return coop_mode && level_up_on && was_on && !blessing_on;
+    bool Tick(bool coop_mode, bool level_up_on, bool blessing_on, bool steps_on) {
+        if (!coop_mode) {
+            blessing_seen = false;
+            return false;
+        }
+        if (blessing_on) {
+            blessing_seen = true;
+            return false;
+        }
+        if (!blessing_seen || steps_on) {
+            return false;
+        }
+        blessing_seen = false;
+        return level_up_on;
     }
 
 private:
+    bool blessing_seen = false;
+};
+// Discord 2026-11-06: a teammate's hit on the Doll while a player was in her level up left that
+// player kneeling for good. The hit ends her talk where it stands, so its "72100100 off" never
+// runs (rig doll-hit-during-level-up: 72100100, 72100101 and 72100102 stayed on) and m21_00
+// 12100112 never stands the player up. Tick (each frame, her HP or none while she is not here)
+// says when to end this game's blessing: her HP dropped while 72100100 is on.
+class DollHitEndsBlessing {
+public:
+    bool Tick(bool coop_mode, bool blessing_on, std::optional<s32> doll_hp) {
+        const std::optional<s32> before = last_hp;
+        const bool was_on = blessing_was_on;
+        last_hp = coop_mode ? doll_hp : std::nullopt;
+        blessing_was_on = coop_mode && blessing_on;
+        return was_on && blessing_was_on && before && last_hp && *last_hp < *before;
+    }
+
+private:
+    std::optional<s32> last_hp;
     bool blessing_was_on = false;
 };
+// The Doll's "Give" (12100122, each player's own): m21_00 12100121 sets it while the player
+// holds the Small Hair Ornament, and in a session that set comes back as the other player's set
+// message, which keeps a per-player flag as it was: nobody was offered "Give" (Discord
+// 2026-11-06, 1.4.0). In a party it follows what this player holds: the value it must take when
+// it differs, else nothing (as HeldItemFlagFix).
+constexpr s32 DollGiveFlag = 12100122;
+constexpr u32 SmallHairOrnamentGoods = 4300;
+std::optional<bool> DollGiveFix(bool party_configured, bool flag_on, bool holds);
 // The other player's "set this event flag" (0x017C0570) and "event ended" (0x017C0901) messages
 // leave these flags and events alone in a party: what one player received is not given to the
 // other (the Hunter's Dream messengers' gift events and flags, 12101020-12101029, and the
@@ -2016,6 +2085,52 @@ private:
     std::optional<s64> joined_ms;
     bool done = false;
 };
+// Kaniel 2026-11-11 (on by default after the rig comparison; SHADPS4_BLOODBORNE_TRIP_AFTER_JOIN=0
+// turns it off, see TripsAfterJoin): many
+// co-op bugs show only between a join and a player's first trip. Joined, a guest is a white
+// phantom (type 1) in the host's world; after any trip it is a live player (type 0) and every
+// member runs its own copy of the map, which most of the party code is built around. So a guest
+// that joined makes one trip right away, a reload in place where it stands. Tick says when: a
+// party guest still a phantom, SettleMs after it `arrived` in the session's world and SettleMs
+// with nothing `busy` (a load, a trip, its arrival's placing, no position, dead), within
+// WindowMs of the arrival; once per session.
+// Due says whether that trip is still to come (rig 2026-11-11: a guest that joined on another map
+// than its host had the team's loading screen open after 1 s and the trip's load 9-14 s later, a
+// second loading screen in the middle of play): the team's load counts the guest as loading while
+// it is, so the one screen stays up over both: from the join on (the guest becomes a phantom only
+// as it arrives in the session's world), then while it is a phantom. Not where no trip is made
+// (`never_here`, a chalice dungeon), and for HoldMs after the join at most, so a trip that cannot
+// start (the guest busy, down) never keeps the screen.
+bool TripsAfterJoin(const char* setting);
+class TripAfterJoin {
+public:
+    static constexpr s64 SettleMs = 3000;
+    static constexpr s64 WindowMs = 60000;
+    static constexpr s64 HoldMs = 30000;
+    struct Input {
+        bool switched_on = false;
+        bool guest = false;
+        bool in_session = false;
+        bool arrived = false;
+        bool phantom = false;
+        bool busy = false;
+        bool never_here = false;
+        s64 now_ms = 0;
+    };
+    bool Tick(const Input& in);
+    // After Tick with the same input.
+    bool Due(const Input& in) const;
+    // Whether this session's trip went: a join's re-create (RecreateAfterJoin) is then the trip's.
+    bool Went() const {
+        return went;
+    }
+
+private:
+    std::optional<s64> joined_ms;
+    std::optional<s64> arrived_ms;
+    std::optional<s64> calm_since;
+    bool went = false;
+};
 // Kaniel 2026-11-03: Lisara's game dropped out of the room and joined again within a second. The
 // member count never stayed down for MemberDepartures, so nothing re-created her and the host saw
 // her old body hidden until a trip. Tick says when to re-create: `left` is a member's leave the
@@ -2565,6 +2680,26 @@ u16 HarderEnemyAttack(u16 attack, float rate);
 // (for attacks, also for AtkParam_Pc).
 std::size_t MakeNpcParamHarder(std::span<u8> param, const HarderEnemies& harder);
 std::size_t MakeNpcAttacksHarder(std::span<u8> param, float damage);
+// Bug audit 24 (Redichoti 2026-10-30; rig hp-lossy-link 2026-11-10): the scaling changes the
+// tables only, so copies loaded before a second hunter came kept their old stats (the host's
+// 484/484 against the guest's 484/726 for one enemy), and the game's own HP sync (the owner's HP as
+// it is) showed the same enemy full to one and at two thirds to the other. When this game's HP
+// rate changes, the copies already loaded take it too: their base (data +0x100), from which the
+// game makes the max again whenever it likes (0x01A0D7D0, `base x rate` into +0xFC and +0x104,
+// truncated; a hand-out runs it: rig handed-out-max-watch 2026-11-10), both maxes and HP, the HP
+// share kept (a living copy never below 1, a dead one stays dead). Nothing when the rate is the
+// same or the copy has no HP.
+constexpr u64 EnemyBaseHpAt = 0x100;
+constexpr u64 EnemyMaxHpAgainAt = 0x104;
+struct RescaledHp {
+    s32 base = 0;
+    s32 max = 0;
+    s32 max_again = 0;
+    s32 hp = 0;
+    bool operator==(const RescaledHp&) const = default;
+};
+std::optional<RescaledHp> RescaleLoadedHp(s32 base, s32 max, s32 max_again, s32 hp, float old_rate,
+                                          float new_rate);
 // The game's co-op boss HP bonus (SpEffect 7500-7503, max HP x1.5/x2/x2.5/x3, given at a boss
 // start) would stack on the HP multiplier, so with harder enemies its max HP rate becomes 1 and
 // the HP multiplier is the only one. The rows' status resistance bonus stays. Returns the rows
@@ -3704,6 +3839,22 @@ bool PanelHasDowned(const struct PartyPanel& panel);
 // The role line of the nameplate over `name` (an online id, or a board name without one): its
 // revive, in red html, while that member is down; nothing for anyone else (the game's line stays).
 std::optional<std::string> NameplateRoleLine(const struct PartyPanel& panel, std::string_view name);
+// Bug audit 24 (I_Eat_Toast 2026-10-30: both nameplates said "Host"): the role line is the party's,
+// not the game's (the role each game sends, which a guest's game got wrong after its own reload).
+// Host over the member hosting the team's session (`host`: its board name or online id), Guest
+// over every other member the panel knows (all of them in the host's own game, `hosting`);
+// nothing for a name it does not know, or in a guest's game that knows no host.
+enum class NameplateRole : u8 { Host, Guest };
+std::optional<NameplateRole> NameplateRoleOf(const struct PartyPanel& panel, std::string_view name,
+                                             bool hosting, std::string_view host);
+// The role line's html: the game's own text for the role (messages 107000 and 107100, polished
+// to Host and Guest in English, the player's language else); nothing when the game has none.
+std::optional<std::string> NameplateRoleText(NameplateRole role, std::u16string_view host_text,
+                                             std::u16string_view guest_text);
+constexpr s32 NameplateHostMessage = 107000;
+constexpr s32 NameplateGuestMessage = 107100;
+// UTF-16 game text as UTF-8.
+std::string Utf8OfUtf16(std::u16string_view chars);
 // Which remote player's tag (0 to 6) a TagData address is, from FeData's address.
 std::optional<int> RemoteTagIndex(u64 tag_data, u64 fe_data);
 
@@ -4253,6 +4404,17 @@ public:
 private:
     std::vector<CopyTeam> saved; // each taken body's own team
 };
+// Kaniel 2026-11-11, the friendly fire rule ("you hit your teammates always ... just for harder
+// play"): with it `on`, every other player's body in this world (`present`) is struck as a downed
+// one is, on the invaders' team, so the game's own hits land on it (as in a duel); its own team
+// comes back when the rule goes off. The bodies for DownedTeams::Tick's `downed`: the downed ones
+// (`downed`) and, with the rule, the rest of `present`.
+std::vector<CopyTeam> WithFriendlyFire(std::vector<CopyTeam> downed,
+                                       std::span<const CopyTeam> present, bool on);
+// Whether the body `handle`, on team `team`, is a downed member's: on the invaders' team, and
+// not only for the friendly fire (`friendly_fire`, the rule's bodies; `downed`, the downed ones).
+bool OnDownedTeam(u32 handle, s32 team, std::span<const u32> downed,
+                  std::span<const u32> friendly_fire);
 // Another player's body in this world and where it stands.
 struct BodyPosition {
     u32 handle = 0;

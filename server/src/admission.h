@@ -9,8 +9,9 @@
 // - Links from one address: a household behind one router has a few games, never dozens.
 // - New accounts from one address an hour (accounts are made at the first sign-in).
 // - Each link's datagrams and bytes a second: a token bucket; what goes past it is dropped, and a
-//   link past it again and again bans its address for a while.
-// - Bans by address or player id, from the operator (banned.txt) or the strikes above.
+//   link past it again and again is reported for the server's log (Kaniel 2026-11-06: logged,
+//   never banned: a 15-minute ban froze a player's game after a duel, with nothing in the log).
+// - Bans by address or player id, from the operator (banned.txt) only.
 #pragma once
 
 #include <algorithm>
@@ -32,7 +33,6 @@ struct Limits {
     double byte_burst = 1'000'000.0;
     int strikes_to_ban = 5; // seconds a link went past its bucket, within strike_window_ms
     qint64 strike_window_ms = 60'000;
-    qint64 ban_ms = 15 * 60'000;
 };
 
 class Guard {
@@ -56,16 +56,26 @@ public:
         links.remove(link);
     }
 
-    bool Banned(quint32 address, qint64 now_ms) const;
+    bool Banned(quint32 address) const;
     bool BannedId(const QByteArray& online_id) const {
         return banned_ids.contains(online_id);
     }
-    // In the operator's list (not a rate ban of Ban's).
+    // In the operator's list (the only bans there are).
     bool ListBanned(quint32 address) const {
         return banned_addresses.contains(address);
     }
-    void Ban(quint32 address, qint64 until_ms) {
-        bans[address] = until_ms;
+    // A link that went past its rate strikes_to_ban times within strike_window_ms: who, and how
+    // many of its datagrams were dropped meanwhile.
+    struct Flood {
+        quint32 address = 0;
+        quint64 link = 0; // Endpoint::Key
+        quint64 dropped = 0;
+    };
+    // The floods since the last call (for the server's log).
+    QList<Flood> TakeFloods() {
+        QList<Flood> taken;
+        taken.swap(floods);
+        return taken;
     }
     // The operator's list: one address (a.b.c.d) or player id a line, '#' comments.
     void SetBanned(const QSet<quint32>& addresses, const QSet<QByteArray>& ids);
@@ -74,7 +84,7 @@ public:
         quint64 hellos_refused = 0;
         quint64 datagrams_dropped = 0;
         quint64 accounts_refused = 0;
-        quint64 bans = 0;
+        quint64 floods = 0;
     };
     const Counters& Count() const {
         return counters;
@@ -95,13 +105,14 @@ private:
         qint64 last_strike_ms = 0;
         int strikes = 0;
         qint64 strikes_from_ms = 0;
+        quint64 dropped = 0; // in the strikes' window
     };
 
     Limits limits;
     QHash<quint32, Bucket> hellos;
     QHash<quint32, QList<qint64>> accounts; // when each address made its accounts, the last hour
     QHash<quint64, LinkState> links;
-    QHash<quint32, qint64> bans; // address -> until
+    QList<Flood> floods; // not taken yet (TakeFloods)
     QSet<quint32> banned_addresses;
     QSet<QByteArray> banned_ids;
     Counters counters;

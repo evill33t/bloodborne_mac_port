@@ -122,9 +122,12 @@ LinkServer::LinkServer(SharedState* shared, const QString& db_path, quint16 tcp_
     // Hosted: a link's rates count its datagrams once their tag is good (a spoofed flood from a
     // player's address must not get that address banned).
     m_link.SetAdmit([this](const ServerLink::Endpoint& from, qsizetype bytes) {
-        return !m_hosted.enabled ||
-               m_guard.AllowDatagram(from.Key(), from.ipv4, static_cast<int>(bytes),
-                                     m_clock.elapsed());
+        if (!m_hosted.enabled ||
+            m_guard.AllowDatagram(from.Key(), from.ipv4, static_cast<int>(bytes),
+                                  m_clock.elapsed()))
+            return true;
+        LogFloods();
+        return false;
     });
     m_clock.start();
     // Hosted (docs/HOSTED_SERVER.md): limits on who comes in, a fixed build, passwords checked on
@@ -402,7 +405,7 @@ bool LinkServer::Admit(const QByteArray& datagram, ServerLink::Kind kind, quint3
     const qint64 now = m_clock.elapsed();
     // Game frames share 1200 bytes (coop/game_link.h); a large game packet goes alone, never this
     // big.
-    if (datagram.size() > 16384 || m_guard.Banned(address, now))
+    if (datagram.size() > 16384 || m_guard.Banned(address))
         return false;
     if (kind == ServerLink::Kind::Hello) {
         // Without a cookie of its source the hub only sends one back (no larger, nothing kept):
@@ -422,6 +425,29 @@ bool LinkServer::Admit(const QByteArray& datagram, ServerLink::Kind kind, quint3
     }
     // A link's datagrams: their rates once their tag is checked (the hub's admit).
     return true;
+}
+
+// Kaniel 2026-11-06: a game past its rate is logged with its id, never banned (a 15-minute ban
+// of its address had frozen a player's game after a duel: "no answer from the server").
+void LinkServer::LogFloods() {
+    const Admission::Limits& limits = m_guard.Settings();
+    for (const Admission::Guard::Flood& flood : m_guard.TakeFloods()) {
+        QString who = QStringLiteral("a game not linked");
+        for (const ServerLink::Hub::LinkRow& link : m_link.Links()) {
+            if (link.endpoint.Key() == flood.link)
+                who = QString::fromUtf8(link.online_id);
+        }
+        const ServerLink::Endpoint from{flood.address, static_cast<quint16>(flood.link & 0xFFFF)};
+        qWarning().noquote()
+            << QStringLiteral("Hosted: %1 (%2) went past %3 datagrams or %4 bytes a second %5 "
+                              "times within %6 s: %7 of its datagrams dropped (not banned)")
+                   .arg(who, from.Text())
+                   .arg(limits.datagrams_per_second)
+                   .arg(limits.bytes_per_second)
+                   .arg(limits.strikes_to_ban)
+                   .arg(limits.strike_window_ms / 1000)
+                   .arg(flood.dropped);
+    }
 }
 
 void LinkServer::OnLinkTick() {

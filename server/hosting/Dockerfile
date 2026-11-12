@@ -85,7 +85,7 @@ FROM qt-${QT_FROM} AS qt
 # --- shadnet -------------------------------------------------------------------------------------
 FROM qt AS build
 ARG BUILD_JOBS=0
-ARG SOURCE_REVISION=efa0ad265d840d9195e55db2e3216f46f7daedd0
+ARG SOURCE_REVISION=0bb87c1b80ca2dfc01d75931cc3cb55873c057e2
 WORKDIR /src/server
 # What CMakeLists.txt reads; not hosting/, so editing the ops files does not rebuild shadnet.
 COPY server/CMakeLists.txt /src/server/
@@ -139,7 +139,7 @@ COPY --from=build /out/ /opt/shadnet/
 COPY server/worlds.cfg server/scoreboards.cfg server/data/common-passwords.txt /opt/shadnet/defaults/
 COPY server/hosting/entrypoint.sh server/hosting/healthcheck.sh /opt/shadnet/
 ENV LD_LIBRARY_PATH=/opt/shadnet/lib QT_PLUGIN_PATH=/opt/shadnet/plugins SHADNET_HOME=/data \
-    LANG=C.UTF-8 BB_RELEASE_VERSION=1.4.0 \
+    LANG=C.UTF-8 BB_RELEASE_VERSION=1.5.0 \
     PATH=/opt/shadnet:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 VOLUME /data
 WORKDIR /data

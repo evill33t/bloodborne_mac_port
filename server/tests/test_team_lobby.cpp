@@ -1311,8 +1311,8 @@ int ATeamWithoutItsMakersRulesTakesTheServersDefault() {
 // enemies and their strength, and the other rules by name; anything unknown or
 // out of range is refused (the server then keeps its own default).
 int TheServersDefaultRulesComeFromItsConfig() {
-  const auto fixed = ParseTeamRules(
-      "enemies=fixed; hp=2.5; damage=1.25; poise=2; rot; travel; vote; tempo=1");
+  const auto fixed = ParseTeamRules("enemies=fixed; hp=2.5; damage=1.25; "
+                                    "poise=2; rot; travel; vote; tempo=1");
   CHECK(fixed.has_value());
   CHECK(!fixed->enemy_scaling() && fixed->enemy_hp() == 2.5f &&
         fixed->enemy_damage() == 1.25f && fixed->enemy_poise() == 2.0f &&
@@ -1323,10 +1323,38 @@ int TheServersDefaultRulesComeFromItsConfig() {
         automatic->enemy_hp() == 0.0f && !automatic->rot());
   CHECK(ParseTeamRules("").has_value() && ParseTeamRules("")->enemy_scaling());
   CHECK(!ParseTeamRules("enemies=hard"));
-  CHECK(!ParseTeamRules("hp=0.5"));   // weaker than the game's own
-  CHECK(!ParseTeamRules("hp=11"));    // past HarderEnemiesMax
+  CHECK(!ParseTeamRules("hp=0.5")); // weaker than the game's own
+  CHECK(!ParseTeamRules("hp=11"));  // past HarderEnemiesMax
   CHECK(!ParseTeamRules("tempo=3"));
   CHECK(!ParseTeamRules("fly"));
+  // Kaniel 2026-11-11: friendly fire, off unless named.
+  CHECK(!fixed->friendly_fire() && !ParseTeamRules("")->friendly_fire());
+  const auto friendly = ParseTeamRules("enemies=auto; friendlyfire");
+  CHECK(friendly.has_value() && friendly->friendly_fire() &&
+        friendly->enemy_scaling());
+  CHECK(!ParseTeamRules("friendlyfire=1"));
+  return 0;
+}
+
+// Kaniel 2026-11-11: friendly fire is a team rule, off in a new team; its
+// leader turns it on and every member's state has it, a member cannot.
+int TheLeaderTurnsFriendlyFireOn() {
+  TwoHunters t;
+  TeamLobby &lobby = t.lobby;
+  CHECK(!lobby.StateFor("a").team().rules().friendly_fire());
+  bbcoop::TeamRequest rules = Request(Action::RULES);
+  *rules.mutable_rules() = lobby.StateFor("a").team().rules();
+  rules.mutable_rules()->set_friendly_fire(true);
+  CHECK(!lobby.Request("b", rules).notice.empty()); // not the leader
+  CHECK(!lobby.StateFor("b").team().rules().friendly_fire());
+  CHECK(lobby.Request("a", rules).changed);
+  bbcoop::LobbyState back;
+  CHECK(back.ParseFromString(lobby.StateFor("b").SerializeAsString()));
+  CHECK(back.team().rules().friendly_fire() &&
+        back.team().rules().enemy_scaling());
+  rules.mutable_rules()->set_friendly_fire(false);
+  CHECK(lobby.Request("a", rules).changed);
+  CHECK(!lobby.StateFor("b").team().rules().friendly_fire());
   return 0;
 }
 
@@ -1622,6 +1650,7 @@ int main() {
   failed |= RulesSetBeforeATeamGoIntoTheTeam();
   failed |= ATeamWithoutItsMakersRulesTakesTheServersDefault();
   failed |= TheLeaderSetsTheEnemiesStrength();
+  failed |= TheLeaderTurnsFriendlyFireOn();
   failed |= TheServersDefaultRulesComeFromItsConfig();
   failed |= AMembersRotIsKeptWhileItsTeamLives();
   failed |= TheLeaderPicksTheTeamsDeathMode();

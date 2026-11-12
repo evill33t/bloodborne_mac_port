@@ -298,6 +298,14 @@ public:
                          range->min_ms, range->max_ms);
             }
         }
+        if (const char* env = std::getenv("SHADPS4_P2P_LOSS_PERCENT"); env != nullptr) {
+            if (const auto percent = ParseLossPercent(env)) {
+                std::lock_guard lock(loss_mutex);
+                loss_line.emplace(*percent, static_cast<u32>(physical_port) * 31u + 7u);
+                LOG_INFO(Lib_Net, "P2P transport: {}% of the packets sent are lost (test loss)",
+                         *percent);
+            }
+        }
 
         LOG_INFO(Lib_Net,
                  "P2P transport ready: UDP physical_port={} (set SHADPS4_P2P_PORT to pin it)",
@@ -431,6 +439,12 @@ public:
 #else
         if (LinkCut()) {
             return true; // lost on the way, as on a dropped connection
+        }
+        {
+            std::lock_guard lock(loss_mutex);
+            if (loss_line && loss_line->Drops()) {
+                return true; // the test loss: lost on the way
+            }
         }
         if (!FirewallAllows(dest.sin_addr.s_addr, dest.sin_port, "a datagram to")) {
             return false;
@@ -1182,6 +1196,8 @@ private:
     std::thread receive_thread;
 
     std::optional<DelayLine> delay_line;
+    std::mutex loss_mutex;
+    std::optional<LossLine> loss_line;     // SHADPS4_P2P_LOSS_PERCENT
     std::atomic<s64> link_cut_until_ms{0}; // CutLink
     std::thread delay_thread;
     std::mutex delay_mutex;

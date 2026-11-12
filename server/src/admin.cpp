@@ -282,7 +282,7 @@ Answer Stats(Context& context) {
                         {"hellos_refused", static_cast<qint64>(count.hellos_refused)},
                         {"datagrams_dropped", static_cast<qint64>(count.datagrams_dropped)},
                         {"accounts_refused", static_cast<qint64>(count.accounts_refused)},
-                        {"bans", static_cast<qint64>(count.bans)}},
+                        {"floods", static_cast<qint64>(count.floods)}},
             {},
             {}};
 }
@@ -319,8 +319,7 @@ ServerLink::Hub::Result KickBanned(ServerLink::Hub& hub, const Admission::Guard&
                                    qint64 link_ms) {
     ServerLink::Hub::Result result;
     for (const ServerLink::Hub::LinkRow& link : hub.Links()) {
-        // banned.txt's alone: a rate ban (Guard::Ban) holds the address's next hellos only, or
-        // every game behind one address (a CGNAT) would go with the one flooding.
+        // banned.txt's (the only bans: a flooding link is logged, never banned).
         if (guard.BannedId(link.online_id) || guard.ListBanned(link.endpoint.ipv4)) {
             const auto kicked = hub.Kick(link.online_id, 0, link_ms);
             result.sends.append(kicked.sends);

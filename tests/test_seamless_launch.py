@@ -28,7 +28,7 @@ class SeamlessLaunch(unittest.TestCase):
             self.assertNotEqual(first['BB_USER_DIR'],second['BB_USER_DIR'])
             self.assertEqual(first['BB_SHADNET_SERVER'],s.GLOBAL_HOST+':31314')
             self.assertEqual(first['BB_SHADNET_SERVER_KEY'],s.GLOBAL_PIN)
-            self.assertEqual(first['BB_RELEASE_VERSION'],'1.4.0')
+            self.assertEqual(first['BB_RELEASE_VERSION'],'1.5.0')
             self.assertNotIn('SHADPS4_BLOODBORNE_HOST_RULES',first)
             self.assertNotIn('SHADPS4_BLOODBORNE_HARDER_ENEMIES',first)
             for path in data.rglob('*'):
@@ -84,15 +84,27 @@ class SeamlessLaunch(unittest.TestCase):
             self.assertNotIn('SHADPS4_P2P_PORT',env)
             self.assertNotIn('BB_SHADNET_SERVER_KEY',env);self.assertEqual(env['BB_SHADNET_WEBAPI'],'http://other.example:31315')
             self.assertEqual(env['BB_USER_DIR'],str(data/'explicit'))
-            self.assertEqual(env['SHADPS4_BLOODBORNE_HOST_RULES'],'travel,vote,scale')
+            self.assertNotIn('SHADPS4_BLOODBORNE_HOST_RULES',env)
             with self.assertRaises(ValueError): s.launch_environment({'BB_SHADNET_NPID':'half'},data)
-    def test_v131_boss_tempo_rules_reach_client(self):
+    def test_v150_legacy_launcher_rules_never_replace_kept_rules(self):
         with tempfile.TemporaryDirectory() as temp:
             data=Path(temp)
             for tempo in ('aggressive','relentless'):
                 (data/'bbport.ini').write_text('seamless_host_rules=travel,vote,'+tempo+'\n')
-                env=s.launch_environment({},data)
-                self.assertEqual(env['SHADPS4_BLOODBORNE_HOST_RULES'],'travel,vote,'+tempo)
+                env=s.launch_environment({'SHADPS4_BLOODBORNE_HOST_RULES':'off','SHADPS4_BLOODBORNE_HARDER_ENEMIES':'3,1.5,3'},data)
+                self.assertNotIn('SHADPS4_BLOODBORNE_HOST_RULES',env)
+                self.assertNotIn('SHADPS4_BLOODBORNE_HARDER_ENEMIES',env)
+    def test_v150_30fps_remains_retail_30_and_other_rates_use_60(self):
+        with tempfile.TemporaryDirectory() as temp:
+            data=Path(temp)
+            for requested,expected in [('30','30'),('60','60'),('90','60'),('uncap','60')]:
+                env=s.launch_environment({'BB_FPS':requested},data)
+                self.assertEqual(env['BB_FPS'],expected)
+                self.assertEqual(env['BB_FPS_LIMIT'],expected)
+                self.assertEqual(env['BB_FPS_PRESET'],expected)
+                self.assertEqual(env['BB_VBLANK_HZ'],'60')
+            (data/'bbport.ini').write_text('fps_cap=30\n')
+            self.assertEqual(s.launch_environment({'BB_FPS':'adaptive'},data)['BB_FPS'],'30')
     def test_launcher_custom_save_folder_is_copied_then_isolated(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);selected=root/'chosen saves';selected.mkdir();(selected/'slot').write_bytes(b'original')

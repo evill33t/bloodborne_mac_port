@@ -315,6 +315,30 @@ std::optional<s32> AltarPickedIn(std::span<const s32> on) {
     return AltarOfPickBits(bits);
 }
 
+std::optional<s32> AltarOfDungeonCopy(s32 flag) {
+    constexpr s32 First = 14000000;
+    if (flag < First || flag >= First + RitualAltarCount * 100000 || flag % 100000 >= 10000) {
+        return std::nullopt;
+    }
+    return (flag - First) / 100000;
+}
+
+bool SameAltarDungeon(std::span<const u8> mine, std::span<const s32> team_on, s32 altar) {
+    constexpr size_t HeadBytes = 8;
+    if (mine.size() < HeadBytes || altar < 0 || altar >= RitualAltarCount) {
+        return false;
+    }
+    const s32 base = AltarFlagBase(altar);
+    std::array<u8, HeadBytes> team{};
+    const auto from = std::ranges::lower_bound(team_on, base);
+    for (auto it = from; it != team_on.end() && *it < base + static_cast<s32>(HeadBytes * 8);
+         ++it) {
+        const s32 bit = *it - base;
+        team[static_cast<size_t>(bit / 8)] |= static_cast<u8>(0x80 >> (bit % 8));
+    }
+    return std::ranges::equal(mine.first(HeadBytes), team);
+}
+
 std::optional<s32> AltarOfWarpRequest(s32 flag) {
     constexpr s32 WarpRequest = 72100420;
     if (flag < WarpRequest || flag >= WarpRequest + RitualAltarCount) {

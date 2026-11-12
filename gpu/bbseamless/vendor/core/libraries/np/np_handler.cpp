@@ -9,6 +9,7 @@
 #include <httplib.h>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
+#include "core/bloodborne_sign_in.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/invitation_dialog/invitation_dialog.h"
 #include "core/libraries/network/rpc_bridge.h"
@@ -52,6 +53,32 @@ NpHandler& NpHandler::GetInstance() {
     static NpHandler s_instance;
     return s_instance;
 }
+
+namespace {
+
+// Why a sign-in failed, for the screens (core/bloodborne_sign_in.h): the game itself only hears
+// "signed out", which it shows as "not signed in to PlayStation Network".
+Core::Bloodborne::SignInProblem SignInProblemOf(ShadNet::ShadNetState state) {
+    using Core::Bloodborne::SignInProblem;
+    switch (state) {
+    case ShadNet::ShadNetState::Ok:
+        return SignInProblem::None;
+    case ShadNet::ShadNetState::FailureInput:
+    case ShadNet::ShadNetState::FailureResolve:
+    case ShadNet::ShadNetState::FailureConnect:
+    case ShadNet::ShadNetState::FailureServerInfo:
+        return SignInProblem::NoAnswer;
+    case ShadNet::ShadNetState::FailureAuth:
+    case ShadNet::ShadNetState::FailureUsername:
+    case ShadNet::ShadNetState::FailurePassword:
+    case ShadNet::ShadNetState::FailureToken:
+        return SignInProblem::WrongLogin;
+    default:
+        return SignInProblem::Other;
+    }
+}
+
+} // namespace
 
 std::pair<std::string, u16> NpHandler::ParseServerAddress() const {
     const std::string server_str = EmulatorSettings.GetShadNetServer();
@@ -132,6 +159,11 @@ void NpHandler::Initialize() {
         const ShadNet::ProbeInfo probe = ShadNet::ProbeServer(host, port);
         if (probe.result != ShadNet::ProbeResult::Ok) {
             EmulatorSettings.SetShadNetSessionDisabled(true);
+            Core::Bloodborne::SignInNotesOfThisGame().Failed(
+                probe.result == ShadNet::ProbeResult::Unreachable
+                    ? Core::Bloodborne::SignInProblem::NoAnswer
+                    : Core::Bloodborne::SignInProblem::Other,
+                host, port);
             switch (probe.result) {
             case ShadNet::ProbeResult::VersionMismatch:
                 LOG_WARNING(NpHandler,
@@ -266,6 +298,8 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
     if (Net::ServerLinkSwitchOn()) {
         if (link_addr == 0 || !Net::EnsureP2PTransport()) {
             LOG_ERROR(NpHandler, "user_id={} no server link to {}:{}", user_id, host, port);
+            Core::Bloodborne::SignInNotesOfThisGame().Failed(
+                Core::Bloodborne::SignInProblem::NoAnswer, host, port);
             return false;
         }
         Net::ConfigureServerLink(link_addr, htons(port), npid, password,
@@ -273,6 +307,8 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         client_port = Net::StartRpcBridge();
         client_host = "127.0.0.1";
         if (client_port == 0) {
+            Core::Bloodborne::SignInNotesOfThisGame().Failed(Core::Bloodborne::SignInProblem::Other,
+                                                             host, port);
             return false;
         }
         LOG_INFO(NpHandler, "user_id={} signs in through the server link {}:{}", user_id, host,
@@ -317,17 +353,22 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
                   static_cast<int>(conn_state));
         handle_protocol_mismatch(conn_state);
         client->Stop();
+        Core::Bloodborne::SignInNotesOfThisGame().Failed(SignInProblemOf(conn_state), host, port);
         return false;
     }
 
     ShadNet::ShadNetState auth_state = client->WaitForAuthenticated();
-    // The session of the game this one replaces (the in-game restart) can still be open on the
-    // server for a moment; its login is then refused as already logged in. Asked again a few
-    // times before the game plays offline for the whole session (Supermedo's 44ca939).
-    for (int retry = 1; auth_state == ShadNet::ShadNetState::FailureAlreadyIn && retry <= 4;
+    // The session of the game this one replaces (the in-game restart), or one whose connection
+    // died on the way, can still be open on the server; its login is then refused as already
+    // logged in. Asked again for a minute before the game plays offline for the whole session
+    // (Supermedo's 44ca939 and f45b5f6).
+    constexpr int AlreadyInRetries = 12;
+    for (int retry = 1;
+         auth_state == ShadNet::ShadNetState::FailureAlreadyIn && retry <= AlreadyInRetries;
          ++retry) {
-        LOG_WARNING(NpHandler, "user_id={} already signed in elsewhere; asking again in 5 s ({}/4)",
-                    user_id, retry);
+        LOG_WARNING(NpHandler,
+                    "user_id={} already signed in elsewhere; asking again in 5 s ({}/{})", user_id,
+                    retry, AlreadyInRetries);
         client->Stop();
         std::this_thread::sleep_for(std::chrono::seconds(5));
         client = make_client();
@@ -342,11 +383,13 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
                   static_cast<int>(auth_state));
         handle_protocol_mismatch(auth_state);
         client->Stop();
+        Core::Bloodborne::SignInNotesOfThisGame().Failed(SignInProblemOf(auth_state), host, port);
         return false;
     }
 
     LOG_INFO(NpHandler, "user_id={} signed in npid='{}' accountId={}", user_id, npid,
              client->GetUserId());
+    Core::Bloodborne::SignInNotesOfThisGame().SignedIn();
 
     if (Net::ServerLinkSwitchOn()) {
         // The rooms' server is the link's (the client's own address is the bridge's).

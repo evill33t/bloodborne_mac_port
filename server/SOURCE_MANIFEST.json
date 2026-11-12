@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together",
-  "upstream_base": "efa0ad265d840d9195e55db2e3216f46f7daedd0",
+  "upstream_base": "0bb87c1b80ca2dfc01d75931cc3cb55873c057e2",
   "files": [
     {
       "path": "backend/README.txt",
@@ -40,7 +40,7 @@
     {
       "path": "docs/HOSTED_SERVER.md",
       "source": "docs/HOSTED_SERVER.md",
-      "sha256": "9d2f18e704308ad3cfaf1a21bae8564fec72d5c248c38d583b1a3a462feb0e56"
+      "sha256": "acc0b5522334bdcc815552c777b4a701bafcb85f0053cfbcc686de0fb1355d75"
     },
     {
       "path": "docs/SCALING.md",
@@ -270,8 +270,8 @@
     {
       "path": "server/coop/coop.proto",
       "source": "server/coop/coop.proto",
-      "sha256": "c4776271d559f0cf66eb8ba2888fdfa598cdb27f5b94dfd8080d66a45b6b3471",
-      "adapted_sha256": "431543637aab68e703c9e06a77c11e00cdf8af75d8fb1983c28af10240cc5634"
+      "sha256": "2ab8ced324f8d4649549ed6741505f9a4ead93165c03536072e7dae979af9afb",
+      "adapted_sha256": "1fc0c91174bc2115b4ed24b4a3f83c134849da33d2c9757039c92d92261a4e75"
     },
     {
       "path": "server/coop/coop_messages.cpp",
@@ -368,12 +368,12 @@
     {
       "path": "server/coop/team_lobby.cpp",
       "source": "server/coop/team_lobby.cpp",
-      "sha256": "f37009c18b2c350fce1456a0c568f2e03f3363fb8fe0968347400835295e2ba7"
+      "sha256": "d1f8b8348e429393790ea2184254a4df70b72f4090f2f91c08af2f70ee0a3ef1"
     },
     {
       "path": "server/coop/team_lobby.h",
       "source": "server/coop/team_lobby.h",
-      "sha256": "a600d18e51ca47ae3f2d8156786363ac3f5c94f5ea598242baa70ffc44862556"
+      "sha256": "f70cbdc1f4d8be2f9d771d7904dda28ff2918ebc1e45f1e1201f955280fe351a"
     },
     {
       "path": "server/coop/trade.cpp",
@@ -446,7 +446,7 @@
       "path": "server/hosting/Dockerfile",
       "source": "server/hosting/Dockerfile",
       "sha256": "d6b97172a202734adefc06c60d3cb55a6c2bf347793457e53ea8c4e1a3706f2f",
-      "adapted_sha256": "c789ac465ab37a840e4ed65222f16a05ed4f9a61213b89cbfe15d60e3bd0868d"
+      "adapted_sha256": "00794152ca048fad406b6162f32b8ce9be527d76dcd165483fa956b6685cb5ec"
     },
     {
       "path": "server/hosting/Dockerfile.backup",
@@ -461,7 +461,7 @@
     {
       "path": "server/hosting/README.md",
       "source": "server/hosting/README.md",
-      "sha256": "d18bf02bfb40c34605b0236617e4c6d6877bf0c6c0b79c422af6e76d71efc44c"
+      "sha256": "1206c6c47d377e3f0718aa67cd2d351d46e2261c004b8f3249a4cf172325e511"
     },
     {
       "path": "server/hosting/admin.sh",
@@ -557,7 +557,7 @@
     {
       "path": "server/src/admin.cpp",
       "source": "server/src/admin.cpp",
-      "sha256": "3c16e1e92405f7bbe78138c71dd00de18e2cbc93513c5bdfcb61dd62ffd78bf6"
+      "sha256": "b87be185a768d1a4e901553fb7209924e2a54d42f0196ecc097adb2b3df78bd5"
     },
     {
       "path": "server/src/admin.h",
@@ -567,12 +567,12 @@
     {
       "path": "server/src/admission.cpp",
       "source": "server/src/admission.cpp",
-      "sha256": "3d25bf6409a55a95c802a534c1ae381955093ffccd7d0f7cd3d41caa59f6e838"
+      "sha256": "cae928ca48ee239f0d22088f0f5d9b0ef321548b08559d61abcd52adceb40f03"
     },
     {
       "path": "server/src/admission.h",
       "source": "server/src/admission.h",
-      "sha256": "0b955ed09490237f7b3bced999a6b9150279d970b6ba5919ffb754a33d37b132"
+      "sha256": "2c532f5a9c4ac5e3617ff69040243954fb7906fc4c74c379249481296a0a83a0"
     },
     {
       "path": "server/src/bloodborne_backend.cpp",
@@ -721,13 +721,13 @@
     {
       "path": "server/src/link_server.cpp",
       "source": "server/src/link_server.cpp",
-      "sha256": "c82426b677a31c4b9381258c6b277fbda9b4965dd142d03eb1b2e03624f7f40f",
-      "adapted_sha256": "9db7af47eb24d8571b1fb303af279640892a58a68a4a901e9d1305c8519595f4"
+      "sha256": "104bf87496f3db9fa8ca3c1fe2ab76bb68b97b116a14d7d7bca054149b688a8f",
+      "adapted_sha256": "d242e725ada9a4af63adc417039ffab3c871d67378211b12a9515493dac0521d"
     },
     {
       "path": "server/src/link_server.h",
       "source": "server/src/link_server.h",
-      "sha256": "7e259fc617d71aabbe48014a1fb70407fdf869abf5d474f6895c185e815f4207"
+      "sha256": "8d5a72eed1d6b24e937e1f537d2d52f5eb4e2f17267d612554d39561e8c34de3"
     },
     {
       "path": "server/src/main.cpp",
@@ -989,12 +989,12 @@
     {
       "path": "server/tests/test_admin.cpp",
       "source": "server/tests/test_admin.cpp",
-      "sha256": "725b0082ea3f7e04aab8b349558bc74e05873a697d34da7dadd12b36bf5f9c6e"
+      "sha256": "2f0b16b55a74b247b53218e8a1952f570c8f3011940dd6cf926e9afab851a0bb"
     },
     {
       "path": "server/tests/test_admission.cpp",
       "source": "server/tests/test_admission.cpp",
-      "sha256": "6bfeef6161d462f5566089c16f3938bee48768b80211498d12a6de89788d5225"
+      "sha256": "8ebf360c323afa5730dbd65744d6691f814d7c7badee1b59f8ed3ecde42bb342"
     },
     {
       "path": "server/tests/test_bloodborne_backend_json.cpp",
@@ -1103,7 +1103,7 @@
     {
       "path": "server/tests/test_team_lobby.cpp",
       "source": "server/tests/test_team_lobby.cpp",
-      "sha256": "4933c4e345e9be6946ceddea8974e14c3f6957b7ce010baabab9b197dd591945"
+      "sha256": "64a52cac0b4b647176906fe9fb6984aa90b53da04155103a7b684b62ce520ebf"
     },
     {
       "path": "server/tests/test_watchdog.cpp",
@@ -1262,6 +1262,6 @@
       "sha256": "de2382047fbdda5308ae448f4d17f163fc85b6a5d809f40c2c6d2edbfa7addbc"
     }
   ],
-  "previous_upstream_base": "5d2305ee611ef1e03be39ff925f0da75c9a70393",
+  "previous_upstream_base": "efa0ad265d840d9195e55db2e3216f46f7daedd0",
   "local_extension_base": "9e60cec70e589a199cf86771de4844fe556562d4"
 }

@@ -11,6 +11,7 @@
 #include "core/bloodborne_re_internal.h"
 #include "core/bloodborne_send_pace.h"
 #include "core/bloodborne_team.h"
+#include "core/bloodborne_titles.h"
 #include "core/bloodborne_trade.h"
 #include "core/bloodborne_write_watch.h"
 
@@ -1843,20 +1844,21 @@ bool SeamlessCoreInstalled() {
            healing_fountain_host_availability_hook_installed;
 }
 
-// Whether this game is the one the seamless patches are for: Bloodborne CUSA03173 at 01.09.
+// Whether this game is the one the seamless patches are for: Bloodborne at 01.09, any release
+// (bloodborne_titles.h). A refusal is said in the log, a production one too: the launcher gives
+// the game the party HUD either way, and without co-op's code it flashes its placeholders.
 bool IsSeamlessCoopGame() {
-    // Native port: regional 1.09 executables must still pass CoopSitesMatch in full.
-    constexpr std::array<std::string_view,9> titles{"CUSA03173", "CUSA00207", "CUSA00208",
-        "CUSA00900", "CUSA03179", "CUSA01363", "CUSA03023", "CUSA00299", "CUSA03014"};
-    if (std::ranges::find(titles, MemoryPatcher::g_game_serial) == titles.end()) {
-        return false;
-    }
     const auto* param_sfo = Common::Singleton<PSF>::Instance();
     const std::string_view app_version = param_sfo->GetString("APP_VER").value_or("Unknown");
-    if (app_version != "01.09" && !NativeVerified109EbootFile()) {
-        LOG_ERROR(Debug,
-                  "Bloodborne seamless patches require the verified 01.09 executable; loaded version is {}",
-                  app_version);
+    const CoopGame game = SeamlessCoopGameFor(MemoryPatcher::g_game_serial, app_version);
+    if (!GetsSeamlessCoop(game)) {
+        LOG_ERROR(Debug, "Seamless co-op requires a retail Bloodborne title: {}", MemoryPatcher::g_game_serial);
+        return false;
+    }
+    // Native port: stale metadata is accepted only for the independently verified 1.09 image.
+    // CoopSitesMatch still checks every hook before writing any game code.
+    if (game == CoopGame::OtherVersion && !NativeVerified109EbootFile()) {
+        LOG_ERROR(Debug, "Bloodborne seamless patches require the verified 01.09 executable; loaded version is {}", app_version);
         return false;
     }
     return true;
