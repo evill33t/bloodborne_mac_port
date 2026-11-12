@@ -2,7 +2,7 @@
 /* Fixed-width copies only. The arm64 renderer never calls into the x86 game module. */
 #pragma once
 #include "bbcoop.h"
-#define BB_COOP_UI_VERSION 7u
+#define BB_COOP_UI_VERSION 8u
 #define BB_COOP_INVENTORY_MAX 512
 #define BB_COOP_MODEL_WIDTH 560u
 #define BB_COOP_MODEL_HEIGHT 768u
@@ -64,6 +64,8 @@ typedef struct BbCoopUi {
     uint32_t duel_id;
     char trade_question[512], duel_name[40], notice[256];
     int32_t trade_on, partner_count, inventory_count, camera_on;
+    int32_t sign_in_problem;
+    char sign_in_server[128], sign_in_reason[384];
     struct { char id[40], name[40]; } partners[4];
     BbCoopInventoryItem inventory[BB_COOP_INVENTORY_MAX];
     int32_t want_portrait, portrait_count;

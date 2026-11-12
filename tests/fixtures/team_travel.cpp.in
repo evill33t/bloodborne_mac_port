@@ -41,6 +41,9 @@ class TeamTravel {
 namespace Core::Bloodborne {
 bool IsParamOfType(std::span<const u8>, std::string_view) { return false; }
 std::optional<u64> FindParamRow(std::span<const u8>, s32) { return std::nullopt; }
+// The old launcher override is outside this fixture. Kept-rule tests pass nullptr and must
+// never fall back to that path; fail if a test accidentally does.
+std::optional<HarderEnemies> ParseHarderEnemies(std::string_view) { std::abort(); }
 namespace Coop {
 std::mutex map_board_mutex;
 std::chrono::steady_clock::time_point map_board_time = std::chrono::steady_clock::now();
@@ -62,6 +65,15 @@ using namespace Coop;
 int main() {
     using namespace Core::Bloodborne;
     using namespace Core::Bloodborne::Coop;
+    const auto kept=ParseScreenRules("1,1,1,1,2,4,2,3,1");
+    if(!kept || !kept->friendly_fire || !kept->travel_vote || kept->boss_tempo!=BossTempo::Relentless ||
+       !kept->enemies || kept->enemies->hp!=4) return 20;
+    if(OwnRulesAtStart(nullptr,nullptr,ScreenRulesText(*kept))!=kept) return 21;
+    const auto legacy=ParseScreenRules("0,1,0,0,0,0,0,0");
+    if(!legacy || legacy->friendly_fire || !legacy->travel_together) return 22;
+    for(auto invalid:{"0,1,0,0,0,0,0,0,2","0,1,0,0,0,0,0,0,1,1","0,1,0,0,0,nan,0,0,1"})
+        if(ParseScreenRules(invalid)) return 23;
+    if(OwnRulesAtStart(nullptr,nullptr,"").has_value()) return 24;
     std::mutex done_mutex;
     std::condition_variable cv;
     bool done = false;

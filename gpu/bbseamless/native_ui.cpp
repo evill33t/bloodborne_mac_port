@@ -255,6 +255,7 @@ extern "C" void bbseamless_frame(uint32_t* buttons,uint8_t sticks[4],uint8_t* l2
     bbcoop_duel_ask(&view.duel_id,view.duel_name,sizeof(view.duel_name));
     view.skip_want=view.skip_watching=0;
     bbcoop_cutscene_vote(&view.skip_want,&view.skip_watching);
+    view.sign_in_problem=bbcoop_sign_in_problem(view.sign_in_server,sizeof(view.sign_in_server),view.sign_in_reason,sizeof(view.sign_in_reason));
     view.production=BB_PRODUCTION;view.camera_on=bbcoop_free_camera_on();
     view.want_portrait=bbcoop_portrait_offscreen_wanted();view.portrait_count=0;
     for(int i=0;i<std::clamp<int>(view.lobby.member_count,0,BBCOOP_LOBBY_TEAM) && view.portrait_count<int(std::size(view.portraits));++i) {

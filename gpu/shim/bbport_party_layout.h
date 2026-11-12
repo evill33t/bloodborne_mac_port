@@ -35,6 +35,32 @@ inline float TeamScreenScale(float scale, float display_w) {
     return std::min(scale, display_w / (TeamWindowWidth + TeamWindowMargin));
 }
 
+/// Kaniel 2026-11-11: the team settings page (bbport_overlay.cpp DrawSettings) has twelve rows
+/// while the enemy strength is Custom, nine otherwise (friendly fire is the last). At 720p (the
+/// overlay's scale stops at 0.75,
+/// so the page is 960 units high, not 1080) those rows of the usual height put the focused row's
+/// meaning under them onto the key guide. The rows' height and the gap between them, at scale 1,
+/// for `rows` rows in `room` (from the first row's top to the key guide's top, at scale 1): the
+/// usual ones where the rows, the space under them and three lines of meaning fit, else lower rows
+/// closer together (never under SettingsRowLeast: the text in them is 22 high).
+inline constexpr float SettingsRowHeight = 50.0f, SettingsRowGap = 8.0f, SettingsRowLeast = 36.0f;
+inline constexpr float SettingsRowsUnder = 20.0f; // DrawSettings: under the last row
+inline constexpr float SettingsMeaningRoom = 3 * 25.0f + 10.0f; // three lines at 19, a little air
+struct SettingsRows {
+    float height, gap;
+};
+inline SettingsRows TeamSettingsRows(int rows, float room) {
+    const auto needs = [rows](float height, float gap) {
+        return rows * height + (rows - 1) * gap + SettingsRowsUnder + SettingsMeaningRoom;
+    };
+    if (needs(SettingsRowHeight, SettingsRowGap) <= room) {
+        return {SettingsRowHeight, SettingsRowGap};
+    }
+    const float gap = SettingsRowGap * 0.5f;
+    const float height = std::floor((room - needs(0.0f, gap)) / float(rows));
+    return {std::clamp(height, SettingsRowLeast, SettingsRowHeight), gap};
+}
+
 /// Kaniel 2026-10-24: the game's 16:9 screen inside a frame of another shape (21:9, 32:9, 16:10, 4:3):
 /// its middle, as high as a wider frame and as wide as a taller one; the frame itself at 16:9. The
 /// game's UI coordinates (its 1920x1080 stage) map onto it, the same scale both ways.

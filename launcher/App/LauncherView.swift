@@ -406,17 +406,6 @@ struct LauncherView: View {
 
     private var portValid: Bool { OnlineSettings.port(from: model.p2pPortText) != nil }
 
-    private func seamlessRule(_ name: String) -> Binding<Bool> {
-        Binding(get: { model.online.seamlessHostRules.split(separator: ",").contains(Substring(name)) }, set: { on in
-            var selected = Set(model.online.seamlessHostRules.split(separator: ",").map(String.init))
-            selected.remove("off")
-            if on { selected.insert(name) } else { selected.remove(name) }
-            if name == "vote", on { selected.insert("travel") }
-            if name == "travel", !on { selected.remove("vote") }
-            model.online.seamlessHostRules = selected.isEmpty ? "off" : ["rot", "travel", "vote", "scale", "aggressive", "relentless"].filter(selected.contains).joined(separator: ",")
-        })
-    }
-
     @ViewBuilder private var seamlessRows: some View {
         Picker("Server host", selection: $model.online.seamlessHost) {
             ForEach(SeamlessHost.allCases) { Text($0.label).tag($0) }
@@ -431,29 +420,11 @@ struct LauncherView: View {
                 .font(.caption).foregroundStyle(.secondary)
         } else {
         TextField("Server", text: $model.online.seamlessServer, prompt: Text(OnlineSettings.defaultSeamlessServer))
-        Text("A persistent identity is created automatically for this server. Co-op saves use a separate folder, seeded from your existing saves on first launch. Co-op runs at 60 FPS.")
+        Text("A persistent identity is created automatically for this server. Co-op saves use a separate folder, seeded from your existing saves on first launch. Co-op uses fixed timing at 60 FPS, or retail 30 FPS when selected.")
             .font(.caption).foregroundStyle(.secondary)
         Text("In game: F6 opens your team; F8 opens the map; G places a ping. Create a team or join with a friend's code, select a world and start the hunt.")
             .font(.caption).foregroundStyle(.secondary)
-        Toggle("Rot penalties after death", isOn: seamlessRule("rot"))
-        Toggle("Offer to travel together", isOn: seamlessRule("travel"))
-        Toggle("Vote before travelling together", isOn: seamlessRule("vote"))
-        Toggle("Scale enemies with team size", isOn: seamlessRule("scale"))
-        Picker("Boss tempo", selection: Binding(get: {
-            model.online.seamlessHostRules.split(separator: ",").contains("relentless") ? "relentless" :
-            model.online.seamlessHostRules.split(separator: ",").contains("aggressive") ? "aggressive" : "vanilla"
-        }, set: { tempo in
-            var rules = model.online.seamlessHostRules.split(separator: ",").map(String.init)
-            rules.removeAll { ["off", "aggressive", "relentless"].contains($0) }
-            if tempo != "vanilla" { rules.append(tempo) }
-            model.online.seamlessHostRules = rules.isEmpty ? "off" : rules.joined(separator: ",")
-        })) {
-            Text("Vanilla").tag("vanilla")
-            Text("Aggressive").tag("aggressive")
-            Text("Relentless").tag("relentless")
-        }
-        TextField("Enemy HP, damage, poise multipliers", text: $model.online.seamlessHarderEnemies, prompt: Text("off or 3,1.5,3"))
-        Text("Host rules apply when you lead a team. Set each enemy multiplier from 1 to 10, or use off for the original difficulty.")
+        Text("Team leaders set enemy strength, friendly fire, Travel Together and other rules in the in-game team settings. Those choices are kept for the leader’s next team.")
             .font(.caption).foregroundStyle(.secondary)
         }
     }

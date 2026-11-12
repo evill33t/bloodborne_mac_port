@@ -784,6 +784,9 @@ message TeamRules {
     float enemy_hp = 6;
     float enemy_damage = 7;
     float enemy_poise = 8;
+    // Kaniel 2026-11-11: friendly fire, for a harder hunt: the teammates' strikes land on each
+    // other at all times (no duel: a teammate's lethal hit is a death as an enemy's is).
+    bool friendly_fire = 9;
 }
 
 enum BossTempo {

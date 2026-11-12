@@ -313,6 +313,12 @@ void LogNearbyEnemyControl() {
             if (ReadValue<u8>(character, 0x28) == 0) {
                 WatchEnemyHp(character + 0x28, ReadValue<u32>(character, 0x08));
             }
+        } else if (std::string_view{trace_enemy} == "max") {
+            // Bug audit 24: who makes a handed-out enemy's max again (data +0x104) again after the
+            // scaling's rescale (rig enemy-max-hp-handed-out 2026-11-10).
+            if (data >= 0x10000) {
+                WatchEnemyHp(data + EnemyMaxHpAgainAt, ReadValue<u32>(character, 0x08));
+            }
         } else if (std::string_view{trace_enemy} == "ctrl") {
             if (control >= 0x10000) {
                 WatchEnemyHp(control + 0x14, ReadValue<u32>(character, 0x08));
@@ -975,6 +981,11 @@ bool IsMe(const std::string& member) {
 } // namespace
 
 namespace Coop {
+
+std::optional<s32> DollHp() {
+    const u64 doll = DollCharacter();
+    return doll >= 0x10000 ? std::optional{CharacterHp(doll)} : std::nullopt;
+}
 
 std::vector<u32> OwnBossClaims() {
     std::scoped_lock lock{boss_claims_mutex};
@@ -2852,12 +2863,24 @@ void KeepEnemyDeathsInStep(bool sharing) {
             dead_since.erase(handle);
         }
     }
+    // When the host's board last had each one dead this visit (see BroughtBackByTheHost).
+    static std::unordered_map<u32, s64> host_dead;
+    static u64 host_dead_visit = 0;
+    if (visit != host_dead_visit) {
+        host_dead.clear();
+        host_dead_visit = visit;
+    }
     if (hosts_now) {
+        for (const CharacterShown& character : *hosts_now) {
+            if (character.dead) {
+                host_dead[character.handle] = now_ms;
+            }
+        }
         static BringBackGuard bring_back_guard;
         const s64 host_moved = session_host_moved_ms.load();
         const std::vector<u32> back = bring_back_guard.Filter(
-            visit, BroughtBackByTheHost(*hosts_now, dead_here, others, now_ms), *hosts_now,
-            dead_here);
+            visit, BroughtBackByTheHost(*hosts_now, dead_here, others, host_dead, now_ms),
+            *hosts_now, dead_here);
         static u32 held_logged = 0;
         if (!back.empty() &&
             HoldsBringBacks(now_ms, host_moved != 0 ? std::optional{host_moved} : std::nullopt)) {

@@ -47,6 +47,8 @@ HostRules ParseHostRules(std::string_view setting) {
             rules.boss_tempo = BossTempo::Aggressive;
         } else if (word == "relentless") {
             rules.boss_tempo = BossTempo::Relentless;
+        } else if (word == "friendlyfire") {
+            rules.friendly_fire = true;
         }
         if (comma == std::string_view::npos) {
             break;
@@ -71,6 +73,7 @@ std::string HostRulesText(const HostRules& rules) {
     add(rules.enemy_scaling, "scale");
     add(rules.boss_tempo == BossTempo::Aggressive, "aggressive");
     add(rules.boss_tempo == BossTempo::Relentless, "relentless");
+    add(rules.friendly_fire, "friendlyfire");
     return text.empty() ? "off" : text;
 }
 
@@ -273,15 +276,18 @@ std::optional<HarderEnemies> TeamScaledEnemies(std::size_t hunters, const Harder
 std::string ScreenRulesText(const HostRules& rules) {
     const HarderEnemies none{0.0f, 0.0f, 0.0f};
     const HarderEnemies strength = rules.enemies.value_or(none);
-    return fmt::format("{},{},{},{},{},{:g},{:g},{:g}", rules.rot ? 1 : 0,
+    return fmt::format("{},{},{},{},{},{:g},{:g},{:g}{}", rules.rot ? 1 : 0,
                        rules.travel_together ? 1 : 0, rules.travel_vote ? 1 : 0,
                        rules.enemy_scaling ? 1 : 0, static_cast<int>(rules.boss_tempo), strength.hp,
-                       strength.damage, strength.poise);
+                       strength.damage, strength.poise, rules.friendly_fire ? ",1" : "");
 }
 
 std::optional<HostRules> ParseScreenRules(std::string_view text) {
-    std::array<float, 8> values{};
+    // Eight values, and friendly fire's ninth when it is on (Kaniel 2026-11-11).
+    constexpr std::size_t Needed = 8;
+    std::array<float, Needed + 1> values{};
     std::size_t count = 0;
+    bool whole = false;
     while (count < values.size()) {
         const std::size_t comma = text.find(',');
         const std::string_view part = text.substr(0, comma);
@@ -292,11 +298,12 @@ std::optional<HostRules> ParseScreenRules(std::string_view text) {
         }
         values[count++] = value;
         if (comma == std::string_view::npos) {
+            whole = true;
             break;
         }
         text.remove_prefix(comma + 1);
     }
-    if (count != values.size()) {
+    if (!whole || count < Needed) {
         return std::nullopt;
     }
     const auto flag = [](float value) { return value == 0.0f || value == 1.0f; };
@@ -305,7 +312,7 @@ std::optional<HostRules> ParseScreenRules(std::string_view text) {
     };
     if (!flag(values[0]) || !flag(values[1]) || !flag(values[2]) || !flag(values[3]) ||
         !(values[4] == 0.0f || values[4] == 1.0f || values[4] == 2.0f) || !rate(values[5]) ||
-        !rate(values[6]) || !rate(values[7])) {
+        !rate(values[6]) || !rate(values[7]) || !flag(values[8])) {
         return std::nullopt;
     }
     HostRules rules;
@@ -315,7 +322,46 @@ std::optional<HostRules> ParseScreenRules(std::string_view text) {
     rules.enemy_scaling = values[3] == 1.0f;
     rules.boss_tempo = static_cast<BossTempo>(static_cast<int>(values[4]));
     rules.enemies = TeamStrength(values[5], values[6], values[7]);
+    rules.friendly_fire = values[8] == 1.0f;
     return rules;
+}
+
+std::optional<HostRules> OwnRulesAtStart(const char* env_rules, const char* env_harder,
+                                         std::string_view saved) {
+    if (env_rules != nullptr) {
+        HostRules rules = ParseHostRules(env_rules);
+        rules.enemies = ParseHarderEnemies(env_harder != nullptr ? env_harder : "");
+        return rules;
+    }
+    while (!saved.empty() &&
+           (saved.back() == '\n' || saved.back() == '\r' || saved.back() == ' ')) {
+        saved.remove_suffix(1);
+    }
+    return ParseScreenRules(saved);
+}
+
+std::string TeamChoicesText(const TeamChoices& choices) {
+    return fmt::format("{},{},{}", choices.join, choices.invaders ? 1 : 0, choices.death_mode);
+}
+
+std::optional<TeamChoices> ParseTeamChoices(std::string_view text) {
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r' || text.back() == ' ')) {
+        text.remove_suffix(1);
+    }
+    // Three single digits and two commas.
+    if (text.size() != 5 || text[1] != ',' || text[3] != ',' || text[0] < '0' || text[0] > '2' ||
+        text[2] < '0' || text[2] > '1' || text[4] < '0' || text[4] > '1') {
+        return std::nullopt;
+    }
+    return TeamChoices{.join = static_cast<u32>(text[0] - '0'),
+                       .invaders = text[2] == '1',
+                       .death_mode = static_cast<u32>(text[4] - '0')};
+}
+
+TeamChoices ChoicesForNewTeam(const TeamChoices& team, const TeamChoices& kept) {
+    return TeamChoices{.join = team.join == 0 ? kept.join : team.join,
+                       .invaders = team.invaders || kept.invaders,
+                       .death_mode = team.death_mode == 0 ? kept.death_mode : team.death_mode};
 }
 
 std::optional<HarderEnemies> TeamStrength(float hp, float damage, float poise) {

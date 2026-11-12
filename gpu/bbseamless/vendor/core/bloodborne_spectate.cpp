@@ -277,6 +277,50 @@ std::optional<u32> BossBarHandle(std::span<const u8> gauges) {
     return std::nullopt;
 }
 
+bool AwayBossBars::PutAway(std::span<u8> gauges, u32 map) {
+    if (!BossBarsUp(gauges)) {
+        return false;
+    }
+    kept.assign(gauges.begin(), gauges.end());
+    kept_map = map;
+    ClearBossGauges(gauges);
+    return true;
+}
+
+AwayBossBars::Outcome AwayBossBars::Tick(std::span<u8> gauges, u32 map,
+                                         const std::optional<LampPosition>& boss, bool boss_dead,
+                                         const std::optional<LampPosition>& me) {
+    if (kept.empty()) {
+        return Outcome::Dropped;
+    }
+    // Over for this player: its boss dead, another map, or a fight the game shows itself.
+    if (map != kept_map || boss_dead || BossBarsUp(gauges) || gauges.size() != kept.size()) {
+        Drop();
+        return Outcome::Dropped;
+    }
+    if (!boss || !me ||
+        std::hypot((*boss)[0] - (*me)[0], (*boss)[1] - (*me)[1], (*boss)[2] - (*me)[2]) >
+            BossLeaveMetres) {
+        return Outcome::Away;
+    }
+    std::ranges::copy(kept, gauges.begin());
+    Drop();
+    return Outcome::Back;
+}
+
+void AwayBossBars::Drop() {
+    kept.clear();
+    kept_map = 0;
+}
+
+bool AwayBossBars::Holding() const {
+    return !kept.empty();
+}
+
+std::optional<u32> AwayBossBars::Handle() const {
+    return kept.empty() ? std::nullopt : BossBarHandle(kept);
+}
+
 DeathCatch CatchOf(NoDeadCheck check, bool armed, bool down, bool answer, bool boss_fight,
                    bool spectating) {
     if (answer) {

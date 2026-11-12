@@ -45,6 +45,15 @@ constexpr s32 AltarFlagBase(s32 altar) {
 // The altar whose record `flag` is in (94k00000-94k05999), if any.
 std::optional<s32> AltarOfFlag(s32 flag);
 
+// Altar k's own copy of a chalice dungeon's flags (14k00000-14k09999: the view 1290xxxx + (11 + k)
+// * 100000): the altar it belongs to, if any.
+std::optional<s32> AltarOfDungeonCopy(s32 flag);
+// Whether `mine` (this game's altar `altar` record) names the dungeon the team world's names: the
+// same first 8 bytes (dungeon word and ChannelId; the rest is each member's progress), the team's
+// read from the world's flags on (`team_on`, sorted). Discord audit A6: a teammate's doors go only
+// into the same dungeon, never into a member's own other dungeon on that altar.
+bool SameAltarDungeon(std::span<const u8> mine, std::span<const s32> team_on, s32 altar);
+
 // The dungeon a record's first word names (1D, key, variant, layout); none without the 0x1D.
 struct AltarDungeon {
     u8 key = 0;

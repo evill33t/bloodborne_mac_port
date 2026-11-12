@@ -23,6 +23,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -124,6 +125,9 @@ bool team_host = false;
 // see TeamHostTookOver.
 std::atomic<bool> took_over{false};
 bool personal_world_due = false;
+// How this session's loads take the team's world (HowToTakeTeamWorld), decided at the first load
+// that has the server's copy; none before, and alone.
+std::optional<TeamWorldTake> team_take;
 // The clear counts this game's loads saw per save slot, and a load found to be the next
 // playthrough's not yet handled (ApplyTeamWorldOnLoad keeps that save's new world).
 PlaythroughWatch playthroughs;
@@ -280,10 +284,10 @@ std::mutex kept_rot_mutex;
 std::optional<std::vector<u32>> kept_rot;
 
 u8 RulesBits(const HostRules& rules) {
-    return static_cast<u8>((rules.rot ? 1 : 0) | (rules.travel_together ? 2 : 0) |
-                           (rules.travel_vote && rules.travel_together ? 4 : 0) |
-                           (rules.enemy_scaling ? 8 : 0) |
-                           (static_cast<u8>(rules.boss_tempo) & 3) << 4);
+    return static_cast<u8>(
+        (rules.rot ? 1 : 0) | (rules.travel_together ? 2 : 0) |
+        (rules.travel_vote && rules.travel_together ? 4 : 0) | (rules.enemy_scaling ? 8 : 0) |
+        (static_cast<u8>(rules.boss_tempo) & 3) << 4 | (rules.friendly_fire ? 0x40 : 0));
 }
 
 HostRules RulesOf(u8 bits) {
@@ -292,7 +296,8 @@ HostRules RulesOf(u8 bits) {
             .travel_together = (bits & 2) != 0,
             .travel_vote = (bits & 4) != 0,
             .enemy_scaling = (bits & 8) != 0,
-            .boss_tempo = tempo <= 2 ? static_cast<BossTempo>(tempo) : BossTempo::Vanilla};
+            .boss_tempo = tempo <= 2 ? static_cast<BossTempo>(tempo) : BossTempo::Vanilla,
+            .friendly_fire = (bits & 0x40) != 0};
 }
 
 BossTempo BossTempoOf(bbcoop::BossTempo tempo) {
@@ -306,6 +311,9 @@ BossTempo BossTempoOf(bbcoop::BossTempo tempo) {
     }
 }
 
+void SetOwnRules(const HostRules& rules, bool keep);
+TeamChoices KeptTeamChoices();
+
 void NoteTeamRules(const bbcoop::LobbyState& state, const std::string& me) {
     const bool team = state.has_team();
     const bbcoop::TeamRules& r = state.team().rules();
@@ -314,7 +322,8 @@ void NoteTeamRules(const bbcoop::LobbyState& state, const std::string& me) {
                           .travel_vote = r.travel_vote(),
                           .enemy_scaling = r.enemy_scaling(),
                           .boss_tempo = BossTempoOf(r.boss_tempo()),
-                          .enemies = TeamStrength(r.enemy_hp(), r.enemy_damage(), r.enemy_poise())};
+                          .enemies = TeamStrength(r.enemy_hp(), r.enemy_damage(), r.enemy_poise()),
+                          .friendly_fire = r.friendly_fire()};
     const u8 bits = RulesBits(rules);
     const bool was_in = in_team.exchange(team);
     const bool strength_changed = team_enemy_hp.exchange(r.enemy_hp()) != r.enemy_hp() |
@@ -327,6 +336,46 @@ void NoteTeamRules(const bbcoop::LobbyState& state, const std::string& me) {
                                                rules.enemies->damage, rules.enemies->poise)
                                  : std::string{"standard"});
     }
+    // Kaniel 2026-11-11: a team this player just made (alone in it, not started) takes the joining,
+    // invaders and death mode it kept from its last one, where the team still has the defaults.
+    // Under team_mutex (TakeLobbyMessage): straight into the outbox.
+    if (team && !was_in && state.team().leader() == me && state.team().members_size() == 1 &&
+        !state.team().started()) {
+        const bbcoop::Team& made = state.team();
+        const TeamChoices now{.join = static_cast<u32>(made.join()),
+                              .invaders = made.allow_invaders(),
+                              .death_mode = made.death_mode()};
+        const TeamChoices wanted = ChoicesForNewTeam(now, KeptTeamChoices());
+        const auto ask = [](bbcoop::TeamRequest::Action action) {
+            bbcoop::Envelope envelope;
+            envelope.mutable_team_request()->set_action(action);
+            return envelope;
+        };
+        if (wanted.join != now.join) {
+            bbcoop::Envelope envelope = ask(bbcoop::TeamRequest::OPEN);
+            envelope.mutable_team_request()->set_join(static_cast<bbcoop::Team::Join>(wanted.join));
+            lobby_outbox.push_back(std::move(envelope));
+        }
+        if (wanted.invaders != now.invaders) {
+            bbcoop::Envelope envelope = ask(bbcoop::TeamRequest::INVADERS);
+            envelope.mutable_team_request()->set_allow(wanted.invaders);
+            lobby_outbox.push_back(std::move(envelope));
+        }
+        if (wanted.death_mode != now.death_mode) {
+            bbcoop::Envelope envelope = ask(bbcoop::TeamRequest::DEATH_MODE);
+            envelope.mutable_team_request()->set_death_mode(wanted.death_mode);
+            lobby_outbox.push_back(std::move(envelope));
+        }
+        if (wanted != now) {
+            LOG_NOTICE(Debug, "Co-op team lobby: the new team takes this leader's kept settings {}",
+                       TeamChoicesText(wanted));
+        }
+    }
+    // The team this player leads (its own, or one a leader that left handed over): its rules are
+    // this player's own until it sets others, so a hello again (the link back) asks for the same.
+    if (team && state.team().leader() == me) {
+        SetOwnRules(rules, false);
+    }
     if (team) {
         for (const bbcoop::TeamMember& m : state.team().members()) {
             if (m.member() == me) {
@@ -337,37 +386,147 @@ void NoteTeamRules(const bbcoop::LobbyState& state, const std::string& me) {
     }
 }
 
-// Kaniel 2026-11-05: the rules this game asks for its team: the ones its leader set on the team
-// screen (SetTeamRulesFromScreen), else its launcher's (SHADPS4_BLOODBORNE_HOST_RULES and the
-// enemies' strength, SHADPS4_BLOODBORNE_HARDER_ENEMIES), else none (the public server's launcher
-// sets none: the team starts with the server's default rules).
-std::mutex screen_rules_mutex;
-std::optional<bbcoop::TeamRules> screen_rules;
+// Kaniel 2026-11-11: the launcher sets no party rules any more: the team screen is the one place
+// for them. This player's own rules (the team it makes starts with them, and it plays by them out
+// of a team): the ones it set on the team screen, kept in the user folder for the next start
+// (OwnRulesAtStart: the dev settings' go over the kept ones); none until it sets any (the team it
+// makes takes the server's default).
+std::mutex own_rules_mutex;
+std::optional<HostRules> own_rules;
+bool own_rules_read = false;
 
-std::optional<bbcoop::TeamRules> OwnTeamRules() {
+std::filesystem::path OwnRulesFile() {
+    return Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "bloodborne_team_rules.txt";
+}
+
+// Under own_rules_mutex.
+std::optional<HostRules>& OwnRulesLocked() {
+    if (!own_rules_read) {
+        own_rules_read = true;
+        std::string saved;
+        {
+            std::ifstream file{OwnRulesFile(), std::ios::binary};
+            std::getline(file, saved);
+        }
+        own_rules = OwnRulesAtStart(std::getenv("SHADPS4_BLOODBORNE_HOST_RULES"),
+                                    std::getenv("SHADPS4_BLOODBORNE_HARDER_ENEMIES"), saved);
+        LOG_INFO(Debug, "Co-op host rules: this player's own are {}",
+                 own_rules ? ScreenRulesText(*own_rules) : std::string{"not set"});
+    }
+    return own_rules;
+}
+
+// The team screen's rules of the team this player leads: its own from now on (a hello again asks
+// for them, not for older ones); `keep` (its own press) writes them for the next start.
+void SetOwnRules(const HostRules& rules, bool keep) {
+    std::scoped_lock lock{own_rules_mutex};
+    OwnRulesLocked() = rules;
+    if (!keep) {
+        return;
+    }
+    // Whole or not at all: a game closed mid-write leaves the old line.
+    const std::filesystem::path path = OwnRulesFile();
+    std::filesystem::path partial = path;
+    partial += ".part";
+    std::error_code error;
     {
-        std::scoped_lock lock{screen_rules_mutex};
-        if (screen_rules) {
-            return screen_rules;
+        std::ofstream file{partial, std::ios::binary | std::ios::trunc};
+        file << ScreenRulesText(rules) << '\n';
+        if (!file.flush()) {
+            LOG_WARNING(Debug, "Co-op host rules: the team's rules could not be kept in {}",
+                        path.string());
+            return;
         }
     }
-    if (std::getenv("SHADPS4_BLOODBORNE_HOST_RULES") == nullptr) {
-        return std::nullopt;
+    std::filesystem::rename(partial, path, error);
+    if (error) {
+        LOG_WARNING(Debug, "Co-op host rules: the team's rules could not be kept in {}: {}",
+                    path.string(), error.message());
+    } else {
+        LOG_INFO(Debug, "Co-op host rules: kept {} for the next start", ScreenRulesText(rules));
     }
-    const HostRules& own = OwnHostRules();
+}
+
+bbcoop::TeamRules TeamRulesOf(const HostRules& rules) {
     bbcoop::TeamRules r;
-    r.set_rot(own.rot);
-    r.set_travel_together(own.travel_together);
-    r.set_travel_vote(own.travel_vote);
-    r.set_enemy_scaling(own.enemy_scaling);
-    r.set_boss_tempo(static_cast<bbcoop::BossTempo>(own.boss_tempo));
-    const char* harder = std::getenv("SHADPS4_BLOODBORNE_HARDER_ENEMIES");
-    if (const auto strength = ParseHarderEnemies(harder != nullptr ? harder : "")) {
-        r.set_enemy_hp(strength->hp);
-        r.set_enemy_damage(strength->damage);
-        r.set_enemy_poise(strength->poise);
+    r.set_rot(rules.rot);
+    r.set_travel_together(rules.travel_together);
+    r.set_travel_vote(rules.travel_vote && rules.travel_together);
+    r.set_enemy_scaling(rules.enemy_scaling);
+    r.set_boss_tempo(static_cast<bbcoop::BossTempo>(rules.boss_tempo));
+    r.set_friendly_fire(rules.friendly_fire);
+    if (rules.enemies) {
+        r.set_enemy_hp(rules.enemies->hp);
+        r.set_enemy_damage(rules.enemies->damage);
+        r.set_enemy_poise(rules.enemies->poise);
     }
     return r;
+}
+
+// Kaniel 2026-11-11: the leader's joining, invaders and death mode (TeamChoices), kept the same
+// way: read once, written at each press of its own on the team screen.
+std::mutex team_choices_mutex;
+std::optional<TeamChoices> team_choices;
+
+std::filesystem::path TeamChoicesFile() {
+    return Common::FS::GetUserPath(Common::FS::PathType::UserDir) / "bloodborne_team_choices.txt";
+}
+
+// Under team_choices_mutex.
+TeamChoices& TeamChoicesLocked() {
+    if (!team_choices) {
+        std::string saved;
+        {
+            std::ifstream file{TeamChoicesFile(), std::ios::binary};
+            std::getline(file, saved);
+        }
+        team_choices = ParseTeamChoices(saved).value_or(TeamChoices{});
+        LOG_INFO(Debug, "Co-op team lobby: this player's kept team settings are {}",
+                 TeamChoicesText(*team_choices));
+    }
+    return *team_choices;
+}
+
+TeamChoices KeptTeamChoices() {
+    std::scoped_lock lock{team_choices_mutex};
+    return TeamChoicesLocked();
+}
+
+// A press on the team screen's joining, invaders or death mode row (KeepTeamChoice): kept for
+// the next team.
+void StoreTeamChoice(const std::function<void(TeamChoices&)>& set) {
+    std::scoped_lock lock{team_choices_mutex};
+    TeamChoices& choices = TeamChoicesLocked();
+    const TeamChoices before = choices;
+    set(choices);
+    if (choices == before) {
+        return;
+    }
+    const std::filesystem::path path = TeamChoicesFile();
+    std::filesystem::path partial = path;
+    partial += ".part";
+    {
+        std::ofstream file{partial, std::ios::binary | std::ios::trunc};
+        file << TeamChoicesText(choices) << '\n';
+        if (!file.flush()) {
+            return;
+        }
+    }
+    std::error_code error;
+    std::filesystem::rename(partial, path, error);
+    if (!error) {
+        LOG_INFO(Debug, "Co-op team lobby: kept the team settings {} for the next team",
+                 TeamChoicesText(choices));
+    }
+}
+
+// The rules this game asks for its team at its hello: its own, when it has any.
+std::optional<bbcoop::TeamRules> OwnTeamRules() {
+    std::scoped_lock lock{own_rules_mutex};
+    if (const std::optional<HostRules>& own = OwnRulesLocked()) {
+        return TeamRulesOf(*own);
+    }
+    return std::nullopt;
 }
 
 bool TakeLobbyMessage(const bbcoop::Envelope& envelope) {
@@ -1609,6 +1768,7 @@ bool HoldTitleLoadForTeam(u32 slot, bool fresh) {
         }
         team_world_due = decision.start.has_value();
         team_world_taken = false;
+        team_take.reset();
         team_world_blocks.clear();
         team_host = decision.start && decision.start->host() == me;
         personal_world_due = !decision.start.has_value();
@@ -1745,7 +1905,10 @@ void PS4_SYSV_ABI NoteRemoStep(u64 step, const GuestRegisterSnapshot*) {
 void UpdateTeamLoad() {
     const s64 now_ms = SteadyMilliseconds();
     const u64 global = GetGlobalState();
-    const bool loading = global < 0x10000 || TryRead<u8>(global, 0x08).value_or(1) != 0;
+    // A joined guest's trip in place still to come counts as its load (TripAfterJoin::Due): the
+    // one screen covers the join and that trip.
+    const bool loading =
+        global < 0x10000 || TryRead<u8>(global, 0x08).value_or(1) != 0 || TripAfterJoinDue();
     const u64 manager = GetMatchingState();
     const s32 matching = manager >= 0x10000 && HasMemoryAccess(manager, 0x128, MemoryProt::CpuRead)
                              ? ReadValue<s32>(manager, 0x124)
@@ -1938,6 +2101,7 @@ void LeaveTeamInPlay(u64 manager) {
         team_session.reset();
         team_world_due = false;
         team_world_taken = false;
+        team_take.reset();
         team_world_blocks.clear();
         team_host = false;
         personal_world_due = true;
@@ -2042,6 +2206,7 @@ void AdoptTeamInPlay(const bbcoop::TeamStart& start) {
         team_session.reset();
         team_world_due = true;
         team_world_taken = false;
+        team_take.reset();
         team_world_blocks.clear();
         team_host = start.host() == me;
         personal_world_due = false;
@@ -2466,6 +2631,11 @@ std::optional<bbcoop::LobbyState> TeamLobbyState() {
     return team_gate.Lobby();
 }
 
+std::string TeamSessionHost() {
+    std::scoped_lock lock{team_mutex};
+    return team_session ? team_session->host() : std::string{};
+}
+
 std::string TeamLobbyMember() {
     std::scoped_lock lock{team_mutex};
     return lobby_member;
@@ -2493,14 +2663,14 @@ std::string CharacterNameOf(std::string_view member) {
     return {};
 }
 
-const HostRules& OwnHostRules() {
-    static const HostRules own = [] {
-        const char* setting = std::getenv("SHADPS4_BLOODBORNE_HOST_RULES");
-        const HostRules rules = ParseHostRules(setting != nullptr ? setting : "");
-        LOG_INFO(Debug, "Co-op host rules: this launcher's are {}", HostRulesText(rules));
-        return rules;
-    }();
-    return own;
+HostRules OwnHostRules() {
+    std::scoped_lock lock{own_rules_mutex};
+    return OwnRulesLocked().value_or(HostRules{});
+}
+
+bool HasOwnHostRules() {
+    std::scoped_lock lock{own_rules_mutex};
+    return OwnRulesLocked().has_value();
 }
 
 HostRules ActiveHostRules() {
@@ -2537,28 +2707,15 @@ void ReportRot(std::span<const u32> rot) {
 void TeamLobbyRequest(bbcoop::TeamRequest::Action action, const std::string& id) {
     bbcoop::Envelope envelope;
     // Kaniel 2026-11-05: the leader's rules from the team screen (ScreenRulesText): the team's
-    // from now on, and this game's own for its next hellos (OwnTeamRules).
+    // from now on, and this player's own for its next hellos and its next start (SetOwnRules).
     if (action == bbcoop::TeamRequest::RULES) {
         const auto parsed = ParseScreenRules(id);
         if (!parsed) {
             LOG_WARNING(Debug, "Co-op team lobby: the team screen's rules {} are not rules", id);
             return;
         }
-        bbcoop::TeamRules r;
-        r.set_rot(parsed->rot);
-        r.set_travel_together(parsed->travel_together);
-        r.set_travel_vote(parsed->travel_vote && parsed->travel_together);
-        r.set_enemy_scaling(parsed->enemy_scaling);
-        r.set_boss_tempo(static_cast<bbcoop::BossTempo>(parsed->boss_tempo));
-        if (parsed->enemies) {
-            r.set_enemy_hp(parsed->enemies->hp);
-            r.set_enemy_damage(parsed->enemies->damage);
-            r.set_enemy_poise(parsed->enemies->poise);
-        }
-        {
-            std::scoped_lock lock{screen_rules_mutex};
-            screen_rules = r;
-        }
+        const bbcoop::TeamRules r = TeamRulesOf(*parsed);
+        SetOwnRules(*parsed, true);
         envelope.mutable_team_request()->set_action(bbcoop::TeamRequest::RULES);
         *envelope.mutable_team_request()->mutable_rules() = r;
         LOG_NOTICE(Debug, "Co-op team lobby: the team screen sets the team's rules {}", id);
@@ -2616,6 +2773,35 @@ void WriteWholeFile(const std::filesystem::path& path, const std::string& text) 
     }
 }
 
+// The worlds this slot's save made (HomeWorlds); none: no list yet (a save from before it, or one
+// that never took a team's world).
+std::filesystem::path HomeWorldFile(int slot) {
+    return Common::FS::GetUserPath(Common::FS::PathType::UserDir) /
+           SlotFileName("home_world", slot);
+}
+
+std::optional<HomeWorlds> ReadHomeWorlds(int slot) {
+    return ParseHomeWorlds(ReadWholeFile(HomeWorldFile(slot)));
+}
+
+// The save's own world is a team's from now on (it made the team's world): the one kept aside
+// from before is over. Out of the way, never deleted (the launcher's save backups take it too).
+void RetireOwnWorld(int slot) {
+    std::error_code error;
+    if (!std::filesystem::exists(PersonalWorldFile(slot), error)) {
+        return;
+    }
+    const std::filesystem::path old = Common::FS::GetUserPath(Common::FS::PathType::UserDir) /
+                                      SlotFileName("personal_world_before_home", slot);
+    std::filesystem::remove(old, error);
+    std::filesystem::rename(PersonalWorldFile(slot), old, error);
+    if (error) {
+        LOG_ERROR(Debug, "Co-op team world: could not move slot {}'s old own world aside: {}", slot,
+                  error.message());
+        std::filesystem::remove(PersonalWorldFile(slot), error);
+    }
+}
+
 struct WorldStore {
     FlagStore store;
     std::vector<FlagBlockBits> blocks;
@@ -2646,6 +2832,50 @@ size_t SetWorldFlags(const WorldStore& world, const WorldFlags& target) {
         LOG_INFO(Debug, "Co-op team world: flags set to the world's (-off):{}", which);
     }
     return changes.size();
+}
+
+// This save's own world back where another's was in it, block by block as the loads bring them
+// (the file keeps the blocks still to come): alone again, or back in a world it made. Whether
+// any flag store block was looked at (the caller's copy of the store is old then). team_mutex
+// held.
+bool PutOwnWorldBack(int slot, std::string_view why) {
+    const std::string text = ReadWholeFile(PersonalWorldFile(slot));
+    if (text.empty()) {
+        personal_world_due = false;
+        return false;
+    }
+    auto own = ParseWorldFlags(text);
+    std::optional<WorldStore> store = ReadWorldStore();
+    if (!own || !store) {
+        LOG_WARNING(Debug, "Co-op team world: slot {}'s own world {}", slot,
+                    own ? "waits (the flags are not readable now)" : "does not read: left");
+        personal_world_due = own.has_value();
+        return false;
+    }
+    std::erase_if(store->blocks, [&](const FlagBlockBits& block) {
+        return !std::binary_search(own->blocks.begin(), own->blocks.end(), block.id);
+    });
+    if (store->blocks.empty()) {
+        return false;
+    }
+    const size_t changed = SetWorldFlags(*store, *own);
+    const u32 per_block = store->store.flags_per_block;
+    for (const FlagBlockBits& block : store->blocks) {
+        std::erase(own->blocks, block.id);
+        std::erase_if(own->on, [&](s32 flag) { return u32(flag) / per_block == block.id; });
+    }
+    if (own->blocks.empty()) {
+        std::error_code error;
+        std::filesystem::remove(PersonalWorldFile(slot), error);
+        personal_world_due = false;
+    } else {
+        WriteWholeFile(PersonalWorldFile(slot), FormatWorldFlags(*own));
+    }
+    LOG_INFO(Debug,
+             "Co-op team world: slot {} {}: its own world is back in {} blocks ({} flags "
+             "changed, {} blocks to come)",
+             slot, why, store->blocks.size(), changed, own->blocks.size());
+    return true;
 }
 
 } // namespace
@@ -2742,43 +2972,44 @@ void ApplyTeamWorldOnLoad(bool trip) {
     if (personal && slot >= 0) {
         // Alone again: this save's own world back where a team's was in it, block by block as
         // the loads bring them; the file keeps the blocks still to come.
-        const std::string text = ReadWholeFile(PersonalWorldFile(slot));
         std::scoped_lock lock{team_mutex};
-        if (text.empty()) {
+        // Noted with its home worlds: its next hunt as their host goes on from this save
+        // (HowToTakeTeamWorld).
+        if (auto home = ReadHomeWorlds(slot); home && !home->worlds.empty() && !home->alone) {
+            home->alone = true;
+            WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds(*home));
+        }
+        std::error_code error;
+        if (!std::filesystem::exists(PersonalWorldFile(slot), error)) {
             personal_world_due = false;
             return;
         }
-        auto own = ParseWorldFlags(text);
-        std::optional<WorldStore> store = ReadWorldStore();
-        if (!own || !store) {
-            LOG_WARNING(Debug, "Co-op team world: slot {}'s own world {}", slot,
-                        own ? "waits (the flags are not readable now)" : "does not read: left");
-            personal_world_due = own.has_value();
-            return;
+        // A save from before the home worlds (its own world aside, no list): the world it last
+        // played is its own when its character hosted it, and nothing comes back over it
+        // (seixas' host 2026-10-29: alone before his friend joined, the DLC's lamps were gone).
+        if (!ReadHomeWorlds(slot)) {
+            const std::string hint = ReadTeamWorldHint(slot);
+            const auto& lobby = team_gate.Lobby();
+            const OldSaveWorld old = OldSavesWorld(lobby ? &*lobby : nullptr, hint, lobby_name);
+            if (old == OldSaveWorld::Made) {
+                HomeWorlds home;
+                home.Add(hint);
+                WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds(home));
+                RetireOwnWorld(slot);
+                personal_world_due = false;
+                LOG_INFO(Debug,
+                         "Co-op team world: slot {} plays alone: world {} is its own (its "
+                         "character hosted it), its world stays as it is",
+                         slot, hint);
+                return;
+            }
+            LOG_INFO(Debug,
+                     "Co-op team world: slot {} plays alone, a save from before the home "
+                     "worlds: its last world {} ({})",
+                     slot, hint.empty() ? "none" : hint,
+                     old == OldSaveWorld::Visited ? "another character's" : "not known here");
         }
-        std::erase_if(store->blocks, [&](const FlagBlockBits& block) {
-            return !std::binary_search(own->blocks.begin(), own->blocks.end(), block.id);
-        });
-        if (store->blocks.empty()) {
-            return;
-        }
-        const size_t changed = SetWorldFlags(*store, *own);
-        const u32 per_block = store->store.flags_per_block;
-        for (const FlagBlockBits& block : store->blocks) {
-            std::erase(own->blocks, block.id);
-            std::erase_if(own->on, [&](s32 flag) { return u32(flag) / per_block == block.id; });
-        }
-        if (own->blocks.empty()) {
-            std::error_code error;
-            std::filesystem::remove(PersonalWorldFile(slot), error);
-            personal_world_due = false;
-        } else {
-            WriteWholeFile(PersonalWorldFile(slot), FormatWorldFlags(*own));
-        }
-        LOG_INFO(Debug,
-                 "Co-op team world: slot {} plays alone: its own world is back in {} "
-                 "blocks ({} flags changed, {} blocks to come)",
-                 slot, store->blocks.size(), changed, own->blocks.size());
+        PutOwnWorldBack(slot, "plays alone");
         return;
     }
     if (!due) {
@@ -2789,6 +3020,7 @@ void ApplyTeamWorldOnLoad(bool trip) {
         return; // the next call (the flags readable, the slot known)
     }
     std::scoped_lock lock{team_mutex};
+    const std::string world_id{WorldIdOfParty(team_party)};
     if (!world->exists()) {
         if (!team_world_taken) {
             LOG_INFO(Debug, "Co-op team world: the team has no world yet: {}",
@@ -2801,6 +3033,70 @@ void ApplyTeamWorldOnLoad(bool trip) {
             for (const FlagBlockBits& block : store->blocks) {
                 team_world_blocks.insert(block.id);
             }
+            // It is this save's home world from here: alone, the save keeps it.
+            HomeWorlds home = ReadHomeWorlds(slot).value_or(HomeWorlds{});
+            if (home.Add(world_id)) {
+                WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds(home));
+                RetireOwnWorld(slot);
+                LOG_INFO(Debug,
+                         "Co-op team world: world {} is made from slot {}'s save: its home "
+                         "world ({} in all)",
+                         world_id, slot, home.worlds.size());
+            }
+        }
+        team_world_taken = true;
+        return;
+    }
+    if (!team_take) {
+        std::optional<HomeWorlds> home = ReadHomeWorlds(slot);
+        // A save from before the home worlds, hosting the world its own character's reports
+        // made: its home world.
+        if (!home && team_host && !lobby_name.empty() && world->character() == lobby_name) {
+            home.emplace();
+            if (home->Add(world_id)) {
+                WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds(*home));
+                RetireOwnWorld(slot);
+                LOG_INFO(Debug,
+                         "Co-op team world: world {} is slot {}'s home world (its character "
+                         "hosted it before the home worlds were kept)",
+                         world_id, slot);
+            }
+        }
+        team_take =
+            HowToTakeTeamWorld(home.value_or(HomeWorlds{}), world_id, team_host, world->version());
+        // In a team again: decided for this session, and the next one starts from the server's.
+        if (home && home->alone) {
+            home->alone = false;
+            WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds(*home));
+        }
+        LOG_INFO(Debug, "Co-op team world: slot {} takes world {} (version {}) as {}", slot,
+                 world_id, world->version(),
+                 *team_take == TeamWorldTake::Aside  ? "another's: its own goes aside"
+                 : *team_take == TeamWorldTake::Home ? "its home world: the server's goes in"
+                                                     : "its home world: this save leads");
+    }
+    if (*team_take != TeamWorldTake::Aside) {
+        // Its own world kept aside while it visited another's comes back first: the home world
+        // goes on from it.
+        std::error_code error;
+        if (std::filesystem::exists(PersonalWorldFile(slot), error) &&
+            PutOwnWorldBack(slot, "is back in its home world")) {
+            store = ReadWorldStore();
+            if (!store) {
+                return;
+            }
+        }
+    }
+    if (*team_take == TeamWorldTake::SaveLeads) {
+        // As the host whose save made it: never the server's copy over the save's.
+        for (const FlagBlockBits& block : store->blocks) {
+            team_world_blocks.insert(block.id);
+        }
+        if (!team_world_taken) {
+            LOG_INFO(Debug,
+                     "Co-op team world: this host's save is its home world's latest ({} "
+                     "blocks): it goes to the server as it is",
+                     store->blocks.size());
         }
         team_world_taken = true;
         return;
@@ -2834,8 +3130,16 @@ void ApplyTeamWorldOnLoad(bool trip) {
         return;
     }
     // This save's own world aside first, block by block as the loads bring them: a block the file
-    // has already (a save that held a team's before) keeps what the file says.
-    {
+    // has already (a save that held a team's before) keeps what the file says. Never in its home
+    // world: its own world is that one.
+    if (*team_take == TeamWorldTake::Aside) {
+        // A world kept aside from here on has a list beside it (an empty one for a save that made
+        // no world): only a save from before the lists has the one without the other.
+        std::error_code error;
+        if (!std::filesystem::exists(PersonalWorldFile(slot), error) &&
+            !std::filesystem::exists(HomeWorldFile(slot), error)) {
+            WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds({}));
+        }
         WorldFlags own =
             ParseWorldFlags(ReadWholeFile(PersonalWorldFile(slot))).value_or(WorldFlags{});
         std::vector<FlagBlockBits> new_blocks;
@@ -2881,6 +3185,11 @@ std::vector<u32> TeamWorldBlocksForGuest() {
     return WorldFlagsOf(*team_world).blocks;
 }
 
+bool SavePlaysInTeam() {
+    std::scoped_lock lock{team_mutex};
+    return team_switch && !team_party.empty();
+}
+
 std::vector<s32> TeamWorldFlagsOnForGuest() {
     std::scoped_lock lock{team_mutex};
     if (!team_switch || team_host || !team_world || !team_world->exists()) {
@@ -2895,6 +3204,24 @@ void TickTeamWorld(s64 now_ms) {
     }
     {
         std::scoped_lock lock{team_mutex};
+        // The host of its home world (NoteVersion: no other world's is kept): the server's copy
+        // as it stands is this save's (its own reports', or taken at this session's loads). Kept
+        // with the list, so its next session knows the server's copy for its own
+        // (HowToTakeTeamWorld).
+        static u64 noted_version = 0;
+        static std::string noted_world;
+        if (team_host && team_world_taken && team_world && team_world->exists()) {
+            const std::string world_id{WorldIdOfParty(team_party)};
+            const int slot = character_slot.load();
+            if (slot >= 0 && (team_world->version() != noted_version || world_id != noted_world)) {
+                noted_version = team_world->version();
+                noted_world = world_id;
+                if (auto home = ReadHomeWorlds(slot);
+                    home && home->NoteVersion(world_id, noted_version)) {
+                    WriteWholeFile(HomeWorldFile(slot), FormatHomeWorlds(*home));
+                }
+            }
+        }
         if (!team_host || team_party.empty() || !team_world_taken || !team_world ||
             now_ms - team_world_reported_ms < TeamWorldReportMs) {
             return;
@@ -3161,7 +3488,8 @@ bool RunTeamTitleVerb(const AutoplayCommand& command, bool begun, double elapsed
                  .travel_vote = r.travel_vote(),
                  .enemy_scaling = r.enemy_scaling(),
                  .boss_tempo = BossTempoOf(r.boss_tempo()),
-                 .enemies = TeamStrength(r.enemy_hp(), r.enemy_damage(), r.enemy_poise())});
+                 .enemies = TeamStrength(r.enemy_hp(), r.enemy_damage(), r.enemy_poise()),
+                 .friendly_fire = r.friendly_fire()});
         };
         done =
             lobby && lobby->has_team() && team_rules_text(lobby->team().rules()) == command.args[0];
@@ -3477,6 +3805,16 @@ void InvasionRequest(bool cancel) {
              send ? "to the server" : "nothing to send");
     if (send) {
         SendInvadeRequest(cancel);
+    }
+}
+
+void KeepTeamChoice(bbcoop::TeamRequest::Action action, u32 value) {
+    if (action == bbcoop::TeamRequest::OPEN && value <= 2) {
+        StoreTeamChoice([value](TeamChoices& choices) { choices.join = value; });
+    } else if (action == bbcoop::TeamRequest::INVADERS) {
+        StoreTeamChoice([value](TeamChoices& choices) { choices.invaders = value != 0; });
+    } else if (action == bbcoop::TeamRequest::DEATH_MODE && value <= 1) {
+        StoreTeamChoice([value](TeamChoices& choices) { choices.death_mode = value; });
     }
 }
 

@@ -43,7 +43,7 @@ bool map_view_read = false;
 struct MapTrip {
     bool active = false;
     s32 point = 0;
-    const LampPoint* planned = nullptr;
+    std::optional<LampPoint> planned;
     MapTripProgress progress;
     Clock::time_point started{};
     std::optional<Clock::time_point> fix_at;
@@ -152,7 +152,7 @@ void TickMapTripArrival(bool loading) {
         WriteValue(global, 0x1528, map_trip.point);
     }
     const auto at = LocalPlayerPosition();
-    const bool move = ArrivalNeedsMove(map_trip.planned, at);
+    const bool move = ArrivalNeedsMove(map_trip.planned ? &*map_trip.planned : nullptr, at);
     LOG_INFO(Debug, "Bloodborne map screen: arrived at {} ({}, {}, {}), moved to the lamp={}",
              map_trip.point, at ? (*at)[0] : 0.0f, at ? (*at)[1] : 0.0f, at ? (*at)[2] : 0.0f,
              move);
@@ -177,7 +177,7 @@ void StartMapTrip(s32 point) {
     map_trip.started = Clock::now();
     map_trip.planned = StartTripToLamp(point);
     LOG_INFO(Debug, "Bloodborne map screen: travels to {} ({:#x}), at the lamp={}", point,
-             map_trip.progress.target_map, map_trip.planned != nullptr);
+             map_trip.progress.target_map, map_trip.planned.has_value());
 }
 
 MapScreenView ReadMapScreenNow(bool loading) {

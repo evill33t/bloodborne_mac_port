@@ -48,10 +48,10 @@ Experimental integrations are opt-in:
 
 **Regular** retains normal gameplay and saves. Its **Online** page also exposes the separate The Hunter's Dream and shadNet pools, with account configuration, connection checks, optional UPnP and credential storage. Their communities and servers have their own compatibility requirements. HTTPS certificate verification is retained for the existing HTTPS backend.
 
-**Seamless Co-op** defaults to **`bloodborne.phobos.services`** and uses the client adapted from [Yharnam Together v1.4.0](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/releases/tag/v1.4.0). It includes:
+**Seamless Co-op** defaults to **`bloodborne.phobos.services`** and uses the client adapted from [Yharnam Together v1.5.0](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/releases/tag/v1.5.0). It includes:
 
 - Automatic server-scoped account registration, encrypted authenticated UDP transport, pinned identity for the default host, reconnect handling and isolated per-server save profiles seeded from a copy of the chosen regular saves.
-- Five-hunter teams, team duels, quick match and in-game leader rule editing. Optional **seamlesshunt.com (Global)** host with HTTPS account sign-in, Keychain sessions and per-account saves.
+- Five-hunter teams, team duels, quick match, saved in-game leader rules and optional friendly fire. Optional **seamlesshunt.com (Global)** host with HTTPS account sign-in, Keychain sessions and per-account saves.
 - Persistent teams and worlds; hunter/name/code invitations, online-hunter and world browsers, ready checks, world selection, session restoration, shared world/event/boss progress, enemy ownership and HP synchronization, and independent travel.
 - Downed/revive/wipe behavior, spectating, death modes and rot, optional enemy scaling/harder enemies, chalice sharing, bloodstain retention, shared trophies and cutscene skip voting.
 - Windows-reference-style co-op presentation, with the Windows launcher hero image behind the team setup window and across “Entering the hunt”: hunter cards, live portraits, readiness/leader marks, party HP/vial/bullet displays, compass, pings, invitations, loading screens and game-styled dialogs. Game art and fonts are read from the player's own files, with fallbacks.
@@ -279,6 +279,9 @@ The following build, launch and troubleshooting instructions follow upstream 0.5
 - A Mac with **Apple Silicon** running **macOS 15 or newer**, with at least **16 GB** of memory
 - **Rosetta 2** (`softwareupdate --install-rosetta`)
 - **Xcode Command Line Tools** (`xcode-select --install`)
+  With Command Line Tools 27 alone, the launcher is built against an older macOS SDK that is
+  still installed (the macOS 27 SDK there lacks SwiftUI's macro plugin; the build says which SDK
+  it uses). If no older SDK is left, install the full Xcode.
 - **Homebrew** (arm64) with build tools:
   `brew install cmake ninja nasm glslang pkgconf boost cryptopp`
 - **Python 3** (patch compiler and eboot preparation scripts)

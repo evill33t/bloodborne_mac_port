@@ -61,4 +61,30 @@ private:
     Clock::time_point last_due{};
 };
 
+// The test network's packet loss (SHADPS4_P2P_LOSS_PERCENT, 1 to 50): that share of what this
+// game sends is never sent, as on a lossy link. Nothing, 0 or anything else: no loss.
+inline std::optional<u32> ParseLossPercent(std::string_view text) {
+    u32 value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (text.empty() || error != std::errc{} || end != text.data() + text.size() || value == 0 ||
+        value > 50) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+class LossLine {
+public:
+    LossLine(u32 percent, u32 seed) : percent{percent}, random{seed} {}
+
+    bool Drops() {
+        std::uniform_int_distribution<u32> pick{0, 99};
+        return pick(random) < percent;
+    }
+
+private:
+    u32 percent;
+    std::minstd_rand random;
+};
+
 } // namespace Libraries::Net

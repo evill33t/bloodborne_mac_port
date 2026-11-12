@@ -146,6 +146,8 @@ std::optional<bbcoop::TeamRules> ParseTeamRules(std::string_view setting) {
             key == "rot"      ? rules.set_rot(true)
             : key == "travel" ? rules.set_travel_together(true)
                               : rules.set_travel_vote(true);
+        } else if (key == "friendlyfire" && value.empty()) {
+            rules.set_friendly_fire(true); // Kaniel 2026-11-11
         } else if (key == "tempo" && value.size() == 1 && value[0] >= '0' && value[0] <= '2') {
             rules.set_boss_tempo(static_cast<bbcoop::BossTempo>(value[0] - '0'));
         } else {

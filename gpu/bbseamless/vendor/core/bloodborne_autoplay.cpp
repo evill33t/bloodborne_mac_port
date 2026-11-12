@@ -85,8 +85,8 @@ struct AutoplayRun {
     bool step_begun = false;
     std::optional<std::chrono::steady_clock::time_point> hold_until;
     u32 travel_map = 0;
-    std::optional<double> travel_fixed_at;     // seconds into the step it was moved to the lamp
-    const LampPoint* travel_planned = nullptr; // the lamp the travel was placed at, if any
+    std::optional<double> travel_fixed_at;   // seconds into the step it was moved to the lamp
+    std::optional<LampPoint> travel_planned; // the lamp the travel was placed at, if any
     u32 attack_handle = 0;
     std::optional<u32> attack_placed; // the attack cycle the player was last put in place for
     s32 noted_max_hp = 0;             // note-max-hp: the player's max HP then
@@ -100,9 +100,12 @@ struct AutoplayRun {
     // chapter <name> <seconds>: when the chapter's time budget runs out (the rig's, 2026-10-15).
     std::optional<std::chrono::steady_clock::time_point> chapter_deadline;
     double chapter_budget = 0.0;
-    bool keep_going = false;   // keep-going on: a failed step gives up only its chapter
-    bool failed = false;       // a step failed and the script went on: "done (failed)"
-    LampPosition glide_from{}; // glide: where the player was when it began
+    bool keep_going = false;          // keep-going on: a failed step gives up only its chapter
+    bool failed = false;              // a step failed and the script went on: "done (failed)"
+    LampPosition glide_from{};        // glide: where the player was when it began
+    std::optional<LampPosition> spot; // spot-mark: where the player stood then
+    float standing_from_y = 0.0f;     // expect-standing: y when it began
+    float standing_low_y = 0.0f;      // expect-standing: its lowest y since
     // watch-unseen: the character watched and until when, and how often it was seen drawn.
     u32 watch_handle = 0;
     std::optional<std::chrono::steady_clock::time_point> watch_until;
@@ -524,7 +527,7 @@ void BeginAutoplayTravel(const AutoplayStep& step, s32 point) {
         return;
     }
     // A guest's own trip (TickGuestLampTrip), at the lamp when it is known.
-    const LampPoint* planned = StartTripToLamp(point);
+    std::optional<LampPoint> planned = StartTripToLamp(point);
     // As a guest's own lamp trip in a session does; out of one it is the game's own travel,
     // as a player's at a lamp.
     if (IsPartyGuestRole() && InPartySession()) {
@@ -544,14 +547,14 @@ void FixAutoplayTravelArrival(const AutoplayStep& step, s32 point) {
         WriteValue(global, 0x1528, point);
     }
     const auto at = LocalPlayerPosition();
-    const LampPoint* planned = nullptr;
+    std::optional<LampPoint> planned;
     {
         std::scoped_lock lock{autoplay_mutex};
         planned = autoplay_run.travel_planned;
     }
     LOG_INFO(Debug, "Bloodborne autoplay: travel arrived at ({}, {}, {}) planned at the lamp={}",
-             at ? (*at)[0] : 0.0f, at ? (*at)[1] : 0.0f, at ? (*at)[2] : 0.0f, planned != nullptr);
-    if (ArrivalNeedsMove(planned, at)) {
+             at ? (*at)[0] : 0.0f, at ? (*at)[1] : 0.0f, at ? (*at)[2] : 0.0f, planned.has_value());
+    if (ArrivalNeedsMove(planned ? &*planned : nullptr, at)) {
         MoveToRespawnPoint(true);
     }
     std::scoped_lock lock{autoplay_mutex};
@@ -822,6 +825,83 @@ bool AutoplayExpectWalks(const AutoplayStep& step) {
     return false;
 }
 
+// spot-mark: where the player stands now, for expect-near-spot (A6 audit 2026-11-10: where a
+// chalice dungeon's layer put the team, its lamp, to find them there again after a wipe).
+bool AutoplaySpotMark(const AutoplayStep& step) {
+    const auto at = LocalPlayerPosition();
+    if (!at) {
+        step.failure = "no player";
+        return false;
+    }
+    {
+        std::scoped_lock lock{autoplay_mutex};
+        autoplay_run.spot = *at;
+    }
+    LOG_INFO(Debug, "Bloodborne autoplay: spot marked at ({:.1f}, {:.1f}, {:.1f}) map {:#x}",
+             (*at)[0], (*at)[1], (*at)[2], GetCurrentPackedMap());
+    return true;
+}
+
+// expect-near-spot [<metres>]: the player stands within `metres` (15) of the marked spot.
+bool AutoplayExpectNearSpot(const AutoplayStep& step) {
+    const auto at = LocalPlayerPosition();
+    std::optional<LampPosition> spot;
+    {
+        std::scoped_lock lock{autoplay_mutex};
+        spot = autoplay_run.spot;
+    }
+    if (!spot || !at) {
+        step.failure = !spot ? "no spot marked" : "no player";
+        return false;
+    }
+    const float distance = std::sqrt(((*at)[0] - (*spot)[0]) * ((*at)[0] - (*spot)[0]) +
+                                     ((*at)[1] - (*spot)[1]) * ((*at)[1] - (*spot)[1]) +
+                                     ((*at)[2] - (*spot)[2]) * ((*at)[2] - (*spot)[2]));
+    LOG_INFO(Debug,
+             "Bloodborne autoplay: {:.1f} m from the marked spot, at ({:.1f}, {:.1f}, {:.1f})",
+             distance, (*at)[0], (*at)[1], (*at)[2]);
+    if (distance > static_cast<float>(step.Number(0, 15))) {
+        step.failure = fmt::format("{:.1f} m from the marked spot", distance);
+        return false;
+    }
+    return true;
+}
+
+// expect-standing [<seconds> [<metres>]]: for `seconds` (8) the player is in the world and its y
+// drops no more than `metres` (3) below where it began: no fall through the map, no grey void.
+bool AutoplayExpectStanding(const AutoplayStep& step) {
+    const auto at = LocalPlayerPosition();
+    if (!at) {
+        step.failure = "no player position (a grey void?)";
+        return false;
+    }
+    float from = 0.0f;
+    float low = 0.0f;
+    {
+        std::scoped_lock lock{autoplay_mutex};
+        if (!step.begun) {
+            autoplay_run.standing_from_y = (*at)[1];
+            autoplay_run.standing_low_y = (*at)[1];
+        }
+        autoplay_run.standing_low_y = std::min(autoplay_run.standing_low_y, (*at)[1]);
+        from = autoplay_run.standing_from_y;
+        low = autoplay_run.standing_low_y;
+    }
+    const float drop = from - low;
+    if (drop > static_cast<float>(step.Number(1, 3)) || (*at)[1] < -500.0f) {
+        step.failure = fmt::format("fell {:.1f} m (y {:.1f} -> {:.1f}) in {:.1f} s", drop, from,
+                                   (*at)[1], step.elapsed);
+        return false;
+    }
+    if (step.elapsed < step.Number(0, 8)) {
+        return false;
+    }
+    LOG_INFO(Debug,
+             "Bloodborne autoplay: stood {:.1f} s at ({:.1f}, {:.1f}, {:.1f}), dropped {:.1f} m",
+             step.elapsed, (*at)[0], (*at)[1], (*at)[2], drop);
+    return true;
+}
+
 // glide <x y z>...: from where the player is along those points at walking pace, by small
 // teleports facing the way it goes (a far teleport drops it through the floor): a path a "map
 // change" log line gave (its trail), to cross a border between two maps.
@@ -996,7 +1076,8 @@ bool AutoplayReviveDowned(const AutoplayStep& step) {
             continue;
         }
         const bool is_downed =
-            ReadValue<s32>(other.character, CharacterTeamOffset) == DownedTeams::Hostile;
+            Coop::BodyOnDownedTeam(ReadValue<u32>(other.character, 0x08),
+                                   ReadValue<s32>(other.character, CharacterTeamOffset));
         const float d = std::hypot((*other.at)[0] - posted[0], (*other.at)[2] - posted[2]);
         if (d < 4.0f &&
             ((is_downed && !nearest_downed) || (is_downed == nearest_downed && d < nearest))) {
@@ -1344,9 +1425,13 @@ bool AutoplayExpectHp(const AutoplayStep& step) {
         return false;
     }
     const s32 hp = ReadValue<s32>(found->data, 0xF8);
-    const auto holds = CompareAutoplay(hp, step.Arg(1), static_cast<s64>(step.Number(2, 0)));
+    // "max": its own max HP in this game (bug audit 24: whole is hp == max on every game, whatever
+    // max each copy has).
+    const s32 max = ReadValue<s32>(found->data, 0xFC);
+    const s64 limit = step.Arg(2) == "max" ? max : static_cast<s64>(step.Number(2, 0));
+    const auto holds = CompareAutoplay(hp, step.Arg(1), limit);
     if (!holds || !*holds) {
-        step.failure = fmt::format("hp is {}", hp);
+        step.failure = fmt::format("hp is {} of {}", hp, max);
         return false;
     }
     return true;
@@ -1385,7 +1470,8 @@ bool AutoplayDump(const AutoplayStep& step) {
     dump("modules", modules, 0x100);
     // Each module's first bytes: what draws the character is in one of them.
     for (u64 index = 0; modules >= 0x10000 && index < 0x20; ++index) {
-        dump(fmt::format("module{:02x}", index).c_str(), ReadValue<u64>(modules, index * 8), 0x100);
+        dump(fmt::format("module{:02x}", index).c_str(), ReadValue<u64>(modules, index * 8),
+             index == 4 ? 0x300 : 0x100); // the data module (HP, max HP and what they come from)
     }
     return true;
 }
@@ -2141,6 +2227,13 @@ bool AutoplayTeamVerb(const AutoplayStep&) {
     return true;
 }
 
+// Kaniel 2026-11-11 (the friendly fire rule, set mid-hunt): team-rules <rules> and
+// team-wait-rules <rules> work in the world too, as the leader's team screen in game does
+// (RunTeamTitleVerb: at once when the team has those rules already, as after the title's).
+bool AutoplayTeamRulesVerb(const AutoplayStep& step) {
+    return Coop::RunTeamTitleVerb(step.command, step.begun, step.elapsed, step.failure);
+}
+
 // Kaniel 2026-10-16: the team menu in game, what its buttons do (menu-invite <online id>,
 // menu-kick <online id>, menu-join, menu-leave; each [timeout]). Invasions: menu-invade,
 // menu-invade-leave, menu-allow-invaders <0|1>, wait-invader <0|1> (RunTeamMenuVerb).
@@ -2478,6 +2571,31 @@ bool AutoplayDuelStrike(const AutoplayStep& step) {
     return false;
 }
 
+// Kaniel 2026-11-11, the friendly fire rule: strike-player <seconds> [down]: light attacks on the
+// nearest other player from each side in turn (as duel-strike) for <seconds>; with "down", until
+// a teammate on the board is down (a failure after <seconds>).
+bool AutoplayStrikePlayer(const AutoplayStep& step) {
+    const bool until_down = step.Arg(1) == "down";
+    const VitalsView view = ReadVitalsBoard();
+    const bool down = std::ranges::any_of(view.board.members, [&](const MemberVitals& member) {
+        return member.member != view.member && member.vital == Vital::Down;
+    });
+    if (until_down ? down : step.elapsed > step.Number(0, 10)) {
+        autoplay_buttons.store(0);
+        LOG_INFO(Debug, "Bloodborne autoplay: strikes at a teammate done after {:.1f} s{}",
+                 step.elapsed, down ? " (a teammate is down)" : "");
+        return true;
+    }
+    if (const auto found = FindAutoplayCharacter(AutoplayPlayer)) {
+        AutoplayAttackCycle(*found, step.elapsed, false);
+    }
+    if (until_down && step.elapsed > step.Number(0, 10)) {
+        autoplay_buttons.store(0);
+        step.failure = fmt::format("no teammate down after {:.0f} s of strikes", step.elapsed);
+    }
+    return false;
+}
+
 bool AutoplayWaitDuel(const AutoplayStep& step) {
     static constexpr std::array<std::string_view, 6> Parts{"none",      "asked",    "answered",
                                                            "countdown", "fighting", "out"};
@@ -2521,6 +2639,9 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"hit", AutoplayHit},
     {"teleport", AutoplayTeleport},
     {"expect-walks", AutoplayExpectWalks},
+    {"spot-mark", AutoplaySpotMark},
+    {"expect-near-spot", AutoplayExpectNearSpot},
+    {"expect-standing", AutoplayExpectStanding},
     {"place", AutoplayPlace},
     {"glide", AutoplayGlide},
     {"pickup", AutoplayPickup},
@@ -2541,6 +2662,7 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"duel-answer", AutoplayDuelAnswer},
     {"wait-duel", AutoplayWaitDuel},
     {"duel-strike", AutoplayDuelStrike},
+    {"strike-player", AutoplayStrikePlayer},
     {"wait-flag", AutoplayExpectOrWaitFlag},
     {"flags", AutoplayLogFlags},
     {"altar-record", AutoplayAltarRecord},
@@ -2595,8 +2717,8 @@ constexpr auto AutoplayVerbs = std::to_array<std::pair<std::string_view, Autopla
     {"team-wait", AutoplayTeamVerb},
     {"team-leave", AutoplayTeamVerb},
     {"team-open", AutoplayTeamVerb},
-    {"team-rules", AutoplayTeamVerb},
-    {"team-wait-rules", AutoplayTeamVerb},
+    {"team-rules", AutoplayTeamRulesVerb},
+    {"team-wait-rules", AutoplayTeamRulesVerb},
     {"team-join-open", AutoplayTeamVerb},
     {"team-wait-open", AutoplayTeamVerb},
     {"team-code-share", AutoplayTeamVerb},

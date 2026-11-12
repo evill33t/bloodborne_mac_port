@@ -158,6 +158,31 @@ bool BossFightCatchesDeath(bool bars_up, std::span<const MemberVitals> board, st
                            const std::optional<LampPosition>& boss = std::nullopt);
 // The first boss the bars show (its handle), if any.
 std::optional<u32> BossBarHandle(std::span<const u8> gauges);
+
+// Discord audit A10 (Provi 2026-10-23): a guest killed in Rom's fight while the host fought on woke
+// at its lamp with her bar still on screen. A spectator's wake (WakeAtOwnLamp: giving up, a
+// teammate's lamp) moves it there without a reload, and the game takes a bar down only at a
+// reload or the boss's death. The bars are put away at the wake (as ClearBossGauges) and kept;
+// they come back once the player is within BossLeaveMetres of that boss again (the same fight,
+// dived or walked back into), and are dropped for good once the boss is dead, on another map, once
+// the game shows bars of its own (a new fight), or at a death's respawn (Drop).
+class AwayBossBars {
+public:
+    enum class Outcome { Away, Back, Dropped };
+    // The bars up in `gauges` kept and cleared there; false (nothing kept) when none was up.
+    bool PutAway(std::span<u8> gauges, u32 map);
+    // Each tick while Holding: `boss` where the kept bar's boss stands on `map` now (none: not
+    // found), `boss_dead` its death, `me` this player. Back writes the kept bars into `gauges`.
+    Outcome Tick(std::span<u8> gauges, u32 map, const std::optional<LampPosition>& boss,
+                 bool boss_dead, const std::optional<LampPosition>& me);
+    void Drop();
+    bool Holding() const;
+    std::optional<u32> Handle() const;
+
+private:
+    std::vector<u8> kept;
+    u32 kept_map = 0;
+};
 // What the IsNoDead hook makes of a check that would kill the player: nothing (the game's own
 // answer), a down's catch (party death's rule, KeepsPlayerAlive: the team's death mode follows),
 // or a boss fight's: its lethal checks and the game's kills (Instant) while `boss_fight`

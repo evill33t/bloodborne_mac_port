@@ -268,6 +268,10 @@ void bbcoop_file_opened(const char *guest_path);
 /* The game unlocked a trophy itself; party members get it too. */
 void bbcoop_trophy_unlocked(int32_t trophy_id);
 
+/* The map this game is on (packed, as the co-op log prints it; 0: none yet), for the port's
+ * diagnostics lines. Reads the game's memory: not every frame. */
+uint32_t bbcoop_current_map(void);
+
 /* Phase 5, the team lobby (always on with co-op), for the game's own menu
  * (the team screen, bbport_overlay.cpp). Names are UTF-8; `id` is what a request names (a
  * player's lobby member, a team's id). */
@@ -343,6 +347,8 @@ typedef struct bbcoop_lobby {
     int rule_rot, rule_travel, rule_vote, rule_scale;
     /* Kaniel 2026-10-28: the boss tempo (0 Vanilla, 1 Aggressive, 2 Relentless). */
     int rule_tempo;
+    /* Kaniel 2026-11-11: friendly fire (the teammates' strikes land on each other). */
+    int rule_friendly_fire;
     /* Kaniel 2026-11-05: the enemies' strength, the team's: HP, damage and poise multipliers (a
      * full team's with rule_scale, Auto; everyone's without, Fixed). */
     float rule_hp, rule_damage, rule_poise;
@@ -371,6 +377,22 @@ typedef struct bbcoop_lobby {
 enum { BBCOOP_DEATH_DOWN = 0, BBCOOP_DEATH_SPECTATE = 1 };
 /* Fills `lobby`; 0 when the team lobby is off. */
 int bbcoop_lobby_view(bbcoop_lobby *lobby);
+/* Players' reports (Discord, 1.0.0 to 1.3.x): with the co-op server out of reach the game said
+ * "not signed in to PlayStation Network". Why this game's sign-in to the co-op server failed
+ * (BBCOOP_SIGN_IN_*; 0 while it is signed in, still signing in, or plays offline), with the
+ * server's address as the launcher gave it ("26.1.2.3:31313") and, for REFUSED, the server's own
+ * line (the build check on join). The game's dialog and the team screen say it. */
+enum {
+    BBCOOP_SIGN_IN_OK = 0,
+    BBCOOP_SIGN_IN_NO_ANSWER = 1,   /* nothing answers there: not started, a firewall, the address */
+    BBCOOP_SIGN_IN_WRONG_LOGIN = 2, /* the server refused the login or its password */
+    BBCOOP_SIGN_IN_OTHER = 3,
+    BBCOOP_SIGN_IN_REFUSED = 4,     /* the server refused this game: `reason` */
+};
+int bbcoop_sign_in_problem(char *server, size_t server_size, char *reason, size_t reason_size);
+/* 1 for the game's own "not signed in to PlayStation Network" texts (its message category and
+ * id): the ones the port's lookup hook answers with the co-op server's reason. */
+int bbcoop_is_psn_sign_in_text(uint32_t category, uint32_t id);
 /* Kaniel 2026-10-25, the Rot host rule: this player's rot for the party HUD, each penalty's kind
  * (BBCOOP_ROT_*), the oldest first; 0 while the rule is off or there is none. */
 enum {
@@ -429,7 +451,8 @@ enum { BBCOOP_TEAM_CREATE = 1, BBCOOP_TEAM_INVITE = 2, BBCOOP_TEAM_ACCEPT = 3,
        /* Provi 2026-10-29: the leader puts out every lamp of a world (`id`) not played now. */
        BBCOOP_TEAM_RESET_LAMPS = 28,
        /* Kaniel 2026-11-05: the leader sets the team's rules on the team screen; `id` is
-        * "rot,travel,vote,scale,tempo,hp,damage,poise" (ScreenRulesText). */
+        * "rot,travel,vote,scale,tempo,hp,damage,poise" (ScreenRulesText), and ",1" after
+        * them with friendly fire. */
        BBCOOP_TEAM_RULES = 16 };
 enum { BBCOOP_JOIN_INVITE_ONLY = 0, BBCOOP_JOIN_ASK = 1, BBCOOP_JOIN_OPEN = 2 };
 void bbcoop_lobby_request(int action, const char *id);

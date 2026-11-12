@@ -345,6 +345,22 @@ const LampPoint* FindLampPoint(s32 warp_point) {
     return found != LampPoints.end() && found->warp_point == warp_point ? &*found : nullptr;
 }
 
+std::optional<LampPoint> ChaliceTripLamp(s32 point, u32 current_map, bool resolved,
+                                         const std::array<float, 4>& position,
+                                         const std::array<float, 4>& rotation) {
+    constexpr u32 ChaliceArea = 0x1D;
+    const u32 map = point > 0 ? PackedMapOfWarpPoint(point) : 0;
+    if (!resolved || map >> 24 != ChaliceArea || current_map != map) {
+        return std::nullopt;
+    }
+    return LampPoint{point, map, position[0], position[1], position[2], rotation[1]};
+}
+
+std::optional<LampPoint> TakeChaliceTripLamp(std::optional<LampPoint>& pending, s32 warp_point) {
+    const std::optional<LampPoint> lamp = std::exchange(pending, std::nullopt);
+    return lamp && lamp->warp_point == warp_point ? lamp : std::nullopt;
+}
+
 bool ArrivalNeedsMove(const LampPoint* planned, const std::optional<LampPosition>& at) {
     if (planned == nullptr || !at) {
         return true;
@@ -1147,6 +1163,10 @@ std::optional<bool> HeldItemFlagFix(bool party_configured, bool flag_on, bool ho
         return std::nullopt;
     }
     return holds;
+}
+
+std::optional<bool> DollGiveFix(bool party_configured, bool flag_on, bool holds) {
+    return HeldItemFlagFix(party_configured, flag_on, holds);
 }
 
 std::optional<bool> GestureFlagFix(bool party_configured, bool flag_on, bool learned) {
@@ -3065,6 +3085,48 @@ bool RecreateIsForAJoin(bool pending, bool for_join) {
     return !pending || for_join;
 }
 
+bool TripsAfterJoin(const char* setting) {
+    return setting == nullptr || std::string_view{setting} != "0";
+}
+
+bool TripAfterJoin::Tick(const Input& in) {
+    if (!in.in_session) {
+        joined_ms.reset();
+        arrived_ms.reset();
+        calm_since.reset();
+        went = false;
+        return false;
+    }
+    if (!joined_ms) {
+        joined_ms = in.now_ms;
+    }
+    if (!arrived_ms) {
+        if (!in.arrived) {
+            return false;
+        }
+        arrived_ms = in.now_ms;
+    }
+    if (in.busy || in.never_here) {
+        calm_since.reset();
+        return false;
+    }
+    if (!calm_since) {
+        calm_since = in.now_ms;
+    }
+    if (!in.switched_on || !in.guest || !in.phantom || went || in.now_ms - *arrived_ms > WindowMs ||
+        in.now_ms - *arrived_ms <= SettleMs || in.now_ms - *calm_since <= SettleMs) {
+        return false;
+    }
+    went = true;
+    return true;
+}
+
+bool TripAfterJoin::Due(const Input& in) const {
+    // Joined, it is a phantom only once it arrived in the session's world (the join's reload).
+    return in.switched_on && in.guest && in.in_session && (in.phantom || !arrived_ms) &&
+           !in.never_here && !went && joined_ms && in.now_ms - *joined_ms <= HoldMs;
+}
+
 u8 RebuiltTaskFlags(u8 constructed, const SavedJoinTask* saved, bool waiting) {
     if (!saved) {
         return constructed & JoinTaskFlagBits;
@@ -3473,6 +3535,21 @@ void SetCoopBossHpRates(std::span<u8> sp_effect_param,
         }
         std::memcpy(sp_effect_param.data() + *row + SpEffectMaxHpRateOffset, &rate, sizeof(rate));
     }
+}
+
+std::optional<RescaledHp> RescaleLoadedHp(s32 base, s32 max, s32 max_again, s32 hp, float old_rate,
+                                          float new_rate) {
+    if (max <= 0 || base <= 0 || old_rate <= 0.0f || new_rate <= 0.0f || old_rate == new_rate) {
+        return std::nullopt;
+    }
+    const double factor = static_cast<double>(new_rate) / old_rate;
+    // Truncated, as the game's own maths (vcvttss2si) makes the max from the base.
+    const auto scaled = [&](s32 value) {
+        return std::max(static_cast<s32>(static_cast<double>(value) * factor + 1e-6), 1);
+    };
+    const s32 new_max = scaled(max);
+    const s32 new_hp = hp <= 0 ? 0 : hp >= max ? new_max : std::clamp(scaled(hp), 1, new_max);
+    return RescaledHp{scaled(base), new_max, max_again > 0 ? scaled(max_again) : 0, new_hp};
 }
 
 std::size_t MakeNpcAttacksHarder(std::span<u8> param, float damage) {
@@ -4902,7 +4979,8 @@ bool RespawnsInWorldRespawn(WorldRespawnKind kind, const RespawnCandidate& chara
 
 std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
                                       std::span<const DeadCopy> dead_here,
-                                      const std::unordered_set<u32>& party_kills, s64 now_ms) {
+                                      const std::unordered_set<u32>& party_kills,
+                                      const std::unordered_map<u32, s64>& host_dead, s64 now_ms) {
     std::unordered_set<u32> alive_at_host;
     for (const CharacterShown& character : host) {
         if (!character.hidden && !character.disabled && !character.distant && !character.dead) {
@@ -4911,8 +4989,11 @@ std::vector<u32> BroughtBackByTheHost(std::span<const CharacterShown> host,
     }
     std::vector<u32> back;
     for (const DeadCopy& copy : dead_here) {
+        const auto dead_there = host_dead.find(copy.handle);
         if (!copy.boss && alive_at_host.contains(copy.handle) &&
-            !party_kills.contains(copy.handle) && now_ms - copy.dead_since_ms >= BringBackAfterMs) {
+            !party_kills.contains(copy.handle) && now_ms - copy.dead_since_ms >= BringBackAfterMs &&
+            dead_there != host_dead.end() &&
+            dead_there->second >= copy.dead_since_ms - HostDeadBeforeCopyMs) {
             back.push_back(copy.handle);
         }
     }
@@ -5596,28 +5677,12 @@ std::string GameHudString(std::span<const u8, GameHudStringSize> raw,
     return text;
 }
 
-std::string GameStringUtf8(std::span<const u8, GameHudStringSize> raw,
-                           const std::function<std::vector<char16_t>(u64, size_t)>& read) {
-    constexpr size_t MaxChars = 16;
-    u64 capacity = 0;
-    std::memcpy(&capacity, raw.data() + 0x20, sizeof(capacity));
-    std::vector<char16_t> chars;
-    if (capacity < 8) {
-        chars.resize(8);
-        std::memcpy(chars.data(), raw.data() + 0x08, 16);
-    } else {
-        u64 pointer = 0;
-        std::memcpy(&pointer, raw.data() + 0x08, sizeof(pointer));
-        chars = read(pointer, MaxChars + 1);
-    }
-    const auto end = std::ranges::find(chars, u'\0');
-    if (end == chars.end() || end - chars.begin() > static_cast<std::ptrdiff_t>(MaxChars)) {
-        return {}; // no end within a name's length: not a name
-    }
+std::string Utf8OfUtf16(std::u16string_view chars) {
     std::string text;
-    for (auto it = chars.begin(); it != end; ++it) {
+    for (auto it = chars.begin(); it != chars.end(); ++it) {
         u32 c = *it;
-        if (c >= 0xD800 && c < 0xDC00 && it + 1 != end && it[1] >= 0xDC00 && it[1] < 0xE000) {
+        if (c >= 0xD800 && c < 0xDC00 && it + 1 != chars.end() && it[1] >= 0xDC00 &&
+            it[1] < 0xE000) {
             c = 0x10000 + ((c - 0xD800) << 10) + (*++it - 0xDC00);
         }
         if (c < 0x80) {
@@ -5637,6 +5702,27 @@ std::string GameStringUtf8(std::span<const u8, GameHudStringSize> raw,
         }
     }
     return text;
+}
+
+std::string GameStringUtf8(std::span<const u8, GameHudStringSize> raw,
+                           const std::function<std::vector<char16_t>(u64, size_t)>& read) {
+    constexpr size_t MaxChars = 16;
+    u64 capacity = 0;
+    std::memcpy(&capacity, raw.data() + 0x20, sizeof(capacity));
+    std::vector<char16_t> chars;
+    if (capacity < 8) {
+        chars.resize(8);
+        std::memcpy(chars.data(), raw.data() + 0x08, 16);
+    } else {
+        u64 pointer = 0;
+        std::memcpy(&pointer, raw.data() + 0x08, sizeof(pointer));
+        chars = read(pointer, MaxChars + 1);
+    }
+    const auto end = std::ranges::find(chars, u'\0');
+    if (end == chars.end() || end - chars.begin() > static_cast<std::ptrdiff_t>(MaxChars)) {
+        return {}; // no end within a name's length: not a name
+    }
+    return Utf8OfUtf16({chars.data(), static_cast<size_t>(end - chars.begin())});
 }
 
 std::string HtmlText(std::string_view text) {
@@ -5689,6 +5775,32 @@ std::optional<std::string> NameplateRoleLine(const PartyPanel& panel, std::strin
         }
     }
     return std::nullopt;
+}
+
+std::optional<NameplateRole> NameplateRoleOf(const PartyPanel& panel, std::string_view name,
+                                             bool hosting, std::string_view host) {
+    if (name.empty() || (!hosting && host.empty())) {
+        return std::nullopt;
+    }
+    for (const PanelMember& member : panel.members) {
+        const std::string_view id = member.name.empty() ? member.member : member.name;
+        if (id == name || member.shown == name) {
+            return !hosting &&
+                           (member.member == host || (!member.name.empty() && member.name == host))
+                       ? NameplateRole::Host
+                       : NameplateRole::Guest;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> NameplateRoleText(NameplateRole role, std::u16string_view host_text,
+                                             std::u16string_view guest_text) {
+    const std::u16string_view text = role == NameplateRole::Host ? host_text : guest_text;
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    return HtmlText(Utf8OfUtf16(text));
 }
 
 namespace {
@@ -6803,7 +6915,11 @@ std::vector<CopyTeam> DownedTeams::Tick(const std::vector<CopyTeam>& downed,
         if (body.team == Unchangeable || invader(body.handle)) {
             continue;
         }
-        if (std::ranges::find(saved, body.handle, &CopyTeam::handle) == saved.end()) {
+        // A body first seen on the invaders' team was put there by something else (a duel): that
+        // is not its own team, and nothing of this is to give back (Kaniel 2026-11-11: the
+        // friendly fire rule turned on in a duel kept the duel's foe hostile for good).
+        if (body.team != Hostile &&
+            std::ranges::find(saved, body.handle, &CopyTeam::handle) == saved.end()) {
             saved.push_back(body);
         }
         if (body.team != Hostile) {
@@ -6821,6 +6937,26 @@ std::vector<CopyTeam> DownedTeams::Tick(const std::vector<CopyTeam>& downed,
         return true;
     });
     return writes;
+}
+
+std::vector<CopyTeam> WithFriendlyFire(std::vector<CopyTeam> downed,
+                                       std::span<const CopyTeam> present, bool on) {
+    if (!on) {
+        return downed;
+    }
+    for (const CopyTeam& body : present) {
+        if (std::ranges::find(downed, body.handle, &CopyTeam::handle) == downed.end()) {
+            downed.push_back(body);
+        }
+    }
+    return downed;
+}
+
+bool OnDownedTeam(u32 handle, s32 team, std::span<const u32> downed,
+                  std::span<const u32> friendly_fire) {
+    return team == DownedTeams::Hostile &&
+           (std::ranges::find(friendly_fire, handle) == friendly_fire.end() ||
+            std::ranges::find(downed, handle) != downed.end());
 }
 
 std::vector<DownedBodyPick> DownedBodyPicker::Pick(std::span<const MemberVitals> board,

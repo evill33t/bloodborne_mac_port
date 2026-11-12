@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <string>
 #include <string_view>
 
 #include "coop/team_code.h"
@@ -374,30 +375,159 @@ bool ItemGetsSilent() {
     return silent_item_gets > 0;
 }
 
-std::vector<HeldGoods> PhantomKeyItemsToGiveBack(std::span<const HeldGoods> first_look,
-                                                 std::span<const HeldGoods> last_look,
-                                                 std::span<const HeldGoods> home) {
-    const auto count_in = [](std::span<const HeldGoods> list, u32 goods) {
-        s32 count = 0;
-        for (const HeldGoods& held : list) {
-            if (held.goods == goods) {
-                count += held.count;
-            }
-        }
-        return count;
-    };
-    std::vector<HeldGoods> give;
+std::vector<OwedKeyItem> PhantomKeyItemsGained(std::span<const HeldGoods> first_look,
+                                               std::span<const HeldGoods> last_look) {
+    std::vector<OwedKeyItem> gains;
     for (const HeldGoods& held : last_look) {
-        if (IsBellGoods(held.goods)) {
+        if (IsBellGoods(held.goods) || std::ranges::any_of(gains, [&](const OwedKeyItem& g) {
+                return g.goods == held.goods;
+            })) {
             continue;
         }
-        const s32 gained = held.count - count_in(first_look, held.goods);
-        const s32 missing = held.count - count_in(home, held.goods);
-        if (const s32 count = std::min(gained, missing); count > 0) {
-            give.push_back({held.goods, count});
+        const s32 in_last = CountIn(last_look, held.goods);
+        if (const s32 gained = in_last - CountIn(first_look, held.goods); gained > 0) {
+            gains.push_back({held.goods, gained, in_last});
+        }
+    }
+    return gains;
+}
+
+std::vector<HeldGoods> OwedKeyItemsToGive(std::span<const OwedKeyItem> owed,
+                                          std::span<const HeldGoods> home) {
+    std::vector<HeldGoods> give;
+    for (const OwedKeyItem& item : owed) {
+        const s32 missing = item.held - CountIn(home, item.goods);
+        if (const s32 count = std::min(item.gained, missing); count > 0) {
+            give.push_back({item.goods, count});
         }
     }
     return give;
+}
+
+std::vector<HeldGoods> PhantomKeyItemsToGiveBack(std::span<const HeldGoods> first_look,
+                                                 std::span<const HeldGoods> last_look,
+                                                 std::span<const HeldGoods> home) {
+    return OwedKeyItemsToGive(PhantomKeyItemsGained(first_look, last_look), home);
+}
+
+std::string EncodeOwedKeyItems(std::span<const OwedKeyItem> owed) {
+    std::string text;
+    for (const OwedKeyItem& item : owed) {
+        text += std::to_string(item.goods) + ' ' + std::to_string(item.gained) + ' ' +
+                std::to_string(item.held) + '\n';
+    }
+    return text;
+}
+
+std::vector<OwedKeyItem> ParseOwedKeyItems(std::string_view text) {
+    std::vector<OwedKeyItem> owed;
+    while (!text.empty()) {
+        const size_t end = text.find('\n');
+        std::string_view line = text.substr(0, end);
+        text.remove_prefix(end == std::string_view::npos ? text.size() : end + 1);
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        const auto number = [&line](auto& value) {
+            const auto [next, error] =
+                std::from_chars(line.data(), line.data() + line.size(), value);
+            if (error != std::errc{}) {
+                return false;
+            }
+            line.remove_prefix(static_cast<size_t>(next - line.data()));
+            if (!line.empty() && line.front() == ' ') {
+                line.remove_prefix(1);
+            }
+            return true;
+        };
+        OwedKeyItem item;
+        if (number(item.goods) && number(item.gained) && number(item.held) && line.empty() &&
+            item.gained > 0 && item.held >= item.gained && !IsBellGoods(item.goods) &&
+            std::ranges::none_of(owed,
+                                 [&](const OwedKeyItem& o) { return o.goods == item.goods; })) {
+            owed.push_back(item);
+        }
+    }
+    return owed;
+}
+
+namespace {
+// Both lists as one: for a goods in both, the one that gained more (the newer one on a tie).
+std::vector<OwedKeyItem> MergeOwed(std::span<const OwedKeyItem> older,
+                                   std::span<const OwedKeyItem> newer) {
+    std::vector<OwedKeyItem> merged{newer.begin(), newer.end()};
+    for (const OwedKeyItem& item : older) {
+        const auto same = std::ranges::find(merged, item.goods, &OwedKeyItem::goods);
+        if (same == merged.end()) {
+            merged.push_back(item);
+        } else if (item.gained > same->gained) {
+            *same = item;
+        }
+    }
+    return merged;
+}
+} // namespace
+
+void PhantomKeyItemLedger::Load(std::vector<OwedKeyItem> owed) {
+    *this = {};
+    carried = std::move(owed);
+}
+
+std::vector<HeldGoods> PhantomKeyItemLedger::LookAtPhantom(u64 list, std::vector<HeldGoods> held) {
+    if (list != phantom_list) {
+        // Another phantom's list with no look at the guest's own between them (a join's reload,
+        // a re-created session): the old one's gains are owed on.
+        if (phantom_list != 0) {
+            carried = MergeOwed(carried, PhantomKeyItemsGained(first_look, last_look));
+        }
+        phantom_list = list;
+        first_look = held;
+        last_look = std::move(held);
+        std::vector<HeldGoods> want = own_look;
+        for (const OwedKeyItem& item : carried) {
+            if (const s32 more = item.held - CountIn(want, item.goods); more > 0) {
+                want.push_back({item.goods, more});
+            }
+        }
+        return OwnKeyItemsForPhantom(want, last_look);
+    }
+    last_look = std::move(held);
+    // What was owed and is in this list now is this list's gain from here on (so one used up
+    // or handed over in it is owed no more).
+    const std::vector<OwedKeyItem> gains = PhantomKeyItemsGained(first_look, last_look);
+    std::erase_if(carried, [&](const OwedKeyItem& item) {
+        const auto same = std::ranges::find(gains, item.goods, &OwedKeyItem::goods);
+        return same != gains.end() && same->gained >= item.gained;
+    });
+    return {};
+}
+
+std::optional<std::vector<HeldGoods>> PhantomKeyItemLedger::LookAtOwn(u64 list,
+                                                                      std::vector<HeldGoods> held) {
+    if (phantom_list != 0 && list != phantom_list) {
+        carried = MergeOwed(carried, PhantomKeyItemsGained(first_look, last_look));
+        phantom_list = 0;
+        first_look.clear();
+        last_look.clear();
+    }
+    own_look = std::move(held);
+    if (phantom_list != 0) {
+        return std::nullopt;
+    }
+    return OwedKeyItemsToGive(carried, own_look);
+}
+
+void PhantomKeyItemLedger::GaveBack() {
+    if (phantom_list == 0) {
+        carried.clear();
+    }
+}
+
+std::vector<OwedKeyItem> PhantomKeyItemLedger::Owed() const {
+    if (phantom_list == 0) {
+        return carried;
+    }
+    return MergeOwed(carried, PhantomKeyItemsGained(first_look, last_look));
 }
 
 bool IsWorldFlag(s32 flag) {
@@ -518,6 +648,129 @@ std::vector<s32> TeamLampFlagsToSet(const WorldFlags& team, const std::function<
         }
     }
     return flags;
+}
+
+namespace {
+
+bool IsWorldIdWord(std::string_view id) {
+    return !id.empty() && id.size() <= 64 && std::ranges::all_of(id, [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+               c == '-' || c == '_' || c == '.';
+    });
+}
+
+} // namespace
+
+bool HomeWorlds::Has(std::string_view id) const {
+    return std::ranges::any_of(worlds, [&](const World& world) { return world.id == id; });
+}
+
+u64 HomeWorlds::Version(std::string_view id) const {
+    const auto it = std::ranges::find_if(worlds, [&](const World& w) { return w.id == id; });
+    return it != worlds.end() ? it->version : 0;
+}
+
+bool HomeWorlds::Add(std::string_view id) {
+    if (!IsWorldIdWord(id) || Has(id)) {
+        return false;
+    }
+    worlds.push_back({std::string{id}, 0});
+    if (worlds.size() > MaxHomeWorlds) {
+        worlds.erase(worlds.begin(), worlds.end() - MaxHomeWorlds);
+    }
+    return true;
+}
+
+bool HomeWorlds::NoteVersion(std::string_view id, u64 version) {
+    const auto it = std::ranges::find_if(worlds, [&](const World& w) { return w.id == id; });
+    if (it == worlds.end() || it->version == version) {
+        return false;
+    }
+    it->version = version;
+    return true;
+}
+
+std::string FormatHomeWorlds(const HomeWorlds& home) {
+    std::string text = "worlds\n";
+    for (const HomeWorlds::World& world : home.worlds) {
+        text += world.id + " " + std::to_string(world.version) + "\n";
+    }
+    return text + (home.alone ? "alone\n" : "") + "end\n";
+}
+
+std::optional<HomeWorlds> ParseHomeWorlds(std::string_view text) {
+    HomeWorlds home;
+    int part = 0; // 1 the worlds, 2 the end
+    while (!text.empty()) {
+        const auto end = text.find('\n');
+        std::string_view line = text.substr(0, end);
+        text = end == std::string_view::npos ? std::string_view{} : text.substr(end + 1);
+        if (!line.empty() && line.back() == '\r') {
+            line.remove_suffix(1);
+        }
+        if (line.empty()) {
+            continue;
+        }
+        if (line == "worlds" && part == 0) {
+            part = 1;
+            continue;
+        }
+        if (line == "end" && part == 1) {
+            part = 2;
+            continue;
+        }
+        if (line == "alone" && part == 1) {
+            home.alone = true;
+            continue;
+        }
+        const auto space = line.find(' ');
+        if (part != 1 || space == std::string_view::npos) {
+            return std::nullopt;
+        }
+        const std::string_view id = line.substr(0, space);
+        const std::string_view number = line.substr(space + 1);
+        u64 version = 0;
+        const auto [parsed, error] =
+            std::from_chars(number.data(), number.data() + number.size(), version);
+        if (error != std::errc{} || parsed != number.data() + number.size() || !home.Add(id)) {
+            return std::nullopt;
+        }
+        home.worlds.back().version = version;
+    }
+    if (part != 2) {
+        return std::nullopt; // cut short
+    }
+    return home;
+}
+
+std::string_view WorldIdOfParty(std::string_view party) {
+    constexpr std::string_view prefix = "world:";
+    return party.starts_with(prefix) ? party.substr(prefix.size()) : std::string_view{};
+}
+
+TeamWorldTake HowToTakeTeamWorld(const HomeWorlds& home, std::string_view world, bool host,
+                                 u64 server_version) {
+    if (!home.Has(world)) {
+        return TeamWorldTake::Aside;
+    }
+    const u64 seen = home.Version(world);
+    return host && home.alone && seen != 0 && seen == server_version ? TeamWorldTake::SaveLeads
+                                                                     : TeamWorldTake::Home;
+}
+
+OldSaveWorld OldSavesWorld(const bbcoop::LobbyState* lobby, std::string_view hint,
+                           std::string_view character) {
+    if (lobby == nullptr || hint.empty() || character.empty()) {
+        return OldSaveWorld::Unknown;
+    }
+    for (const bbcoop::TeamWorldInfo& world : lobby->worlds()) {
+        if (world.id() == hint) {
+            return world.character().empty()        ? OldSaveWorld::Unknown
+                   : world.character() == character ? OldSaveWorld::Made
+                                                    : OldSaveWorld::Visited;
+        }
+    }
+    return OldSaveWorld::Unknown;
 }
 
 std::string FormatWorldFlags(const WorldFlags& world) {
@@ -661,6 +914,10 @@ bool KeptChangeYieldsToTeam(s32 flag, std::optional<s64> kept_ms, s64 now_ms,
     const u32 block = static_cast<u32>(flag) / flags_per_block;
     return std::find(team_blocks.begin(), team_blocks.end(), block) != team_blocks.end() &&
            (!kept_ms || now_ms - *kept_ms >= KeptChangeReportMs);
+}
+
+bool KeptChangeStaysWithTeam(s32 flag, bool team_mode, bool plays_in_team) {
+    return team_mode && !plays_in_team && IsWorldFlag(flag);
 }
 
 TeamJoin::Action TeamJoin::Tick(const Frame& frame) {

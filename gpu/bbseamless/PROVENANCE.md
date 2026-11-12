@@ -1,10 +1,10 @@
 # Reference client sources
 
-Updated to [Amanises-Yharnam-Together/BBSC-Yharnam-Together v1.4.0 at efa0ad2](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/tree/efa0ad265d840d9195e55db2e3216f46f7daedd0)
-from v1.3.1 and the original 8d5e54f import. Local Mac adapters, durable invasion rewards
+Updated to [Amanises-Yharnam-Together/BBSC-Yharnam-Together v1.5.0 at 0bb87c1](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/tree/0bb87c1b80ca2dfc01d75931cc3cb55873c057e2)
+from v1.4.0, v1.3.1 and the original 8d5e54f import. Local Mac adapters, durable invasion rewards
 and the Travel Together lock fix are retained. This release credits Kaniel / lKaniel,
 Amanises and the Yharnam Together contributors, with original per-file notices preserved.
-See [the integration record](../../docs/SEAMLESS_V1_4_0.md).
+See [the integration record](../../docs/SEAMLESS_V1_5_0.md).
 Original co-op client author: **Kaniel / lKaniel**
 ([GitHub](https://github.com/lKaniel)). The Mac overlay/Metal foundation and original
 `tests/test_mtl_overlay.mm` harness are by **Mark Hall**, as credited in their retained

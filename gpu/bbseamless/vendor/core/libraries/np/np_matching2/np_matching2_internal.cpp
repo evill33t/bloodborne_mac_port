@@ -1403,10 +1403,27 @@ void FireEvent(const PendingEvent& ev) {
 
 } // namespace
 
+DispatchHold::DispatchHold() {
+    std::scoped_lock lock(g_state.queue_mutex);
+    ++g_state.dispatch_holds;
+}
+
+DispatchHold::~DispatchHold() {
+    {
+        std::scoped_lock lock(g_state.queue_mutex);
+        --g_state.dispatch_holds;
+    }
+    g_state.queue_cv.notify_all();
+}
+
 PS4_SYSV_ABI void* EventDispatcherThreadMain(void*) {
     Common::SetCurrentThreadName("Matching2:Dispatch");
     std::unique_lock lock(g_state.queue_mutex);
     while (g_state.dispatch_running.load()) {
+        if (g_state.dispatch_holds > 0) {
+            g_state.queue_cv.wait(lock);
+            continue;
+        }
         const auto now = std::chrono::steady_clock::now();
 
         std::vector<PendingEvent> ready;

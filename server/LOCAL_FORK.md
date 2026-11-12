@@ -7,20 +7,20 @@ Linux service. The Mac app does not launch or package the server.
 
 ## Source and changes
 
-Current upstream base: **v1.4.0**, `efa0ad265d840d9195e55db2e3216f46f7daedd0` from
+Current upstream base: **v1.5.0**, `0bb87c1b80ca2dfc01d75931cc3cb55873c057e2` from
 [Amanises-Yharnam-Together/BBSC-Yharnam-Together](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together).
-Previous upstream base: v1.3.1, `5d2305ee611ef1e03be39ff925f0da75c9a70393`
+Previous upstream base: v1.4.0, `efa0ad265d840d9195e55db2e3216f46f7daedd0`
 (original import: `8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1`).
 Retained local extension base: `9e60cec70e589a199cf86771de4844fe556562d4`.
 The imported baseline is retained by its original hashes. Local hosting and server
 adaptations are listed by `adapted_sha256` in [SOURCE_MANIFEST.json](SOURCE_MANIFEST.json).
 
 The local server also supports `CompatibleClientVersions` in `shadnet.cfg`. To admit the
-Mac `dev` label and Windows `1.4.0` together, set:
+Mac `dev` label and Windows `1.5.0` together, set:
 
 ```ini
 CheckServerBuild=true
-CompatibleClientVersions=dev,1.4.0
+CompatibleClientVersions=dev,1.5.0
 SignIn=open
 ```
 
@@ -126,3 +126,9 @@ import; the C++ source/protocol/tests are identical to the already deployed/test
 See [the v1.4.0 integration record](../docs/SEAMLESS_V1_4_0.md). Existing private servers
 using automatic identities must set `SignIn=open` explicitly: v1.4.0 hosted defaults use
 password accounts. Keep `BB_RELEASE_VERSION=1.4.0` (set by the image) and the protocol check.
+
+## v1.5.0 update
+
+See [the v1.5.0 integration record](../docs/SEAMLESS_V1_5_0.md). The image uses
+`BB_RELEASE_VERSION=1.5.0`; preserve `SignIn=open` on our private host and its pinned identity.
+All team members should use the same co-op source release.

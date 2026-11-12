@@ -5,6 +5,7 @@
 #include "invasion_visual.h"
 #include "common/float_chars.h"
 #include "vendor/core/bloodborne_memory_window.h"
+#include "vendor/core/bloodborne_titles.h"
 #include <cassert>
 #include <cerrno>
 #include <cstdio>
@@ -13,6 +14,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 int main() {
+    for(auto title:Core::Bloodborne::RetailTitles) {
+        assert(Core::Bloodborne::SeamlessCoopGameFor(title,"01.09")==Core::Bloodborne::CoopGame::Yes);
+        assert(Core::Bloodborne::SeamlessCoopGameFor(title,"01.00")==Core::Bloodborne::CoopGame::OtherVersion);
+    }
+    assert(!Core::Bloodborne::GetsSeamlessCoop(Core::Bloodborne::SeamlessCoopGameFor("CUSA00001","01.09")));
     Core::Bloodborne::MemoryWindows windows;
     windows.Note(2,0x1000,0x2000,3);
     assert(windows.Covers(2,0x1000,0x1000,1));

@@ -1,18 +1,18 @@
 # Seamless co-op on macOS
 
 This branch integrates the online client from
-[Amanises-Yharnam-Together/BBSC-Yharnam-Together](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/tree/efa0ad265d840d9195e55db2e3216f46f7daedd0),
-pinned at **v1.4.0**, `efa0ad265d840d9195e55db2e3216f46f7daedd0`. The default server is
+[Amanises-Yharnam-Together/BBSC-Yharnam-Together](https://github.com/Amanises-Yharnam-Together/BBSC-Yharnam-Together/tree/0bb87c1b80ca2dfc01d75931cc3cb55873c057e2),
+pinned at **v1.5.0**, `0bb87c1b80ca2dfc01d75931cc3cb55873c057e2`. The default server is
 `bloodborne.phobos.services`. This repository builds the client and includes the separately hosted [server component](../server/LOCAL_FORK.md).
 
-See [the v1.4.0 integration record](SEAMLESS_V1_4_0.md) for the update scope and validation.
+See [the v1.5.0 integration record](SEAMLESS_V1_5_0.md) for the update scope and validation.
 
 ## Start playing
 
 Build dependencies with `bash scripts/macos/bootstrap_deps.sh`, then run
 `bash build_macos.sh`. Both online modules are included by default. Choose **Seamless Co-op**
 in the **Game mode** selector at the top of the launcher, then press **Play**. This enables
-co-op on `bloodborne.phobos.services`; its server and host rules are in the **Online** tab.
+co-op on `bloodborne.phobos.services`; its server is in the **Online** tab. The leader sets party rules in the in-game team settings.
 Select Continue or Load Game to choose your character; its team screen opens before entering
 the world.
 
@@ -23,10 +23,12 @@ shown when creating an account. Password change, recovery and sign-out are avail
 Sessions expire after 29 days in the launcher; sign in again when prompted. Each public account
 gets its own co-op save folder, seeded once from the selected regular saves. Switching back to
 **Private / local server** restores the private server address and existing server-scoped saves.
-Both known hosts pin their published transport identity. Global uses the server's default
-rules; the team leader can change rules from the in-game team settings menu.
+Both known hosts pin their published transport identity. The team leader sets rules in the in-game team settings on either host; the game keeps those
+choices for the leader’s next team. Old launcher rule/strength values remain in the INI for
+older builds, but v1.5.0 does not apply them.
 
-v1.4.0 supports five hunters per team, quick match, spectator following, named team duels,
+v1.5.0 adds full-player guest reloads, per-save world protection, persistent leader rules,
+custom strength and optional friendly fire. It retains five hunters per team, quick match, spectator following, named team duels,
 leader rule editing and a phantom-glow setting. Production releases disable co-op autoplay
 and the developer free camera. Windows Discord IPC is retained upstream source, but is not
 implemented on macOS. Public acceptance and gameplay coverage are recorded in the integration
@@ -44,8 +46,6 @@ For a command-line launch, set the following in `bbport.ini`:
 online=1
 online_pool=seamless
 seamless_server=bloodborne.phobos.services:31314
-seamless_host_rules=off
-seamless_harder_enemies=off
 ```
 
 Registration is automatic. A persistent account belongs to each server and is stored in an
@@ -58,7 +58,8 @@ the seed and then routed to the chosen co-op folder's `savedata`. Game assets re
 checked event copies and links form a temporary
 private game view, removed on exit. Generated event caches include input and output hashes.
 
-Co-op uses the reference's fixed 60 FPS game timing. The renderer still runs in the native
+Co-op uses fixed 60 FPS game timing, or retail 30 FPS when selected. Higher requested rates
+use 60 FPS here; unlocked co-op is not enabled by this adapter. The renderer still runs in the native
 arm64 Metal host; game hooks and networking run in the x86-64 Rosetta game process.
 
 ## Controls and features

@@ -64,14 +64,17 @@ int main() {
             auto* desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:width height:height mipmapped:NO];
             desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead;
             auto texture=[mtl newTextureWithDescriptor:desc];
-            for(int mode=0;mode<10;++mode) {
+            for(int mode=0;mode<11;++mode) {
                 s.map_screen=mode>=5 && mode<9;s.has_map=s.map_screen;s.map.map=0x18010000;s.map.has_me=1;s.map.y=10;
                 s.area_count=2;s.areas[0].map=0x18010000;s.areas[1].map=0x15000000;
                 std::snprintf(s.areas[0].name,64,"Yharnam");std::snprintf(s.areas[1].name,64,"Hunter's Dream");
                 s.label_count=1;s.labels[0].id=19;std::snprintf(s.labels[0].name,96,"Iosefka's Clinic");
                 BbSettings::Get().map_view=mode>=5?mode-5:1;
                 BbSettings::Get().menu_language=mode==7?BbLanguage::MenuLanguage::De:mode==8?BbLanguage::MenuLanguage::Ja:BbLanguage::MenuLanguage::English;
-                s.team_screen=mode==0;s.has_load=mode==2;s.trade_id=mode==3?42:0;
+                s.team_screen=mode==0 || mode==10;s.lobby.signed_in=mode!=10;s.sign_in_problem=mode==10?BBCOOP_SIGN_IN_REFUSED:0;
+                std::snprintf(s.sign_in_server,sizeof(s.sign_in_server),"test.example:31314");
+                std::snprintf(s.sign_in_reason,sizeof(s.sign_in_reason),"A different release is required (safe text %%s)");
+                s.lobby.rule_friendly_fire=1;s.has_load=mode==2;s.trade_id=mode==3?42:0;
                 s.panel.member_count=mode==4?1:4;
                 s.panel.members[0].vital=mode==4?BBCOOP_VITAL_DOWN:BBCOOP_VITAL_UP;
                 s.panel.members[0].landed=0; // a fresh downed companion must not leave a draw path

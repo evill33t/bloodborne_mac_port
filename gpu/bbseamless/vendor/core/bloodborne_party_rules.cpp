@@ -381,14 +381,55 @@ bool ScaleParam(ScaledParam& kept, u64 address, std::span<u8> table,
 
 } // namespace
 
+// See RescaleLoadedHp: every enemy copy loaded now (not the players) takes the new HP rate.
+// Bug audit 24: every game then makes the same max for an enemy, whenever its copy loaded.
+std::size_t RescaleLoadedEnemies(float old_rate, float new_rate) {
+    const u64 world = ReadValue<u64>(image_base + CandidateLocalStatePointerOffset, 0);
+    if (world < 0x10000 || old_rate == new_rate) {
+        return 0;
+    }
+    const u64 player = GetLocalPlayer();
+    std::size_t rescaled = 0;
+    ForEachWorldCharacter(world, [&](u64 character) {
+        const u32 handle = ReadValue<u32>(character, 0x08);
+        // Players: 0x10044000 and up (the rig's census); their HP is no NpcParam's.
+        if (character == player || (handle & 0xFFFFF000u) == 0x10044000u) {
+            return;
+        }
+        const u64 modules = ReadValue<u64>(character, 0x3B0);
+        const u64 data = modules >= 0x10000 ? ReadValue<u64>(modules, 0x20) : 0;
+        if (data < 0x10000 ||
+            !HasMemoryAccess(data + 0xF8, EnemyMaxHpAgainAt + 4 - 0xF8, MemoryProt::CpuWrite)) {
+            return;
+        }
+        const auto hp =
+            RescaleLoadedHp(ReadValue<s32>(data, EnemyBaseHpAt), ReadValue<s32>(data, 0xFC),
+                            ReadValue<s32>(data, EnemyMaxHpAgainAt), ReadValue<s32>(data, 0xF8),
+                            old_rate, new_rate);
+        if (!hp) {
+            return;
+        }
+        WriteValue(data, EnemyBaseHpAt, hp->base);
+        WriteValue(data, 0xFC, hp->max);
+        if (hp->max_again > 0) {
+            WriteValue(data, EnemyMaxHpAgainAt, hp->max_again);
+        }
+        WriteValue(data, 0xF8, hp->hp);
+        ++rescaled;
+    });
+    return rescaled;
+}
+
 void MakeEnemiesHarder() {
     // Kaniel 2026-10-25: with the enemy scaling rule the team's size on this map picks the rate,
     // over the player's own setting.
     // Kaniel 2026-11-05: in a team the team's strength (EnemiesWanted), never each player's own.
     const HostRules rules = ActiveHostRules();
     const std::size_t hunters = rules.enemy_scaling ? HuntersOnMyMap() : 0;
+    // Kaniel 2026-11-11: out of a team the player's own strength is its own rules' (the ones it set
+    // on the team screen), the dev setting's when given.
     const std::optional<HarderEnemies> wanted =
-        EnemiesWanted(rules, InTeamNow(), hunters, harder_enemies);
+        EnemiesWanted(rules, InTeamNow(), hunters, harder_enemies ? harder_enemies : rules.enemies);
     // Kaniel 2026-10-28: the boss tempo rule's turn speed for the boss rows.
     const float turn = ActiveBossTempoTuning().turn;
     static ScaledParam npc_kept;
@@ -433,6 +474,8 @@ void MakeEnemiesHarder() {
         // What this step changes: the harder rate (or its table) and the boss turn speed.
         const bool rate_changes = !SameRate(npc_kept.rate, wanted) || npc_kept.table != npc;
         const bool turn_changes = npc_kept.turn != turn || (npc_kept.table != npc && turn != 1.0f);
+        // The HP rate the copies loaded until now were made with (a fresh table is the game's).
+        const float old_hp_rate = npc_kept.table == npc && npc_kept.rate ? npc_kept.rate->hp : 1.0f;
         if (ScaleParam(npc_kept, npc, *table, marker, wanted, turn,
                        [&](std::span<u8> param, const std::optional<HarderEnemies>& rate) {
                            rows = rate ? MakeNpcParamHarder(param, *rate) : 0;
@@ -440,12 +483,16 @@ void MakeEnemiesHarder() {
                        })) {
             npc_kept.marker = HarderEnemiesMarker(*table, NpcHpOffset, NpcPoiseOffset);
             if (rate_changes) {
-                LOG_INFO(Debug,
-                         "Bloodborne harder enemies: {} NpcParam rows, {} (Father Gascoigne HP "
-                         "{}, poise {}){}",
-                         rows, RateText(wanted), npc_kept.marker ? (*npc_kept.marker)[0] : -1,
-                         npc_kept.marker ? (*npc_kept.marker)[1] : -1,
-                         in_world ? "; enemies already on this map keep their old stats" : "");
+                const float new_hp_rate = wanted ? wanted->hp : 1.0f;
+                const std::size_t rescaled =
+                    in_world ? RescaleLoadedEnemies(old_hp_rate, new_hp_rate) : 0;
+                LOG_INFO(
+                    Debug,
+                    "Bloodborne harder enemies: {} NpcParam rows, {} (Father Gascoigne HP "
+                    "{}, poise {}); {} enemies already on this map rescaled x{:.2f} -> x{:.2f}",
+                    rows, RateText(wanted), npc_kept.marker ? (*npc_kept.marker)[0] : -1,
+                    npc_kept.marker ? (*npc_kept.marker)[1] : -1, rescaled, old_hp_rate,
+                    new_hp_rate);
             }
             if (turn_changes) {
                 float gascoigne = 0.0f;
@@ -551,6 +598,42 @@ std::size_t PolishMessages() {
 } // namespace
 
 namespace Coop {
+
+// The game's texts of the nameplate roles (see NameplateRoleText), looked up every two seconds:
+// the HUD writes the line on every frame, and a reloaded message file moves them.
+std::optional<std::string> PartyNameplateRoleText(NameplateRole role) {
+    static std::mutex mutex;
+    static std::chrono::steady_clock::time_point looked{};
+    static std::u16string host_text, guest_text;
+    std::scoped_lock lock{mutex};
+    if (const auto now = std::chrono::steady_clock::now();
+        now - looked >= std::chrono::seconds{2}) {
+        looked = now;
+        host_text.clear();
+        guest_text.clear();
+        const u64 repository = ReadValue<u64>(image_base + MsgRepositoryPointerOffset, 0);
+        if (repository >= 0x10000 && HasMemoryAccess(repository, 0x10, MemoryProt::CpuRead)) {
+            const auto read = [&](s32 id) {
+                const char16_t* text = GameMessage(repository, EventTextOverrideCategory, id);
+                if (text == nullptr) {
+                    text = GameMessage(repository, EventTextCategory, id);
+                }
+                std::u16string out;
+                const u64 at = reinterpret_cast<u64>(text);
+                for (size_t i = 0;
+                     text != nullptr && i < 32 &&
+                     HasMemoryAccess(at + i * 2, 2, MemoryProt::CpuRead) && text[i] != u'\0';
+                     ++i) {
+                    out += text[i];
+                }
+                return out;
+            };
+            host_text = read(NameplateHostMessage);
+            guest_text = read(NameplateGuestMessage);
+        }
+    }
+    return NameplateRoleText(role, host_text, guest_text);
+}
 
 // Multiplayer UI polish for a party (Kaniel 2026-10-11): Host/Guest text, a name for guest role 6
 // and no bell icons, in the loaded message files, the role table and SpEffectParam. Checked every

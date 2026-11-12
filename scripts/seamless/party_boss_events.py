@@ -31,7 +31,9 @@ Boss fogs (open_boss_fog_for_guests): a white phantom's fog event waited for the
 "entered" flag, so a party guest could not enter a boss fog first (nor after a world reset). It
 no longer waits, and it sets the host's flag too, which starts the boss; the emulator posts that
 flag to the host (IsBossFogEntryFlag). Boss entrances triggered by walking into the arena accept
-a phantom too.
+a phantom too. Rom's fog (m32_00 13204830), the Dream's (m21_00 12100800) and the chalice
+dungeons' (m29 12906789, 12906796, 12906800) have no "entered" flag of that shape, so
+HIDDEN_FOG_EVENTS names them: their fog is hidden for a client too (let_guests_see_hidden_fogs).
 
 Items picked up with the action button at a glowing spot (ACTION_PICKUP_EVENTS: the Abandoned
 Old Workshop's Small Hair Ornament, Third Umbilical Cord and Old Hunter Bone, and seven more) ended
@@ -222,6 +224,22 @@ OR_GROUP_1, OR_GROUP_2 = 0xFF, 0xFE
 # is on. A party is always in multiplayer, so it never went. Both sides' multiplayer checks never
 # match: the wall stands while he lives, as in a lone game, and goes once he is dead.
 ARENA_WALL_EVENTS = {'m34_00_00_00.emevd.dcx': 13400010}
+# Boss fogs hidden for everyone but a client (player report 2026-11-08, v1.4.0: on the way to Rom
+# one of two players could not get through a fog wall). A boss fog event hides its wall until the
+# boss's entrance has run, behind "skip 2 lines for a client" (1003:5 2 1: wall object off, fog
+# SFX off), so a party guest faced a fog the host did not see. open_boss_fog_for_guests turns
+# that skip off in every boss fog event it finds by the phantom's "host entered" flag; these two
+# have none: Rom's at the Lunarium's balcony (m32_00 13204830, wall 3201800; his fight starts with
+# the dive) and the Dream's (m21_00 12100800, wall 2101800, hidden once Gehrman or the Moon
+# Presence is dead, in three branches). The chalice dungeons' fog events (m29 12906789, 12906796,
+# 12906800; Discord 2026-11-05 and 2026-11-08: fog walls at a chalice dungeon's spawn room, and
+# still there after the friend left) take their wall and fog from each block's 2000:0 (12906796 in
+# about 2350 block files), so no flag of theirs is fixed either. The audit of the 01.09 files
+# (and the 2641 chalice block files, which have no such skip) found no other one
+# (tools/re/tests TheGamesEventFiles).
+HIDDEN_FOG_EVENTS = {'m32_00_00_00.emevd.dcx': {13204830}, 'm21_00_00_00.emevd.dcx': {12100800},
+                     'm29.emevd.dcx': {12906789, 12906796, 12906800}}
+HIDE_OBJECT = (2005, 3)
 
 
 def patch_chalice_walls(emevd: bytes, edits: list | None = None, event_id: int = 12907600,
@@ -244,6 +262,34 @@ def patch_chalice_walls(emevd: bytes, edits: list | None = None, event_id: int =
             if (bank, ident) == IF_MULTIPLAYER_STATE and length >= 2 and data[at] in groups:
                 data[at + 1] = NEVER
                 note(edits, event, k, bank, ident, why)
+                patched += 1
+    return bytes(data), patched
+
+
+def let_guests_see_hidden_fogs(emevd: bytes, wanted: set[int],
+                               edits: list | None = None) -> tuple[bytes, int]:
+    """In the `wanted` events every client skip (1003:5, state 1) over a wall object switched off
+    (2005:3 off) never matches: a client hides the fog when the host does."""
+    data = bytearray(emevd)
+    fields = struct.unpack_from('<16q', data, 16)
+    event_count, event_offset, instruction_offset, args_offset = (fields[0], fields[1], fields[3],
+                                                                  fields[13])
+    patched = 0
+    for index in range(event_count):
+        event, count, first, *_ = struct.unpack_from('<qqqqqii', data, event_offset + index * 48)
+        if event not in wanted:
+            continue
+        instructions = [struct.unpack_from('<iiqqq', data, instruction_offset + first + k * 32)
+                        for k in range(count)]
+        for k, (bank, ident, length, offset, _) in enumerate(instructions):
+            at = args_offset + offset
+            if (bank, ident) != SKIP_IF_MULTIPLAYER_STATE or length < 2 or data[at + 1] != 1:
+                continue
+            skipped = instructions[k + 1:k + 1 + data[at]]
+            if any((b, i) == HIDE_OBJECT and n >= 5 and data[args_offset + o + 4] == 0
+                   for b, i, n, o, _ in skipped):
+                data[at + 1] = NEVER
+                note(edits, event, k, bank, ident, 'client hides the fog too')
                 patched += 1
     return bytes(data), patched
 
@@ -1056,8 +1102,10 @@ def parse(emevd: bytes) -> dict:
     for index in range(fields[0]):
         event, count, first, param_count, param_offset, rest, unknown = struct.unpack_from(
             '<qqqqqii', emevd, fields[1] + index * EVENT_SIZE)
-        if (count < 0 or first < 0 or first % INSTRUCTION_SIZE or
-                first + count * INSTRUCTION_SIZE > fields[2] * INSTRUCTION_SIZE):
+        # An event without instructions may give any offset: mods' event files (written by event
+        # editors) give -1, and the game reads nothing there (Supermedo's 1.9.8.1 fix to this file).
+        if count < 0 or count and (first < 0 or first % INSTRUCTION_SIZE or
+                                   first + count * INSTRUCTION_SIZE > fields[2] * INSTRUCTION_SIZE):
             raise EventPatchError(f'event {event}: its {count} instructions at {first} are '
                                   f'outside the instruction table')
         instructions = []
@@ -1204,7 +1252,7 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
               'item pickup checks': 0, 'host door effects': 0, 'ambush checks': 0,
               'chalice reward checks': 0, 'one-time enemy checks': 0, 'lake dive checks': 0,
               'ending checks': 0, 'dropped banners': 0, 'own animation checks': 0,
-              'plain action buttons': 0, 'arena wall checks': 0}
+              'plain action buttons': 0, 'arena wall checks': 0, 'hidden fog checks': 0}
     try:
         if name.startswith('m'):
             emevd, counts['boss event checks'] = patch_events(emevd, edits)
@@ -1233,6 +1281,9 @@ def patch_file(name: str, original: bytes) -> tuple[bytes | None, list, dict]:
             emevd, counts['arena wall checks'] = patch_chalice_walls(
                 emevd, edits, ARENA_WALL_EVENTS[name], (OR_GROUP_1, OR_GROUP_2),
                 'arena wall goes with its boss in a party')
+        if name in HIDDEN_FOG_EVENTS:
+            emevd, counts['hidden fog checks'] = let_guests_see_hidden_fogs(
+                emevd, HIDDEN_FOG_EVENTS[name], edits)
         if name in HOST_DOOR_EFFECT:
             emevd, counts['host door effects'] = patch_host_door_effect(
                 emevd, edits, HOST_DOOR_EFFECT[name])
