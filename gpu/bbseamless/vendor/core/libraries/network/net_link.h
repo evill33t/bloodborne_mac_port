@@ -59,6 +59,7 @@ enum class Kind : u8 {
     // server -> game (a region of shards, docs/SCALING.md): continue on another shard, at its
     // address with its key; the hellos there carry the ticket. A hello's answer, or on the link.
     Redirect = 11,
+    Fragment = 12, // negotiated, individually authenticated pieces of a Data datagram
 };
 struct Hello {
     u8 version = LinkVersion;
@@ -74,6 +75,7 @@ struct Hello {
     // A region: the ticket of the shard that sent the game here (opaque), after the work's 8
     // bytes (0: none done), its size a u16.
     std::vector<u8> ticket;
+    bool fragments = false; // optional byte after the work and ticket fields
 };
 struct Redirect {
     u32 addr_nbo = 0;
@@ -85,6 +87,7 @@ struct Redirect {
 struct Welcome {
     bool accepted = false;
     std::string text;
+    bool fragments = false; // server accepted the hello's fragmentation capability
 };
 struct Data {
     u32 addr_nbo = 0;
@@ -202,7 +205,7 @@ inline std::optional<Kind> KindOf(std::span<const u8> datagram) {
         return std::nullopt;
     }
     const u8 kind = datagram[8];
-    if (kind < static_cast<u8>(Kind::Hello) || kind > static_cast<u8>(Kind::Redirect)) {
+    if (kind < static_cast<u8>(Kind::Hello) || kind > static_cast<u8>(Kind::Fragment)) {
         return std::nullopt;
     }
     if (!Detail::Body(datagram, static_cast<Kind>(kind))) {
@@ -218,13 +221,14 @@ inline std::vector<u8> Encode(const Hello& hello) {
     Detail::PutText(out, hello.online_id);
     Detail::PutText(out, hello.build);
     Detail::PutText(out, hello.secret);
-    if (hello.work || !hello.ticket.empty()) {
+    if (hello.work || !hello.ticket.empty() || hello.fragments) {
         Detail::Put(out, hello.work.value_or(0));
     }
-    if (!hello.ticket.empty()) {
+    if (!hello.ticket.empty() || hello.fragments) {
         Detail::Put(out, static_cast<u16>(hello.ticket.size()));
         Detail::PutRaw(out, hello.ticket.data(), hello.ticket.size());
     }
+    if (hello.fragments) out.push_back(1);
     return out;
 }
 
@@ -259,6 +263,7 @@ inline std::vector<u8> Encode(const Welcome& welcome) {
     auto out = Detail::Start(Kind::Welcome);
     out.push_back(welcome.accepted ? 1 : 0);
     Detail::PutText(out, welcome.text);
+    if (welcome.fragments) out.push_back(1);
     return out;
 }
 
@@ -390,6 +395,7 @@ inline std::optional<Welcome> DecodeWelcome(std::span<const u8> datagram) {
         return std::nullopt;
     }
     welcome.accepted = accepted != 0;
+    welcome.fragments = !body->Rest().empty() && body->Rest()[0] == 1;
     return welcome;
 }
 
@@ -438,6 +444,7 @@ inline std::vector<u8> HelloDatagram(LinkAuth::Client& auth, std::string online_
     hello.online_id = std::move(online_id);
     hello.build = std::move(build);
     hello.secret = std::string{secret};
+    hello.fragments = true;
     if (auth.HasCookie()) {
         hello.cookie = auth.CookieToEcho();
         hello.work = auth.WorkToSend();

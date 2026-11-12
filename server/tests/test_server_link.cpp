@@ -1415,8 +1415,87 @@ int TwoPCsOneId() {
 }
 } // namespace
 
+int FragmentedData() {
+  Net net;
+  net->SetPartyOf([](const Endpoint&) { return QStringLiteral("team-a"); });
+  const auto hello = [](const char* who, bool fragments) {
+    Hello value{LinkVersion, who, Build, "s3cr3t", {}};
+    value.fragments = fragments;
+    return Encode(value);
+  };
+  auto answer = net.Receive(Kaniel, hello("Kaniel", true), 0);
+  CHECK(DecodeWelcome(SentTo(answer, Kaniel).value(0))->fragments);
+  answer = net.Receive(Ada, hello("Ada", true), 1);
+  CHECK(DecodeWelcome(SentTo(answer, Ada).value(0))->fragments);
+  answer = net.Receive(Eileen, hello("Eileen", false), 2);
+  CHECK(!DecodeWelcome(SentTo(answer, Eileen).value(0))->fragments);
+  const auto parsed = DecodeHello(hello("Kaniel", true));
+  CHECK(parsed && parsed->fragments && parsed->ticket.isEmpty());
+  Hello ticketed{LinkVersion, "Kaniel", Build, "s3cr3t", {}};
+  ticketed.ticket = QByteArray::fromHex("001122");
+  ticketed.work = 123;
+  ticketed.fragments = true;
+  const auto ticket = DecodeHello(Encode(ticketed));
+  CHECK(ticket && ticket->fragments && ticket->ticket == ticketed.ticket && ticket->work == 123);
+
+  using namespace BloodborneCoop;
+  std::vector<u8> packet;
+  GameLinkDetail::Put(packet, u32{0x3d});
+  GameLinkDetail::Put(packet, u32{1600});
+  packet.resize(1608, 0x31);
+  BloodborneCoop::GameFrame frame{"Kaniel", 7, 9, 0,
+      {{PacketClass::Reliable, 0, packet}}};
+  const auto body = GamePacketsFrame(frame);
+  const auto plain = Encode(Data{VirtualEndpointOf("Ada"), body});
+  const auto parts = LinkFragments::Split(Span(plain), 1);
+  CHECK(parts.size() == 2);
+  // A plain forged fragment never reaches the assembler; valid authenticated pieces do.
+  CHECK(net.hub.Receive(Kaniel, ToQt(parts[0]), 10).sends.isEmpty());
+  CHECK(net.Receive(Kaniel, ToQt(parts[1]), 11).sends.isEmpty());
+  answer = net.Receive(Kaniel, ToQt(parts[0]), 12);
+  const auto sent = SentTo(answer, Ada);
+  CHECK(sent.size() == 2);
+  LinkFragments::Inbox inbox;
+  std::optional<LinkFragments::Bytes> joined;
+  for (const auto& part : sent) {
+    CHECK(part.size() + LinkAuth::TrailerBytes + 28 <= 1200);
+    CHECK(KindOf(part) == Kind::Fragment);
+    joined = inbox.Take(Span(part), 13);
+  }
+  CHECK(joined.has_value());
+  auto data = DecodeData(ToQt(*joined));
+  CHECK(data && data->peer == VirtualEndpointOf("Kaniel") && data->frame == body);
+
+  // Legacy destinations still receive the original Data format.
+  const auto legacy = Encode(Data{VirtualEndpointOf("Eileen"), body});
+  for (const auto& part : LinkFragments::Split(Span(legacy), 2))
+    answer = net.Receive(Kaniel, ToQt(part), 20);
+  CHECK(SentTo(answer, Eileen).size() == 1);
+  CHECK(DecodeData(SentTo(answer, Eileen)[0])->frame == body);
+  // A legacy sender has not opted into the new wire kind.
+  for (const auto& part : parts) CHECK(net.Receive(Eileen, ToQt(part), 21).sends.isEmpty());
+
+  // Channel restrictions still run on the complete packet before forwarding.
+  net->SetPacketRoutes([](const Endpoint&, const Endpoint&, u32) { return false; });
+  for (const auto& part : LinkFragments::Split(Span(plain), 3))
+    answer = net.Receive(Kaniel, ToQt(part), 30);
+  data = DecodeData(SentTo(answer, Ada).value(0));
+  CHECK(data.has_value());
+  const auto routed = DecodeGameFrame(Span(data->frame).subspan(9));
+  CHECK(routed && routed->entries.size() == 1 &&
+        NativePacketChannel(routed->entries[0].packet) == DroppedNativeChannel);
+  net->SetPartyOf([](const Endpoint& endpoint) {
+    return endpoint == Kaniel ? QStringLiteral("team-a") : QStringLiteral("team-b");
+  });
+  for (const auto& part : LinkFragments::Split(Span(plain), 4))
+    CHECK(net.Receive(Kaniel, ToQt(part), 40).sends.isEmpty());
+  CHECK(net.unopened == 0);
+  std::cout << "server link fragmentation: negotiated, authenticated, routed and legacy-compatible: ok\n";
+  return 0;
+}
+
 int main() {
-  if (Contracts() != 0 || HelloAndBuilds() != 0 || BuildChecks() != 0 ||
+  if (FragmentedData() != 0 || Contracts() != 0 || HelloAndBuilds() != 0 || BuildChecks() != 0 ||
       CompatibleVersions() != 0 ||
       Relays() != 0 || Liveness() != 0 || TeamOnly() != 0 ||
       VirtualMembers() != 0 || RoutesGamePackets() != 0 || SignsIn() != 0 ||

@@ -104,8 +104,8 @@ RUN --mount=type=cache,id=shadnet-build,target=/src/server/build \
     cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/opt/qt \
     && printf '#pragma once\n#define BB_SCM_REV "%s"\n' "$SOURCE_REVISION" > build/include/bbcoop_revision.h \
     && cmake --build build --target shadnet bbload test_server_link test_build_fingerprint \
-        test_packet_routes test_rpc_tunnel test_admission test_http_gate test_team_lobby test_lobby_friends_db test_bloodborne_trade test_bloodborne_world test_world_writer test_signed_accounts test_password_accounts test_config test_admin test_accounts test_bloodborne_duel test_invasions $( [ "$BUILD_JOBS" -gt 0 ] && echo -j"$BUILD_JOBS" ) \
-    && ctest --test-dir build --output-on-failure -R '^(server_link|build_fingerprint|packet_routes|rpc_tunnel|admission|http_gate|team_lobby|lobby_friends_db|bloodborne_trade|bloodborne_world|world_writer|signed_accounts|password_accounts|config|admin|accounts|bloodborne_duel|invasions|password_signin|password_region)$' \
+        test_packet_routes test_link_fragments test_rpc_tunnel test_admission test_http_gate test_team_lobby test_lobby_friends_db test_bloodborne_trade test_bloodborne_world test_world_writer test_signed_accounts test_password_accounts test_config test_admin test_accounts test_bloodborne_duel test_invasions $( [ "$BUILD_JOBS" -gt 0 ] && echo -j"$BUILD_JOBS" ) \
+    && ctest --test-dir build --output-on-failure -R '^(server_link|build_fingerprint|packet_routes|link_fragments|rpc_tunnel|admission|http_gate|team_lobby|lobby_friends_db|bloodborne_trade|bloodborne_world|world_writer|signed_accounts|password_accounts|config|admin|accounts|bloodborne_duel|invasions|password_signin|password_region)$' \
     && mkdir -p /bin-out && strip -o /bin-out/shadnet build/shadnet \
     && strip -o /bin-out/bbload build/bbload
 COPY server/hosting/collect-runtime.sh /usr/local/bin/

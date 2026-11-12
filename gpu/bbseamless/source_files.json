@@ -1085,7 +1085,8 @@
     {
       "path": "vendor/core/libraries/network/net_link.h",
       "source": "emulator/src/core/libraries/network/net_link.h",
-      "sha256": "fb9e85f2db727949581c686ce1db362a809704cc25df537a71cee4fa74aee084"
+      "sha256": "fb9e85f2db727949581c686ce1db362a809704cc25df537a71cee4fa74aee084",
+      "adapted_sha256": "aa1e4b19b63a9986b00aa73e3070896b116a7df77995d2b64cdc5e4c9ea9900a"
     },
     {
       "path": "vendor/core/libraries/network/net_obj.cpp",
@@ -1136,7 +1137,7 @@
       "path": "vendor/core/libraries/network/p2p_sockets.cpp",
       "source": "emulator/src/core/libraries/network/p2p_sockets.cpp",
       "sha256": "a405472357d15fde5509fdba946d4f945feab9ac88c7fd38c7d832acc94f1de1",
-      "adapted_sha256": "1355bf262b44d508bc3f4ed95fff04b7515f750de25aaa1fdd9ba8a33b105aec"
+      "adapted_sha256": "26a7d229bf3cd721bfb3d5528e5c1a90ec105f7c24cb38bfb14f4e713e588a2e"
     },
     {
       "path": "vendor/core/libraries/network/posix_sockets.cpp",

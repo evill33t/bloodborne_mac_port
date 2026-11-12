@@ -308,6 +308,10 @@ if(BUILD_TESTING)
         BLOODBORNE_SERVER_LINK_CONTRACTS="${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/server_link_frames.txt")
     add_test(NAME region COMMAND test_region)
 
+    add_executable(test_link_fragments EXCLUDE_FROM_ALL tests/test_link_fragments.cpp)
+    target_include_directories(test_link_fragments PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME link_fragments COMMAND test_link_fragments)
+
     add_executable(test_packet_routes EXCLUDE_FROM_ALL tests/test_packet_routes.cpp)
     target_include_directories(test_packet_routes PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME packet_routes COMMAND test_packet_routes)

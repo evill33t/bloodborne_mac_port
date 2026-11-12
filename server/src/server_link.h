@@ -31,6 +31,7 @@
 #include <QString>
 #include <QStringList>
 #include "coop/link_auth.h"
+#include "coop/link_fragments.h"
 
 namespace ServerLink {
 
@@ -61,6 +62,7 @@ enum class Kind : quint8 {
     // A region of shards (docs/SCALING.md): continue on another shard, its address, key and the
     // ticket its hellos carry; the answer to a hello (in place of a welcome) or on the session.
     Redirect = 11,
+    Fragment = 12, // negotiated, individually authenticated Data fragments
 };
 enum class MemberState : quint8 { Quiet = 0, Back = 1, Gone = 2 };
 
@@ -111,10 +113,12 @@ struct Hello {
     // A region: the ticket of the shard that sent the game here (after the work's 8 bytes, 0 for
     // none done, as a u16 size and its bytes).
     QByteArray ticket;
+    bool fragments = false;
 };
 struct Welcome {
     bool accepted = false;
     QByteArray text;
+    bool fragments = false;
 };
 struct Data {
     Endpoint peer; // where it goes (from a game), where it came from (to a game)
@@ -355,6 +359,9 @@ private:
         // hello again gets the same welcome, and the session stays.
         LinkAuth::Key hello_key{};
         QByteArray welcome;
+        bool fragments = false;
+        quint64 next_fragment = 0;
+        LinkFragments::Inbox fragment_inbox;
     };
 
     void OnHello(const Endpoint& from, const QByteArray& datagram, qint64 now_ms, Result& result);

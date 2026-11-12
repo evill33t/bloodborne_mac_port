@@ -35,6 +35,7 @@
 #include "core/libraries/network/net_delay.h"
 #include "core/libraries/network/net_firewall.h"
 #include "core/libraries/network/net_link.h"
+#include "coop/link_fragments.h"
 #include "core/libraries/network/net_silence.h"
 #include "core/libraries/network/net_util.h"
 #include "core/libraries/network/server_link.h"
@@ -420,16 +421,37 @@ public:
         // The server link: the frame goes to shadNet, which hands it to the peer.
         if (const auto server = LinkServer();
             Link::RoutesThroughServer(server, dest_addr_nbo, dest_port_nbo)) {
-            auto sealed = SealLink(Link::EncodeData(dest_addr_nbo, dest_port_nbo, framed));
-            if (!sealed) {
-                return -1; // no link yet: the game sends its own again
-            }
-            framed = std::move(*sealed);
             dest.sin_addr.s_addr = server.addr_nbo;
             dest.sin_port = server.port_nbo;
+            return TransmitLinkData(dest, Link::EncodeData(dest_addr_nbo, dest_port_nbo, framed))
+                       ? static_cast<int>(len) : -1;
         }
         return Transmit(dest, std::move(framed)) ? static_cast<int>(len) : -1;
 #endif
+    }
+
+    // Fragment before sealing: each small datagram has its own authentication and replay counter.
+    // Older servers keep the original Data format, and legacy peers need no client update.
+    bool TransmitLinkData(const sockaddr_in& dest, std::vector<u8> plain) {
+        std::vector<std::vector<u8>> datagrams;
+        {
+            std::lock_guard lock(link_mutex);
+            if (link_fragments && plain.size() > LinkFragments::ChunkBytes) {
+                for (auto& part : LinkFragments::Split(plain, ++next_fragment)) {
+                    auto sealed = Link::Sealed(link_auth, std::move(part));
+                    if (!sealed) return false;
+                    datagrams.push_back(std::move(*sealed));
+                }
+            } else {
+                auto sealed = Link::Sealed(link_auth, std::move(plain));
+                if (!sealed) return false;
+                datagrams.push_back(std::move(*sealed));
+            }
+        }
+        if (datagrams.empty()) return false;
+        bool sent = true;
+        for (auto& datagram : datagrams) sent = Transmit(dest, std::move(datagram)) && sent;
+        return sent;
     }
 
     // Sends a datagram as it is, after the test ping's delay when there is one.
@@ -484,6 +506,8 @@ public:
             link_online_id = std::move(online_id);
             link_secret = std::move(secret);
             link_welcomed = false;
+            link_fragments = false;
+            fragment_inbox.Clear();
             link_hello_ms.reset();
             link_auth = {};
             if (key) {
@@ -510,6 +534,8 @@ public:
         std::lock_guard lock(link_mutex);
         if (Link::SaysHelloAgainForBuild(link_build, build)) {
             link_welcomed = false;
+            link_fragments = false;
+            fragment_inbox.Clear();
             link_hello_ms.reset();
         }
         link_build = std::move(build);
@@ -870,7 +896,17 @@ private:
                 }
             } else if (auto plain = Link::Opened(link_auth, sealed);
                        plain && Link::KindOf(*plain) == kind) {
-                opened = std::move(*plain);
+                if (kind == Link::Kind::Fragment) {
+                    if (link_fragments) {
+                        if (auto complete = fragment_inbox.Take(*plain, now_ms)) {
+                            opened = std::move(*complete);
+                            kind = Link::Kind::Data;
+                        }
+                    }
+                } else {
+                    fragment_inbox.Expire(now_ms);
+                    opened = std::move(*plain);
+                }
                 learned = link_auth.TakeLearned();
             } else if (link_untagged++ < 20) {
                 // Not from the server (a spoofed source, another server's key), or a replay.
@@ -962,6 +998,8 @@ private:
             std::lock_guard lock(link_mutex);
             link_server = {redirect.addr_nbo, redirect.port_nbo};
             link_welcomed = false;
+            link_fragments = false;
+            fragment_inbox.Clear();
             link_hello_ms.reset();
             link_refusal.clear();
             link_warning.clear();
@@ -1030,7 +1068,9 @@ private:
             std::lock_guard lock(link_mutex);
             if (welcome.accepted) {
                 first = !link_welcomed;
+                if (first) fragment_inbox.Clear(); // never combine fragments across handshakes
                 link_welcomed = true;
+                link_fragments = welcome.fragments;
                 link_refusal.clear();
                 // Another installation than the others' (Kaniel 2026-10-25): linked, and told.
                 repeated = link_warning == welcome.text;
@@ -1050,6 +1090,7 @@ private:
             Common::Singleton<NetUtil::NetUtilInternal>::Instance()->SetExternalIp(
                 htonl(Link::VirtualAddressOf(online_id).ipv4));
             if (first) {
+                LOG_INFO(Lib_Net, "Server link: Data fragmentation {}", welcome.fragments ? "negotiated (1200-byte UDP budget)" : "unavailable on this server");
                 LOG_INFO(Lib_Net, "Server link: the server took this game's hello");
                 TellLinkObserver("welcome", welcome.text);
             }
@@ -1216,6 +1257,9 @@ private:
     Link::ServerEndpoint link_server;
     std::string link_online_id;
     std::string link_secret;
+    bool link_fragments = false;
+    u64 next_fragment = 0;
+    LinkFragments::Inbox fragment_inbox;
     std::string link_build;
     bool link_welcomed{false};
     std::string link_refusal;
