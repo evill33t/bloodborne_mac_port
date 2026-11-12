@@ -128,3 +128,8 @@ vladtepes22's [SaveRequest research](https://github.com/vladtepes22/NightwatchCo
 The new Mac directory/receipt transaction continues Mark Hall's runtime/save foundation
 and Kaniel's [temporary-close save work](https://github.com/lKaniel/bloodborne-server/blob/8d5e54fee50e1d7c9dd25ba0a32f224b1d76b6f1/bbport/src/runtime_file.c).
 No Nightwatch implementation or native save/parameter data is included in the distribution.
+
+The local co-op packet-loss fix adds `vendor/coop/link_fragments.h`, mirrored from
+`server/coop/link_fragments.h`. It extends the existing authenticated server link with
+negotiated, bounded Data reassembly; native game packets and co-op protocol 9 are unchanged.
+See `docs/COOP_GUEST_SYNC_FIX.md` for the captured failure and validation boundaries.

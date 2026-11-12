@@ -185,7 +185,7 @@ std::optional<Kind> KindOf(const QByteArray& datagram) {
         return std::nullopt;
     }
     const quint8 kind = static_cast<quint8>(datagram[8]);
-    if (kind < static_cast<quint8>(Kind::Hello) || kind > static_cast<quint8>(Kind::Redirect) ||
+    if (kind < static_cast<quint8>(Kind::Hello) || kind > static_cast<quint8>(Kind::Fragment) ||
         !Body(datagram, static_cast<Kind>(kind))) {
         return std::nullopt;
     }
@@ -199,13 +199,14 @@ QByteArray Encode(const Hello& hello) {
     PutText(out, hello.online_id);
     PutText(out, hello.build);
     PutText(out, hello.secret);
-    if (hello.work || !hello.ticket.isEmpty()) {
+    if (hello.work || !hello.ticket.isEmpty() || hello.fragments) {
         Put(out, hello.work.value_or(0));
     }
-    if (!hello.ticket.isEmpty()) {
+    if (!hello.ticket.isEmpty() || hello.fragments) {
         Put(out, static_cast<quint16>(hello.ticket.size()));
         out.append(hello.ticket);
     }
+    if (hello.fragments) out.append(char{1});
     return out;
 }
 
@@ -253,6 +254,7 @@ QByteArray Encode(const Welcome& welcome) {
     QByteArray out = Start(Kind::Welcome);
     out.append(static_cast<char>(welcome.accepted ? 1 : 0));
     PutText(out, welcome.text);
+    if (welcome.fragments) out.append(char{1});
     return out;
 }
 
@@ -324,6 +326,8 @@ std::optional<Hello> DecodeHello(const QByteArray& datagram) {
         if (hello.ticket.size() != size) {
             return std::nullopt;
         }
+        const auto tail = rest.Rest().mid(size);
+        hello.fragments = !tail.isEmpty() && tail[0] == 1;
     }
     return hello;
 }
@@ -373,6 +377,7 @@ std::optional<Welcome> DecodeWelcome(const QByteArray& datagram) {
         return std::nullopt;
     }
     welcome.accepted = accepted != 0;
+    welcome.fragments = !body->Rest().isEmpty() && body->Rest()[0] == 1;
     return welcome;
 }
 
@@ -519,6 +524,20 @@ void Hub::SealSends(Result& result) {
             ++index;
             continue;
         }
+        auto target = members.find(send.to.Key());
+        if (target != members.end() && target->fragments &&
+            send.datagram.size() > static_cast<qsizetype>(LinkFragments::ChunkBytes) &&
+            KindOf(send.datagram) == Kind::Data) {
+            const auto parts = LinkFragments::Split(Span(send.datagram), ++target->next_fragment);
+            const Endpoint to = send.to;
+            result.sends.removeAt(index);
+            // Append already sealed pieces so this loop never fragments a fragment.
+            for (const auto& part : parts) {
+                if (auto sealed = Seal(to, ToQt(part)))
+                    result.sends.append({to, std::move(*sealed), true});
+            }
+            continue;
+        }
         if (auto sealed = Seal(send.to, std::move(send.datagram))) {
             send.datagram = std::move(*sealed);
             send.sealed = true;
@@ -625,7 +644,15 @@ Hub::Result Hub::Receive(const Endpoint& from, const QByteArray& datagram, qint6
         return result;
     }
     Heard(link, now_ms, result);
-    Dispatch(link, *kind, plain, result);
+    link.fragment_inbox.Expire(now_ms);
+    if (*kind == Kind::Fragment) {
+        if (!link.fragments) return result;
+        const auto complete = link.fragment_inbox.Take(Span(plain), now_ms);
+        if (!complete) return result;
+        Dispatch(link, Kind::Data, ToQt(*complete), result);
+    } else {
+        Dispatch(link, *kind, plain, result);
+    }
     SealSends(result);
     return result;
 }
@@ -856,7 +883,10 @@ void Hub::OnHello(const Endpoint& from, const QByteArray& datagram, qint64 now_m
     // counters stay. A new one (the game's next link) gets a new handshake's.
     if (!link.session || link.welcome.isEmpty() ||
         !LinkAuth::SameBytes(link.hello_key, responder->GameKey())) {
-        auto answered = AnswerOf(*responder, Encode(Welcome{true, warning.left(0xFF)}));
+        link.fragments = hello->fragments;
+        link.fragment_inbox.Clear();
+        link.next_fragment = 0;
+        auto answered = AnswerOf(*responder, Encode(Welcome{true, warning.left(0xFF), link.fragments}));
         link.session.emplace(std::move(answered.session));
         link.hello_key = responder->GameKey();
         link.welcome = ToQt(answered.datagram);
@@ -1036,6 +1066,7 @@ Hub::Result Hub::Tick(qint64 now_ms) {
         result.gone.append(link.endpoint);
     }
     for (Link& link : members) {
+        link.fragment_inbox.Expire(now_ms);
         const qint64 gap = now_ms - link.last_heard_ms;
         if (!link.quiet && gap > quiet_ms) {
             link.quiet = true;
