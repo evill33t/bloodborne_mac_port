@@ -52,3 +52,23 @@ received the pinned public welcome, logged in and received authenticated HTTP 20
 The public fingerprint warning remains visible. The original seed saves, executable and
 checked event files matched after this bounded test. This is connection proof, not mixed-
 platform or campaign gameplay proof.
+
+## opc deployment
+
+All 20 focused server CTest suites passed in the ARM64 image, including admission, password
+accounts, lobby/duels and durable world/reward tests. A network-isolated disposable container
+then accepted two `dev` and two `1.5.0` simulated clients over actual UDP, with four playing
+and zero refusals. Qt's normalized whitespace in the existing release list is accepted by
+the preflight without changing the permitted old labels before the update.
+
+Only `docker-bloodborne-server-1` was replaced, following a stopped-data backup. All 38
+existing worlds, private automatic accounts (`SignIn=open`), the pinned transport key and
+static configuration were retained; unrelated container IDs were unchanged. The service was
+healthy afterward. It checks protocol 9 and permits `dev,1.5.0`; the image reports its actual
+source release via `BB_RELEASE_VERSION=1.5.0`.
+
+Image: `bloodborne-server:v1.5.0-mac-arm64`,
+`sha256:c362e52628894fde83ee45780ede93f40e80f92c3b68c1c7d2c8686694ddbbec`.
+The previous image and private closed-data backup remain on opc under
+`/docker/bloodborne-server/rollbacks/v1.5.0-20261112/`. Do not restore that snapshot over later
+player progress. Deployment and isolated-client reports remain in the local validation folder.
