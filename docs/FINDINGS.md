@@ -3062,3 +3062,17 @@ guest offset `0x53b3260`). It is not counted as a passing gameplay test. Both
 attempts used isolated config/cache and copied saves; checked source game and
 seed-save hashes were unchanged. Evidence remains local under
 `out/framegen-stability-20261112/` in the integration worktree.
+
+## 2026-11-12: 3840x1620 native ultrawide (#93)
+
+Requested for 5K2K monitors (the usual middle size). No community patch exists for it, so
+`Resolution Patch 3840x1620 (21:9)` in patches/Bloodborne.xml is Kyo's 5120x2160 patch with only
+the scene/UI width and height changed (`mov` immediates at 0x2196A6B/0x2358554: 0x0F00, and
+0x2196A7A/0x235855D: 0x0654). 3840x1620 and 5120x2160 are both exactly 64:27, so the aspect float
+at 0x183A35D (0x4017B426 = 2.3704) and the camera/HUD values stay as they are; diffing Kyo's
+3440x1440 and 5120x2160 patches shows those are the only resolution-dependent lines. At 6.2 M
+pixels (below 4K) it gets the same memory as the 1440p ultrawides: DMEM 6144 MiB, the second
+texture pool at 1536 MiB, the retail first heap, and the launcher's under-24 GB warning.
+Checked: the patch audit and ultrawide tests (all presets against the 1.09 eboot), launch
+settings and launcher tests. Not yet checked in game (needs the Mac): the scene, HUD and lock-on
+markers at 3840x1620.

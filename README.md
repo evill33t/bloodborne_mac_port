@@ -8,7 +8,7 @@ This is an experimental development build. Included features and draft integrati
 
 Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
 
-Recent mainline sync: upstream **0.5.15** (`7375585`) adds remappable controller buttons and the macOS 15 / Xcode 16 build fixes. The 0.5.14 long-session occlusion-query and M5 compute-archive fixes, Native Mac Settings, Exit Game and the integrated client features are retained. [Upstream release notes](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/7375585/README.md).
+Recent mainline sync: upstream **0.5.16** (`398bf39`) adds the Saves & Folders page, version/mod/beta save backups, online-beta app/update support and native 3840×1620 output. It also integrates the MetalFX Spatial and GPU boundary fixes while retaining the fork’s client features. [Upstream release notes](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/398bf39/README.md).
 
 **Video guide:** Andrew Tsai’s [guide to this port](https://www.youtube.com/watch?v=_QgmfFyZbYo).
 
@@ -17,7 +17,8 @@ Recent mainline sync: upstream **0.5.15** (`7375585`) adds remappable controller
 ### Launcher, settings and controls
 
 - Bundled fallback app icon from the Yharnam Together / Bloodborne Seamless Co-op website, replaced at runtime by the selected game’s icon when available. [Branding sources and credits](assets/branding/README.md).
-- Native SwiftUI launcher with **General, Advanced, Controls, Achievements and Online** pages; game-folder validation, save-folder selection, preferred-display selection with disconnected-display fallback, and remembered settings.
+- Native SwiftUI launcher with **General, Saves & Folders, Advanced, Controls, Achievements and Online** pages; game-folder validation, save-folder selection, preferred-display selection with disconnected-display fallback, and remembered settings.
+- **Saves & Folders** brings game/save/backup folders together, with **Back Up Now**, dated backups and restoration. Automatic backups cover mod changes, new versions and beta launches; manually created backups are retained. The upstream online beta installs as a separate app beside the regular app.
 - A persistent **Regular / Seamless Co-op** selector above the pages. New configurations start in Regular with online play off. Switching modes preserves each mode's saves, accounts and server settings; the choice also applies when the launcher is hidden.
 - In-game settings with **⌘,** or **L3 + R3** (the stick shortcut can be disabled in **Controls**), native **Mac Settings** and **Exit Game** entries, and a launcher **Stop** button with process cleanup and crash-report recovery.
 - Keyboard, mouse and SDL3 gamepad support, including controller selection, touchpad gestures, keyboard text entry and mouse camera capture. Rebind keys, mouse buttons and wheel steps in **Controls**; clear individual actions, inspect shared bindings or restore defaults. Left Alt walks at half stick deflection. Mouse sensitivity, vertical multiplier, inversion and camera-key behavior are configurable. A still cursor hides over the game after three seconds.
