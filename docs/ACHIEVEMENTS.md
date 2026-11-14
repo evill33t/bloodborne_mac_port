@@ -39,11 +39,11 @@ mutex. Guest trophy calls do not invoke AppKit or ImGui. The GPU library receive
 and a session-only notification mask. The Rosetta game process publishes them into
 `BbGpuShared` with atomic payload access and a sequence counter. The renderer makes at most three attempts
 to read a complete snapshot, keeping its last one when the writer is busy. macOS uses this
-split-process architecture exclusively. Shared-control version 8 rejects mismatched
+split-process architecture exclusively. Shared-control version 14 rejects mismatched
 game/host binaries; rebuild/package both. No frame-generation or renderer changes are required.
 
-This fork's `dev` integration uses shared-control version 11 for its combined trophies,
-native Mac Settings and co-op records; version 8 above describes the standalone achievements PR.
+This fork's `dev` integration uses shared-control version 13 for its combined trophies,
+native Mac Settings and co-op records; version 14 above describes the standalone achievements PR.
 
 ## Original sources and adaptation
 
@@ -127,7 +127,7 @@ the packaged app were not retested. The full Ninja-based build/test command was 
 ## Upstream controls refresh, 31 October 2026
 
 The current upstream merge retains the full Controls page, mouse-wheel bindings and
-vertical mouse sensitivity alongside Achievements. Shared-control version 8 keeps the
+vertical mouse sensitivity alongside Achievements. Shared-control version 14 keeps the
 upstream mouse-wheel counters and appends the trophy snapshot and artwork path. Both
 game and GPU-host binaries must be rebuilt together.
 
