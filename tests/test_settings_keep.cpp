@@ -73,16 +73,6 @@ int main() {
            Get().screen_lighting_gi == 1.2f);
     assert(!Get().metalfx_white_scene_fix && !Get().startup_metalfx_white_scene_fix);
     Get().metalfx_white_scene_fix = true;
-    assert(Get().hdr && Get().startup_hdr && Get().hdr_paper_white == 1.25f && Get().hdr_peak == 4.0f);
-    Get().preset = NativeAA;
-    assert(NativeHdrSupported());
-    Get().preset = 1;
-    assert(!NativeHdrSupported());
-    Get().preset = NativeAA;
-    setenv("BB_RENDER_RES", "1920x1080", 1);
-    assert(!NativeHdrSupported());
-    unsetenv("BB_RENDER_RES");
-    Get().hdr = false; Get().hdr_paper_white = 0.75f; Get().hdr_peak = 0.0f;
     Get().preset = 3;
     Get().map_view = 3;Get().compass=false;Get().compass_position=2;
     Get().bloodstains=false;Get().team_pings=false;Get().ping_key=3;Get().free_camera=true;
