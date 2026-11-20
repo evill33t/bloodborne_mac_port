@@ -8,7 +8,7 @@ This is an experimental development build. Included features and draft integrati
 
 Download this fork's app from [Releases](https://github.com/evill33t/bloodborne_mac_port/releases). Signed releases include a notarized app, a SHA-256 checksum and the tested source revision. [Release build and signing instructions](docs/MACOS_RELEASE.md).
 
-Recent mainline sync: upstream **0.5.17** plus current master (`b837b16a`) adds controller Personal Effects mapping, focus/cursor and text-input fixes, safe restarts with guarded descriptors, per-architecture library packaging and held plain draws in tessellation runs. The fork’s renderer, launcher and client features are retained. [Upstream release notes](https://github.com/Wooloomooloo2/bloodborne_mac_port/blob/b837b16a/README.md).
+Recent mainline sync: upstream **0.5.18-test1** (`33993727`) reuses one object-motion texture per size and increases the write-fault unprotect window to 1024 KiB on Macs with 24 GB of memory or less. The fork’s renderer, launcher, achievements, online and seamless co-op features are retained. [Upstream changes](https://github.com/Wooloomooloo2/bloodborne_mac_port/commit/339937270d15c2a15c48bd386e9cd46d55d99bc9).
 
 **Video guide:** Andrew Tsai’s [guide to this port](https://www.youtube.com/watch?v=_QgmfFyZbYo).
 
