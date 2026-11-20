@@ -189,13 +189,15 @@ if (APPLE)
     # bbport: one-frame Metal GPU capture (shim/bbport_gpu_capture.h).
     enable_language(OBJCXX)
     target_sources(bbgpu PRIVATE shim/bbport_gpu_capture.mm)
+    # Hiding a still cursor (shim/bbport_cursor.h, AppKit).
+    target_sources(bbgpu PRIVATE shim/bbport_cursor.mm)
     # MetalFX temporal upscaling on native textures (shim/bbport_metalfx.h), used by the upscaler.
     target_sources(bbgpu PRIVATE shim/bbport_metalfx.mm)
     target_sources(bbgpu PRIVATE shim/bbport_framegen.mm)
     # The settings overlay's Metal side and ImGui's Metal backend (both ARC).
     target_sources(bbgpu PRIVATE shim/bbport_overlay_metal.mm
                    third_party/imgui/backends/imgui_impl_metal.mm)
-    set_source_files_properties(shim/bbport_gpu_capture.mm shim/bbport_metalfx.mm shim/bbport_framegen.mm
+    set_source_files_properties(shim/bbport_gpu_capture.mm shim/bbport_cursor.mm shim/bbport_metalfx.mm shim/bbport_framegen.mm
                                 shim/bbport_overlay_metal.mm
                                 third_party/imgui/backends/imgui_impl_metal.mm
                                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
