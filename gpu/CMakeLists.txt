@@ -205,6 +205,7 @@ if (APPLE)
     # bbgpu-host, host/host_runtime.c); anything else left undefined is a link error (ld's
     # default: it warns that an explicit -undefined error is deprecated).
     set(BB_HOST_RUNTIME_SYMBOLS
+        gpu_process_host_exited
         runtime_disabled_optimizations runtime_errno runtime_fault_recover
         runtime_file_translate runtime_game_cpu_since_last runtime_memory_clamp
         runtime_memory_gpu_protect runtime_memory_read_backing runtime_memory_region

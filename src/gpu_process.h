@@ -19,6 +19,9 @@ void gpu_process_stop(void);
 void *gpu_process_shared(void);
 /* The renderer now runs in the host: from here on, losing the host ends the game. */
 void gpu_process_rendering(void);
+/* A ring poller observed the host is gone: use the same exit status as the Mach receiver.
+ * Does not return. Call only after observing host death, never to stop a live renderer. */
+void gpu_process_host_exited(void);
 
 /* ---- runtime_memory.c side of the mirror ---- */
 enum { RUNTIME_MIRROR_MAP = 1, RUNTIME_MIRROR_UNMAP = 2, RUNTIME_MIRROR_PROTECT = 3 };

@@ -86,6 +86,30 @@ static void lost_locked(const char *why) {
     start_failed(why);
 }
 
+/* Both the Mach notification and the GPU ring pollers can notice the host's death. Reap
+ * under the same lock as the exit decision: otherwise a poller can see ESRCH after the
+ * receiver reaps a successful exit, but before the receiver reports it, and exit 1 first. */
+void gpu_process_host_exited(void) {
+    pthread_mutex_lock(&mutex);
+    if (!alive) {
+        pthread_mutex_unlock(&mutex);
+        _exit(0); /* gpu_process_stop already marked a deliberate runtime shutdown */
+    }
+    int status = 0;
+    char why[96] = "host process exited";
+    pid_t waited;
+    do {
+        waited = waitpid(host_pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (waited == host_pid) {
+        if (WIFEXITED(status)) snprintf(why, sizeof why, "host process exited with status %d", WEXITSTATUS(status));
+        else if (WIFSIGNALED(status)) snprintf(why, sizeof why, "host process killed by signal %d", WTERMSIG(status));
+    }
+    lost_locked(why);
+    pthread_mutex_unlock(&mutex);
+    _exit(1); /* lost_locked exits while holding the lock when alive is true */
+}
+
 /* runtime_memory.c, region table write lock held: pushed in operation order, ahead of any GPU
  * work issued after it (one ring, one producer lock in the GPU library). */
 static void mirror_event(int op, uintptr_t address, uint64_t size, uint64_t phys, int prot) {
@@ -182,16 +206,7 @@ static void *receiver(void *unused) {
         if (in.m.h.msgh_id == BBGPU_MSG_VERIFY_REPLY && in.m.h.msgh_size >= sizeof(BbGpuVerifyReply)) {
             handle_reply(&in.m.reply);
         } else if (in.m.h.msgh_id == MACH_NOTIFY_DEAD_NAME) {
-            int status = 0;
-            char why[96] = "host process exited";
-            if (waitpid(host_pid, &status, 0) == host_pid) {
-                if (WIFEXITED(status)) snprintf(why, sizeof why, "host process exited with status %d", WEXITSTATUS(status));
-                else if (WIFSIGNALED(status)) snprintf(why, sizeof why, "host process killed by signal %d", WTERMSIG(status));
-            }
-            pthread_mutex_lock(&mutex);
-            lost_locked(why);
-            pthread_mutex_unlock(&mutex);
-            return NULL;
+            gpu_process_host_exited();
         } else {
             mach_msg_destroy(&in.m.h);
         }

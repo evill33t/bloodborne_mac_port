@@ -19,6 +19,9 @@ extern std::unique_ptr<AmdGpu::Liverpool> liverpool; // gnmdriver.cpp
 
 extern "C" void runtime_memory_gpu_protect(uintptr_t address, uint64_t size, int read, int write);
 extern "C" void runtime_restart(void); // bb-probe (probe.c)
+#ifdef __APPLE__
+extern "C" void gpu_process_host_exited(void); // bb-probe (gpu_process.c)
+#endif
 
 namespace Libraries::VideoOut {
 void BbSplitApplyEvent(const BbGpuRecord* record);
@@ -37,6 +40,12 @@ constexpr u64 Second = 1'000'000'000;
 
 /// The peer process is gone: nothing can make progress any more.
 [[noreturn]] void PeerLost(const char* what) {
+#ifdef __APPLE__
+    // The runtime owns waitpid and distinguishes a window close from a crashed host.
+    if (Remote()) {
+        gpu_process_host_exited();
+    }
+#endif
     std::printf("GPU split: the %s process is gone; exiting\n", what);
     std::fflush(stdout);
     _exit(1);

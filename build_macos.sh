@@ -226,6 +226,10 @@ if [[ ${1:-} == --test ]]; then
     /usr/bin/clang -arch x86_64 -arch arm64 -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET -std=c11 -O2 -g \
         -Wall -Wextra -Werror -I. tests/test_bbgpu_rings.c -o out/bbgpu-rings-test
     arch -x86_64 out/bbgpu-rings-test
+    # Host-death observers must agree on a normal close versus an unexpected process exit.
+    "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_gpu_peer_exit.c "${runtime[@]}" \
+        out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/gpu-peer-exit-test
+    out/gpu-peer-exit-test
     # The GPU process split end to end (opens the host's window for a moment).
     if [[ -x out/bbgpu-host ]]; then
         "$CC" "${cflags[@]}" "${includes[@]}" -I. -Isrc tests/test_gpu_split.c "${runtime[@]}" src/gpu_process.c \
